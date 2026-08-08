@@ -1,0 +1,61 @@
+name: IPA
+
+# The whole iOS loop for a Linux desktop: this repo cannot build an Expo app locally (no Xcode, no
+# CocoaPods), so every push to `main` produces an unsigned Debug IPA and replaces the rolling `dev`
+# prerelease. `xtool install` on the laptop signs it with the free Apple ID and pushes it to the
+# phone — see docs/ship.md. Signing does not happen here: it would need a paid account's
+# certificate in a secret, and free provisioning holds exactly one certificate that xtool owns.
+on:
+  push:
+    branches: [main]
+    # Docs-only commits do not change the IPA, and a run is ~15 minutes of waiting.
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+concurrency:
+  group: ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      # Newest non-beta on macos-15. Never inherit the runner default.
+      - run: sudo xcode-select -s /Applications/Xcode_26.3.app
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+
+      # `ios/` is generated, never committed — the app.json plugins are the source of truth for it.
+      # This is also the step that resolves Citadel: `pod install` writes the Swift package
+      # references that ExpoSSH.podspec declares.
+      - run: bunx expo prebuild -p ios
+
+      # Debug, because this is a dev client that loads its JS from Metro over the LAN; Release would
+      # bake in a bundle and take longer to build for no gain here.
+      - name: Build and package an unsigned IPA
+        run: |
+          set -euo pipefail
+          workspace=$(ls -d ios/*.xcworkspace)
+          scheme=$(basename "$workspace" .xcworkspace)
+          xcodebuild -workspace "$workspace" -scheme "$scheme" \
+            -configuration Debug -sdk iphoneos -derivedDataPath build \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          mkdir -p Payload
+          cp -R "build/Build/Products/Debug-iphoneos/$scheme.app" Payload/
+          zip -qry Port22.ipa Payload
+
+      # One URL that is always the latest build. Delete-then-create rather than clobber-in-place, so
+      # the tag points at the commit that was actually built.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete dev --yes --cleanup-tag || true
+          gh release create dev Port22.ipa --prerelease --target "${GITHUB_SHA}" \
+            --title "dev — latest main" \
+            --notes "Unsigned Debug dev-client build of ${GITHUB_SHA}. Rolling: every push to main replaces it. Install with \`xtool install\`."

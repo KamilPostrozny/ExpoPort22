@@ -9,12 +9,14 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.kamilpostrozny.port22",
       "supportsTablet": false,
       "infoPlist": {
         "NSCameraUsageDescription": "Port22 uses the camera so you can upload a photo you take now to the machine you are attached to."
       }
     },
     "android": {
+      "package": "com.kamilpostrozny.port22",
       "adaptiveIcon": {
         "backgroundColor": "#11111b",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
