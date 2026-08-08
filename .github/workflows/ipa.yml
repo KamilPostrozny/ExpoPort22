@@ -13,8 +13,8 @@ on:
   workflow_dispatch:
     inputs:
       xcode:
-        description: 'Xcode version on the runner (26.3, 26.2, 26.1.1, 26.0.1, 16.4)'
-        default: '26.2'
+        description: 'Xcode version on the runner (26.6, 26.5, 26.4.1, 26.3, 26.2, 26.1.1, 26.0.1)'
+        default: '26.6'
 
 concurrency:
   group: ipa-${{ github.ref }}
@@ -25,15 +25,16 @@ permissions:
 
 jobs:
   package:
-    runs-on: macos-15
+    # macos-26, not macos-15, for Xcode 26.6 alone: it is the image EAS uses for SDK 57, and
+    # anything older (26.2 and 26.3 both tried) cannot type-check expo-modules-jsi's own
+    # `JavaScriptCodable+Date.swift`, which every SDK 57 build compiles into an xcframework.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      # Never inherit the runner default (16.4 — older than anything Expo SDK 57 is tested on).
-      # Not the newest either: 26.3 fails to type-check expo-modules-jsi's own
-      # `JavaScriptCodable+Date.swift`. EAS builds SDK 57 on 26.6, which the runners do not have,
-      # so this is the nearest working toolchain — a dispatch input, because finding it is guesswork
-      # from a machine with no Xcode on it.
-      - run: sudo xcode-select -s "/Applications/Xcode_${{ inputs.xcode || '26.2' }}.app"
+      # Pinned rather than inherited even though 26.6 is currently the default, so an image bump
+      # cannot silently move the toolchain. A dispatch input, because finding a working version is
+      # guesswork from a machine with no Xcode on it.
+      - run: sudo xcode-select -s "/Applications/Xcode_${{ inputs.xcode || '26.6' }}.app"
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
 
