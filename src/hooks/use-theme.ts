@@ -1,14 +1,12 @@
-/**
- * Learn more about light and dark modes:
- * https://docs.expo.dev/guides/color-schemes/
- */
+import { useColorScheme } from 'react-native';
 
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSettings } from '@/settings';
+import { resolveTheme, type Theme } from '@/theme';
 
-export function useTheme() {
+/** The live flavour. `auto` follows the system appearance without a reconnect or a remount —
+ *  `useColorScheme` re-renders on the appearance change, `useSettings` on a picker tap. */
+export function useTheme(): Theme {
+  const { theme } = useSettings();
   const scheme = useColorScheme();
-  const theme = scheme === 'unspecified' ? 'light' : scheme;
-
-  return Colors[theme];
+  return resolveTheme(theme, scheme === 'dark');
 }
