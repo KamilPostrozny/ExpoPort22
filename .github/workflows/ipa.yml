@@ -11,6 +11,10 @@ on:
     # Docs-only commits do not change the IPA, and a run is ~15 minutes of waiting.
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
+    inputs:
+      xcode:
+        description: 'Xcode version on the runner (26.3, 26.2, 26.1.1, 26.0.1, 16.4)'
+        default: '26.2'
 
 concurrency:
   group: ipa-${{ github.ref }}
@@ -24,8 +28,12 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      # Newest non-beta on macos-15. Never inherit the runner default.
-      - run: sudo xcode-select -s /Applications/Xcode_26.3.app
+      # Never inherit the runner default (16.4 — older than anything Expo SDK 57 is tested on).
+      # Not the newest either: 26.3 fails to type-check expo-modules-jsi's own
+      # `JavaScriptCodable+Date.swift`. EAS builds SDK 57 on 26.6, which the runners do not have,
+      # so this is the nearest working toolchain — a dispatch input, because finding it is guesswork
+      # from a machine with no Xcode on it.
+      - run: sudo xcode-select -s "/Applications/Xcode_${{ inputs.xcode || '26.2' }}.app"
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
 
