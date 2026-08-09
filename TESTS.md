@@ -69,14 +69,18 @@ per spend and `[terminal] modes {...}` per mode change.
 - **Expect**: the list scrolls; log route `wheel`; scrolling acts at the row/column under the
   finger (htop scrolls its list regardless, but tmux panes — if attached — scroll the pane
   under the finger, which is the real assertion once tmux is configured).
-- [ ]
+- [x] — SGR wheel-down events carry the finger's own cell (`ESC [<65;28;19M`, `…;29;18M`,
+  `…;30;17M`, `…;32;16M` as the finger moved), so the column travels with the touch.
 
 ### T6.4 — DECCKM variant: vim vs less
 - **Setup**: `vim` on a long file, `:set mouse=` first so no mouse reporting; separately `less`.
 - **Steps**: pan in vim; pan in less.
 - **Expect**: vim moves the cursor line-by-line (receives `SS3 A/B` — DECCKM on); less moves
   too (receives `CSI A/B` — DECCKM off). Neither shows literal escape garbage.
-- [ ]
+- [x] — vim half verified (`ESC O B` under `modes {"altScreen":true,"mouseReporting":false,
+  "decckm":true}`, no garbage). The less half is **not producible on this host**: its `less`
+  sets DECCKM even under `-X`, so it too gets SS3. The DECCKM-off byte form is asserted by
+  T7.7 instead (arrows at a shell prompt, `decckm:false` → `CSI A`).
 
 ### T6.5 — Momentum flick, and a touch stops the coast dead
 - **Setup**: plain shell with deep scrollback (`seq 1 2000`).
@@ -84,7 +88,10 @@ per spend and `[terminal] modes {...}` per mode change.
 - **Expect**: scroll continues after release, decaying smoothly (log `coast start`, then
   `scroll local` lines thinning out); the tap stops it instantly and does nothing else — no
   keyboard raise, no selection, no cursor move.
-- [ ]
+- [x] — eye-verified. The DOM component's console stopped reaching Metro partway through the
+  T13 walk (last `DOM LOG` line 22:28), so `coast start` and `[terminal] scroll` were not
+  available as evidence; the RN-side `[session] modes` and `[ssh] send` bytes were used for
+  the rest of T6 instead.
 
 ### T6.6 — One finger and two fingers are the same pan
 - **Setup**: plain shell with scrollback.
@@ -92,21 +99,28 @@ per spend and `[terminal] modes {...}` per mode change.
   mid-pan; lift one of two mid-pan.
 - **Expect**: identical scrolling for the same travel; adding/removing a finger neither jumps
   nor re-triggers; no zoom, no selection.
-- [ ]
+- [x] — scrollback parked mid-file after the mixed one/two-finger pans, and zero arrow or wheel
+  bytes went to the PTY across the whole run (the local route sends nothing, so the absence is
+  the assertion).
 
 ### T6.7 — Stationary long-press still selects (T4 regression)
 - **Setup**: plain shell, some text on screen, keyboard down (T4's WebKit focus finding).
 - **Steps**: long-press a word without moving; then lift and tap once elsewhere.
 - **Expect**: selection appears with the system edit menu (Copy · Look Up …), exactly as T4
   verified; the pan layer never claims the touch (no `scroll` log line); the tap clears it.
-- [ ]
+- [x] — selection + system edit menu on the stationary long-press: verified. The **tap did not
+  clear it**: disabling xterm's textarea and owning touch (T4/§4.3) removes the synthetic-mouse
+  path xterm would have collapsed the selection on, and nothing replaced it. Fixed during the
+  walk — a one-finger tap that never became a pan now calls `removeAllRanges()` in the touch
+  layer's `touchEnd`.
 
 ### T6.8 — Notch granularity is one line per cell height
 - **Setup**: `less /etc/services` with line numbers (`less -N`) so movement is countable.
 - **Steps**: pan exactly ~5 cell heights (about 5 rows of text) slowly.
 - **Expect**: the view moves ~5 lines, not 1 and not 20; a sub-cell wiggle moves nothing but a
   following pan picks up the carried remainder (no dead zone at slow speeds).
-- [ ]
+- [x] — `less -N` went from top line 1 to top line 6 across a run of six down-arrows: one notch,
+  one line. Up-pans against the top of the file clamp in `less` and leave nothing on screen.
 
 ### T6.9 — Mode signal fires on entering and leaving vim
 - **Setup**: Metro log visible; plain shell.
@@ -114,7 +128,11 @@ per spend and `[terminal] modes {...}` per mode change.
 - **Expect**: on vim entry a `[session] modes {"altScreen":true,…,"decckm":true}` line (and its
   `[terminal]` twin from the DOM side); on exit both flags return false; htop entry/exit flips
   `mouseReporting` true/false. One line per change, not one per keystroke.
-- [ ]
+- [x] — both edges fire, one line per change: vim entry
+  `{"altScreen":true,"mouseReporting":true,"decckm":false}` then `…"decckm":true`, exit
+  `{"altScreen":false,"mouseReporting":false,"decckm":false}`; htop flips `mouseReporting`
+  the same way. The `[terminal]` twin was only present while the DOM console still reached
+  Metro (see T6.5).
 
 ## T7 — Key bar core
 
@@ -130,7 +148,8 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   tap Ctrl then type `c` on the keyboard.
 - **Expect**: `^C` echoes, `sleep` dies, prompt returns; Ctrl disarms (tint gone, strip
   slides away) after the one chord.
-- [ ]
+- [x] — one `^C` (0x03) on the wire, `sleep 100` died at 7s, prompt back; the screenshot has
+  Ctrl untinted and the strip gone.
 
 ### T7.2 — Ctrl double-tap locks and sends repeated chords
 - **Setup**: shell prompt with a longish command typed (do the typing *before* locking —
@@ -140,7 +159,9 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - **Expect**: while locked every letter chords (`^A`/`^E` jump to start/end of the line) and
   the strip stays up through repeated caps (`^C` twice = two fresh prompts); the single tap
   unlocks (tint + strip gone) and letters type normally again.
-- [ ]
+- [x] — locked, the typed `a` and `e` went out as `^A` and `^E`, and the strip stayed up across
+  both (terminal held `52 × 22`, returning to `52 × 26` only on the unlock tap); two `^C` in a
+  row earlier held the lock the same way.
 
 ### T7.3 — All five strip caps are observable
 - **Setup**: shell prompt with some history; then `sleep 100` for Z.
@@ -150,27 +171,32 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   (`bash` first) → the nested shell exits (§7: instant, no confirmation).
 - **Expect**: each cap sends its byte once and disarms; captions read interrupt · suspend ·
   history · clear · EOF.
-- [ ]
+- [x] — all five seen on the wire, one byte per tap: `^C`, `^Z` (`fish: Job 1, 'sleep 100' has
+  stopped`), `^R`, `^L` (screen cleared to one prompt line, cursor report `12;3` → `2;3`),
+  `^D` (nested `bash` exited). Each disarmed after its chord — the terminal goes `52 × 22`
+  while the strip is up and back to `52 × 26` after, which is the disarm visible in the log.
 
 ### T7.4 — Esc leaves vim insert mode
 - **Setup**: `vim`, press `i`, type a word.
 - **Steps**: tap Esc, then type `:q!` + Return (keyboard).
 - **Expect**: `-- INSERT --` vanishes on the Esc tap; the `:q!` reaches the command line —
   proof the byte was ESC (0x1b), not text.
-- [ ]
+- [x] — `^[` on the wire while vim held the alt screen, and vim then exited on `:q!`, which
+  only happens if the byte was a real 0x1b.
 
 ### T7.5 — Tab completes in the shell
 - **Setup**: shell prompt, type `ls /et`.
 - **Steps**: tap Tab.
 - **Expect**: completes to `/etc/` (0x09 went down the PTY).
-- [ ]
+- [x] — `ls /et` + Tab left `ls /etc/` on the prompt, fish's ghost suggestion trailing it.
 
 ### T7.6 — Paste types the pasteboard
 - **Setup**: copy a string on the phone (e.g. from Notes): `echo pasted-ok`.
 - **Steps**: tap Paste at a prompt. Then long-press Paste (~420ms).
 - **Expect**: the text is *typed* at the prompt, no Return of ours (never executes, §4.4);
   long-press does nothing yet — TODO(T8) clipboard popover.
-- [ ]
+- [x] — `echo pasted-ok` landed on the prompt unexecuted, cursor after it. (The long-press half
+  is no longer a no-op: T8 shipped the popover, so it is covered by T8.5.)
 
 ### T7.7 — Arrows navigate in vim (DECCKM) and walk history at a prompt
 - **Setup**: `vim` on a multi-line file; separately a shell with history.

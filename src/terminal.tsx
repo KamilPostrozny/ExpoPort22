@@ -485,6 +485,12 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
         return;
       }
       if (pan === 'panning') startCoast(tracker.velocity(), panX, panY);
+      // A one-finger tap on a live selection clears it. xterm would normally do this itself, off
+      // the synthetic mouse pair iOS sends — but its textarea is disabled and touch is ours, so
+      // that path is gone and without this the selection and its edit menu simply stay (T13/T6.7).
+      if (pan === 'pending' && fingers === 1 && document.getSelection()?.isCollapsed === false) {
+        document.getSelection()?.removeAllRanges();
+      }
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
       // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.
       if (pan === 'pending' && isTwoFingerTap(fingers, false, ev.timeStamp - downAt)) {
