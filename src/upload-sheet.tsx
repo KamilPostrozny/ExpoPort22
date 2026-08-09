@@ -14,6 +14,8 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Dimensions,
+  Keyboard,
   Modal,
   Pressable,
   StyleSheet,
@@ -52,6 +54,33 @@ export default function UploadSheet(props: UploadSheetProps) {
   const [dir, setDir] = useState<string | null>(null);
   const [entries, setEntries] = useState<RemoteEntry[] | null>(null);
   const [name, setName] = useState(props.suggestedName);
+  /**
+   * The keyboard's height, as bottom padding for the sheet.
+   *
+   * `KeyboardAvoidingView` is the usual answer and it does not work here: it derives the overlap
+   * from `onLayout`, whose y is parent-relative, and inside a `Modal` even `measureInWindow`
+   * reports against the modal's own window — so the inset a pageSheet starts at is invisible from
+   * in here, the lift comes out short, and the Save button stays under the keyboard
+   * (measured on device, T13/T8.9). The sheet's bottom *is* the window's bottom, which makes the
+   * keyboard's own height the exact padding needed, with nothing to measure.
+   */
+  const [keyboardPad, setKeyboardPad] = useState(0);
+
+  // `WillChangeFrame` rather than Show/Hide: it is the one that also fires when the keyboard
+  // resizes under a language switch or a floating-to-docked change, and it carries the frame.
+  useEffect(() => {
+    const height = (frame: { screenY: number; height: number }) =>
+      // A keyboard parked off-screen (hidden, or the hardware-keyboard bar) reports a screenY at
+      // or past the window's bottom edge; only the part that actually overlaps is padding.
+      Math.max(0, Dimensions.get('window').height - frame.screenY);
+    const subs = [
+      Keyboard.addListener('keyboardWillChangeFrame', (e) =>
+        setKeyboardPad(height(e.endCoordinates)),
+      ),
+      Keyboard.addListener('keyboardWillHide', () => setKeyboardPad(0)),
+    ];
+    return () => subs.forEach((sub) => sub.remove());
+  }, []);
 
   // Resolve where to start, then list. A remembered directory that no longer lists (deleted,
   // permission gone) falls back to $HOME rather than showing an error nobody can act on.
@@ -132,7 +161,10 @@ export default function UploadSheet(props: UploadSheetProps) {
       presentationStyle="pageSheet"
       onRequestClose={props.onCancel}
       visible>
-      <View style={[styles.sheet, { backgroundColor: theme.background }]}>
+      {/* The SAVE AS field sits at the bottom of the sheet, so a raised keyboard covers both it
+          and the Save button unless the content is lifted (found on device, T13/T8.9). */}
+      <View
+        style={[styles.sheet, { backgroundColor: theme.background, paddingBottom: keyboardPad }]}>
         <View style={styles.grabberRow}>
           <View style={[styles.grabber, { backgroundColor: theme.border }]} />
         </View>
