@@ -23,6 +23,8 @@ tail -n0 -F "$log" | grep -E --line-buffered "$pattern" | while read -r line; do
   # An emptied selection is the *end* of something, and shooting it wastes the debounce window that
   # the interesting frame — text selected, edit menu up — needed.
   [[ $line == *'selection ""'* ]] && continue
+  # Leaving the app is not worth a picture — the frame is whatever replaced it. Coming back is.
+  [[ $line == *'[app] inactive'* || $line == *'[app] background'* ]] && continue
   now=$(date +%s)
   # A tap produces a burst of log lines and a screenshot takes several seconds; one picture per
   # burst is the useful rate, and anything faster just queues up behind the tunnel setup.
