@@ -29,7 +29,12 @@ export async function loadOrCreateKey(comment = 'port22'): Promise<KeyPair> {
     await SecureStore.setItemAsync(SEED_KEY, seedBase64, STORE_OPTIONS);
   }
   const publicKey = ed25519.getPublicKey(fromBase64(seedBase64));
-  return { seedBase64, publicKeyLine: `${KEY_TYPE} ${toBase64(publicKeyBlob(publicKey))} ${comment}` };
+  const publicKeyLine = `${KEY_TYPE} ${toBase64(publicKeyBlob(publicKey))} ${comment}`;
+  // PLAN.md §7 says log freely; the seed is the one thing held back, and only because the public
+  // half is what you ever need to read. Nothing enforces that — drop `seedBase64` in here if a
+  // signature ever needs checking by hand.
+  console.log('[keys]', publicKeyLine);
+  return { seedBase64, publicKeyLine };
 }
 
 /** `string("ssh-ed25519") + string(key)` — the wire encoding OpenSSH base64s into the key line. */

@@ -17,7 +17,12 @@ export default function Scratch() {
   const [key, setKey] = useState<KeyPair | null>(null);
   const [lines, setLines] = useState<string[]>([]);
 
-  const log = (line: string) => setLines((l) => [...l.slice(-120), line]);
+  // On screen and in Metro both: the phone is where you notice, the console is where you read a
+  // stack trace and scroll back past the 120 lines this keeps.
+  const log = (line: string) => {
+    console.log('[harness]', line);
+    setLines((l) => [...l.slice(-120), line]);
+  };
 
   useEffect(() => {
     loadOrCreateKey().then(setKey, (error) => log(`key: ${error}`));

@@ -29,4 +29,58 @@ declare class ExpoSSHModule extends NativeModule<ExpoSSHModuleEvents> {
   listDirectory(path: string): Promise<RemoteEntry[]>;
 }
 
-export default requireNativeModule<ExpoSSHModule>('ExpoSSH');
+const native = requireNativeModule<ExpoSSHModule>('ExpoSSH');
+
+/**
+ * Set false to go quiet. Worth doing before profiling anything on the scroll path: `onShellData`
+ * fires per channel read, so a `less` page or a `htop` refresh is hundreds of console lines, and
+ * Metro's transport is slow enough to be the thing you end up measuring.
+ */
+const LOG = true;
+
+const TAP_OUT = new Set(['addListener', 'removeListener', 'removeAllListeners', 'emit']);
+
+/**
+ * Every call, its arguments, and how it settled — into the Metro console.
+ *
+ * A proxy rather than a hand-written wrapper per method so a function added to the native module
+ * is logged without anyone remembering to wire it up.
+ */
+function logged(module: ExpoSSHModule): ExpoSSHModule {
+  if (!LOG) return module;
+  return new Proxy(module, {
+    get(target, property) {
+      const value = Reflect.get(target, property);
+      if (typeof value !== 'function' || typeof property !== 'string' || TAP_OUT.has(property)) {
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return (...args: unknown[]) => {
+        console.log(`[ssh] ${property}`, ...args);
+        const result = value.apply(target, args);
+        if (!(result instanceof Promise)) return result;
+        return result.then(
+          (resolved) => {
+            console.log(`[ssh] ${property} ->`, resolved);
+            return resolved;
+          },
+          (error) => {
+            console.log(`[ssh] ${property} failed:`, error);
+            throw error;
+          },
+        );
+      };
+    },
+  });
+}
+
+if (LOG) {
+  native.addListener('onHostKey', (event) => console.log('[ssh] onHostKey', event));
+  // Decoded, because base64 tells you nothing at a glance, then JSON-quoted so an escape
+  // sequence prints as \u001b[2J instead of repainting the terminal you are reading.
+  native.addListener('onShellData', ({ data }) =>
+    console.log('[ssh] onShellData', JSON.stringify(atob(data))),
+  );
+  native.addListener('onShellClose', () => console.log('[ssh] onShellClose'));
+}
+
+export default logged(native);

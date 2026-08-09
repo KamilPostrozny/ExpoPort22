@@ -170,7 +170,7 @@ actor SSHSession {
   /// that is cheaper than trying.
   func upload(_ data: [UInt8], to path: String, creating directories: [String]) async throws {
     guard let client else { throw Failure.notConnected }
-    try await client.withSFTP(logger: Self.quiet) { sftp in
+    try await client.withSFTP(logger: Self.chatty) { sftp in
       var attributes = SFTPFileAttributes()
       attributes.permissions = 0o700
       for directory in directories {
@@ -187,7 +187,7 @@ actor SSHSession {
   /// downloads anything.
   func listDirectory(_ path: String) async throws -> [RemoteEntry] {
     guard let client else { throw Failure.notConnected }
-    return try await client.withSFTP(logger: Self.quiet) { sftp in
+    return try await client.withSFTP(logger: Self.chatty) { sftp in
       try await sftp.listDirectory(atPath: path).flatMap(\.components).map { component in
         RemoteEntry(
           name: component.filename,
@@ -207,12 +207,13 @@ actor SSHSession {
     return component.longname.hasPrefix("d")
   }
 
-  /// Citadel's SFTP client announces the path it is opening at `.info`, and swift-log's default
-  /// handler prints it. Filenames are never logged (SPEC §5), so the client gets a logger that says
-  /// nothing — `SFTPFile` inherits it.
-  private static var quiet: Logger {
+  /// Citadel's SFTP client announces every path it opens at `.info`. That used to be silenced;
+  /// PLAN.md §7 now says log freely, so it talks. This lands in the device console rather than
+  /// Metro (`idevicesyslog`), and it is the only view into an upload that fails inside the
+  /// subsystem rather than at the call. `SFTPFile` inherits it.
+  private static var chatty: Logger {
     var logger = Logger(label: "port22.sftp")
-    logger.logLevel = .critical
+    logger.logLevel = .debug
     return logger
   }
 

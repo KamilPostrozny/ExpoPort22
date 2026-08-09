@@ -167,9 +167,7 @@ Verified: `bun test`, `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20,
 and the whole accept list walked against a real host on an iPhone — connect with the TOFU
 fingerprint prompt, `ls` over an exec channel, shell I/O, and a file into `/tmp/port22` confirmed
 by `listDirectory`. RN's static-linking warning for SPM products never bit; `USE_FRAMEWORKS=dynamic`
-was not needed. **Still open**: Android is a name-only stub until T3. Note the harness reports into
-on-screen state rather than `console.log` — §7 forbids logging host, session bytes or filenames
-even in debug, so Metro can only ever show that JS did not throw.
+was not needed. **Still open**: Android is a name-only stub until T3.
 
 **T3 ★ — expo-ssh native module, Android** deps: T2 (API fixed by T2)
 Same TS API, Kotlin + sshj impl. *Accept*: same demo passes on Android.
@@ -276,5 +274,10 @@ Settled (user decisions, 2026-08-09):
 
 - No reply to OSC 52 reads; non-http links do nothing; no tmux = no tabs button, no message; failed conf push changes nothing visible.
 - No haptic on tab select; `^D` instant, no confirmation.
-- Never log key material, host, session bytes, or filenames — even in debug.
+- **Log freely.** The reference app's SPEC §5 banned logging host, session bytes and filenames even
+  in debug; user decision 2026-08-09 drops that outright — debuggability wins, and this app has one
+  user on his own LAN. Every `ExpoSSH` call, result and event goes to the Metro console
+  (`modules/expo-ssh/src/ExpoSSHModule.ts`, `LOG`). The one thing still held back is the ed25519
+  seed: it has no debug value where the public key does, so `src/keys.ts` logs the
+  `authorized_keys` line instead. Say the word and that goes too.
 - Uploads stay memory-bound and size-unguarded.
