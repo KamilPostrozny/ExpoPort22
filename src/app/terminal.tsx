@@ -21,12 +21,34 @@ import Animated, {
   useSharedValue,
   withDelay,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { parseAnsi, type SpanLine } from '@/ansi-spans';
+import {
+  PAGE_RADIUS,
+  SETTLE_HOLD_MS,
+  pageFontSize,
+  pagePitch,
+  rubber,
+  swipeTarget,
+} from '@/barswipe-model';
 import { pushYank } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
 import KeyBar, { ArrowsPopover, BarMenu, ClipboardPopover, type BarPopover } from '@/keybar';
+import Ribbon from '@/ribbon';
+import {
+  RIBBON_IDLE,
+  killCommand,
+  ribbonDismiss,
+  ribbonPoll,
+  ribbonResumed,
+  ribbonSent,
+  selectRecipe,
+} from '@/ribbon-model';
+import { RECIPES, type Cap } from '@/ribbon-recipes';
+import type { ModeSignal } from '@/scroll-model';
 import {
   answerHostKey,
   attachTerminal,
@@ -39,7 +61,7 @@ import {
   type Session,
 } from '@/session';
 import { endpoint, getSettings, updateSettings, useSettings } from '@/settings';
-import Switcher, { useSwitcherCards, type Card } from '@/switcher';
+import Switcher, { Snapshot, useSwitcherCards, type Card } from '@/switcher';
 import {
   ZOOM_COMMIT,
   gridTop,
@@ -50,10 +72,10 @@ import {
   type Frame,
 } from '@/switcher-model';
 import TerminalView, { type TerminalHandle } from '@/terminal';
-import { killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
+import { capturePane, exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
 import { deriveConfigStatus, tabsAvailable, type TmuxWindow } from '@/tmux-model';
 import { MONO, type Theme } from '@/theme';
-import { pick, sendFile, useUploadBusy, type UploadKind } from '@/upload';
+import { pick, quickAttach, sendFile, useUploadBusy, type UploadKind } from '@/upload';
 import { joinPath, sanitizeFilename, stampName } from '@/upload-model';
 import UploadSheet from '@/upload-sheet';
 
@@ -76,7 +98,12 @@ export default function SessionScreen() {
   const terminal = useRef<TerminalHandle>(null);
   const detach = useRef<(() => void) | null>(null);
   const [open, setOpen] = useState<BarPopover>('none');
-  const [decckm, setDecckm] = useState(false);
+  /** T6's emulator-internal signal, whole: DECCKM for the arrows, altScreen for the ribbon. */
+  const [modes, setModes] = useState<ModeSignal>({
+    altScreen: false,
+    mouseReporting: false,
+    decckm: false,
+  });
   /** The bar stack's measured height — the `popBase` the popovers anchor on. */
   const [barHeight, setBarHeight] = useState(60);
   /** A picked file waiting on a destination (§4.6): the sheet is up exactly while this is set. */
@@ -300,6 +327,191 @@ export default function SessionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
+  /* --- T11: bar-swipe window hop (§4.4) ---
+   *
+   * Horizontal bar pan → page-slide: the live terminal and a neighbour snapshot ride the finger
+   * as rounded page cards, tab-name pills replace the bar keys, rubber-band at the ends,
+   * commit/flick thresholds from the prototype (all in barswipe-model, tested). The neighbour's
+   * content is a FRESH `capture-pane` taken on swipe start (§6); after a commit `select-window`
+   * makes tmux redraw the PTY, and a short settle overlay holds the snapshot until that lands. */
+  const swipeX = useSharedValue(0);
+  const roundSV = useSharedValue(0); // page corner radius, 0→1 of PAGE_RADIUS
+  const [pageSwipe, setPageSwipe] = useState<PageSwipe | null>(null);
+  const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
+    null,
+  );
+
+  const SLIDE = { duration: 320, easing: Easing.bezier(0.22, 1, 0.36, 1) };
+
+  const clearBarSwipe = () => {
+    swipeInfo.current = null;
+    setPageSwipe(null);
+    swipeX.value = 0;
+    roundSV.value = withTiming(0, { duration: 150 });
+  };
+
+  const settleBarSwipe = () => {
+    setPageSwipe((s) => (s === null ? s : { ...s, phase: 'settle' }));
+    roundSV.value = withTiming(0, { duration: 200 });
+    setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
+  };
+
+  // The settle overlay (a static copy of the committed page) is mounted: reset the slide offset
+  // under it, so the live terminal is back at rest by the time the overlay drops. An effect, not
+  // the callback, so the reset paints strictly after the translated pages have unmounted.
+  useEffect(() => {
+    if (pageSwipe?.phase === 'settle') swipeX.value = 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageSwipe?.phase]);
+
+  const grabNeighbor = (win: TmuxWindow, key: 'prev' | 'next') => {
+    capturePane(win.index)
+      .then((text) => {
+        const snap = { lines: parseAnsi(text).slice(0, 80), cols: win.width };
+        setPageSwipe((s) => (s === null ? s : { ...s, [key]: snap }));
+      })
+      .catch(() => {}); // window died between list and capture: the page stays a blank card
+  };
+
+  const onBarSwipe = (phase: 'start' | 'move' | 'end', dx: number) => {
+    if (stage === null) return;
+    if (phase === 'start') {
+      if (swipeInfo.current !== null || sw !== 'closed' || !connected) return;
+      const windows = cards.map((c) => c.win);
+      if (windows.length === 0) return;
+      const pos = activePos();
+      swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
+      setOpen('none');
+      // The warm list can be stale (a window made from the shell since the last re-list); this
+      // swipe rides what it has, and the re-list makes the next one fresh.
+      void refresh(false);
+      console.log('[barswipe] start at', pos, 'of', windows.length);
+      setPageSwipe({
+        names: windows.map((w) => w.name),
+        pos,
+        count: windows.length,
+        target: pos,
+        phase: 'drag',
+        prev: null,
+        next: null,
+      });
+      roundSV.value = withTiming(1, { duration: 180 });
+      if (pos > 0) grabNeighbor(windows[pos - 1], 'prev');
+      if (pos < windows.length - 1) grabNeighbor(windows[pos + 1], 'next');
+      swipeX.value = rubber(dx, pos, windows.length);
+    } else if (phase === 'move') {
+      const info = swipeInfo.current;
+      if (!info?.live) return;
+      swipeX.value = rubber(dx, info.pos, info.windows.length);
+    } else {
+      const info = swipeInfo.current;
+      if (!info?.live) return;
+      info.live = false;
+      const target = swipeTarget(dx, Date.now() - info.t0, info.pos, info.windows.length);
+      if (target === info.pos) {
+        console.log('[barswipe] cancel');
+        setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
+        roundSV.value = withTiming(0, { duration: 200 });
+        swipeX.value = withTiming(0, SLIDE, (done) => {
+          if (done) runOnJS(clearBarSwipe)();
+        });
+      } else {
+        const win = info.windows[target];
+        console.log('[barswipe] commit → window', win.index, `(${win.name})`);
+        void selectWindow(win.index); // tmux redraws the PTY, which replaces the snapshot
+        setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
+        swipeX.value = withTiming((info.pos - target) * pagePitch(stage.w), SLIDE, (done) => {
+          if (done) runOnJS(settleBarSwipe)();
+        });
+      }
+    }
+  };
+
+  // The live terminal is itself a page while a swipe is on: it slides and rounds its corners.
+  const termSlideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: swipeX.value }],
+    borderRadius: PAGE_RADIUS * roundSV.value,
+  }));
+
+  /* --- T11: the context ribbon (§4.4) ---
+   *
+   * State crosses in ribbon-model's reducer (tested): T9's foreground poll, T6's altScreen, and
+   * the ^Z watch on the key bar's send path. The screen only feeds events in and executes caps. */
+  const [ribbonCore, setRibbonCore] = useState(RIBBON_IDLE);
+  const [rbExpanded, setRbExpanded] = useState(false);
+  const fgCommand = tmux.foreground?.command ?? null;
+  const fgPid = tmux.foreground?.pid ?? null;
+  useEffect(() => {
+    setRibbonCore((c) =>
+      ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
+    );
+  }, [fgCommand, fgPid]);
+  // A new process instance always arrives compact (design 4a: expansion is never sticky).
+  useEffect(() => setRbExpanded(false), [ribbonCore.instance]);
+
+  const recipe = connected ? selectRecipe(ribbonCore, modes.altScreen) : null;
+
+  /** Every key on its way to the PTY, with the ribbon's ^Z watch on the side. `ribbonSent`
+   *  returns the same object for bytes that are not its business, so this re-renders nothing. */
+  const sendKeys = (bytes: string) => {
+    setRibbonCore((c) => ribbonSent(c, bytes, Date.now()));
+    send(bytes);
+  };
+
+  const onRibbonCap = (cap: Cap) => {
+    console.log('[ribbon] cap', cap.label);
+    if (cap.action === 'attach') {
+      void quickAttach(); // §4.6: /tmp/port22 + typed path; the busy flag tints the cap inert
+      return;
+    }
+    if (cap.action === 'kill') {
+      if (ribbonCore.pid !== null) {
+        const command = killCommand(ribbonCore.pid);
+        console.log('[ribbon] kill-force:', command);
+        void exec(command).catch((error) => console.log('[ribbon] kill-force failed:', error));
+      }
+      setRibbonCore(ribbonResumed); // a killed stopped job is resolved; running clears on the next poll
+      return;
+    }
+    if (cap.action === 'bg') {
+      // ^Z then `bg` in one tap. Deliberately NOT through sendKeys: this ^Z ends backgrounded,
+      // not stopped, so it must not become a suspension candidate.
+      send('\x1a');
+      send('bg\r');
+      return;
+    }
+    if (cap.action === 'fg' || cap.action === 'bg2') {
+      send(cap.action === 'fg' ? 'fg\r' : 'bg\r');
+      setRibbonCore(ribbonResumed);
+      return;
+    }
+    if (cap.bytes !== undefined) {
+      send(cap.bytes);
+      if (cap.focus) setFocusSignal((n) => n + 1); // pager/htop search needs typing (§4.4)
+    }
+  };
+
+  const ribbonEl =
+    recipe === null ? null : (
+      <Ribbon
+        theme={theme}
+        recipe={recipe}
+        startedAt={ribbonCore.startedAt}
+        expanded={rbExpanded}
+        busy={sending}
+        onToggle={() => setRbExpanded((e) => !e)}
+        onDismiss={() => {
+          console.log('[ribbon] dismissed', recipe.proc);
+          setRibbonCore(ribbonDismiss);
+        }}
+        onCap={onRibbonCap}
+      />
+    );
+
+  /** Outside-tap collapses an expanded TUI recipe (§4.4): one transparent layer over the
+   *  terminal area only, so the ribbon's own caps stay tappable. */
+  const rbScrim = recipe !== null && RECIPES[recipe.id].collapsible && rbExpanded;
+
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
   // compensated for RN's centre-origin scale — all from the one tested function.
@@ -373,6 +585,11 @@ export default function SessionScreen() {
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
           screen, so a `bottom` measured from the bar holds whether the keyboard is up or not. */}
       <View style={styles.screen}>
+      {/* The terminal area: the flex region above the bar. During a bar swipe the live terminal
+          slides inside it as a rounded page card, with the neighbour snapshots as its siblings —
+          the bar itself stays put, showing the name pills. */}
+      <View style={styles.termArea}>
+      <Animated.View style={[styles.termSlide, { backgroundColor: theme.background }, termSlideStyle]}>
       <TerminalView
         ref={terminal}
         theme={theme}
@@ -395,20 +612,51 @@ export default function SessionScreen() {
         onLink={async (url) => {
           await WebBrowser.openBrowserAsync(url);
         }}
-        // T6 produces the signal; the bar's arrows cluster consumes DECCKM now, T11's ribbon
-        // takes the rest later. The log line stays — a missing one is a bridge fault.
-        onModes={async (modes) => {
-          console.log('[session] modes', JSON.stringify(modes));
-          setDecckm(modes.decckm);
+        // T6 produces the signal; the bar's arrows cluster consumes DECCKM, the ribbon consumes
+        // altScreen. The log line stays — a missing one is a bridge fault.
+        onModes={async (next) => {
+          console.log('[session] modes', JSON.stringify(next));
+          setModes(next);
         }}
         onTwoFingerTap={async () => openSettings()}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
+      </Animated.View>
+
+      {/* The neighbour pages while a swipe is live, and the settle overlay after a commit —
+          which holds the committed snapshot over the terminal until tmux's redraw has landed. */}
+      {pageSwipe !== null && stage !== null && pageSwipe.phase !== 'settle' && (
+        <>
+          {pageSwipe.pos > 0 && (
+            <NeighborPage side={-1} snap={pageSwipe.prev} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} x={swipeX} />
+          )}
+          {pageSwipe.pos < pageSwipe.count - 1 && (
+            <NeighborPage side={1} snap={pageSwipe.next} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} x={swipeX} />
+          )}
+        </>
+      )}
+      {pageSwipe?.phase === 'settle' && stage !== null && (
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }]}>
+          <PageContent
+            snap={pageSwipe.target > pageSwipe.pos ? pageSwipe.next : pageSwipe.prev}
+            stageW={stage.w}
+            theme={theme}
+          />
+        </View>
+      )}
+
+      {/* Outside-tap collapses an expanded TUI ribbon; only the terminal area eats the tap. */}
+      {rbScrim && (
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => setRbExpanded(false)} />
+      )}
+      </View>
 
       <KeyBar
         theme={theme}
-        decckm={decckm}
-        sendBytes={send}
+        decckm={modes.decckm}
+        sendBytes={sendKeys}
         open={open}
         onOpenChange={setOpen}
         onHeight={setBarHeight}
@@ -422,6 +670,15 @@ export default function SessionScreen() {
         windowIndex={tmux.windowIndex ?? undefined}
         onTabsTap={openSwitcher}
         onSwitcherDrag={onSwitcherDrag}
+        // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
+        // hop through; without it the axis is silence, like the tabs button (§7).
+        onBarSwipe={showTabs ? onBarSwipe : undefined}
+        pills={
+          pageSwipe !== null && stage !== null
+            ? { names: pageSwipe.names, pos: pageSwipe.pos, x: swipeX, pitch: pagePitch(stage.w) }
+            : null
+        }
+        ribbon={ribbonEl}
       />
 
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the
@@ -432,7 +689,7 @@ export default function SessionScreen() {
           {open === 'arrows' ? (
             <ArrowsPopover
               theme={theme}
-              decckm={decckm}
+              decckm={modes.decckm}
               bottom={barHeight + 6}
               sendBytes={send}
             />
@@ -479,6 +736,64 @@ export default function SessionScreen() {
         <Status session={session} theme={theme} onSetup={leave} />
       )}
     </SafeAreaView>
+  );
+}
+
+/* --- T11: the page-slide's cards --- */
+
+/** A neighbour's captured pane, parsed for the Snapshot renderer; `null` until the capture lands
+ *  (§4.4 accepts ~100–300ms of blank card before the slide attaches). */
+type PageSnap = { lines: SpanLine[]; cols: number } | null;
+
+type PageSwipe = {
+  names: string[];
+  /** Grid position of the current window at swipe start, and how many there are. */
+  pos: number;
+  count: number;
+  /** Where a commit is headed (= `pos` until the release decides). */
+  target: number;
+  /** drag = finger down; anim = commit/cancel slide running; settle = snapshot holding the
+   *  screen while tmux redraws the PTY under it. */
+  phase: 'drag' | 'anim' | 'settle';
+  prev: PageSnap;
+  next: PageSnap;
+};
+
+/** The captured pane at page size — T10's Snapshot renderer, fitted to the pane's true columns. */
+function PageContent({ snap, stageW, theme }: { snap: PageSnap; stageW: number; theme: Theme }) {
+  if (snap === null) return null;
+  return (
+    <View style={styles.pagePad}>
+      <Snapshot lines={snap.lines} theme={theme} fontSize={pageFontSize(stageW, snap.cols)} />
+    </View>
+  );
+}
+
+/** One neighbour page card, riding the shared page offset a full pitch to the side. */
+function NeighborPage({
+  side,
+  snap,
+  pitch,
+  stageW,
+  theme,
+  x,
+}: {
+  side: -1 | 1;
+  snap: PageSnap;
+  pitch: number;
+  stageW: number;
+  theme: Theme;
+  x: SharedValue<number>;
+}) {
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateX: side * pitch + x.value }],
+  }));
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }, style]}>
+      <PageContent snap={snap} stageW={stageW} theme={theme} />
+    </Animated.View>
   );
 }
 
@@ -562,6 +877,10 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   stageWrapper: { position: 'absolute', top: 0, left: 0, overflow: 'hidden' },
   terminal: { flex: 1 },
+  termArea: { flex: 1 },
+  termSlide: { flex: 1, overflow: 'hidden' },
+  page: { borderRadius: PAGE_RADIUS, overflow: 'hidden' },
+  pagePad: { flex: 1, padding: 6 },
   status: {
     position: 'absolute',
     top: 0,

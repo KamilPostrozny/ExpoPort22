@@ -29,8 +29,23 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  FadeOut,
+  FadeOutDown,
+  useAnimatedStyle,
+  type SharedValue,
+} from 'react-native-reanimated';
 
+import {
+  PILL_GAP,
+  PILL_ITEM,
+  pillCont,
+  pillDist,
+  pillOpacity,
+  pillScale,
+} from '@/barswipe-model';
 import {
   pinPasteboard,
   refreshPasteboard,
@@ -93,8 +108,17 @@ export type KeyBarProps = {
    *  classified as up-with-keyboard-shown, then once with 'end' on release; the screen turns
    *  dy into zoom progress and decides commit-or-spring-back. Only wired while `showTabs`. */
   onSwitcherDrag?: (phase: 'move' | 'end', dx: number, dy: number) => void;
-  /** TODO(T11): bar swipe ↔ switches tmux window; +1 = next (leftward swipe), −1 = previous. */
-  onBarSwipeHorizontal?: (direction: 1 | -1) => void;
+  /** T11: bar swipe ↔ is the page-slide window hop. Raw gesture only — 'start' once when the pan
+   *  claims the horizontal axis, 'move' per frame with the pan's translation, 'end' on release.
+   *  The screen owns the model: rubber band, thresholds, commit, and the shared `x` the pages
+   *  and the pills both ride (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
+  onBarSwipe?: (phase: 'start' | 'move' | 'end', dx: number) => void;
+  /** While a page swipe is live: the tab-name pills that replace the bar keys (§4.4). `x` is the
+   *  screen's page offset, `pitch` its page step — the strip derives the continuous position. */
+  pills?: { names: string[]; pos: number; x: SharedValue<number>; pitch: number } | null;
+  /** T11's context ribbon, rendered in the slot above the chord strip so its height rides the
+   *  same `onHeight` measurement the popovers anchor on. The screen owns its state. */
+  ribbon?: React.ReactNode;
 };
 
 /* --- §3's glass recipe --- */
@@ -111,8 +135,8 @@ function rgba(hex: string, alpha: number): string {
 
 /** One glass surface: blur, tint, border — §3's recipe. `blur(14px) saturate(160%)` maps onto
  *  BlurView's 0–100 intensity scale (≈40); the inset specular highlight has no RN equivalent, so
- *  the border carries the edge alone. */
-function Glass({
+ *  the border carries the edge alone. Exported for T11's ribbon, which is the same glass. */
+export function Glass({
   theme,
   radius,
   style,
@@ -185,6 +209,8 @@ export default function KeyBar(props: KeyBarProps) {
   const lastCtrlTap = useRef(0);
   /** The axis this bar pan committed to, so it fires once and never also presses keys. */
   const swipe = useRef<BarSwipe>(null);
+  /** The pill's measured width — the name-pill pitch (prototype: item + gap exactly fill it). */
+  const [pillW, setPillW] = useState(0);
 
   // The session just connected: raise the keyboard, typing is what comes next.
   useEffect(() => {
@@ -265,11 +291,16 @@ export default function KeyBar(props: KeyBarProps) {
         props.onSwitcherDrag?.('move', e.translationX, e.translationY);
         return;
       }
+      if (swipe.current === 'horizontal') {
+        props.onBarSwipe?.('move', e.translationX);
+        return;
+      }
       if (swipe.current !== null) return;
       const s = classifyBarSwipe(e.translationX, e.translationY);
       if (s === null) return;
       swipe.current = s;
-      if (s === 'down') Keyboard.dismiss();
+      if (s === 'horizontal') props.onBarSwipe?.('start', e.translationX);
+      else if (s === 'down') Keyboard.dismiss();
       else if (s === 'up') {
         if (input.current?.isFocused()) {
           // Keyboard already up: this swipe is the drag into the switcher (§4.4) — where there
@@ -288,10 +319,7 @@ export default function KeyBar(props: KeyBarProps) {
         props.onSwitcherDrag?.('end', e.translationX, e.translationY);
         return;
       }
-      // TODO(T11): the real thresholds (70px, or 30px flicked) and the page-slide live there.
-      if (swipe.current === 'horizontal' && Math.abs(e.translationX) > 30) {
-        props.onBarSwipeHorizontal?.(e.translationX < 0 ? 1 : -1);
-      }
+      if (swipe.current === 'horizontal') props.onBarSwipe?.('end', e.translationX);
     });
 
   const keyLabel = { color: theme.foreground, fontFamily: MONO, fontSize: 14 };
@@ -314,8 +342,9 @@ export default function KeyBar(props: KeyBarProps) {
 
   return (
     <View onLayout={(e) => props.onHeight(e.nativeEvent.layout.height)}>
-      {/* TODO(T11): the context ribbon renders here, above the chord strip — its height then
-          feeds the same `onHeight` measurement the popovers anchor on, for free. */}
+      {/* T11's context ribbon, above the chord strip — its height feeds the same `onHeight`
+          measurement the popovers anchor on, for free. */}
+      {props.ribbon}
 
       {ctrl !== 'off' && (
         <Animated.View
@@ -364,7 +393,10 @@ export default function KeyBar(props: KeyBarProps) {
           </Key>
 
           <Glass theme={theme} radius={24.5} style={styles.pill}>
-            <View style={styles.keysRow}>
+            <View
+              style={[styles.keysRow, props.pills != null && { opacity: 0 }]}
+              pointerEvents={props.pills != null ? 'none' : 'auto'}
+              onLayout={(e) => setPillW(e.nativeEvent.layout.width)}>
               <View style={styles.keysGroup}>
                 <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
                   <Text style={keyLabel}>Ctrl</Text>
@@ -402,6 +434,16 @@ export default function KeyBar(props: KeyBarProps) {
                 />
               </Key>
             </View>
+            {/* §4.4: during a bar swipe the tab-name pills replace the keys. */}
+            {props.pills != null && pillW > 0 && (
+              <Animated.View
+                entering={FadeIn.duration(150)}
+                exiting={FadeOut.duration(150)}
+                pointerEvents="none"
+                style={styles.namesWrap}>
+                <NameStrip theme={theme} pills={props.pills} width={pillW} />
+              </Animated.View>
+            )}
           </Glass>
 
           {props.showTabs && (
@@ -447,6 +489,64 @@ export default function KeyBar(props: KeyBarProps) {
         keyboardAppearance={theme.isDark ? 'dark' : 'light'} // iOS-only prop, ignored elsewhere
       />
     </View>
+  );
+}
+
+/* --- the name pills (§4.4: they replace the keys during a bar swipe) --- */
+
+function NameStrip({
+  theme,
+  pills,
+  width,
+}: {
+  theme: Theme;
+  pills: NonNullable<KeyBarProps['pills']>;
+  width: number;
+}) {
+  const { names, pos, x, pitch } = pills;
+  const stripStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: -pillCont(pos, x.value, pitch) * width }],
+  }));
+  return (
+    <Animated.View
+      style={[
+        styles.nameStrip,
+        { gap: PILL_GAP * width, paddingLeft: ((1 - PILL_ITEM) * width) / 2 },
+        stripStyle,
+      ]}>
+      {names.map((name, i) => (
+        <NamePill key={i} theme={theme} name={name} i={i} pills={pills} width={width} />
+      ))}
+    </Animated.View>
+  );
+}
+
+function NamePill({
+  theme,
+  name,
+  i,
+  pills,
+  width,
+}: {
+  theme: Theme;
+  name: string;
+  i: number;
+  pills: NonNullable<KeyBarProps['pills']>;
+  width: number;
+}) {
+  const { pos, x, pitch } = pills;
+  const style = useAnimatedStyle(() => {
+    const d = pillDist(i, pillCont(pos, x.value, pitch));
+    return { transform: [{ scale: pillScale(d) }], opacity: pillOpacity(d) };
+  });
+  return (
+    <Animated.View style={[styles.namePill, { width: PILL_ITEM * width }, style]}>
+      <Text style={[styles.namePillArrow, { color: theme.placeholder }]}>‹</Text>
+      <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
+        {name}
+      </Text>
+      <Text style={[styles.namePillArrow, { color: theme.placeholder }]}>›</Text>
+    </Animated.View>
   );
 }
 
@@ -657,6 +757,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pillDivider: { width: 1, height: 27 },
+  namesWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, overflow: 'hidden' },
+  nameStrip: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  namePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  namePillText: { fontFamily: MONO, fontSize: 14, fontWeight: '500', flexShrink: 1 },
+  namePillArrow: { fontSize: 14 },
   arrowsButton: {
     width: 35,
     height: 35,

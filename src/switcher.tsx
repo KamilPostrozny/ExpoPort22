@@ -393,8 +393,9 @@ function WindowCard({
 }
 
 /** The mini terminal: ANSI spans as nested <Text> runs in JBMono at whatever size fits the
- *  pane's true column count. `null` lines = no capture yet — the card is just its background. */
-function Snapshot({
+ *  pane's true column count. `null` lines = no capture yet — the card is just its background.
+ *  Exported for T11's neighbour page cards, which are the same rendering at page size. */
+export function Snapshot({
   lines,
   theme,
   fontSize,

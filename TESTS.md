@@ -582,3 +582,142 @@ same session.
   match — the grid follows tmux even when the phone did not cause the change. (One window
   reads "1 Tab", not "1 Tabs".)
 - [ ]
+
+## T11 — Bar-swipe window switching + context ribbon
+
+All cases: a real host with configured tmux, session attached, three windows unless said
+otherwise. The swipe logs as `[barswipe] …`, the ribbon as `[ribbon] …`; T9's `[ssh] exec`
+lines show `capture-pane`, `select-window` and the kill-force command going out on exec
+channels, never through the PTY. Ribbon foreground reactions ride the ~2s poll — allow a beat
+wherever a process starts or stops; alt-screen reactions (`[session] modes`) are instant.
+
+### T11.1 — Bar swipe hops a window: slide, pills, live redraw
+- **Setup**: attached, three windows, window 1 active, keyboard up.
+- **Steps**: touch the bar and drag slowly left ~100pt; release.
+- **Expect**: the moment the drag classifies horizontal the bar keys fade out and tab-name
+  pills fade in — the centred pill is the current window's name, the next name sliding in
+  from the right as the pages move; the terminal slides left as a page card with rounded
+  corners, the neighbour page sliding in beside it with a gap. On release past ~70pt the
+  slide completes, the badge says 2, and the PTY shows window 2 live (typing works
+  immediately). Log: `[barswipe] start at 0 of 3`, `[barswipe] commit → window …`, and an
+  exec `select-window` — nothing typed into the PTY.
+- [ ]
+
+### T11.2 — Neighbour preview is a real, fresh snapshot
+- **Setup**: window 2 running `watch date` (leave it a while); window 1 active.
+- **Steps**: swipe the bar left slowly and hold half-way; read the incoming page.
+- **Expect**: the incoming page shows `watch date`'s *current* output in colour — a
+  `capture-pane` taken at swipe start (the exec log shows it fire on touch, not earlier), not
+  a stale image from the last switcher visit. A blank page for the first ~100–300ms of the
+  drag is accepted (§4.4); the content attaches mid-slide.
+- [ ]
+
+### T11.3 — Rubber-band at the ends
+- **Steps**: on the first window, drag the bar right ~90pt and hold; release. Repeat on the
+  last window dragging left.
+- **Expect**: the page follows at a third of the finger's travel (heavy, stretchy), no
+  neighbour appears, and release springs straight back — no commit, no `select-window` in the
+  log, badge unchanged.
+- [ ]
+
+### T11.4 — Flick vs slow drag decide differently
+- **Steps**: from window 2: (a) flick the bar left fast, ~40pt of travel; (b) drag left
+  slowly to ~40pt and release; (c) drag left slowly past ~80pt and release.
+- **Expect**: (a) commits — a short fast swipe is enough; (b) springs back — same distance,
+  slow, is a cancel (`[barswipe] cancel`); (c) commits — a slow drag needs the full ~70pt.
+- [ ]
+
+### T11.5 — Cancel springs back clean
+- **Steps**: drag left ~40pt slowly, release; keep typing.
+- **Expect**: the pages spring back (0.32s ease-out), corners square up, pills fade back to
+  the keys, the badge never changed, and the next keystroke lands in the same window. A new
+  swipe started immediately after works.
+- [ ]
+
+### T11.6 — Vertical claim intact: swipe-up still drags the switcher
+- **Steps**: keyboard up: swipe the bar up slowly (T10.2's gesture); then down; then
+  horizontal.
+- **Expect**: up still drags into the switcher zoom, down still hides the keyboard —
+  unchanged from T7/T10 — and only a clearly-horizontal pan starts the page slide. One
+  gesture never becomes the other mid-drag.
+- [ ]
+
+### T11.7 — `sleep 100` → running ribbon with timer; ^C cap kills it
+- **Steps**: type `sleep 100⏎`; wait a beat; watch; tap the `^C` cap.
+- **Expect**: within ~2s a glass pill appears above the bar, expanded: pulsing green dot,
+  `sleep · 0:0x` counting up in seconds, caps `^C stop` · `^Z bg background` · red
+  `kill force`. The `^C` tap prints `^C` in the terminal, the shell prompt returns, and the
+  ribbon leaves on the next poll beat. Log: `[ribbon] cap ^C`.
+- [ ]
+
+### T11.8 — ^Z from the chord strip → suspended pill; fg resumes
+- **Steps**: `sleep 100⏎`; arm Ctrl, tap the chord strip's `Z`; wait a beat; tap the ribbon's
+  `fg` cap.
+- **Expect**: the shell shows `[1]+ Stopped`; within ~2s the ribbon swaps to the suspended
+  form — grey dot, `sleep · stopped`, caps `fg resume` · `bg run behind` · red `kill` — the
+  pill leaves immediately on the `fg` tap, `fg` is typed and run, and the running ribbon
+  (fresh timer) is back on the next beat. The ^Z watch works identically for Ctrl+Z typed on
+  the keyboard.
+- [ ]
+
+### T11.9 — vim: collapsed pill → expand → caps work from insert mode
+- **Steps**: `vim /tmp/t11.txt⏎`; press `i` and type a line (stay in insert mode); look at
+  the ribbon; tap the pill; tap `:w`; type more; tap the pill, tap `ZZ`. Re-open, dirty the
+  buffer, expand, tap the red `:q!`.
+- **Expect**: the ribbon arrives as a *collapsed* dot+label pill (mauve dot, `vim`, chevron)
+  — vim keeps its screen. Tap expands to `:w save` · `:q quit` · `ZZ save+quit` · red
+  `:q! force quit`. `:w` saves *from insert mode* (the Esc prefix does it — vim shows the
+  write message, and the file has the text). `ZZ` saves and quits back to the prompt; `:q!`
+  discards. Tapping the terminal with the ribbon expanded collapses it back to the pill.
+- [ ]
+
+### T11.10 — less: q, / raises the keyboard, g/G jump
+- **Steps**: `man ls⏎`; expand the ribbon; tap `G`, then `g`, then `/` (type `SYNOPSIS⏎`),
+  then `q`.
+- **Expect**: blue-dot pill collapsed on arrival; expanded caps `q quit` · `/ search` ·
+  `g top` · `G end`. `G` jumps to the end, `g` back to the top; `/` puts less's search prompt
+  up **and raises the keyboard** so the term can be typed; `q` exits and the ribbon leaves.
+- [ ]
+
+### T11.11 — htop: q, / filter, F9 kill
+- **Steps**: `htop⏎`; expand; tap `/`, type a name, Esc; tap `F9`; Esc; tap `q`.
+- **Expect**: yellow-dot pill collapsed on arrival; `/` opens htop's filter with the keyboard
+  raised; the red `F9` cap opens htop's SendSignal column (the `CSI 20~` byte string — this
+  is the cap that proves function keys); `q` exits.
+- [ ]
+
+### T11.12 — Agent ribbon: 📎 attaches, ⎋ interrupts
+- **Setup**: `claude` (or any process whose `pane_current_command` is on the agent list)
+  running in the pane.
+- **Steps**: tap 📎 attach; pick a photo; watch the cap and the ⋯ circle; when the path
+  appears, tap ⎋.
+- **Expect**: peach-dot ribbon, expanded on arrival (agents never collapse), caps
+  `📎 attach` · `⎋ interrupt`. The picker opens; during the send both the attach cap and the
+  ⋯ circle tint accent and go inert; then the remote path + one trailing space is typed at
+  the prompt — no Return (T8.16's flow, now driven from the cap). ⎋ sends a bare ESC and the
+  agent shows its interrupt. Log: `[ribbon] cap 📎`, `[upload] quick-attach typed …`.
+- [ ]
+
+### T11.13 — The silences: idle shell, REPL, unknown TUI
+- **Steps**: sit at the prompt 5s; run `python3` and sit at `>>>` 5s; `exit()`; run an
+  alt-screen app not on any list (e.g. `nano` or `nethack`) 5s.
+- **Expect**: no ribbon in any of the three — shell is idle, a REPL at its prompt is not a
+  job, an unknown TUI gets no caps (§4.4). The `[tmux]` log shows the foreground changing,
+  so the silence is a decision, not a missed poll.
+- [ ]
+
+### T11.14 — Swipe-down dismisses until the process changes
+- **Steps**: `sleep 100⏎`; when the ribbon appears, swipe down on the pill; wait 5s; ^C from
+  the chord strip; run `sleep 100⏎` again.
+- **Expect**: the pill leaves on the swipe (`[ribbon] dismissed sleep`) and stays gone while
+  *this* sleep runs — polls do not resurrect it. The second `sleep` is a new process
+  instance: the ribbon returns.
+- [ ]
+
+### T11.15 — Kill force: pgrep + kill -9, observable in the log
+- **Steps**: `sleep 100⏎`; tap the red `kill` cap; read the log and the terminal.
+- **Expect**: the log shows `[ribbon] kill-force: pgrep -P <pane_pid> | xargs kill -9 …` and
+  the `[ssh] exec` line for it — an exec channel, nothing typed into the PTY. The shell
+  prints `Killed`, the prompt returns, the ribbon leaves on the next beat. Same cap from the
+  suspended ribbon (T11.8's setup) kills the stopped job.
+- [ ]

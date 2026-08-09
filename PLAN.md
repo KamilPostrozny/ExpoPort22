@@ -472,7 +472,7 @@ work, untouched; keyboard re-raise on return uses a `focusSignal` counter prop o
 worth a device look; snapshot cards render bg colour per span but no reverse-video/underline
 (deliberate subset).
 
-**T11 — Bar-swipe window switching + ribbon** deps: T9, T7
+**T11 — Bar-swipe window switching + ribbon** ✅ implemented 2026-08-09 (not device-verified) · deps: T9, T7
 Horizontal bar swipe: page-slide cards, rounded corners during drag, name pills strip,
 rubber-band ends, flick thresholds from prototype. Neighbor page content = **fresh
 `capture-pane` snapshot taken on swipe start** (accepted ~100–300ms before slide attaches);
@@ -480,6 +480,43 @@ live PTY content replaces it after `select-window` redraw. Context ribbon: recip
 all §4.4 built-ins (running/suspended/vim/pagers/htop/agents), collapsed-pill UX, dismissal.
 *Accept*: swipe hops windows without switcher; ribbon controls a live build; `:wq` cap
 finishes a `git commit` from insert mode; agent cap attaches a file.
+Landed: `src/barswipe-model.ts` (the page slide's decisions, pure and tested in
+`src/barswipe-model.test.ts`: rubber-band at a third past the ends, commit at 70pt or a 30pt
+flick under 250ms, 430-at-402 page pitch, the name pills' scale/opacity interpolation, the
+neighbour page's type size), `src/ribbon-recipes.ts` (the six built-ins as declarative data —
+match names → caps `{label, caption, bytes|action, danger}` — so PLAN §6's user editor is a data
+problem later), `src/ribbon-model.ts` (selection, suspension, identity, kill, pure and tested in
+`src/ribbon-model.test.ts`), `src/ribbon.tsx` (the glass pill: pulse, timer, caps, the two
+gestures), the pills strip + ribbon slot + `onBarSwipe` in `src/keybar.tsx`, and the page-slide
+state machine + ribbon glue in `src/app/terminal.tsx`. `Snapshot` (T10) and `Glass` (T7) are now
+exported and reused rather than re-drawn; `src/tmux.ts` grew a one-line `exec` export.
+Decisions: **the bar's final horizontal contract is raw gesture out, model in the screen** —
+`onBarSwipe(phase: 'start'|'move'|'end', dx)` replaced T7's release-only hook; the bar reports,
+the screen owns rubber/thresholds/commit, and both ride one shared page-offset value (the pills
+derive their continuous position from it in worklets, so nothing re-renders per frame). The
+vertical claims are untouched: `classifyBarSwipe` still splits the axes, and up/down still mean
+T10's zoom drag and the keyboard. Only the *terminal area* slides — the bar stays put under the
+pills, which is why the page wrapper sits inside the stage rather than being the stage. After a
+commit the slide lands on the snapshot, a **settle overlay** holds that snapshot ~350ms while
+tmux's redraw reaches the PTY, then drops (ponytail: fixed hold; dropping on first shell data is
+the upgrade). **Suspended is tracked, not observed**: the poll cannot tell "stopped" from
+"exited", so a ^Z on the key-bar send path (chord strip and typed Ctrl+Z both route through it)
+makes the running command a candidate, and a poll answering "shell" within 6s makes it
+`suspended` — the ribbon's own "background" cap deliberately bypasses the watch, because that ^Z
+ends backgrounded. **A process instance is a transition counter**, not a pid: `#{pane_pid}` is
+the shell, constant across every job in the pane, so dismissal and the running timer key on a
+counter bumped at every foreground change (design 4a's "returns when the foreground process
+changes" verbatim). Kill-force is `pgrep -P <pane_pid> | xargs kill -9` on an exec channel —
+xargs, not `$()`, for the same fish/POSIX-parity rule every T9 command obeys. Recipe selection
+order: dismissal, tracked suspension, name match (vim on the alt screen is vim), then the
+silences — REPL names and unmatched alt-screen apps — then `running`.
+Verified: `bun test` (129), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Not
+walked on hardware** — the device cases are TESTS.md §T11 (T11.1–T11.15). Still open besides
+that: agent CLIs whose `pane_current_command` is their interpreter (`aider` polling as `python`)
+miss the name list — the recipe data is where that gets fixed when a real host shows its names;
+the settle hold and the 6s candidate window are hardware-tuning knobs like T6's; a kill on a
+`running` recipe clears on the next poll beat rather than instantly (deliberate — the poll is
+the truth).
 
 **T12 — Settings sheet + polish pass** deps: T7–T11
 Bottom sheet per design (sections, swatch rows, stepper 8–32, tmux toggle wiring incl.

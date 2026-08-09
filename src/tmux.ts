@@ -128,6 +128,12 @@ function run(command: string): Promise<string> {
   return ExpoSSH.exec(command, EXEC_LIMIT);
 }
 
+/** T11's kill-force cap: one non-tmux command on the same short-lived-exec seam the session's
+ *  connection already provides. */
+export function exec(command: string): Promise<string> {
+  return run(command);
+}
+
 /* --- lifecycle (driven by src/session.ts state transitions) --- */
 
 /** The session is connected: probe, maybe push the conf, start the poll. Idempotent — the session
