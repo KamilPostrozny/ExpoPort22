@@ -207,7 +207,11 @@ export default function SessionScreen() {
   const stageSV = useSharedValue({ w: 390, h: 800 });
 
   const connected = session.status === 'connected';
-  const showTabs = tabsAvailable(tmux.present, deriveConfigStatus(configureTmux, tmux.config));
+  const showTabs = tabsAvailable(
+    tmux.present,
+    deriveConfigStatus(configureTmux, tmux.config),
+    tmux.attached,
+  );
   const { cards, setCards, refresh } = useSwitcherCards(showTabs && connected, sw !== 'closed');
 
   /** The active window's grid position — tmux's fresher poll first, the list's flag second. */

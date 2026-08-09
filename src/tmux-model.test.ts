@@ -190,11 +190,14 @@ test('config status is the §4.5 trio, and tabs need present AND applied', () =>
   expect(deriveConfigStatus(false, 'applied')).toBe('off'); // the toggle wins
   expect(deriveConfigStatus(true, 'applied')).toBe('applied');
   expect(deriveConfigStatus(true, 'not-applied')).toBe('not-applied');
-  expect(tabsAvailable(true, 'applied')).toBe(true);
-  expect(tabsAvailable(true, 'off')).toBe(false); // toggle off hides the tabs button (§4.5)
-  expect(tabsAvailable(true, 'not-applied')).toBe(false); // switcher needs configured tmux
-  expect(tabsAvailable(false, 'applied')).toBe(false); // no tmux = no button, no mention (§7)
-  expect(tabsAvailable(null, 'applied')).toBe(false); // not probed yet = not available yet
+  expect(tabsAvailable(true, 'applied', true)).toBe(true);
+  expect(tabsAvailable(true, 'off', true)).toBe(false); // toggle off hides the tabs button (§4.5)
+  expect(tabsAvailable(true, 'not-applied', true)).toBe(false); // switcher needs configured tmux
+  expect(tabsAvailable(false, 'applied', true)).toBe(false); // no tmux = no button, no mention (§7)
+  expect(tabsAvailable(null, 'applied', true)).toBe(false); // not probed yet = not available yet
+  // Installed and configured, but this PTY never entered tmux: the switcher's commands would
+  // target a session that is not the one on screen, so the button stays away (T13/T9.4).
+  expect(tabsAvailable(true, 'applied', false)).toBe(false);
 });
 
 test('shell quoting survives quotes, spaces, and stays literal', () => {

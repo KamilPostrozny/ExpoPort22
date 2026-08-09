@@ -279,10 +279,26 @@ export function deriveConfigStatus(
   return configureTmux ? pushed : 'off';
 }
 
-/** The switcher needs configured tmux (§4.5), so the tabs button renders on present AND applied —
- *  which also makes the toggle hide it, as specified. */
-export function tabsAvailable(present: boolean | null, status: ConfigStatus): boolean {
-  return present === true && status === 'applied';
+/**
+ * The switcher needs configured tmux (§4.5), so the tabs button renders on present AND applied —
+ * which also makes the toggle hide it, as specified — AND on a client actually being attached.
+ *
+ * That last term is not decoration. Every action behind the button (`select-window`, `kill-window`,
+ * `new-window`, the snapshots) targets whatever session the exec channel resolves to, which is only
+ * the session on screen while this PTY is inside tmux. With tmux installed and the conf pushed but
+ * the shell never entering it — the default, since §4.9 starts a plain shell and never auto-attaches
+ * — the button used to open a switcher onto someone else's windows, where taps quietly drove another
+ * client and the phone's grid never changed (found on device, T13/T9.4).
+ *
+ * Ceiling, inherited from the probe: "attached" is `#{session_attached} > 0`, so a desktop client
+ * attached while the phone is not still reads as attached. Same ponytail note as in `probe`.
+ */
+export function tabsAvailable(
+  present: boolean | null,
+  status: ConfigStatus,
+  attached: boolean,
+): boolean {
+  return present === true && status === 'applied' && attached;
 }
 
 /**
