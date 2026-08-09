@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -133,11 +133,11 @@ export default function Scratch() {
           {lines.join('\n')}
         </Text>
 
-        <Link href="/terminal" asChild>
-          <Pressable style={[styles.pill, { backgroundColor: theme.surface }]}>
-            <Text style={[styles.pillLabel, { color: theme.foreground }]}>terminal (T4)</Text>
-          </Pressable>
-        </Link>
+        <Pressable
+          onPress={() => router.push('/terminal')}
+          style={[styles.pill, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.pillLabel, { color: theme.foreground }]}>terminal (T4)</Text>
+        </Pressable>
 
         <Pressable onPress={cycle} style={[styles.pill, { backgroundColor: theme.accent }]}>
           <Text style={[styles.pillLabel, { color: theme.onAccent }]}>

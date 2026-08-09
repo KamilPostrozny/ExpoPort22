@@ -68,6 +68,22 @@ cd /home/kamil/Projects/ExpoPort22 && bunx expo start --dev-client
 Run it with `run_in_background: true` and keep the output file path from the tool result — §5 tails
 it. Tell the user to reload the app (shake → Reload, or `r` in the bundler). Then go to §5.
 
+**First check whether a bundler is already up**, because the logs are only readable from the process
+that owns them:
+
+```bash
+ss -ltnp | grep :8081
+```
+
+If one is running in the user's own terminal, `expo start` here prints `Port 8081 is running this
+app in another window` and skips the dev server — and any watch armed on its output file stays
+silent forever, which reads exactly like a healthy quiet app. **Take the port**: `kill <pid>`, start
+the bundler here, and say you did it. The logs are only readable from the process that owns them,
+and reading them is the point of this skill (user decision, 2026-08-09).
+
+The app then has to reconnect once — it was talking to the dead server. Ask for exactly one manual
+step: relaunch the app from the phone. After that, reloads are yours to trigger (§5.1).
+
 ## 4. CI path
 
 `docs/ship.md` is the authority and explains why each piece is there. The short form:
@@ -134,6 +150,24 @@ success, and a monitor that greps only for what you hoped to see stays quiet thr
 
 Then say, in one or two lines, what to tap on the phone and what the log should print if it worked.
 
+## 5.1 Reload the app yourself
+
+Metro's message socket broadcasts to every connected client, which is exactly what pressing `r` in
+the bundler does. Use it after every fix — do not ask the user to reload:
+
+```bash
+bun -e 'const ws = new WebSocket("ws://localhost:8081/message");
+  ws.onopen = () => { ws.send(JSON.stringify({ version: 2, method: "reload" }));
+  setTimeout(() => process.exit(0), 500); };'
+```
+
+`"devMenu"` in place of `"reload"` opens the dev menu on the device. Both are silent no-ops when no
+app is connected — after the reload, confirm from the log that a bundle was actually served
+(`iOS Bundled … ms`), or you are watching a phone that is talking to nothing.
+
+The edit → reload → read-the-log loop is yours to run end to end; the user's only manual step is the
+first relaunch after a bundler takeover.
+
 ## 6. Report
 
 Say which path was taken, what is now on the phone, and what the log showed — including the case
@@ -154,4 +188,5 @@ leave two suspects and no way to tell which broke what.
 | `ERROR: Unable to retrieve device list!` | Missing `UNIX:` prefix, or netmuxd down — not necessarily the network. |
 | `epoll_ctl(...): Operation not permitted` | The `script -qec` pty wrapper was dropped. |
 | Metro says no apps connected | App not opened, or phone and laptop on different networks. |
+| `Port 8081 is running this app in another window` | The user's own bundler owns the logs. §3 — ask before killing it; never arm a watch on the empty output file. |
 | DOM component renders but its fonts are the fallback | `public/fonts` missing from the dev server; check the file is in `public/`, not only `assets/`. |

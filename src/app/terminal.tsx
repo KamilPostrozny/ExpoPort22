@@ -20,6 +20,13 @@ export default function TerminalHarness() {
 
   const write = (text: string) => terminal.current?.write(toBase64(new TextEncoder().encode(text)));
 
+  /** On screen and in the Metro console both — the console is the only one of the two that can be
+   *  read from the machine the fix is being written on. */
+  const report = (line: string) => {
+    console.log('[terminal]', line);
+    setStatus(line);
+  };
+
   const DEMO = [
     '\x1b[1;34m~/Projects/ExpoPort22\x1b[0m $ vim src/terminal.tsx\r\n',
     '\x1b[38;5;213m  1 \x1b[0m\x1b[1mexport default function\x1b[0m \x1b[33mTerminalView\x1b[0m() {\r\n',
@@ -44,14 +51,18 @@ export default function TerminalHarness() {
         theme={theme}
         fontSize={fontSize}
         onData={async (data) => {
-          console.log('[terminal] data', JSON.stringify(data));
+          report(`data ${JSON.stringify(data)}`);
           // Local echo, the one job a host would otherwise do: CR becomes CRLF, delete rubs out.
           write(data === '\r' ? '\r\n' : data === '\x7f' ? '\b \b' : data);
         }}
-        onResize={async (cols, rows) => setStatus(`${cols}×${rows}`)}
-        onBell={async () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-        onClipboard={async (text) => setStatus(`yank: ${text}`)}
+        onResize={async (cols, rows) => report(`resize ${cols}×${rows}`)}
+        onBell={async () => {
+          report('bell');
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }}
+        onClipboard={async (text) => report(`yank: ${text}`)}
         onLink={async (url) => {
+          report(`link: ${url}`);
           await WebBrowser.openBrowserAsync(url);
         }}
         dom={{ scrollEnabled: false, style: styles.terminal }}
@@ -66,7 +77,11 @@ export default function TerminalHarness() {
             <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
           </Pressable>
         ))}
-        <Text style={[styles.label, { color: theme.muted }]}>{status}</Text>
+        {/* One line, never wrapping: a status that grows a second line changes the bar's height,
+            which resizes the terminal, which writes a new status — the terminal never settles. */}
+        <Text numberOfLines={1} style={[styles.status, { color: theme.muted }]}>
+          {status}
+        </Text>
       </View>
     </SafeAreaView>
   );
@@ -78,4 +93,5 @@ const styles = StyleSheet.create({
   bar: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 8 },
   pill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   label: { fontSize: 13, fontWeight: '600' },
+  status: { fontSize: 13, fontWeight: '600', flexBasis: '100%' },
 });

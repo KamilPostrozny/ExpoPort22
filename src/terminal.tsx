@@ -94,10 +94,32 @@ const CSS = `
   .xterm-viewport { overscroll-behavior: none; }
 `;
 
+/**
+ * One line saying whether the bundled font actually arrived. A webview that fell back to the system
+ * monospace looks perfectly fine until a Nerd Font glyph turns up as a box, and by then the cell
+ * width is wrong too — so measure it rather than trust it. In a monospaced font every glyph is one
+ * cell wide, including the private-use ones; a fallback gives a different width for the glyph it
+ * does not have. Logging is deliberate here (PLAN.md §7): this file has no other way to speak.
+ */
+function fontReport(fontSize: number): string {
+  const loaded = document.fonts.check(`${fontSize}px ${MONO}`);
+  const context = document.createElement('canvas').getContext('2d');
+  if (!context) return `font ${MONO} loaded=${loaded} (no canvas to measure with)`;
+  const width = (family: string, text: string) => {
+    context.font = `${fontSize}px ${family}`;
+    return context.measureText(text).width.toFixed(2);
+  };
+  return (
+    `font ${MONO} loaded=${loaded} cell=${width(MONO, 'M')} ` +
+    `nerd-glyph=${width(MONO, '')} system-mono-cell=${width('monospace', 'M')}`
+  );
+}
+
 export default function TerminalView({ theme, fontSize, ref, ...handlers }: TerminalProps) {
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
+  const resizer = useRef<(() => void) | null>(null);
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
   const latest = useRef({ theme, ...handlers });
@@ -153,10 +175,18 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     // One resize per settled gesture: rotation and the keyboard both animate, and tmux redraws the
     // whole session for every size it is told about (§4.2).
     let settle: ReturnType<typeof setTimeout>;
+    let reported = { cols: 0, rows: 0 };
+    // Only a size the host has not been told about is worth a round trip. Without this the same
+    // `cols × rows` goes back on every fit, and since the answer re-renders the native side — which
+    // re-marshals the props, which re-runs the effect below — it never stops.
     const resize = () => {
       fitAddon.fit();
+      if (term.cols === reported.cols && term.rows === reported.rows) return;
+      reported = { cols: term.cols, rows: term.rows };
+      console.log('[terminal] size', term.cols, '×', term.rows);
       latest.current.onResize(term.cols, term.rows);
     };
+    resizer.current = resize;
     const observer = new ResizeObserver(() => {
       clearTimeout(settle);
       settle = setTimeout(resize, 150);
@@ -165,7 +195,16 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
 
     // The first fit has to wait for the font: xterm measures the cell when it opens, and a cell
     // measured in the fallback font is a whole session at the wrong width.
-    document.fonts.load(`${fontSize}px ${MONO}`).then(resize, resize);
+    document.fonts.load(`${fontSize}px ${MONO}`).then(
+      () => {
+        console.log('[terminal]', fontReport(fontSize));
+        resize();
+      },
+      (error) => {
+        console.log('[terminal] font failed to load:', String(error), '—', fontReport(fontSize));
+        resize();
+      },
+    );
 
     return () => {
       clearTimeout(settle);
@@ -175,15 +214,17 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
   }, []);
 
   // A flavour change restyles the live session (§4.8); a font-size change resizes it (§4.2).
+  // Keyed on the flavour's *name*, not the theme object: the object is rebuilt by the bridge on
+  // every render, so an identity comparison here would make this effect run forever.
   useEffect(() => {
     const term = terminal.current;
     if (!term) return;
-    document.body.style.background = theme.background;
-    term.options.theme = xtermTheme(theme);
+    const { theme: current } = latest.current;
+    document.body.style.background = current.background;
+    term.options.theme = xtermTheme(current);
     term.options.fontSize = fontSize;
-    fit.current?.fit();
-    latest.current.onResize(term.cols, term.rows);
-  }, [theme, fontSize]);
+    resizer.current?.();
+  }, [theme.name, fontSize]);
 
   return (
     <>
