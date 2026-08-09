@@ -71,6 +71,7 @@ import {
   zoomProgress,
   type Frame,
 } from '@/switcher-model';
+import SettingsSheet from '@/settings-sheet';
 import TerminalView, { type TerminalHandle } from '@/terminal';
 import { capturePane, exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
 import { deriveConfigStatus, tabsAvailable, type TmuxWindow } from '@/tmux-model';
@@ -169,15 +170,20 @@ export default function SessionScreen() {
     await sendFile(base64, joinPath(dir, filename));
   };
 
-  // TODO(T12): the real Settings sheet (§4.8). Both doors — the ⋯ menu row and the two-finger
-  // tap on the grid — already lead here; until the sheet exists this stub keeps Disconnect
-  // reachable, which is the one Settings action a session cannot be tested without.
+  // T12: the Settings sheet (§4.8). Both doors — the ⋯ menu row and the two-finger tap on the
+  // grid — land here; the sheet slides over the live terminal, and the prototype puts the
+  // keyboard away for it and raises it again on close.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const openSettings = () => {
+    console.log('[settings] sheet open');
     setOpen('none');
-    Alert.alert('Settings', 'The settings sheet lands in T12.', [
-      { text: 'Disconnect', style: 'destructive', onPress: leave },
-      { text: 'Close', style: 'cancel' },
-    ]);
+    Keyboard.dismiss();
+    setSettingsOpen(true);
+  };
+  const closeSettings = () => {
+    console.log('[settings] sheet closed');
+    setSettingsOpen(false);
+    setFocusSignal((n) => n + 1);
   };
 
   /* --- T10: the tab switcher (§4.5) ---
@@ -729,6 +735,17 @@ export default function SessionScreen() {
           suggestedName={pendingUpload.suggestedName}
           onCancel={() => setPendingUpload(null)}
           onSave={saveUpload}
+        />
+      )}
+
+      {settingsOpen && (
+        <SettingsSheet
+          theme={theme}
+          onClose={closeSettings}
+          onDisconnect={() => {
+            setSettingsOpen(false);
+            void leave();
+          }}
         />
       )}
 

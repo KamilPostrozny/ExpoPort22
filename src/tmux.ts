@@ -165,6 +165,14 @@ export function stopTmux(): void {
   set(DOWN);
 }
 
+/** T12's Settings toggle flipping ON mid-session: push now rather than on the next connect.
+ *  A no-op without a live side-channel or without tmux — the toggle still persisted, and the
+ *  next `startTmux` picks it up. */
+export async function applyConfigure(): Promise<void> {
+  if (!up || state.present !== true) return;
+  await configure();
+}
+
 /**
  * The §4.5 push: conf over SFTP (only when it differs), one source-file line into the conf tmux
  * actually reads, then apply-and-verify in a single tmux client command. Every failure lands in

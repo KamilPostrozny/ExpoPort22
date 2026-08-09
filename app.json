@@ -8,11 +8,11 @@
     "scheme": "expoport22",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.kamilpostrozny.port22",
       "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "Port22 uses the camera so you can upload a photo you take now to the machine you are attached to."
+        "NSCameraUsageDescription": "Port22 uses the camera so you can upload a photo you take now to the machine you are attached to.",
+        "CADisableMinimumFrameDurationOnPhone": true
       }
     },
     "android": {
@@ -34,9 +34,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#1e1e2e",
+          "backgroundColor": "#dce0e8",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 76,
+          "dark": {
+            "backgroundColor": "#11111b",
+            "image": "./assets/images/splash-icon-dark.png"
+          }
         }
       ],
       "expo-secure-store",

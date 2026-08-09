@@ -518,16 +518,54 @@ the settle hold and the 6s candidate window are hardware-tuning knobs like T6's;
 `running` recipe clears on the next poll beat rather than instantly (deliberate — the poll is
 the truth).
 
-**T12 — Settings sheet + polish pass** deps: T7–T11
+**T12 — Settings sheet + polish pass** ✅ implemented 2026-08-09 (not device-verified) · deps: T7–T11
 Bottom sheet per design (sections, swatch rows, stepper 8–32, tmux toggle wiring incl.
 hiding tabs button, Disconnect, Forget host key confirm), dictation space filter,
 held-delete repeat, `?996n` on theme flip live-restyle, 120Hz opt-in, launch bg + icon,
 themed everywhere via roles. *Accept*: design-side-by-side review of every screen, both
 platforms, all four flavours.
+Landed: `src/input-model.ts` (the pure decisions, tested in `src/input-model.test.ts`: the
+dictation filter's table, the line tracker behind it, the sheet's release rule),
+`src/settings-sheet.tsx` (the sheet), the filter + held-delete + tracked-send seam in
+`src/keybar.tsx`, the flip notification in `src/terminal.tsx`, `applyConfigure` in
+`src/tmux.ts`, sheet wiring replacing the stub alert in `src/app/terminal.tsx`, 120Hz +
+splash + icon in `app.json` and `assets/images/`.
+Decisions: **the sheet is a transparent RN Modal with its own slide** — reanimated drives the
+translate, one RNGH pan is the swipe-dismiss (release rule tested), scrim and grabber both
+close, no Done; T8's system `pageSheet` was ruled out because its grabber dismisses without
+telling the animation, and no new dependency was worth a sheet this small. The prototype's
+"All settings" row is **omitted**: its destination is the Setup form §4.8 hides while
+connected plus options PLAN §6 settled against, so the door had nowhere to lead — stated
+here rather than wired to nothing. **Dictation heuristic**: the filter runs on the whole
+TextInput diff (spacebar vs dictation is a chunk-size question, invisible per key) — a
+multi-char insert starting with a space at an *empty line* loses the space, a single `' '`
+always passes; line emptiness is tracked from what the bar itself sends (printables up, DEL
+down, `\r`/^C/^U reset, other controls ignored — a stated ceiling, not a bug). **Held-delete
+finding**: iOS's keyboard auto-repeats `deleteBackward` natively, so repeat needs no timer —
+each repeat reaches `onChangeText` while the field has content (the diff emits DEL) and
+`onKeyPress` once it is empty; that second path also fixes a T7 gap where backspace after a
+blur/trim sent nothing at all. **`?996n`**: the query reply already read the live theme; what
+was missing was the push — the DOM component now sends `colorSchemeNotification` (DECSET
+2031 form) when the flavour actually changes, never on boot or font change. **Icon**: T1's
+assets were the Expo template's, so `assets/images/icon.png` and the two splash glyphs are
+generated (crust ground, `>_` in flavour blue, the bundled JetBrains Mono; light splash is
+Latte crust + Latte blue via the plugin's `dark` split) and the template `expo.icon` bundle
+is gone. Colour sweep came back clean: the only literals outside `theme.ts` are the
+prototype's own cross-flavour neutrals (overlay-grey tints, hairlines, shadow black, toggle
+knob white), kept deliberately. Forget-host-key lives in the sheet now *and* stays on the
+mismatch screen — during a mismatch the sheet is unreachable, so that copy is load-bearing
+(§4.1's only recovery there).
+Verified: `bun test` (137), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Not
+walked on hardware** — the device cases are TESTS.md §T12 (T12.1–T12.16, the last being the
+cross-feature regression walk that seeds T13). Still open besides that: the "both platforms"
+half of the accept (Android sheet, Gboard docking, adaptive icon still template art —
+§4.10/T3-era); the dictation single-space ceiling above; whether the Modal-hosted RNGH pan
+needs `GestureHandlerRootView` exactly as written is an on-device check.
 
 **T13 — Device verification + builds** deps: all
 Walk §4 acceptance criteria on physical iPhone & Android. *Accept*: checklist in repo with every
 item ticked on hardware.
+T6–T12 are implemented but untested on device; TESTS.md (T6.1–T12.16) is the walk.
 The iOS half of the build/sideload story landed early, in T2, because nothing else could be
 verified without it: `.github/workflows/ipa.yml` builds an unsigned Debug dev client on
 `macos-26`/Xcode 26.6 (older toolchains cannot compile `expo-modules-jsi`) and publishes it as the

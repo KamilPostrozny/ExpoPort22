@@ -516,7 +516,10 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
   // A flavour change restyles the live session (§4.8); a font-size change resizes it (§4.2).
   // Keyed on the flavour's *name*, not the theme object: the object is rebuilt by the bridge on
   // every render, so an identity comparison here would make this effect run forever.
+  const lastFlavour = useRef(theme.name);
   useEffect(() => {
+    const flipped = lastFlavour.current !== theme.name;
+    lastFlavour.current = theme.name;
     const term = terminal.current;
     if (!term) return;
     const { theme: current } = latest.current;
@@ -524,6 +527,11 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     term.options.theme = xtermTheme(current);
     term.options.fontSize = fontSize;
     resizer.current?.();
+    // §4.2's other half: a mid-session flavour switch (`auto` following a system flip included)
+    // *pushes* the DECSET 2031 notification at the host, so a vim or tmux that asked `?996n` once
+    // is told the answer changed rather than left on the stale one. Subscribers (fish 4) treat it
+    // as "re-query"; everyone else parses and drops it. Boot is not a switch — nothing asked yet.
+    if (flipped) latest.current.onData(current.colorSchemeNotification);
   }, [theme.name, fontSize]);
 
   return (

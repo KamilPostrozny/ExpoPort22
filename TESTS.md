@@ -721,3 +721,145 @@ wherever a process starts or stops; alt-screen reactions (`[session] modes`) are
   prints `Killed`, the prompt returns, the ribbon leaves on the next beat. Same cap from the
   suspended ribbon (T11.8's setup) kills the stopped job.
 - [ ]
+
+## T12 — Settings sheet + polish pass
+
+All cases: connected to a real host unless said otherwise. The sheet's decisions (dictation
+filter, line tracker, swipe-dismiss release) are unit-tested (`src/input-model.test.ts`);
+these cases are the finger half. T7's preamble note about a "T12 stub alert" is history —
+the sheet is real now, and every Settings mention below means the bottom sheet.
+
+### T12.1 — The sheet opens from both doors, over the live terminal
+- **Steps**: run `top` so the terminal is visibly alive; tap ⋯ → Settings; swipe the sheet
+  away; two-finger-tap the grid.
+- **Expect**: both doors slide the same sheet up over the still-updating terminal (top keeps
+  refreshing behind the scrim); the keyboard goes away as it opens. Sections APPEARANCE
+  (Auto + four flavour swatch rows + font stepper), TMUX (toggle + status + explainer),
+  SESSION (Disconnect in accent, Forget host key in red). No host/port/user/startup fields
+  anywhere on it. Log: `[settings] sheet open`.
+- [ ]
+
+### T12.2 — Grabber swipe dismisses; there is no Done
+- **Steps**: open the sheet; drag it down slowly past ~a third and release; reopen; flick it
+  down fast from a short drag; reopen; drag 50pt and release slowly; tap the scrim; tap the
+  grabber.
+- **Expect**: the sheet rides the finger (never above its rest position), releases past the
+  distance or on a flick slide it out, the short slow release springs it back. Scrim tap and
+  grabber tap both close it. No Done button exists. The keyboard comes back on close.
+- [ ]
+
+### T12.3 — A flavour tap restyles the live session, no reconnect
+- **Setup**: `vim` open with syntax colouring, sheet up.
+- **Steps**: tap Latte, then Frappé, then Mocha, watching terminal and chrome.
+- **Expect**: on every tap the terminal grid, the key bar glass, the sheet itself and the
+  check mark all restyle immediately; the SSH connection never blips (vim stays exactly
+  where it was, `[session]` log shows no reconnect). Sub-second, no remount flash.
+- [ ]
+
+### T12.4 — Auto follows a system appearance flip live
+- **Setup**: theme = Auto, connected, sheet closed.
+- **Steps**: Control Centre → toggle system dark mode both ways.
+- **Expect**: the app flips Mocha ↔ Latte on its own, terminal and chrome together, session
+  live throughout. The keyboard appearance follows on its next raise.
+- [ ]
+
+### T12.5 — Font stepper: 8 and 32 are walls, the size survives a restart
+- **Steps**: step − repeatedly to 8 (keep tapping); step + to 32; set 13; kill the app,
+  relaunch, reconnect, reopen the sheet.
+- **Expect**: every step reflows the live grid (tmux redraws — T9's conf sets the resize
+  hooks); the stepper stops dead at 8 and 32 (extra taps change nothing, no haptic);
+  after the relaunch the sheet still says 13 pt and the grid is drawn at it.
+- [ ]
+
+### T12.6 — Tmux toggle: off removes the tabs button, on pushes and verifies
+- **Setup**: tmux attached, tabs button visible, status row reads `applied`.
+- **Steps**: toggle Configure tmux off; look at the bar; toggle it back on; watch the log.
+- **Expect**: off → the tabs button disappears at once and the status reads `off` (nothing
+  is pushed or unpushed — remote state untouched). On → `[tmux] configure: applied` without
+  a reconnect (the mid-session push), status back to `applied`, tabs button returns.
+- [ ]
+
+### T12.7 — Disconnect goes to Setup
+- **Steps**: open the sheet, tap Disconnect.
+- **Expect**: sheet drops, session ends (`[session] … idle`), the Setup screen is up with
+  the host form editable. No auto-reconnect behind it.
+- [ ]
+
+### T12.8 — Forget host key: confirm-gated, next connect asks again
+- **Steps**: sheet → Forget host key → read the dialog → Cancel; again → Forget; Disconnect;
+  connect again.
+- **Expect**: the dialog names the endpoint and warns in the §4.1 wording; Cancel changes
+  nothing (reconnect goes straight through). After Forget, the next connect raises the TOFU
+  fingerprint prompt as if the host had never been seen. The mismatch screen's own Forget
+  (T5) still exists — it is the only door when a mismatch blocks connecting.
+- [ ]
+
+### T12.9 — Dictation: the prepended space is dropped at an empty prompt, kept mid-line
+- **Steps**: at a fresh prompt, mic key → dictate "ls" → stop; ⏎. Then type `ls` (no ⏎),
+  mic key → dictate "minus la" → stop.
+- **Expect**: the first dictation lands as `ls`, not ` ls` — the command runs. The second
+  lands as `ls -la` — the space iOS prepends mid-line is the join it meant, and it stays.
+- [ ]
+
+### T12.10 — A real spacebar at an empty prompt always sends
+- **Steps**: at a fresh prompt, press the spacebar once; type `echo hi`; ⏎.
+- **Expect**: the space goes through (the shell shows ` echo hi` — with a fish/zsh
+  space-prefix history rule, that is also the proof it arrived). Single-char inserts are
+  never eaten by the filter.
+- [ ]
+
+### T12.11 — Held backspace repeats
+- **Steps**: type a long line (~30 chars); hold the delete key until the line is gone and
+  keep holding ~2s more.
+- **Expect**: deletes auto-repeat and accelerate (iOS's own keyboard repeat driving the
+  diff path); when the line is empty the extra held time does no harm — and a backspace at
+  an already-empty prompt still reaches the shell (the bell rings): that is the
+  `onKeyPress` empty-field path, which the diff cannot see.
+- [ ]
+
+### T12.12 — vim and tmux are told about a theme flip (`?996n` + DECSET 2031)
+- **Setup**: a vim with `set background=dark`-sensitive colours (or `fish` 4, which
+  subscribes to DECSET 2031), theme = Auto.
+- **Steps**: flip system dark mode; watch vim/fish; also `printf '\e[?996n'` and read the
+  reply before and after the flip.
+- **Expect**: the query answers `CSI ?997;1n` (dark) before and `CSI ?997;2n` (light) after
+  — the reply tracks the *current* flavour; and the flip itself pushes the same notification
+  unprompted, so a subscriber redraws without asking (fish re-queries, vim plugins that
+  watch it flip their background).
+- [ ]
+
+### T12.13 — 120Hz: scroll and coast are ProMotion-smooth
+- **Steps**: on a ProMotion iPhone, flick-scroll a long scrollback; open/close the sheet.
+- **Expect**: visibly 120Hz-smooth (subjective — compare against a Camera-app pan);
+  `CADisableMinimumFrameDurationOnPhone` is in the built Info.plist (check the ipa if in
+  doubt). T6's frame-rate-independent momentum means the coast *distance* is identical
+  either way — this case is only about smoothness.
+- [ ]
+
+### T12.14 — Launch screen and icon are the app's own, in both appearances
+- **Steps**: check the home-screen icon; kill and relaunch in system dark, then in system
+  light.
+- **Expect**: the icon is the Catppuccin `>_` on crust (not the Expo template); the launch
+  screen is crust-dark with the blue glyph in dark mode, Latte-crust with Latte blue in
+  light. No white flash between splash and the first screen in dark mode.
+- [ ]
+
+### T12.15 — Colour sweep: all four flavours, every screen, no strays
+- **Steps**: for each of Mocha, Latte, Frappé, Macchiato: walk Setup, terminal + bar,
+  chord strip, all three popovers, upload sheet, switcher grid, ribbon, settings sheet,
+  and the three §4.9 status faces.
+- **Expect**: everything recolours per flavour via the roles — no Mocha-only hex stranded
+  anywhere (Latte is where a stray shows instantly: dark text on dark chrome). The
+  overlay-grey key tints and hairlines are *meant* to be the same literal on all four
+  (prototype spec), as is the toggle knob's white.
+- [ ]
+
+### T12.16 — Final cross-feature regression walk (the T13 seed)
+After all T12 changes, re-run the headline case of each earlier section — one line each:
+- T6.5 — momentum flick coasts, a touch stops it dead.
+- T7.1 — Ctrl → `C` chord kills a running `sleep` (the tracked-send seam changed T7's path).
+- T8.16 — quick-attach lands in `/tmp/port22` and types the path + trailing space.
+- T9.1 — a fresh host gets conf + source line + verified `applied`.
+- T10.2 — bar-swipe-up drag opens the switcher, cancel springs back.
+- T11.1 — horizontal bar swipe hops a window with pills + live redraw.
+- [ ]

@@ -55,8 +55,10 @@ import {
   type Slot,
 } from '@/clipboard';
 import { provenance } from '@/clipboard-model';
+import { filterDictation, trackLine } from '@/input-model';
 import {
   CHORD_STRIP,
+  DEL,
   afterChord,
   applyCtrl,
   classifyBarSwipe,
@@ -222,19 +224,31 @@ export default function KeyBar(props: KeyBarProps) {
     if (props.focusSignal) input.current?.focus();
   }, [props.focusSignal]);
 
+  /** T12's dictation filter needs to know whether the line is empty, so everything the bar itself
+   *  sends passes through this tracked seam. (The arrows popover bypasses it — escape sequences
+   *  carry no line-length information anyway; see input-model's ceiling note.) */
+  const lineLen = useRef(0);
+  const track = (bytes: string) => {
+    lineLen.current = trackLine(lineLen.current, bytes);
+    props.sendBytes(bytes);
+  };
+
   /**
    * The per-key seam: every typed key passes through here one at a time — chords apply, then the
-   * bytes go out. T12's dictation leading-space filter and held-delete repeat are built HERE and
-   * nowhere else; nothing upstream of this function knows about keys.
+   * bytes go out. T12's dictation filter sits one level up in `onChangeText`, where the whole
+   * insert chunk is still visible — spacebar vs dictation is a chunk-size question, invisible per
+   * key. Held-delete lands in `onKeyPress` on the TextInput below.
    */
   const emitKey = (key: string) => {
     const applied = applyCtrl(ctrl, key);
     if (applied.mode !== ctrl) setCtrl(applied.mode);
-    props.sendBytes(applied.out);
+    track(applied.out);
   };
 
   const onChangeText = (next: string) => {
-    const bytes = diffInput(typed.current, next);
+    // §4.2: drop iOS dictation's prepended space at an empty line; a real spacebar (a single-char
+    // insert) always passes. Decided on the whole diff, before it is split into keys.
+    const bytes = filterDictation(lineLen.current, diffInput(typed.current, next));
     typed.current = next;
     for (const key of bytes) emitKey(key); // string iteration = one code point per key
     if (next.length > 500) {
@@ -246,7 +260,7 @@ export default function KeyBar(props: KeyBarProps) {
   };
 
   const sendChord = (letter: string) => {
-    props.sendBytes(controlByte(letter)!);
+    track(controlByte(letter)!);
     setCtrl(afterChord(ctrl));
   };
 
@@ -259,7 +273,7 @@ export default function KeyBar(props: KeyBarProps) {
   const onPaste = async () => {
     // The top clipboard slot (§4.4) — OSC 52 yanks and pins first, phone pasteboard as fallback.
     const text = await topSlotText();
-    if (text) props.sendBytes(text); // typed, never executed — no trailing newline of ours
+    if (text) track(text); // typed, never executed — no trailing newline of ours
   };
 
   const toggle = (which: Exclude<BarPopover, 'none'>) => {
@@ -401,10 +415,10 @@ export default function KeyBar(props: KeyBarProps) {
                 <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
                   <Text style={keyLabel}>Ctrl</Text>
                 </Key>
-                <Key onPress={() => props.sendBytes('\x1b')} style={styles.key}>
+                <Key onPress={() => track('\x1b')} style={styles.key}>
                   <Text style={keyLabel}>Esc</Text>
                 </Key>
-                <Key onPress={() => props.sendBytes('\x09')} style={styles.key}>
+                <Key onPress={() => track('\x09')} style={styles.key}>
                   <Text style={keyLabel}>Tab</Text>
                 </Key>
                 <Key
@@ -471,6 +485,15 @@ export default function KeyBar(props: KeyBarProps) {
         style={styles.input}
         onChangeText={onChangeText}
         onSubmitEditing={() => emitKey('\r')}
+        // §4.2 held-delete: iOS's own keyboard auto-repeats `deleteBackward`, and each repeat
+        // reaches this input — as an `onChangeText` while the field still has content (the diff
+        // emits the DEL), and as this key event once it is empty, when there is no text change to
+        // fire on. So repeat needs no timer of ours; this handler is only the empty-field half.
+        // Non-empty backspace never lands here twice: `typed` is still non-empty at key-press
+        // time, so the diff path keeps sole custody of it.
+        onKeyPress={({ nativeEvent }) => {
+          if (nativeEvent.key === 'Backspace' && typed.current === '') emitKey(DEL);
+        }}
         submitBehavior="submit" // Return sends without blurring
         onBlur={() => {
           typed.current = '';
