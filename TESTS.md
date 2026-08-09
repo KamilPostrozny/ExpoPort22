@@ -402,14 +402,19 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   into another iOS app.
 - **Expect**: the popover's top slot shows the yanked text with "tmux yank · just now"; the
   other app pastes the same text (pasteboard got it too); log shows one `[clipboard]` line.
-- [ ]
+- [x] — driven from the host with `tmux set-buffer -w "…"`, which makes tmux emit the OSC 52 to
+  the attached client: one `[clipboard] 1 slots, 0 pinned` per yank, and the popover's top row
+  read the text with `tmux yank · just now`. The pasteboard half is the popover's own
+  phone-pasteboard row, which reads the live iOS pasteboard and showed the same string.
 
 ### T8.2 — Three-yank rotation
 - **Setup**: as T8.1.
 - **Steps**: yank four different strings; open the popover.
 - **Expect**: exactly three yank slots, newest on top, the first yank gone; the phone-pasteboard
   row (holding yank four — the pasteboard follows the last yank) sits below them.
-- [ ]
+- [x] — four yanks logged `1 → 2 → 3 → 3 slots`; the popover showed `yank-four-delta`,
+  `yank-three-charlie`, `yank-two-bravo` newest-first with `yank-one-alpha` gone, and the
+  phone-pasteboard row below them holding `yank-four-delta`.
 
 ### T8.3 — Pin survives rotation and an app restart
 - **Setup**: one yank in the slots.
@@ -418,7 +423,9 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Expect**: the pinned slot is still there after the three yanks (fourth row, "· pinned"
   instead of an age) and still there after the restart — pins live in SecureStore, yanks do
   not (the three unpinned ones are gone after relaunch).
-- [ ]
+- [x] rotation half — pinning logged `3 slots, 1 pinned`, and three fresh yanks settled at
+  `4 slots, 1 pinned`: `golf`/`foxtrot`/`echo` rotating above `yank-two-bravo`, which read
+  `tmux yank · pinned` with a filled pin. Restart half below.
 
 ### T8.4 — Paste tap types the top slot and never executes
 - **Setup**: yank `echo yanked` (with no newline selected); cursor at an empty prompt.

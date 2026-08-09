@@ -272,6 +272,7 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
       altScreen: term.buffer.active.type === 'alternate',
       mouseReporting: term.modes.mouseTrackingMode !== 'none',
       decckm: term.modes.applicationCursorKeysMode,
+      bracketedPaste: term.modes.bracketedPasteMode,
     });
     let reportedModes: ModeSignal | null = null;
     const reportModes = () => {

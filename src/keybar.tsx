@@ -66,6 +66,7 @@ import {
   ctrlTap,
   diffInput,
   navKey,
+  pasteBytes,
   type BarSwipe,
   type CtrlMode,
   type NavKey,
@@ -79,6 +80,9 @@ export type KeyBarProps = {
   /** Application cursor keys as last reported over the bridge (T6's `onModes`) — decides whether
    *  the arrows cluster sends CSI or SS3. */
   decckm: boolean;
+  /** Bracketed paste as last reported over the same bridge — decides whether pasted text is
+   *  wrapped in `ESC[200~ … ESC[201~` (see `pasteBytes`). */
+  bracketedPaste: boolean;
   /** Everything a key emits, on its way to the PTY. */
   sendBytes: (bytes: string) => void;
   /** Which popover is up. Lifted to the screen, which renders the popovers and the outside-tap
@@ -273,7 +277,9 @@ export default function KeyBar(props: KeyBarProps) {
   const onPaste = async () => {
     // The top clipboard slot (§4.4) — OSC 52 yanks and pins first, phone pasteboard as fallback.
     const text = await topSlotText();
-    if (text) track(text); // typed, never executed — no trailing newline of ours
+    // Typed, never executed: no trailing newline of ours, and the bracketed-paste markers so the
+    // newlines *inside* a multi-line yank are content rather than Return presses.
+    if (text) track(pasteBytes(text, props.bracketedPaste));
   };
 
   const toggle = (which: Exclude<BarPopover, 'none'>) => {
@@ -675,12 +681,15 @@ export function BarMenu({
 export function ClipboardPopover({
   theme,
   bottom,
+  bracketedPaste,
   sendBytes,
   onClose,
 }: {
   theme: Theme;
   /** The measured `popBase`, as on ArrowsPopover. */
   bottom: number;
+  /** Whether the far end asked for bracketed paste — see `pasteBytes`. */
+  bracketedPaste: boolean;
   sendBytes: (bytes: string) => void;
   onClose: () => void;
 }) {
@@ -691,7 +700,9 @@ export function ClipboardPopover({
   }, []);
 
   const type = (text: string) => {
-    sendBytes(text); // typed, never executed — multiline yanks included, no newline of ours
+    // Typed, never executed — multiline yanks included, no newline of ours, and wrapped so the
+    // newlines a yank does carry stay content (see `pasteBytes`).
+    sendBytes(pasteBytes(text, bracketedPaste));
     onClose();
   };
 

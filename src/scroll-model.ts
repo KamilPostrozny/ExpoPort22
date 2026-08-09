@@ -17,13 +17,19 @@ export type ModeSignal = {
   mouseReporting: boolean;
   /** Application cursor keys (`CSI ?1 h`): arrows are SS3, not CSI. */
   decckm: boolean;
+  /** Bracketed paste (`CSI ?2004 h`) — every modern shell turns it on. Pasted text has to be
+   *  wrapped in `ESC[200~ … ESC[201~` while it is: without the markers the shell reads the
+   *  newlines inside a paste as Return presses and runs the lines one by one, which is exactly
+   *  the hazard bracketed paste exists to prevent (found on device, T13/T8.6). */
+  bracketedPaste: boolean;
 };
 
 export function modesEqual(a: ModeSignal, b: ModeSignal): boolean {
   return (
     a.altScreen === b.altScreen &&
     a.mouseReporting === b.mouseReporting &&
-    a.decckm === b.decckm
+    a.decckm === b.decckm &&
+    a.bracketedPaste === b.bracketedPaste
   );
 }
 

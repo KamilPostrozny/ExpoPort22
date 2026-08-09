@@ -16,6 +16,7 @@ import {
   ctrlTap,
   diffInput,
   navKey,
+  pasteBytes,
 } from '@/keybar-model';
 import { TWO_FINGER_TAP_MS, arrowKey, isTwoFingerTap } from '@/scroll-model';
 
@@ -165,4 +166,13 @@ test('two fingers, no movement, quick — and nothing else', () => {
   expect(isTwoFingerTap(1, false, 100)).toBe(false);
   expect(isTwoFingerTap(2, true, 100)).toBe(false);
   expect(isTwoFingerTap(2, false, TWO_FINGER_TAP_MS + 1)).toBe(false);
+});
+
+test('paste is bracketed while the far end asks for it, bare otherwise', () => {
+  // The device case (T13/T8.6): three lines pasted bare ran the first two.
+  const block = 'echo one\necho two';
+  expect(pasteBytes(block, true)).toBe(`\x1b[200~${block}\x1b[201~`);
+  // Mode off: the markers would arrive as literal characters, so the text goes as-is.
+  expect(pasteBytes(block, false)).toBe(block);
+  expect(pasteBytes('', true)).toBe('\x1b[200~\x1b[201~');
 });

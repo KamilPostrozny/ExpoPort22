@@ -55,6 +55,21 @@ export const CHORD_STRIP: { letter: string; caption: string }[] = [
   { letter: 'D', caption: 'EOF' },
 ];
 
+/**
+ * Clipboard text on its way into the session. While the far end has bracketed paste on
+ * (`CSI ?2004 h` — every modern shell does at its prompt), the text goes inside `ESC[200~ …
+ * ESC[201~`: that is how a shell tells a paste from typing, and it is what stops the newlines
+ * *inside* the paste from being read as Return presses.
+ *
+ * Found on device (T13/T8.6): pasting three lines without the markers ran the first two and left
+ * the third at the prompt — the "a paste executes commands you never read" hazard that bracketed
+ * paste exists to prevent. With the mode off the text is sent bare, because then the markers
+ * themselves would be typed as literal characters.
+ */
+export function pasteBytes(text: string, bracketedPaste: boolean): string {
+  return bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text;
+}
+
 /* --- arrows cluster --- */
 
 export type NavKey = 'up' | 'down' | 'left' | 'right' | 'home' | 'end';

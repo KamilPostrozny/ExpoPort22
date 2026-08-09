@@ -100,11 +100,13 @@ export default function SessionScreen() {
   const terminal = useRef<TerminalHandle>(null);
   const detach = useRef<(() => void) | null>(null);
   const [open, setOpen] = useState<BarPopover>('none');
-  /** T6's emulator-internal signal, whole: DECCKM for the arrows, altScreen for the ribbon. */
+  /** T6's emulator-internal signal, whole: DECCKM for the arrows, altScreen for the ribbon,
+   *  bracketed paste for the Paste key. */
   const [modes, setModes] = useState<ModeSignal>({
     altScreen: false,
     mouseReporting: false,
     decckm: false,
+    bracketedPaste: false,
   });
   /** The bar stack's measured height — the `popBase` the popovers anchor on. */
   const [barHeight, setBarHeight] = useState(60);
@@ -672,6 +674,7 @@ export default function SessionScreen() {
       <KeyBar
         theme={theme}
         decckm={modes.decckm}
+        bracketedPaste={modes.bracketedPaste}
         sendBytes={sendKeys}
         open={open}
         onOpenChange={setOpen}
@@ -713,6 +716,7 @@ export default function SessionScreen() {
             <ClipboardPopover
               theme={theme}
               bottom={barHeight + 6}
+              bracketedPaste={modes.bracketedPaste}
               sendBytes={send}
               onClose={() => setOpen('none')}
             />

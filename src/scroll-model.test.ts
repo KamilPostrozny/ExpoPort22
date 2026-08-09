@@ -20,6 +20,7 @@ const modes = (m: Partial<ModeSignal> = {}): ModeSignal => ({
   altScreen: false,
   mouseReporting: false,
   decckm: false,
+  bracketedPaste: false,
   ...m,
 });
 
