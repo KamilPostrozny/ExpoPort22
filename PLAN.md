@@ -172,12 +172,27 @@ was not needed. **Still open**: Android is a name-only stub until T3.
 **T3 ★ — expo-ssh native module, Android** deps: T2 (API fixed by T2)
 Same TS API, Kotlin + sshj impl. *Accept*: same demo passes on Android.
 
-**T4 ★ — Terminal DOM component** deps: T1
+**T4 ★ — Terminal DOM component** ✅ built, **not yet verified on device** · deps: T1
 xterm.js in expo-dom component: Nerd Font CSS, Catppuccin theme injection, font-size prop,
 fit/resize→cols/rows callback, data in/out bridge, selection + native edit menu, OSC 8
 link addon (http/https only), OSC 52 handler (write→bridge, read→drop), `CSI ?996n` reply,
 bell→haptic bridge, scrollback. *Accept*: local echo harness renders vim-style output,
 links tap, selection copies.
+Landed: `src/terminal.tsx` (`'use dom'`, `@xterm/xterm` 6 + `@xterm/addon-fit`), `src/app/terminal.tsx`
+(local-echo harness, reachable from the T2 harness), `src/terminal-protocol.ts` (OSC 52 parse, http
+link guard — the two pure bits, tested in `src/core.test.ts`), `src/base64.ts` (moved out of
+`keys.ts` so the webview bundle does not drag SecureStore in with it).
+Decisions: no `@xterm/addon-web-links` — §4.7 wants bare URLs left as plain text, and OSC 8 is
+xterm's own `linkHandler`. Bytes cross the bridge base64 (JSON only) and reach xterm as
+`Uint8Array` so it does the UTF-8 decoding; keystrokes go back as strings. The webview cannot see
+the fonts `useFonts` loads, so the two `.ttf`s are copied into `public/fonts/` — the one directory
+`expo export:embed` puts inside `www.bundle`, which is the DOM bundle's base URL. Resize is
+debounced 150ms in the DOM, where the cell size is known. `TerminalHandle` deliberately does not
+extend `DOMImperativeFactory` (its index signature would type `write` as taking any `JSONValue`).
+Verified so far off-device only: `bun test`, `tsc --noEmit`, `expo export -p ios` (DOM bundle +
+`public/` copy present), `expo-doctor` 20/20. **Still open**: everything the accept list actually
+asks — glyph metrics, the system edit menu over `.xterm-rows`, link taps, bell haptics — needs the
+harness on hardware. Mouse reports (`onBinary`) are still unforwarded; T6 owns their encoding.
 
 **T5 — Session wiring + Setup flow** deps: T2/T3, T4
 Key gen (@noble/ed25519 + SecureStore), Setup screen per design (Latte-friendly), validation,

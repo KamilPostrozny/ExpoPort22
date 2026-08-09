@@ -8,6 +8,8 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
+import { fromBase64, toBase64 } from '@/base64';
+
 const SEED_KEY = 'port22.seed.v1';
 const KEY_TYPE = 'ssh-ed25519';
 
@@ -48,15 +50,3 @@ function publicKeyBlob(publicKey: Uint8Array): Uint8Array {
   return blob;
 }
 
-export function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-export function fromBase64(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}

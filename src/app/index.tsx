@@ -1,10 +1,12 @@
+import { Link } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import ExpoSSH from '../../modules/expo-ssh/src/ExpoSSHModule';
 import { useTheme } from '@/hooks/use-theme';
-import { loadOrCreateKey, toBase64, type KeyPair } from '@/keys';
+import { toBase64 } from '@/base64';
+import { loadOrCreateKey, type KeyPair } from '@/keys';
 import { updateSettings, useSettings } from '@/settings';
 import { MONO, MONO_BOLD, THEME_CHOICES } from '@/theme';
 
@@ -130,6 +132,12 @@ export default function Scratch() {
         <Text selectable style={[styles.log, { color: theme.foreground }]}>
           {lines.join('\n')}
         </Text>
+
+        <Link href="/terminal" asChild>
+          <Pressable style={[styles.pill, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.pillLabel, { color: theme.foreground }]}>terminal (T4)</Text>
+          </Pressable>
+        </Link>
 
         <Pressable onPress={cycle} style={[styles.pill, { backgroundColor: theme.accent }]}>
           <Text style={[styles.pillLabel, { color: theme.onAccent }]}>

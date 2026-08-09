@@ -1,5 +1,6 @@
-/** `bun test` — the one check behind T1's two pieces of real logic: the ANSI ramp's flavour
- *  inversion, and the settings decoder's tolerance. Neither needs a device to be wrong. */
+/** `bun test` — the checks behind the pieces of real logic that do not need a device to be wrong:
+ *  the ANSI ramp's flavour inversion, the settings decoder's tolerance, and the two terminal
+ *  sequences the app answers itself. */
 
 /// <reference types="bun" />
 import { expect, mock, test } from 'bun:test';
@@ -11,6 +12,7 @@ mock.module('@react-native-async-storage/async-storage', () => ({
 
 const { THEMES, resolveTheme } = await import('@/theme');
 const { DEFAULTS, clampFontSize, decode, endpoint, validate } = await import('@/settings');
+const { isHttpLink, parseOsc52 } = await import('@/terminal-protocol');
 
 test('ANSI black and white swap ends between a light and a dark flavour', () => {
   const mocha = THEMES.mocha;
@@ -56,6 +58,23 @@ test('font size clamps to the stepper range', () => {
   expect(clampFontSize(2)).toBe(8);
   expect(clampFontSize(400)).toBe(32);
   expect(clampFontSize(13.4)).toBe(13);
+});
+
+test('an OSC 52 yank comes back as text, a read comes back as nothing', () => {
+  expect(parseOsc52('c;aGVsbG8=')).toBe('hello');
+  expect(parseOsc52('p;aGVsbG8=')).toBe('hello'); // any selection target, same clipboard
+  expect(parseOsc52('c;JC1Dw6nCoQ==')).toBe('$-Cé¡'); // multi-byte UTF-8 survives the round trip
+  expect(parseOsc52('c;?')).toBeNull(); // a read: never answered (§4.7)
+  expect(parseOsc52('c;')).toBeNull();
+  expect(parseOsc52('nonsense')).toBeNull();
+});
+
+test('only http(s) links are offered to the browser', () => {
+  expect(isHttpLink('https://expo.dev')).toBe(true);
+  expect(isHttpLink('HTTP://expo.dev')).toBe(true);
+  expect(isHttpLink('javascript:alert(1)')).toBe(false);
+  expect(isHttpLink('file:///etc/passwd')).toBe(false);
+  expect(isHttpLink('not a url at all')).toBe(false);
 });
 
 test('validation says what is wrong in plain English', () => {
