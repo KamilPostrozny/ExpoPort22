@@ -200,9 +200,24 @@ forever, since the bridge rebuilds that object every render; and the harness's o
 rewrapped its bar, resizing the terminal underneath it. The diagnostics that caught all three (font
 report, size log, one line per bridge callback) stayed in — §7 says log freely, and a webview has no
 other way to speak.
-**Still open**: colours, bold and box drawing are eye-checked only; the long-press system edit menu
-over `.xterm-rows` is unproven, and it may yet fight xterm's own selection (T6 territory, where a
-pan becomes a scroll). Mouse reports (`onBinary`) are still unforwarded — T6 owns their encoding.
+Long-press selection is proven too — system edit menu (Copy · Look Up · Translate) over a live
+selection — and it took a measurement to explain: an identical press on `.xterm-screen`, same
+target and same computed `user-select`, selects with focus on the body and selects nothing with
+focus on xterm's helper textarea. WebKit classifies a touch when it *begins*, from the focus state
+at that moment, so releasing focus mid-press is too late (a 2.4s hold with `blur()` at `touchstart`
+still selected nothing) and no CSS or event juggling reaches it. Three attempted fixes were removed
+rather than stacked; one of them — swallowing synthetic mouse events — broke the gesture outright,
+because WebKit's own selection rides those events.
+
+**Decision for T6/T7: keyboard input moves to a native `TextInput` outside the webview.** Verified
+on the device: with the keyboard owned natively, touching the terminal blurs it, the keyboard hides
+and the selection proceeds — the behaviour every native iOS app has. The webview then owns display
+and selection only, and never takes focus. It also puts the dictation leading-space filter and
+held-delete repeat (§4.2) on the native side, where both are easier. The harness keeps a `native
+kbd` button as the standing proof of this.
+
+**Still open**: colours, bold and box drawing are eye-checked only. Mouse reports (`onBinary`) are
+still unforwarded — T6 owns their encoding.
 
 **T5 — Session wiring + Setup flow** deps: T2/T3, T4
 Key gen (@noble/ed25519 + SecureStore), Setup screen per design (Latte-friendly), validation,

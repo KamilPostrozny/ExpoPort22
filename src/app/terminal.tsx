@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -16,6 +16,7 @@ export default function TerminalHarness() {
   const theme = useTheme();
   const { fontSize } = useSettings();
   const terminal = useRef<TerminalHandle>(null);
+  const native = useRef<TextInput>(null);
   const [status, setStatus] = useState('—');
 
   // The screen says when it is on and off screen, because the person tapping is on the same phone
@@ -51,6 +52,10 @@ export default function TerminalHarness() {
     ['yank', () => write(`\x1b]52;c;${toBase64(new TextEncoder().encode('yanked from tmux'))}\x07`)],
     ['osc52 read', () => write('\x1b]52;c;?\x07')],
     ['focus', () => terminal.current?.focus()],
+    // The experiment behind the long-press question: raise the keyboard from a *native* input, so
+    // nothing inside the webview has focus. If a long-press then selects, the answer for §4.2 is to
+    // take keyboard input natively and leave the page to display and selection alone.
+    ['native kbd', () => native.current?.focus()],
   ];
 
   return (
@@ -75,6 +80,14 @@ export default function TerminalHarness() {
           await WebBrowser.openBrowserAsync(url);
         }}
         dom={{ scrollEnabled: false, style: styles.terminal }}
+      />
+
+      <TextInput
+        ref={native}
+        style={styles.offscreen}
+        autoCapitalize="none"
+        autoCorrect={false}
+        onChangeText={(text) => report(`native key ${JSON.stringify(text)}`)}
       />
 
       <View style={styles.bar}>
@@ -103,4 +116,6 @@ const styles = StyleSheet.create({
   pill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   label: { fontSize: 13, fontWeight: '600' },
   status: { fontSize: 13, fontWeight: '600', flexBasis: '100%' },
+  // Focusable and on screen, but nothing to look at: this is the keyboard's owner, not a field.
+  offscreen: { position: 'absolute', top: 0, left: 0, width: 1, height: 1, opacity: 0 },
 });
