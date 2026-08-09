@@ -89,7 +89,7 @@ export default function Setup() {
           )}
           {field('User', settings.username, (username) => updateSettings({ username }), 'login name')}
           {field(
-            'On connect',
+            'Startup',
             settings.startupCommand ?? '',
             (text) => updateSettings({ startupCommand: text === '' ? null : text }),
             'optional command, e.g. tmux attach',
@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
   // its own share of it, which is one hairline between rows and none against the card's edges.
   fields: { borderRadius: 12, overflow: 'hidden', gap: StyleSheet.hairlineWidth },
   row: { flexDirection: 'row', alignItems: 'center' },
-  label: { width: 96, paddingLeft: 14, fontSize: 15 },
+  label: { width: 88, paddingLeft: 14, fontSize: 15 },
   input: { flex: 1, paddingVertical: 13, paddingRight: 14, fontSize: 16 },
   problem: { fontSize: 14, lineHeight: 19 },
   connect: { borderRadius: 12, paddingVertical: 15, alignItems: 'center' },

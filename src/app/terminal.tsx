@@ -2,7 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -35,7 +35,7 @@ export default function SessionScreen() {
   const { fontSize } = useSettings();
   const session = useSession();
   const terminal = useRef<TerminalHandle>(null);
-  const [booted, setBooted] = useState(false);
+  const detach = useRef<(() => void) | null>(null);
 
   // Which screen is in front decides what a screenshot taken from the laptop contains, and the
   // person tapping is holding the same phone.
@@ -44,12 +44,9 @@ export default function SessionScreen() {
     return () => console.log('[terminal] screen closed');
   }, []);
 
-  // Attach only once the webview is up — its first size report is the earliest proof of that, and
-  // output written before it lands goes nowhere. Until then the session holds the bytes.
-  useEffect(
-    () => (booted ? attachTerminal((base64) => terminal.current?.write(base64)) : undefined),
-    [booted],
-  );
+  // The terminal attaches itself on every boot (see `onBoot`), so all this has to do is let go when
+  // the screen goes away.
+  useEffect(() => () => detach.current?.(), []);
 
   // The TOFU prompt (§4.1). Keyed on the fingerprint rather than the session object so it is raised
   // once per unknown key, not once per re-render that happens to be in `connecting`.
@@ -81,9 +78,12 @@ export default function SessionScreen() {
         theme={theme}
         fontSize={fontSize}
         onData={async (data) => send(data)}
-        onResize={async (cols, rows) => {
-          setSize(cols, rows);
-          setBooted(true);
+        onResize={async (cols, rows) => setSize(cols, rows)}
+        // Every boot, not just the first: iOS reaps a backgrounded webview, and the one that comes
+        // back is empty even though the shell behind it never went anywhere.
+        onBoot={async () => {
+          detach.current?.();
+          detach.current = attachTerminal((base64) => terminal.current?.write(base64));
         }}
         onBell={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
         // §4.7: a yank lands on the phone's pasteboard. The slot history is T8's.

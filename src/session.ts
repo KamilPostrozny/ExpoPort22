@@ -24,10 +24,15 @@ const TERM = 'xterm-256color';
 /** Two in a row and we stop trying (§4.9). A third automatic attempt is a loop, not a recovery. */
 const MAX_AUTOMATIC_ATTEMPTS = 2;
 
-/** Output held for a terminal that has not attached yet. A cap, because a session left running
- *  with no screen on it is otherwise a slow memory leak; the far end of a screenful is what the
- *  user would have seen anyway. */
-const MAX_BUFFERED_CHUNKS = 500;
+/** How much shell output is kept for replay. Two jobs: output that arrives before the webview has
+ *  booted, and output already on screen when iOS reaps the webview — it reloads empty, and a live
+ *  session behind a blank terminal reads as a dead one. Capped, because a session left running with
+ *  no screen on it would otherwise grow without end.
+ *
+ *  ponytail: a replay of raw bytes, not a screen snapshot. A full-screen app that was running when
+ *  the webview died redraws only on its next output; the upgrade path is asking tmux to redraw,
+ *  which is T9's side channel and not worth a state machine of our own before then. */
+const MAX_HISTORY_CHUNKS = 500;
 
 export type Session =
   /** No connection, and none wanted: the user is on Setup. */
@@ -47,7 +52,7 @@ let failures = 0;
 let size = { cols: 80, rows: 24 };
 let shellOpen = false;
 let sink: ((base64: string) => void) | null = null;
-let buffered: string[] = [];
+let history: string[] = [];
 /** Set when *we* are the ones refusing, so the rejection can say why in English rather than
  *  surfacing whatever the SSH library says when a handshake is abandoned. */
 let refusal: { message: string; mismatch: boolean } | null = null;
@@ -79,7 +84,7 @@ export async function connect(): Promise<void> {
   if (state.status === 'connecting') return;
   const settings = getSettings();
   refusal = null;
-  buffered = [];
+  history = [];
   set({ status: 'connecting', hostKey: null });
   try {
     const key = await loadOrCreateKey();
@@ -109,7 +114,7 @@ export async function connect(): Promise<void> {
 export async function disconnect(): Promise<void> {
   shellOpen = false;
   failures = 0;
-  buffered = [];
+  history = [];
   set({ status: 'idle' });
   await ExpoSSH.disconnect().catch(() => {});
 }
@@ -151,22 +156,20 @@ export function setSize(cols: number, rows: number): void {
   if (shellOpen) ExpoSSH.resize(cols, rows).catch(() => {});
 }
 
-/** Points shell output at a terminal and hands it whatever arrived before it existed. */
+/** Points shell output at a terminal and replays the session so far into it. Called on every boot
+ *  of the webview, not only the first: iOS reaps a backgrounded WKWebView and it comes back empty. */
 export function attachTerminal(write: (base64: string) => void): () => void {
   sink = write;
-  for (const chunk of buffered.splice(0)) write(chunk);
+  for (const chunk of history) write(chunk);
   return () => {
     if (sink === write) sink = null;
   };
 }
 
 ExpoSSH.addListener('onShellData', ({ data }) => {
-  if (sink) {
-    sink(data);
-    return;
-  }
-  buffered.push(data);
-  if (buffered.length > MAX_BUFFERED_CHUNKS) buffered.shift();
+  history.push(data);
+  if (history.length > MAX_HISTORY_CHUNKS) history.shift();
+  sink?.(data);
 });
 
 ExpoSSH.addListener('onShellClose', () => {
@@ -208,7 +211,26 @@ AppState.addEventListener('change', async (next) => {
   if (dead && failures < MAX_AUTOMATIC_ATTEMPTS) connect();
 });
 
+/**
+ * What a failed connect says on screen (§4.1 wants plain English). What the SSH stack raises is not
+ * that: a refused socket arrives as `UnexpectedException: … NIOPosix.NIOConnectionError error 1 …
+ * ConcurrentFunctionDefinition.swift:90`, measured on the device. The raw text stays in the log,
+ * where it is useful, and the user gets the sentence that tells them what to go and check.
+ */
 function describe(error: unknown): string {
-  const message = (error instanceof Error ? error.message : String(error)).trim();
-  return message === '' ? 'The connection failed.' : message;
+  const raw = (error instanceof Error ? error.message : String(error)).trim();
+  console.log('[session] connect failed:', raw);
+  if (/NIOConnectionError|refused|timed ?out|unreachable|reset|Network is down/i.test(raw)) {
+    return (
+      `Could not reach ${endpoint(getSettings())}. Check the address and port, that the machine is ` +
+      `awake, and that the phone is on the same network.`
+    );
+  }
+  if (/auth|permission|publickey/i.test(raw)) {
+    return (
+      'The host would not accept this key. Add the public key from Setup to ~/.ssh/authorized_keys ' +
+      'on the machine, then try again.'
+    );
+  }
+  return 'Could not connect. The reason is in the log.';
 }

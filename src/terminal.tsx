@@ -41,6 +41,9 @@ export type TerminalProps = {
   onData: (data: string) => Promise<void>;
   /** After a settled rotation, keyboard move or font change — what the host's window size is now. */
   onResize: (cols: number, rows: number) => Promise<void>;
+  /** The terminal exists and knows its size. Fires again on every reload of the webview — iOS reaps
+   *  a backgrounded one — which is the moment the session has to be painted back in. */
+  onBoot: () => Promise<void>;
   onBell: () => Promise<void>;
   /** An OSC 52 yank, already decoded. Reads are refused before they get here. */
   onClipboard: (text: string) => Promise<void>;
@@ -259,6 +262,7 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     });
     observer.observe(host.current!);
     resize();
+    latest.current.onBoot();
 
     return () => {
       clearTimeout(settle);
