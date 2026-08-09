@@ -219,7 +219,7 @@ kbd` button as the standing proof of this.
 **Still open**: colours, bold and box drawing are eye-checked only. Mouse reports (`onBinary`) are
 still unforwarded — T6 owns their encoding.
 
-**T5 — Session wiring + Setup flow** deps: T2/T3, T4
+**T5 — Session wiring + Setup flow** ✅ done, verified on device 2026-08-09 · deps: T2/T3, T4
 Key gen (@noble/ed25519 + SecureStore), Setup screen per design (Latte-friendly), validation,
 TOFU prompt modal, pinned-key store + mismatch hard-fail, connect → terminal screen,
 startup command, Disconnect, reconnect state machine (§4.9) with the three status screens.
@@ -241,9 +241,26 @@ endpoint is base64url'd into the SecureStore key rather than character-substitut
 substitution maps two endpoints onto one pin. Keyboard input still goes through xterm's textarea;
 the native `TextInput` decided above is T6/T7's, and the bar here is two buttons standing in for
 T7. "Forget host key" sits on the mismatch screen for now; §4.8 moves it into Settings in T12.
-Verified: `bun test` (10), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20.
-**Still open**: the device walk — connect, disconnect, background/foreground reconnect, and the
-mismatch refusal against a real host.
+Verified: `bun test` (10), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20, and the whole
+accept list on an iPhone against a real host — first contact prompts and pins, a second connect goes
+straight through (`host key trust`), keystrokes and delete reach the PTY, `onShellClose` →
+`disconnected` → automatic reconnect on foreground, `isAlive` false-negatives caught on return, the
+Disconnected and Cannot-connect screens with their buttons, and Disconnect → Setup. The mismatch
+path was walked for real, not simulated: a throwaway `sshd` on port 2222 with its own host key,
+trusted, then restarted with a *different* key — the app refused without a prompt, showed the
+mismatch sentence and the red Forget, and after Forget asked again; Cancel on that prompt produced
+"You did not trust this host key." and no pin.
+Three bugs only the device could show, fixed on the spot: iOS reaps a backgrounded WKWebView and the
+one that comes back is empty, so shell output is now kept in a bounded history and replayed on every
+boot of the terminal (which subsumes the old buffer-until-the-webview-is-up case — one path, two
+problems); a refused socket reached the Cannot-connect screen as `UnexpectedException: … NIOPosix.
+NIOConnectionError error 1 … ConcurrentFunctionDefinition.swift:90`, so `describe` turns the
+recognisable failures into the sentence §4.1 asks for and leaves the raw text in the log; and a
+reconnect drew its login under the previous session's rows, so a new shell now starts by clearing
+the screen — through the same path the output takes, which keeps the replay in order.
+**Still open**: Android (T3). Long-press selection remains behind the keyboard being down until the
+native `TextInput` lands in T6/T7. The `:2222` pin from the mismatch test is still on the phone,
+harmless — nothing else uses that endpoint.
 
 **T6 — Scroll gesture system** deps: T4, T5
 Touch layer in DOM component: pan-always-scrolls, notch = cell height, three-way routing
