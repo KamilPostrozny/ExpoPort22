@@ -350,11 +350,47 @@ helper for the agent ribbon cap, both per §4.6, failure alert. *Accept*: file l
 browsed-to directory under its own name with nothing typed; quick-attach puts a photo in
 `/tmp/port22/` and types the path with trailing space.
 
-**T9 — tmux side-channel + config push** deps: T5
+**T9 — tmux side-channel + config push** ✅ implemented 2026-08-09 (not device-verified) · deps: T5
 Probe, config file v1 content, SFTP push + source + read-back verify, status in settings
 store, exec-channel helpers (`list-windows`, `capture-pane -e`, `select/kill/new/move-window`),
 window-title badge feed, foreground-process poll for ribbon. *Accept*: fresh host gets conf,
 works on a `fish` login shell, badge tracks window.
+Landed: `src/tmux-model.ts` (every decision, pure and tested in `src/tmux-model.test.ts`: the
+conf text, the push decision, source-line logic, all command builders, all parsers, the derived
+config-status/tabs states, `shellQuote`), `src/tmux.ts` (the store singleton + poll timer + the
+real exec/SFTP calls), `startTmux`/`stopTmux` riding `set()` in `src/session.ts`, `showTabs` +
+live `windowIndex` on the bar (`src/keybar.tsx`, wired in `src/app/terminal.tsx`).
+Decisions, the load-bearing ones measured rather than assumed: the conf travels over **SFTP, not
+a heredoc** — the reference (`TmuxConfig.swift`, their T60) learned that an exec channel hands
+its string to the *login shell* and fish cannot parse a heredoc; every command left on the exec
+path here is one line fish and POSIX sh parse identically, each run through `fish -c` before
+landing. Apply and verify are **one tmux client command** (`start-server \; source-file \; show
+-gv @port22`): measured locally, a session-less server exits with its last client, so a separate
+verify exec finds "no server running" on exactly the fresh host that matters. Verify reads a
+`@port22` *user option* back — a real option like `escape-time` can be masked by the user's own
+conf setting the same value. The push decision is **content equality**, not a marker compare (a
+marker passes stale/truncated files; equality still bump-replaces a v0 for free). The user's own
+tmux conf is **append-only via `printf >>`** — SFTP would be read-modify-write on a capped read,
+which is data loss — and the target respects tmux's first-found order (`~/.tmux.conf` before the
+XDG path, chosen via SFTP existence checks, no shell involved). The window badge rides the ~2s
+**poll**, not the pushed `set-titles` string (which stays in the conf per spec): a title change
+would need an xterm `onTitleChange` bridge T4 never built, and the ribbon needs this poll anyway
+— one exec answers attached + window index + foreground at once. "Attached" is
+`#{session_attached} > 0` (ponytail-marked ceiling: a desktop client attached while the phone
+sits at a plain shell fools it; `#{pane_tty}` against our own PTY is the upgrade). `list-windows`
+fields ride a US (0x1f) separator with the window *name last and rejoined*, so a name containing
+anything at all shifts nothing; window commands interpolate validated integers only, and
+`shellQuote` (POSIX single-quote escaping, which fish parses identically) is the exported
+contract for later tasks. State shape for the consumers: `TmuxState { present, config, attached,
+windowIndex, foreground }` via `useTmux()`, `configStatus()` folding the toggle in for T12,
+`tabsAvailable(present, status)` deriving T7's button, and `listWindows`/`capturePane`/
+`selectWindow`/`killWindow`/`newWindow`/`moveWindow` for T10/T11 — mutations nudge the poll so
+the badge never waits out the interval.
+Verified: `bun test` (58), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20, and the
+command sequences against tmux 3.7b + fish 4.8.1 locally. **Not walked on hardware** — the
+device cases are TESTS.md §T9 (T9.1–T9.10; T9.6/T9.7 need T10's UI to drive, T9.8's on-screen
+half needs T11). Still open besides that: `move-window -a/-b` needs tmux ≥ 3.2; the
+`session_attached` ceiling above.
 
 **T10 — Tab switcher** deps: T9, T7
 Card grid + snapshot rendering (ANSI→styled text mini-view), zoom-in/out transitions

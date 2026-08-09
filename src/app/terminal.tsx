@@ -30,6 +30,8 @@ import {
 } from '@/session';
 import { endpoint, getSettings, useSettings } from '@/settings';
 import TerminalView, { type TerminalHandle } from '@/terminal';
+import { useTmux } from '@/tmux';
+import { deriveConfigStatus, tabsAvailable } from '@/tmux-model';
 import { MONO, type Theme } from '@/theme';
 
 /**
@@ -44,8 +46,9 @@ import { MONO, type Theme } from '@/theme';
  */
 export default function SessionScreen() {
   const theme = useTheme();
-  const { fontSize } = useSettings();
+  const { fontSize, configureTmux } = useSettings();
   const session = useSession();
+  const tmux = useTmux();
   const terminal = useRef<TerminalHandle>(null);
   const detach = useRef<(() => void) | null>(null);
   const [open, setOpen] = useState<BarPopover>('none');
@@ -146,6 +149,11 @@ export default function SessionScreen() {
         onOpenChange={setOpen}
         onHeight={setBarHeight}
         active={session.status === 'connected'}
+        // §4.5: the tabs button exists only with tmux present AND the config applied — so the
+        // Settings toggle going off takes the button with it, and a host without tmux never
+        // shows one (§7: silence, not a message).
+        showTabs={tabsAvailable(tmux.present, deriveConfigStatus(configureTmux, tmux.config))}
+        windowIndex={tmux.windowIndex ?? undefined}
       />
 
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the

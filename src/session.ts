@@ -19,6 +19,7 @@ import { toBase64 } from '@/base64';
 import { forgetHostKey, hostKeyVerdict, pinHostKey, pinnedHostKey } from '@/host-keys';
 import { loadOrCreateKey } from '@/keys';
 import { endpoint, getSettings } from '@/settings';
+import { startTmux, stopTmux } from '@/tmux';
 
 const TERM = 'xterm-256color';
 
@@ -66,6 +67,10 @@ const listeners = new Set<() => void>();
 function set(next: Session) {
   state = next;
   console.log('[session]', JSON.stringify(next));
+  // T9 rides these transitions: the tmux side-channel exists exactly while a shell does. Both
+  // calls are idempotent, so every state change may say so unconditionally.
+  if (next.status === 'connected') void startTmux();
+  else stopTmux();
   for (const listener of listeners) listener();
 }
 

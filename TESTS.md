@@ -224,3 +224,97 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   — the architecture T4 measured for. Backspace and held-delete: single deletes work;
   auto-repeat on hold is TODO(T12).
 - [ ]
+
+## T9 — tmux side-channel + config push
+
+All cases: a real host with a fish login shell unless said otherwise. The side-channel has no
+UI of its own yet, so most assertions are Metro-log reads: `[tmux] {...}` prints the state on
+every change (present/config/attached/windowIndex/foreground), `[ssh] exec` prints every
+side-channel command and its answer. Stubs in play: the tabs circle renders but its tap is a
+T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet — their feeds do.
+
+### T9.1 — Fresh host gets conf + source line + verify round-trip
+- **Setup**: on the host: `rm -rf ~/.config/port22` and remove any `port22.conf` source line
+  from the tmux conf; tmux installed, no server running (`tmux kill-server`).
+- **Steps**: connect from the phone; watch the log; then on the host inspect the files.
+- **Expect**: log shows the probe answer, the SFTP upload, and `[tmux] configure: applied`;
+  `~/.config/port22/port22.conf` exists and starts `# port22-conf-v1`; the user's tmux conf
+  gained exactly one `source-file -q ~/.config/port22/port22.conf` line; `[tmux]` state says
+  `"config":"applied"`; the tabs circle appears on the bar. (Settings row showing "applied" is
+  T12 — until then the log line is the assertion.)
+- [ ]
+
+### T9.2 — Works on a fish login shell
+- **Setup**: host user's shell is fish (`chsh -s $(which fish)` or already so).
+- **Steps**: walk T9.1 on that host.
+- **Expect**: identical outcome — no parse errors in the log (`Unknown command`, `Missing end`
+  are the fish tells), verify still answers `1`. Every exec line the log shows is the
+  fish-and-sh common ground pinned in `src/tmux-model.test.ts`.
+- [ ]
+
+### T9.3 — Toggle off: tabs affordance gone, no push on next connect
+- **Setup**: connected with config applied (T9.1); host conf files present.
+- **Steps**: turn "Configure tmux" off (until T12's sheet: flip `configureTmux` in the settings
+  blob or a dev build); disconnect; `rm -rf ~/.config/port22` on the host; reconnect.
+- **Expect**: the tabs circle does not render (derived state needs toggle AND applied); the log
+  shows probe but **no** SFTP upload and no `configure:` line; `~/.config/port22` stays absent.
+  The poll still runs — the ribbon feed does not depend on the toggle.
+- [ ]
+
+### T9.4 — No tmux on the host: zero tmux UI, zero message
+- **Setup**: a host (or container) without tmux on PATH.
+- **Steps**: connect; use the session normally for a minute.
+- **Expect**: log shows the probe answering empty and `"present":false`; no tabs circle, no
+  poll lines, no error, no mention of tmux anywhere on screen (§7: silence, not a message).
+- [ ]
+
+### T9.5 — Badge tracks `select-window` from another client
+- **Setup**: connected, `tmux attach` typed into the phone session (window badge visible on the
+  tabs circle); a laptop attached to the same session.
+- **Steps**: from the laptop: `tmux select-window -t :2`, then `:1`.
+- **Expect**: within ~2s (one poll beat) the badge follows to 2, then back; log shows one
+  `[tmux]` line per change, not one per poll.
+- [ ]
+
+### T9.6 — capture-pane snapshot carries ANSI colour
+- **Setup**: attached to tmux; something colourful on screen (`ls --color`, `git log`).
+- **Steps**: trigger `capturePane` — until T10's cards exist, from the switcher once it lands,
+  or by a temporary dev call. **Dep: T10** for the on-screen assertion.
+- **Expect**: the captured string contains `\x1b[` colour sequences (`-e` did its job); fed to
+  a terminal it reproduces the pane's colours.
+- [ ]
+
+### T9.7 — new/kill/select/move helpers observable from a second client
+- **Setup**: attached to tmux; laptop attached to the same session, watching `tmux list-windows`.
+  **Dep: T10** — the helpers have no UI caller until the switcher; drive them from it then.
+- **Steps**: via the switcher (T10): new tab, select another, reorder by drag, close one.
+- **Expect**: the laptop sees each: a window appears (`new-window`), the active marker moves
+  (`select-window`), indices reorder (`move-window -b`/`-a`), a window dies (`kill-window`).
+  Every command in the log is an exec channel — the phone's PTY never echoes any of it.
+- [ ]
+
+### T9.8 — Poll: `sleep 100` is foreground, the prompt is idle
+- **Setup**: attached to tmux, at a fish prompt. **Dep: T11** for the on-screen ribbon; until
+  then the `[tmux]` log line is the assertion.
+- **Steps**: run `sleep 100`; wait ~3s; Ctrl-C it; wait ~3s.
+- **Expect**: log flips to `"foreground":{"command":"sleep","pid":…}` within a beat, then back
+  to `"foreground":null` (fish = idle) after the interrupt. vim and `claude` likewise register;
+  a bare prompt never does.
+- [ ]
+
+### T9.9 — Version bump replaces an old conf
+- **Setup**: on the host: `printf '# port22-conf-v0\nset -g mouse on\n' > ~/.config/port22/port22.conf`.
+- **Steps**: connect.
+- **Expect**: log shows the read-back, the push (content differs), and `configure: applied`;
+  the file on the host now starts `# port22-conf-v1`. Reconnecting again shows the read-back
+  and **no** second upload — byte-identical content skips the push.
+- [ ]
+
+### T9.10 — Failed push changes nothing visible
+- **Setup**: on the host: `chmod 500 ~/.config` (or `chattr +i` the port22 dir) so the SFTP
+  write fails; no `port22.conf` present.
+- **Steps**: connect; use the session.
+- **Expect**: the session works normally; log shows `[tmux] configure failed …` and state stays
+  `"config":"not-applied"`; no tabs circle, no alert, no banner — §7's "failed conf push
+  changes nothing visible". Restore with `chmod 700 ~/.config`; the next connect applies.
+- [ ]

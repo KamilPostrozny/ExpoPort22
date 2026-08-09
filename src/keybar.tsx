@@ -66,7 +66,11 @@ export type KeyBarProps = {
   onHeight: (height: number) => void;
   /** Raise the keyboard when this flips true — the session just connected. */
   active: boolean;
-  /** TODO(T9): the live tmux window index feeds the badge; until then callers get the default. */
+  /** T9's derived "tabs available": tmux present AND conf applied (§4.5). False renders no tabs
+   *  circle at all — no tmux (or a toggled-off config) is silence, not a message (§7). */
+  showTabs: boolean;
+  /** The live tmux window index (T9's ~2s poll; null while not attached). The badge falls back
+   *  to the design default `1`. */
   windowIndex?: number;
   /** TODO(T8): Paste long-press (~420ms) opens the clipboard-slots popover. */
   onPasteLongPress?: () => void;
@@ -343,19 +347,21 @@ export default function KeyBar(props: KeyBarProps) {
             </View>
           </Glass>
 
-          <Key onPress={props.onTabsTap /* TODO(T10): opens the switcher */} style={styles.circleSlot}>
-            <Glass theme={theme} radius={24.5} style={styles.circle}>
-              <SymbolView
-                name="square.on.square"
-                size={19}
-                tintColor={theme.foreground}
-                fallback={<Text style={keyLabel}>▣</Text>}
-              />
-              <Text style={[styles.badge, { color: theme.foreground }]}>
-                {props.windowIndex ?? 1 /* TODO(T9): live window index */}
-              </Text>
-            </Glass>
-          </Key>
+          {props.showTabs && (
+            <Key onPress={props.onTabsTap /* TODO(T10): opens the switcher */} style={styles.circleSlot}>
+              <Glass theme={theme} radius={24.5} style={styles.circle}>
+                <SymbolView
+                  name="square.on.square"
+                  size={19}
+                  tintColor={theme.foreground}
+                  fallback={<Text style={keyLabel}>▣</Text>}
+                />
+                <Text style={[styles.badge, { color: theme.foreground }]}>
+                  {props.windowIndex ?? 1}
+                </Text>
+              </Glass>
+            </Key>
+          )}
         </View>
       </GestureDetector>
 
