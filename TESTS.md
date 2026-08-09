@@ -321,7 +321,10 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - **Steps**: connect; use the session normally for a minute.
 - **Expect**: log shows the probe answering empty and `"present":false`; no tabs circle, no
   poll lines, no error, no mention of tmux anywhere on screen (§7: silence, not a message).
-- [ ]
+- [x] — tmux moved off PATH on the host, then a fresh connect: `{"present":false,…}`, bar
+  without a tabs circle, nothing said on screen. One `[ssh] exec failed` at the probe, then
+  silence — the poll does not run when tmux is absent. Rough edge, log-only: when tmux vanishes
+  *mid-session* the poll keeps retrying every 2s and logs a failure each beat.
 
 ### T9.5 — Badge tracks `select-window` from another client
 - **Setup**: connected, `tmux attach` typed into the phone session (window badge visible on the
