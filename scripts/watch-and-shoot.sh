@@ -20,10 +20,13 @@ mkdir -p "$out"
 last=0
 
 tail -n0 -F "$log" | grep -E --line-buffered "$pattern" | while read -r line; do
+  # An emptied selection is the *end* of something, and shooting it wastes the debounce window that
+  # the interesting frame — text selected, edit menu up — needed.
+  [[ $line == *'selection ""'* ]] && continue
   now=$(date +%s)
   # A tap produces a burst of log lines and a screenshot takes several seconds; one picture per
   # burst is the useful rate, and anything faster just queues up behind the tunnel setup.
-  (( now - last < 5 )) && continue
+  (( now - last < 2 )) && continue
   last=$now
   file="$out/$(date +%H%M%S).png"
   if timeout 90 pymobiledevice3 developer dvt screenshot "$file" >/dev/null 2>&1; then

@@ -207,6 +207,45 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     };
     document.addEventListener('selectionchange', onSelectionChange);
 
+    // iOS synthesises a mouse pair when a touch gesture ends. xterm answers those by focusing its
+    // textarea and clearing the document selection — which is the selection the finger just made,
+    // so the edit menu is dismissed in the same frame it would have appeared. Touch is ours (§4.3
+    // puts scrolling here too), so xterm sees only what this file hands it: nothing, for now.
+    // T6 will need `mousedown`/`mousemove` back for mouse reporting, on the encoded path.
+    const swallow = (event: Event) => event.stopPropagation();
+    for (const type of ['mousedown', 'mouseup', 'mousemove']) {
+      term.element!.addEventListener(type, swallow, true);
+    }
+    // Which leaves the keyboard to us: a tap that selected nothing is a tap that wants to type.
+    term.element!.addEventListener('click', () => {
+      if ((document.getSelection()?.toString() ?? '') === '') term.focus();
+    });
+
+    // And a press held long enough to be a selection gives the keyboard up first: WebKit will not
+    // start a selection anywhere while an input has focus, so with the keyboard open a long-press
+    // does nothing whatsoever. Movement cancels it — that is a pan, and a pan is a scroll (§4.3).
+    let press: ReturnType<typeof setTimeout>;
+    let from = { x: 0, y: 0 };
+    const cancel = () => clearTimeout(press);
+    term.element!.addEventListener(
+      'touchstart',
+      (event) => {
+        const touch = event.touches[0];
+        from = { x: touch.clientX, y: touch.clientY };
+        press = setTimeout(() => term.textarea?.blur(), 300);
+      },
+      { passive: true },
+    );
+    term.element!.addEventListener(
+      'touchmove',
+      (event) => {
+        const touch = event.touches[0];
+        if (Math.hypot(touch.clientX - from.x, touch.clientY - from.y) > 10) cancel();
+      },
+      { passive: true },
+    );
+    term.element!.addEventListener('touchend', cancel, { passive: true });
+
     term.onData((data) => latest.current.onData(data));
     term.onBell(() => latest.current.onBell());
 
