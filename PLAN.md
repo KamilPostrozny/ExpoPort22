@@ -342,13 +342,50 @@ that: BlurView intensity 40 vs the design's `blur(14px)` is an eye-match guess; 
 WKWebView really resigns the TextInput's first responder on touch (T4 measured it once, this
 build must confirm); Android bar (flush surfaces, Gboard docking) is T3/T10-era work.
 
-**T8 — Clipboard + ⋯ menu + uploads** deps: T7, T2/T3
+**T8 — Clipboard + ⋯ menu + uploads** ✅ implemented 2026-08-09 (not device-verified) · deps: T7, T2/T3
 Clipboard slots store (OSC52 feed + pasteboard, pins persisted), Paste tap/long-press
 popover, ⋯ glass menu (Files/Photo-video/Camera/Settings), pickers, **destination browser
 sheet** (readdir, breadcrumb, editable filename, Save here, last-dir memory) + quick-attach
 helper for the agent ribbon cap, both per §4.6, failure alert. *Accept*: file lands in a
 browsed-to directory under its own name with nothing typed; quick-attach puts a photo in
 `/tmp/port22/` and types the path with trailing space.
+Landed: `src/clipboard-model.ts` + `src/upload-model.ts` (every decision, pure and tested in their
+`.test.ts` files: the three-slot ring with pin survival and unpin-drops, the provenance wording,
+the SecureStore pin round trip, the filename sanitiser, the UTC-stamp quick-attach name with the
+date injected, destination-path arithmetic, dirs-first listing order), `src/clipboard.ts` (the
+slots singleton — yanks session-transient, pins in SecureStore `WHEN_UNLOCKED_THIS_DEVICE_ONLY`
+because a pin is as likely as not a token), `src/upload.ts` (pickers, the shared `sendFile` with
+the busy flag and the one failure alert, `quickAttach`), `src/upload-sheet.tsx` (the destination
+browser, an RN `pageSheet` Modal), the clipboard popover + live ⋯ menu + sending tint in
+`src/keybar.tsx`, the flow wiring in `src/app/terminal.tsx`, `lastUploadDir` in `src/settings.ts`,
+pin hydration in `src/app/_layout.tsx`.
+Decisions: **expo-camera stayed out** — expo-image-picker's `launchCameraAsync` *is* the system
+camera UI, which is all the Camera row asks for (AGENTS.md check, the ladder's rung 5); Files is
+expo-document-picker, and since neither picker returns bytes on native, expo-file-system's `File`
+reads the picked URI as base64 — whole file in memory, size unguarded (§7). Destination paths are
+**absolute**, with `$HOME` resolved once through `pwd` on an exec channel: SFTP has no `~`, and
+the breadcrumb needs real segments to walk (the remembered `lastUploadDir` is re-checked with a
+`listDirectory` and falls back to `$HOME` when it stopped existing). The sheet browses and
+chooses; the *screen* uploads — so the ⋯ circle's busy tint covers both flows from the one flag
+in `src/upload.ts`, and quick-attach tints it too. The sanitiser keeps unicode letters (valid
+filenames, mangling helps nobody) but strips path separators, control characters and leading dots,
+and turns whitespace runs into `-`; empty in, `file` out. A collision is shown twice: the file is
+in the listing anyway (the design's reason for listing files at all) and the SAVE AS label says
+"replaces the existing file" while the field matches one. Pinning the pasteboard row copies it
+into the slots as a pinned entry — the design's "phone pasteboard · pinned" third row. The Paste
+key's tap asks `topSlotText()`: top slot first, phone pasteboard as fallback, so the pre-T8
+behaviour survives an empty ring. OSC 52 reads stay unanswered — untouched from T4.
+Quick-attach's exported contract for T11's 📎 cap:
+`quickAttach(kind?: UploadKind): Promise<string | null>` in `src/upload.ts` — picker → SFTP to
+`/tmp/port22/<UTCstamp>.<ext>` (mkdir 0700 on demand, the native upload's chain) → path + one
+trailing space typed, never a Return; resolves the typed path, `null` on cancel or failure (the
+alert has already been shown, nothing typed either way).
+Verified: `bun test` (82), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Not
+walked on hardware** — the device cases are TESTS.md §T8 (T8.1–T8.16; T8.16 is log-driven until
+T11 wires the cap). Still open besides that: the iOS paste-banner cadence in T8.5 (once per
+popover open) is the design's acceptance, only a device shows it; the sheet is an RN `pageSheet`
+Modal rather than the design's custom sheet — grabber and swipe-dismiss come from the system;
+Android pickers/permissions are T3-era work.
 
 **T9 — tmux side-channel + config push** ✅ implemented 2026-08-09 (not device-verified) · deps: T5
 Probe, config file v1 content, SFTP push + source + read-back verify, status in settings

@@ -41,6 +41,14 @@
       ],
       "expo-secure-store",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Port22 shows your photo library so you can upload a photo or video to the machine you are attached to.",
+          "cameraPermission": "Port22 uses the camera so you can upload a photo you take now to the machine you are attached to.",
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "ios": {

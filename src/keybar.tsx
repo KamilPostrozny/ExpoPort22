@@ -14,7 +14,6 @@
  */
 
 import { BlurView } from 'expo-blur';
-import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
@@ -33,6 +32,15 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 
 import {
+  pinPasteboard,
+  refreshPasteboard,
+  togglePin,
+  topSlotText,
+  useClipboard,
+  type Slot,
+} from '@/clipboard';
+import { provenance } from '@/clipboard-model';
+import {
   CHORD_STRIP,
   afterChord,
   applyCtrl,
@@ -47,7 +55,7 @@ import {
 } from '@/keybar-model';
 import { MONO, type Theme } from '@/theme';
 
-export type BarPopover = 'none' | 'menu' | 'arrows';
+export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard';
 
 export type KeyBarProps = {
   theme: Theme;
@@ -72,8 +80,9 @@ export type KeyBarProps = {
   /** The live tmux window index (T9's ~2s poll; null while not attached). The badge falls back
    *  to the design default `1`. */
   windowIndex?: number;
-  /** TODO(T8): Paste long-press (~420ms) opens the clipboard-slots popover. */
-  onPasteLongPress?: () => void;
+  /** §4.6: an upload in flight. The ⋯ circle tints accent and goes inert — the whole progress
+   *  UI. Both flows flip it (quick-attach included, via `useUploadBusy`). */
+  sending?: boolean;
   /** TODO(T10): tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
   /** TODO(T10): bar swipe ↑ with the keyboard already up becomes the drag into the switcher. */
@@ -211,8 +220,8 @@ export default function KeyBar(props: KeyBarProps) {
   };
 
   const onPaste = async () => {
-    // TODO(T8): the top clipboard slot (OSC 52 yanks + pins), not just the phone pasteboard.
-    const text = await Clipboard.getStringAsync();
+    // The top clipboard slot (§4.4) — OSC 52 yanks and pins first, phone pasteboard as fallback.
+    const text = await topSlotText();
     if (text) props.sendBytes(text); // typed, never executed — no trailing newline of ours
   };
 
@@ -223,6 +232,10 @@ export default function KeyBar(props: KeyBarProps) {
     if (next === 'menu') Keyboard.dismiss();
     onOpenChange(next);
   };
+
+  // §4.4: long-press (~420ms) opens the clipboard popover; the popover reads the phone
+  // pasteboard as it opens (the accepted moment for the iOS paste banner).
+  const onPasteLongPress = () => onOpenChange('clipboard');
 
   // The bar swipe (§4.4): ↓ hides the keyboard, ↑ shows it — or hands over to T10's switcher
   // drag when it is already up. Horizontal is T11's window switch; the hook fires on release.
@@ -295,13 +308,27 @@ export default function KeyBar(props: KeyBarProps) {
 
       <GestureDetector gesture={pan}>
         <View style={styles.row}>
-          <Key onPress={() => toggle('menu')} style={styles.circleSlot}>
-            <Glass theme={theme} radius={24.5} style={styles.circle}>
+          {/* §4.6: during an upload the circle tints accent and goes inert — the whole progress
+              UI. The Pressable disables, so a tap during a send does nothing at all. */}
+          <Key onPress={props.sending ? undefined : () => toggle('menu')} style={styles.circleSlot}>
+            <Glass
+              theme={theme}
+              radius={24.5}
+              style={[styles.circle, props.sending && { backgroundColor: rgba(theme.accent, 0.85) }]}>
               <SymbolView
                 name="ellipsis"
                 size={20}
-                tintColor={theme.foreground}
-                fallback={<Text style={[keyLabel, { fontSize: 18 }]}>⋯</Text>}
+                tintColor={props.sending ? theme.background : theme.foreground}
+                fallback={
+                  <Text
+                    style={[
+                      keyLabel,
+                      { fontSize: 18 },
+                      props.sending && { color: theme.background },
+                    ]}>
+                    ⋯
+                  </Text>
+                }
               />
             </Glass>
           </Key>
@@ -320,7 +347,7 @@ export default function KeyBar(props: KeyBarProps) {
                 </Key>
                 <Key
                   onPress={onPaste}
-                  onLongPress={props.onPasteLongPress} // TODO(T8): clipboard-slots popover
+                  onLongPress={onPasteLongPress}
                   delayLongPress={420}
                   style={styles.key}>
                   <Text style={keyLabel}>Paste</Text>
@@ -442,14 +469,23 @@ export function ArrowsPopover({
   );
 }
 
+const UPLOAD_ROWS = [
+  { label: 'Files', kind: 'files' },
+  { label: 'Photo or video', kind: 'photo' },
+  { label: 'Camera', kind: 'camera' },
+] as const;
+
 export function BarMenu({
   theme,
   bottom,
+  onUpload,
   onOpenSettings,
 }: {
   theme: Theme;
   /** The measured `popBase`, as on ArrowsPopover. */
   bottom: number;
+  /** §4.6's destination flow: the screen runs picker → destination sheet → silent SFTP save. */
+  onUpload: (kind: 'files' | 'photo' | 'camera') => void;
   onOpenSettings: () => void;
 }) {
   return (
@@ -459,12 +495,13 @@ export function BarMenu({
       style={[styles.menuPop, { bottom }]}>
       <Glass theme={theme} radius={26}>
         <Text style={[styles.menuHeader, { color: theme.muted }]}>UPLOAD FILE</Text>
-        {/* TODO(T8): Files / Photo or video / Camera become the pickers + destination browser;
-            until then the section is the design's placeholder, inert. */}
-        {['Files', 'Photo or video', 'Camera'].map((label) => (
-          <View key={label} style={[styles.menuRow, styles.menuRowDisabled]}>
+        {UPLOAD_ROWS.map(({ label, kind }) => (
+          <Pressable
+            key={kind}
+            onPress={() => onUpload(kind)}
+            style={({ pressed }) => [styles.menuRow, pressed && { backgroundColor: KEY_TINT }]}>
             <Text style={[styles.menuLabel, { color: theme.foreground }]}>{label}</Text>
-          </View>
+          </Pressable>
         ))}
         <View style={styles.menuBreak} />
         <Pressable
@@ -472,6 +509,84 @@ export function BarMenu({
           style={({ pressed }) => [styles.menuRow, pressed && { backgroundColor: KEY_TINT }]}>
           <Text style={[styles.menuLabel, { color: theme.foreground }]}>Settings</Text>
         </Pressable>
+      </Glass>
+    </Animated.View>
+  );
+}
+
+/**
+ * The clipboard popover (§4.4): slots with content preview and provenance, pin toggles, the
+ * phone-pasteboard row last. Opening reads the pasteboard once — the iOS paste banner firing
+ * here is accepted by the spec. Tapping a row types it; nothing here ever appends a newline.
+ */
+export function ClipboardPopover({
+  theme,
+  bottom,
+  sendBytes,
+  onClose,
+}: {
+  theme: Theme;
+  /** The measured `popBase`, as on ArrowsPopover. */
+  bottom: number;
+  sendBytes: (bytes: string) => void;
+  onClose: () => void;
+}) {
+  const { slots, pasteboard } = useClipboard();
+
+  useEffect(() => {
+    void refreshPasteboard();
+  }, []);
+
+  const type = (text: string) => {
+    sendBytes(text); // typed, never executed — multiline yanks included, no newline of ours
+    onClose();
+  };
+
+  const now = Date.now();
+  const row = (slot: Slot, highlight: boolean, onPin: () => void, onPick: () => void) => (
+    <Pressable
+      onPress={onPick}
+      style={({ pressed }) => [
+        styles.clipRow,
+        { borderTopColor: HAIRLINE },
+        highlight && { backgroundColor: rgba(theme.accent, 0.12) },
+        pressed && { backgroundColor: KEY_TINT },
+      ]}>
+      <View style={styles.clipBody}>
+        <Text numberOfLines={1} style={[styles.clipText, { color: theme.foreground }]}>
+          {slot.text}
+        </Text>
+        <Text style={[styles.clipMeta, { color: theme.muted }]}>{provenance(slot, now)}</Text>
+      </View>
+      <Pressable onPress={onPin} hitSlop={8} style={styles.clipPin}>
+        <SymbolView
+          name={slot.pinned ? 'pin.fill' : 'pin'}
+          size={15}
+          tintColor={slot.pinned ? theme.accentAlternate : theme.placeholder}
+          fallback={
+            <Text style={{ fontSize: 13, color: slot.pinned ? theme.accentAlternate : theme.placeholder }}>
+              {slot.pinned ? '●' : '○'}
+            </Text>
+          }
+        />
+      </Pressable>
+    </Pressable>
+  );
+
+  return (
+    <Animated.View
+      entering={FadeInDown.duration(180)}
+      exiting={FadeOutDown.duration(140)}
+      style={[styles.clipPop, { bottom }]}>
+      <Glass theme={theme} radius={20} style={styles.clipGlass}>
+        <Text style={[styles.clipHeader, { color: theme.placeholder }]}>CLIPBOARD</Text>
+        {slots.map((slot, i) => (
+          <View key={`${slot.at}-${i}`}>{row(slot, i === 0, () => togglePin(i), () => type(slot.text))}</View>
+        ))}
+        {pasteboard !== null && row(pasteboard, false, pinPasteboard, () => type(pasteboard.text))}
+        {slots.length === 0 && pasteboard === null && (
+          <Text style={[styles.clipEmpty, { color: theme.muted }]}>Nothing yanked or copied yet.</Text>
+        )}
       </Glass>
     </Animated.View>
   );
@@ -554,9 +669,39 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: HAIRLINE,
   },
-  menuRowDisabled: { opacity: 0.35 },
   menuLabel: { fontSize: 15 },
   menuBreak: { height: 6, backgroundColor: 'rgba(0,0,0,0.14)' },
+
+  /* clipboard popover — centered, 300pt, 20pt corners per the prototype */
+  clipPop: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  clipGlass: { width: 300 },
+  clipHeader: {
+    paddingHorizontal: 14,
+    paddingTop: 9,
+    paddingBottom: 7,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+  },
+  clipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  clipBody: { flex: 1, minWidth: 0 },
+  clipText: { fontFamily: MONO, fontSize: 12 },
+  clipMeta: { fontSize: 10, marginTop: 1 },
+  clipPin: { padding: 2 },
+  clipEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: HAIRLINE,
+  },
 
   /* the invisible keyboard owner */
   input: { position: 'absolute', width: 1, height: 1, opacity: 0 },

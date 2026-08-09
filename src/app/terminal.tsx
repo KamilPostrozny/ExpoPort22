@@ -15,8 +15,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { pushYank } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
-import KeyBar, { ArrowsPopover, BarMenu, type BarPopover } from '@/keybar';
+import KeyBar, { ArrowsPopover, BarMenu, ClipboardPopover, type BarPopover } from '@/keybar';
 import {
   answerHostKey,
   attachTerminal,
@@ -28,11 +29,14 @@ import {
   useSession,
   type Session,
 } from '@/session';
-import { endpoint, getSettings, useSettings } from '@/settings';
+import { endpoint, getSettings, updateSettings, useSettings } from '@/settings';
 import TerminalView, { type TerminalHandle } from '@/terminal';
 import { useTmux } from '@/tmux';
 import { deriveConfigStatus, tabsAvailable } from '@/tmux-model';
 import { MONO, type Theme } from '@/theme';
+import { pick, sendFile, useUploadBusy, type UploadKind } from '@/upload';
+import { joinPath, sanitizeFilename, stampName } from '@/upload-model';
+import UploadSheet from '@/upload-sheet';
 
 /**
  * The session on screen: the terminal, and — over it, whenever there is no shell behind it — the
@@ -46,15 +50,20 @@ import { MONO, type Theme } from '@/theme';
  */
 export default function SessionScreen() {
   const theme = useTheme();
-  const { fontSize, configureTmux } = useSettings();
+  const { fontSize, configureTmux, host, lastUploadDir } = useSettings();
   const session = useSession();
   const tmux = useTmux();
+  const sending = useUploadBusy();
   const terminal = useRef<TerminalHandle>(null);
   const detach = useRef<(() => void) | null>(null);
   const [open, setOpen] = useState<BarPopover>('none');
   const [decckm, setDecckm] = useState(false);
   /** The bar stack's measured height — the `popBase` the popovers anchor on. */
   const [barHeight, setBarHeight] = useState(60);
+  /** A picked file waiting on a destination (§4.6): the sheet is up exactly while this is set. */
+  const [pendingUpload, setPendingUpload] = useState<{ base64: string; suggestedName: string } | null>(
+    null,
+  );
 
   // Which screen is in front decides what a screenshot taken from the laptop contains, and the
   // person tapping is holding the same phone.
@@ -88,6 +97,30 @@ export default function SessionScreen() {
   const leave = async () => {
     await disconnect();
     router.back();
+  };
+
+  // §4.6's destination flow: picker → destination browser sheet → silent SFTP save. The sheet
+  // does the browsing; the save (and the one failure alert) happens here, the same `sendFile`
+  // quick-attach uses — so the ⋯ circle's busy tint covers both flows from one flag.
+  const startUpload = async (kind: UploadKind) => {
+    setOpen('none');
+    const picked = await pick(kind);
+    if (picked === null) return; // cancelled — not a failure, nothing to say
+    const suggestedName =
+      kind === 'camera'
+        ? stampName(new Date(), picked.name ?? 'photo.jpg') // §4.6: camera defaults to timestamp
+        : sanitizeFilename(picked.name ?? '');
+    setPendingUpload({ base64: picked.base64, suggestedName });
+  };
+
+  const saveUpload = async (dir: string, filename: string) => {
+    if (pendingUpload === null) return;
+    const { base64 } = pendingUpload;
+    setPendingUpload(null);
+    updateSettings({ lastUploadDir: dir }); // §4.6: the sheet remembers where it was
+    // Saves silently: on success nothing is typed and nothing is shown (§4.6). `sendFile` owns
+    // the failure alert.
+    await sendFile(base64, joinPath(dir, filename));
   };
 
   // TODO(T12): the real Settings sheet (§4.8). Both doors — the ⋯ menu row and the two-finger
@@ -124,9 +157,11 @@ export default function SessionScreen() {
           detach.current = attachTerminal((base64) => terminal.current?.write(base64));
         }}
         onBell={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-        // §4.7: a yank lands on the phone's pasteboard. The slot history is T8's.
+        // §4.7: a yank lands on the phone's pasteboard AND in the clipboard slots. OSC 52 reads
+        // are refused inside the webview and never get here.
         onClipboard={async (text) => {
           await Clipboard.setStringAsync(text);
+          pushYank(text);
         }}
         onLink={async (url) => {
           await WebBrowser.openBrowserAsync(url);
@@ -149,6 +184,7 @@ export default function SessionScreen() {
         onOpenChange={setOpen}
         onHeight={setBarHeight}
         active={session.status === 'connected'}
+        sending={sending}
         // §4.5: the tabs button exists only with tmux present AND the config applied — so the
         // Settings toggle going off takes the button with it, and a host without tmux never
         // shows one (§7: silence, not a message).
@@ -168,13 +204,36 @@ export default function SessionScreen() {
               bottom={barHeight + 6}
               sendBytes={send}
             />
+          ) : open === 'clipboard' ? (
+            <ClipboardPopover
+              theme={theme}
+              bottom={barHeight + 6}
+              sendBytes={send}
+              onClose={() => setOpen('none')}
+            />
           ) : (
-            <BarMenu theme={theme} bottom={barHeight + 6} onOpenSettings={openSettings} />
+            <BarMenu
+              theme={theme}
+              bottom={barHeight + 6}
+              onUpload={startUpload}
+              onOpenSettings={openSettings}
+            />
           )}
         </View>
       )}
       </View>
       </KeyboardAvoidingView>
+
+      {pendingUpload !== null && (
+        <UploadSheet
+          theme={theme}
+          host={host}
+          initialDir={lastUploadDir}
+          suggestedName={pendingUpload.suggestedName}
+          onCancel={() => setPendingUpload(null)}
+          onSave={saveUpload}
+        />
+      )}
 
       {session.status !== 'connected' && (
         <Status session={session} theme={theme} onSetup={leave} />

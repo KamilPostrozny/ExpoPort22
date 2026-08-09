@@ -1,0 +1,299 @@
+/**
+ * The destination browser sheet (§4.6, design 4d): a live SFTP listing — directories first, files
+ * visible so a collision is visible before it happens — breadcrumb path, tap a directory to
+ * descend, `..` to walk up, an editable SAVE AS field pre-filled with the sanitised source name,
+ * and "Save here". Saving is silent: nothing is ever typed into the session from this flow.
+ *
+ * The sheet browses and chooses; the screen owns the actual upload (and the failure alert), so
+ * the SFTP write and the busy tint live in one place for both flows. Paths are absolute — `$HOME`
+ * is resolved once through `pwd` on an exec channel, because SFTP has no notion of `~` and the
+ * breadcrumb needs real segments to walk.
+ */
+
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import type { RemoteEntry } from '../modules/expo-ssh/src/ExpoSSH.types';
+import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
+import { MONO, type Theme } from '@/theme';
+import {
+  breadcrumb,
+  formatSize,
+  joinPath,
+  parentPath,
+  sanitizeFilename,
+  sortEntries,
+} from '@/upload-model';
+
+export type UploadSheetProps = {
+  theme: Theme;
+  /** The header's right caption — the host being uploaded to. */
+  host: string;
+  /** The remembered last destination; `null` falls back to `$HOME`. */
+  initialDir: string | null;
+  /** Pre-fill for the SAVE AS field (already sanitised / camera-stamped by the caller). */
+  suggestedName: string;
+  onCancel: () => void;
+  /** The choice: an existing directory and a filename. The caller uploads and remembers. */
+  onSave: (dir: string, filename: string) => void;
+};
+
+export default function UploadSheet(props: UploadSheetProps) {
+  const { theme } = props;
+  const [dir, setDir] = useState<string | null>(null);
+  const [entries, setEntries] = useState<RemoteEntry[] | null>(null);
+  const [name, setName] = useState(props.suggestedName);
+
+  // Resolve where to start, then list. A remembered directory that no longer lists (deleted,
+  // permission gone) falls back to $HOME rather than showing an error nobody can act on.
+  useEffect(() => {
+    let stale = false;
+    (async () => {
+      const home = async () => (await ExpoSSH.exec('pwd', 4096)).trim();
+      let start = props.initialDir;
+      if (start !== null) {
+        try {
+          await ExpoSSH.listDirectory(start);
+        } catch {
+          start = null;
+        }
+      }
+      if (start === null) start = await home();
+      if (!stale) setDir(start);
+    })().catch((error) => console.log('[upload] sheet could not resolve a start dir:', error));
+    return () => {
+      stale = true;
+    };
+  }, [props.initialDir]);
+
+  // Every directory change lists fresh — the listing is the collision warning, so it is never
+  // cached.
+  useEffect(() => {
+    if (dir === null) return;
+    let stale = false;
+    setEntries(null);
+    ExpoSSH.listDirectory(dir)
+      .then((listing) => {
+        if (!stale) setEntries(sortEntries(listing));
+      })
+      .catch((error) => {
+        console.log('[upload] listDirectory failed:', dir, error);
+        if (!stale) setEntries([]);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [dir]);
+
+  const filename = sanitizeFilename(name);
+  const collision = entries?.some((entry) => !entry.isDirectory && entry.name === filename) ?? false;
+
+  const row = (entry: RemoteEntry) => (
+    <Pressable
+      key={entry.name}
+      disabled={!entry.isDirectory}
+      onPress={() => setDir(joinPath(dir!, entry.name))}
+      style={({ pressed }) => [
+        styles.row,
+        { borderBottomColor: theme.border },
+        pressed && { backgroundColor: theme.surface },
+      ]}>
+      <Text style={[styles.rowIcon, { color: entry.isDirectory ? theme.accent : theme.muted }]}>
+        {entry.isDirectory ? '\uf07b' : '\uf15b' /* Nerd Font folder / file */}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.rowName,
+          { color: entry.isDirectory ? theme.foreground : theme.muted },
+          !entry.isDirectory && entry.name === filename && { color: theme.warning },
+        ]}>
+        {entry.name}
+      </Text>
+      {!entry.isDirectory && (
+        <Text style={[styles.rowSize, { color: theme.placeholder }]}>{formatSize(entry.size)}</Text>
+      )}
+      {entry.isDirectory && <Text style={[styles.chevron, { color: theme.placeholder }]}>›</Text>}
+    </Pressable>
+  );
+
+  return (
+    <Modal
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={props.onCancel}
+      visible>
+      <View style={[styles.sheet, { backgroundColor: theme.background }]}>
+        <View style={styles.grabberRow}>
+          <View style={[styles.grabber, { backgroundColor: theme.border }]} />
+        </View>
+        <View style={styles.header}>
+          <Pressable onPress={props.onCancel} hitSlop={10}>
+            <Text style={[styles.headerSide, { color: theme.accent }]}>Cancel</Text>
+          </Pressable>
+          <Text style={[styles.headerTitle, { color: theme.foreground }]}>Upload to…</Text>
+          <Text style={[styles.headerSide, { color: theme.muted }]} numberOfLines={1}>
+            {props.host}
+          </Text>
+        </View>
+
+        <View style={styles.crumbs}>
+          {dir !== null &&
+            breadcrumb(dir).map((segment, i, all) => (
+              <Text
+                key={i}
+                numberOfLines={1}
+                style={[
+                  styles.crumb,
+                  {
+                    color:
+                      i === 0 ? theme.accent : i === all.length - 1 ? theme.foreground : theme.muted,
+                  },
+                ]}>
+                {i > 1 && <Text style={{ color: theme.placeholder }}>{'› '}</Text>}
+                {segment}
+              </Text>
+            ))}
+        </View>
+
+        <View style={[styles.listing, { borderTopColor: theme.border }]}>
+          {entries === null ? (
+            <ActivityIndicator style={styles.spinner} color={theme.accent} />
+          ) : (
+            <FlatList
+              data={entries}
+              keyExtractor={(entry) => entry.name}
+              renderItem={({ item }) => row(item)}
+              ListHeaderComponent={
+                dir !== null && dir !== '/' ? (
+                  <Pressable
+                    onPress={() => setDir(parentPath(dir))}
+                    style={({ pressed }) => [
+                      styles.row,
+                      { borderBottomColor: theme.border },
+                      pressed && { backgroundColor: theme.surface },
+                    ]}>
+                    <Text style={[styles.rowIcon, { color: theme.accent }]}>{'\uf07b'}</Text>
+                    <Text style={[styles.rowName, { color: theme.foreground }]}>..</Text>
+                  </Pressable>
+                ) : null
+              }
+            />
+          )}
+        </View>
+
+        <View style={[styles.footer, { backgroundColor: theme.panel, borderTopColor: theme.border }]}>
+          <Text style={[styles.saveAs, { color: theme.muted }]}>
+            SAVE AS{collision ? ' — replaces the existing file' : ''}
+          </Text>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            autoCorrect={false}
+            autoCapitalize="none"
+            spellCheck={false}
+            style={[
+              styles.nameField,
+              {
+                color: theme.foreground,
+                backgroundColor: theme.background,
+                borderColor: collision ? theme.warning : theme.accent,
+              },
+            ]}
+          />
+          <Pressable
+            disabled={dir === null}
+            onPress={() => props.onSave(dir!, filename)}
+            style={({ pressed }) => [
+              styles.save,
+              { backgroundColor: theme.accent },
+              (pressed || dir === null) && { opacity: 0.6 },
+            ]}>
+            <Text style={[styles.saveLabel, { color: theme.onAccent }]}>Save here</Text>
+            {dir !== null && (
+              <Text style={[styles.savePath, { color: theme.onAccent }]} numberOfLines={1}>
+                {dir}
+              </Text>
+            )}
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  sheet: { flex: 1 },
+  grabberRow: { alignItems: 'center', paddingTop: 8, paddingBottom: 2 },
+  grabber: { width: 36, height: 5, borderRadius: 3 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingTop: 6,
+    paddingBottom: 10,
+  },
+  headerSide: { fontSize: 15, maxWidth: 110 },
+  headerTitle: { fontSize: 15, fontWeight: '600' },
+  crumbs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 18,
+    paddingBottom: 10,
+    flexWrap: 'nowrap',
+    overflow: 'hidden',
+  },
+  crumb: { fontFamily: MONO, fontSize: 11.5, flexShrink: 1 },
+  listing: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
+  spinner: { marginTop: 40 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  rowIcon: { fontFamily: MONO, fontSize: 15, width: 20 },
+  rowName: { flex: 1, fontFamily: MONO, fontSize: 14.5 },
+  rowSize: { fontSize: 11 },
+  chevron: { fontSize: 16 },
+  footer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: 26,
+    gap: 10,
+  },
+  saveAs: { fontSize: 10, fontWeight: '600', letterSpacing: 0.6 },
+  nameField: {
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    fontFamily: MONO,
+    fontSize: 14.5,
+  },
+  save: {
+    height: 48,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  saveLabel: { fontSize: 16, fontWeight: '600' },
+  savePath: { fontFamily: MONO, fontSize: 12, opacity: 0.65, flexShrink: 1 },
+});

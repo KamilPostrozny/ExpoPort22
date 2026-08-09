@@ -30,6 +30,9 @@ export type Settings = {
    *  lines a notch and a yank never reaches the pasteboard. Off is for a shared tmux server, where
    *  `set -g` and `bind` would reach a desktop client on the same server too. */
   configureTmux: boolean;
+  /** Where the destination-upload sheet (§4.6) opens next time; `null` = `$HOME`. Written on every
+   *  "Save here". Not a secret — it is a directory name on the user's own machine. */
+  lastUploadDir: string | null;
 };
 
 export const DEFAULTS: Settings = {
@@ -40,6 +43,7 @@ export const DEFAULTS: Settings = {
   fontSize: 13,
   theme: 'auto',
   configureTmux: true,
+  lastUploadDir: null,
 };
 
 /** Forward-tolerant: an unknown, missing or wrong-typed field takes its default rather than
@@ -60,6 +64,7 @@ export function decode(raw: unknown): Settings {
       : DEFAULTS.theme,
     configureTmux:
       typeof o.configureTmux === 'boolean' ? o.configureTmux : DEFAULTS.configureTmux,
+    lastUploadDir: typeof o.lastUploadDir === 'string' ? o.lastUploadDir : null,
   };
 }
 

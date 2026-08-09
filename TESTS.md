@@ -318,3 +318,140 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   `"config":"not-applied"`; no tabs circle, no alert, no banner — §7's "failed conf push
   changes nothing visible". Restore with `chmod 700 ~/.config`; the next connect applies.
 - [ ]
+
+## T8 — Clipboard + ⋯ menu + uploads
+
+All cases: connected to a real host, terminal on screen, tmux configured (a yank needs the
+pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot change,
+`[ssh] upload` / `[ssh] listDirectory` / `[ssh] exec` print every SFTP and exec call,
+`[upload]` prints the quick-attach path and any failure.
+
+### T8.1 — OSC 52 yank fills a slot and the pasteboard
+- **Setup**: attached to tmux, some text on screen.
+- **Steps**: yank in copy-mode (`prefix [`, select, Enter); then long-press Paste; also paste
+  into another iOS app.
+- **Expect**: the popover's top slot shows the yanked text with "tmux yank · just now"; the
+  other app pastes the same text (pasteboard got it too); log shows one `[clipboard]` line.
+- [ ]
+
+### T8.2 — Three-yank rotation
+- **Setup**: as T8.1.
+- **Steps**: yank four different strings; open the popover.
+- **Expect**: exactly three yank slots, newest on top, the first yank gone; the phone-pasteboard
+  row (holding yank four — the pasteboard follows the last yank) sits below them.
+- [ ]
+
+### T8.3 — Pin survives rotation and an app restart
+- **Setup**: one yank in the slots.
+- **Steps**: open the popover, tap the pin glyph on that slot; yank three more strings; open
+  the popover again; force-quit the app, relaunch, reconnect, open the popover.
+- **Expect**: the pinned slot is still there after the three yanks (fourth row, "· pinned"
+  instead of an age) and still there after the restart — pins live in SecureStore, yanks do
+  not (the three unpinned ones are gone after relaunch).
+- [ ]
+
+### T8.4 — Paste tap types the top slot and never executes
+- **Setup**: yank `echo yanked` (with no newline selected); cursor at an empty prompt.
+- **Steps**: tap Paste once.
+- **Expect**: `echo yanked` appears at the prompt, **not run** — no Return travels, the cursor
+  sits at the end of the typed text. Pressing Return manually runs it (proof the text is real).
+- [ ]
+
+### T8.5 — Long-press popover: previews, provenance, pasteboard slot, banner once
+- **Setup**: at least one yank in the slots; copy something in another iOS app first.
+- **Steps**: long-press Paste (~420ms); read the popover; close it (outside tap); long-press
+  again.
+- **Expect**: slots show content preview (one line, ellipsized) + provenance ("tmux yank ·
+  N min ago"); the phone-pasteboard row is last and shows the other app's text; iOS's paste
+  banner fires **once per open** (on the read), not per row; outside tap closes.
+- [ ]
+
+### T8.6 — Multiline yank stays unexecuted
+- **Setup**: yank a multi-line block (two shell lines) in copy-mode.
+- **Steps**: open the popover, tap that slot.
+- **Expect**: both lines land at the prompt as typed input — the shell may show continuation,
+  but nothing runs until a manual Return. The yank's own embedded newline travels because it is
+  *content*; the app appends none of its own.
+- [ ]
+
+### T8.7 — ⋯ menu: three pickers reachable
+- **Setup**: connected, keyboard up.
+- **Steps**: tap ⋯; tap each of Files / Photo or video / Camera in turn (cancel each picker).
+- **Expect**: the menu opens with the keyboard dismissed (§4.4); Files opens the document
+  picker, Photo or video the photo library (no permission prompt — PHPicker), Camera asks for
+  camera permission once then opens the camera; cancelling any picker returns to the terminal
+  with nothing typed and no sheet.
+- [ ]
+
+### T8.8 — Destination sheet: browse, breadcrumb, descend
+- **Setup**: pick a file via ⋯ → Files.
+- **Steps**: read the sheet; tap a directory; tap `..`; watch the breadcrumb.
+- **Expect**: the sheet opens at `$HOME` (first ever run) with directories first then files,
+  names mono; tapping a directory descends and re-lists (fresh `listDirectory` in the log);
+  `..` walks up; the breadcrumb tracks the path with `/` accented and the current segment
+  bright.
+- [ ]
+
+### T8.9 — Collision is visible and overwrite works
+- **Setup**: on the host: `echo old > ~/collide.txt`; pick any file via ⋯ → Files.
+- **Steps**: in the sheet, type `collide.txt` into SAVE AS while in `$HOME`; read the listing;
+  Save here; on the host `cat ~/collide.txt`.
+- **Expect**: `collide.txt` is visible in the listing (files are shown for exactly this) and
+  tints warning while the field matches it, with "— replaces the existing file" on the SAVE AS
+  label; saving overwrites without any further prompt; the host file now holds the upload.
+- [ ]
+
+### T8.10 — Editable filename lands the file under the new name
+- **Setup**: pick a file with a known name via ⋯ → Files.
+- **Steps**: clear SAVE AS, type `renamed hello.txt`, Save here; `ls` on the host.
+- **Expect**: the file lands as `renamed-hello.txt` (the sanitiser turns the space into a dash
+  on save); the original name is nowhere on the host.
+- [ ]
+
+### T8.11 — Camera default name is the timestamp
+- **Setup**: ⋯ → Camera, take a photo, accept it.
+- **Expect**: the sheet's SAVE AS field pre-fills `YYYYMMDDTHHMMSS.jpg` (UTC, this minute) —
+  not the camera's own IMG-style name.
+- [ ]
+
+### T8.12 — "Save here" saves silently
+- **Setup**: any destination upload; the terminal at a prompt with a distinctive line.
+- **Steps**: Save here; watch the terminal.
+- **Expect**: the sheet dismisses, the file lands (verify on the host), and the terminal shows
+  **nothing** — no typed path, no output, the prompt untouched (§4.6: nothing typed into the
+  session from this flow).
+- [ ]
+
+### T8.13 — Last destination is remembered
+- **Setup**: complete T8.8's browse ending in a subdirectory, Save here.
+- **Steps**: run a second ⋯ upload; then force-quit, relaunch, reconnect, a third upload.
+- **Expect**: the second and third sheets open directly in that subdirectory (persisted in
+  settings); if the directory has meanwhile vanished, the sheet falls back to `$HOME` without
+  an error.
+- [ ]
+
+### T8.14 — ⋯ circle tints accent and goes inert during the send
+- **Setup**: a large file (tens of MB — the send needs to take a visible moment) via ⋯ → Files.
+- **Steps**: Save here; immediately look at the ⋯ circle and try tapping it.
+- **Expect**: the circle is accent-filled with the glyph in background colour for the duration
+  of the SFTP write, and tapping it does nothing; it returns to glass when the send settles —
+  that is the entire progress UI (§4.4/§4.6).
+- [ ]
+
+### T8.15 — Unwritable destination: one alert, nothing typed, nothing left
+- **Setup**: on the host: `mkdir -p ~/noentry && chmod 500 ~/noentry`; upload via ⋯ → Files.
+- **Steps**: browse into `noentry` (listing works — read is allowed), Save here.
+- **Expect**: "Could not send the file" alert, once; the terminal shows nothing; `ls ~/noentry`
+  on the host shows nothing new; the raw SFTP error is in the log. Restore with `chmod 700`.
+- [ ]
+
+### T8.16 — Quick-attach: `/tmp/port22`, typed path, trailing space
+- **Setup**: connected, cursor at a prompt. **Dep: T11** — the agent ribbon 📎 cap is the only
+  UI caller; until it lands, drive `quickAttach('photo')` from a temporary dev call and assert
+  via the log.
+- **Steps**: run the quick-attach flow, pick a photo.
+- **Expect**: log shows `upload` into `/tmp/port22/<UTCstamp>.jpg` (mkdir 0700 on demand —
+  `stat -c %a /tmp/port22` says 700) and `[upload] quick-attach typed …`; the prompt now holds
+  the absolute path plus **one trailing space**, unexecuted; the path also appears as an
+  "upload path" clipboard slot.
+- [ ]

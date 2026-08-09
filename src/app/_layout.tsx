@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { hydratePins } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
 import { hydrateSettings } from '@/settings';
 import { MONO, MONO_BOLD } from '@/theme';
@@ -20,7 +21,8 @@ export default function RootLayout() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   useEffect(() => {
-    hydrateSettings().then(() => setSettingsLoaded(true));
+    // Pins ride along (§4.4): they must be back before the first Paste tap can ask for a top slot.
+    Promise.all([hydrateSettings(), hydratePins()]).then(() => setSettingsLoaded(true));
   }, []);
 
   const ready = fontsLoaded && settingsLoaded;
