@@ -93,6 +93,9 @@ export default function SessionScreen() {
         onLink={async (url) => {
           await WebBrowser.openBrowserAsync(url);
         }}
+        // T6 produces the signal, T11's ribbon consumes it. Until then the Metro log is the
+        // consumer — the DOM side logs the same line, so a missing one here is a bridge fault.
+        onModes={async (modes) => console.log('[session] modes', JSON.stringify(modes))}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
 

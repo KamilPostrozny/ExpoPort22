@@ -21,8 +21,23 @@ import { useDOMImperativeHandle, type DOMImperativeFactory, type DOMProps } from
 import { useEffect, useRef, type Ref } from 'react';
 
 import { fromBase64 } from '@/base64';
+import {
+  COAST_MIN_VELOCITY,
+  FLICK_MIN_VELOCITY,
+  PAN_SLOP_PX,
+  VelocityTracker,
+  arrowKey,
+  coastDistance,
+  coastVelocity,
+  modesEqual,
+  scrollRoute,
+  takeNotches,
+  type ModeSignal,
+} from '@/scroll-model';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
 import { MONO, type Theme } from '@/theme';
+// (`ModeSignal` cannot be re-exported from here: a 'use dom' module allows only its default
+//  export to leave. T11 imports it from '@/scroll-model', where it lives.)
 
 // Deliberately not `extends DOMImperativeFactory`: its index signature types every method as
 // taking `JSONValue`s, which would let a caller write a number at the terminal. The bridge only
@@ -49,6 +64,10 @@ export type TerminalProps = {
   onClipboard: (text: string) => Promise<void>;
   /** An OSC 8 link the user tapped, always `http(s)`. */
   onLink: (url: string) => Promise<void>;
+  /** The emulator-internal mode flags (§4.4 ribbon signals), fired on change and once per boot as
+   *  the baseline. T11's context ribbon is the consumer; §4.3's scroll routing reads the same flags
+   *  but inside the webview, where they are fresh rather than a bridge hop old. */
+  onModes: (modes: ModeSignal) => Promise<void>;
   ref?: Ref<TerminalHandle>;
   dom?: DOMProps;
 };
@@ -213,8 +232,8 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     // iOS synthesises a mouse pair when a touch gesture ends. xterm answers those by focusing its
     // textarea and clearing the document selection — which is the selection the finger just made,
     // so the edit menu is dismissed in the same frame it would have appeared. Touch is ours (§4.3
-    // puts scrolling here too), so xterm sees only what this file hands it: nothing, for now.
-    // T6 will need `mousedown`/`mousemove` back for mouse reporting, on the encoded path.
+    // puts scrolling here too), so xterm sees only what this file hands it: the synthetic wheel
+    // events `bindTouch` below dispatches when mouse reporting is on.
     // Long-press selection is the system's, and it comes with a platform constraint measured here
     // rather than assumed. An identical press on `.xterm-screen`, same target and same computed
     // `user-select`, selects when focus sits on the body and selects nothing when focus sits on
@@ -229,6 +248,41 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
 
     term.onData((data) => latest.current.onData(data));
     term.onBell(() => latest.current.onBell());
+    // Mouse reports xterm encodes for the wheels synthesized below. SGR (what tmux, htop and
+    // anything from this decade negotiates) is ASCII and arrives via `onData`; only the legacy
+    // single-byte DEFAULT encoding comes through here, as a string of raw char codes.
+    // ponytail: a DEFAULT-encoded report with a coordinate byte over 127 gets UTF-8-mangled by the
+    // native `send` path. Real only for a pre-SGR app past column 95; the upgrade path is a
+    // `sendBase64` on the native module.
+    term.onBinary((data) => latest.current.onData(data));
+
+    // The mode flags: read on demand for scroll routing, pushed over the bridge when they change
+    // (T11's ribbon). xterm exposes them read-only (`modes`, `buffer`) with no change event, so the
+    // watch is the buffer-switch event plus a peek after every DECSET/DECRST — the handlers return
+    // false so xterm still applies them, and the microtask runs after the write chunk has been
+    // fully parsed, when `term.modes` is up to date.
+    const currentModes = (): ModeSignal => ({
+      altScreen: term.buffer.active.type === 'alternate',
+      mouseReporting: term.modes.mouseTrackingMode !== 'none',
+      decckm: term.modes.applicationCursorKeysMode,
+    });
+    let reportedModes: ModeSignal | null = null;
+    const reportModes = () => {
+      const next = currentModes();
+      if (reportedModes !== null && modesEqual(reportedModes, next)) return;
+      reportedModes = next;
+      console.log('[terminal] modes', JSON.stringify(next));
+      latest.current.onModes(next);
+    };
+    term.buffer.onBufferChange(() => reportModes());
+    const peek = () => {
+      queueMicrotask(reportModes);
+      return false; // ours is a peek, not a handler — xterm's own must still run
+    };
+    term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, peek);
+    term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, peek);
+
+    const teardownTouch = bindTouch(term, currentModes);
 
     term.parser.registerOscHandler(52, (data) => {
       const text = parseOsc52(data);
@@ -263,11 +317,180 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     observer.observe(host.current!);
     resize();
     latest.current.onBoot();
+    reportModes(); // the baseline: a webview that just booted owes T11 the current state
 
     return () => {
       clearTimeout(settle);
       observer.disconnect();
+      teardownTouch();
       term.dispose();
+    };
+  }
+
+  /**
+   * The §4.3 touch layer: any *moving* touch is a scroll — one or two fingers alike — while a
+   * stationary long-press stays WebKit's, so the T4 selection path survives untouched. Movement
+   * under the slop is left entirely alone (no preventDefault), which is exactly the window WebKit
+   * needs to begin a long-press; past the slop the touch is claimed and every further move is
+   * cancelled, which is also what kills WebKit's own pending gestures for it.
+   *
+   * Routing per notch, decided fresh from the mode flags each time pixels are spent:
+   * - `wheel`: a synthetic WheelEvent at the finger's coordinates, dispatched at xterm. Checked in
+   *   the xterm 6 source rather than assumed: its wheel listener feeds CoreMouseService, which
+   *   derives the cell from `clientX/clientY` and encodes per the negotiated protocol (SGR via
+   *   `onData`, legacy DEFAULT via `onBinary`) — so the encoding is xterm's, not reimplemented
+   *   here, and `deltaMode: DOM_DELTA_LINE, deltaY: ±1` is exactly one report. Its always-on
+   *   listener even downgrades a wheel to arrows itself for a protocol with no wheel (X10).
+   * - `arrows`: one DECCKM-aware arrow per notch, through the same `onData` bridge as keystrokes.
+   * - `local`: `term.scrollLines`, the public scrollback API.
+   */
+  function bindTouch(term: Terminal, currentModes: () => ModeSignal) {
+    const el = host.current!;
+    let pan: 'idle' | 'pending' | 'panning' = 'idle';
+    let panX = 0;
+    let panY = 0;
+    let carry = 0;
+    let tracker = new VelocityTracker();
+    let coast: number | null = null;
+
+    // Measured, not asked for: the screen element is exactly `rows` cells tall, and xterm's cell
+    // metrics live on internal services.
+    const cellHeight = () => {
+      const screen = term.element?.querySelector('.xterm-screen');
+      return screen && term.rows > 0 ? screen.getBoundingClientRect().height / term.rows : 0;
+    };
+
+    /** Turns accumulated pixels into notches and routes them. `x`/`y` is where the finger is —
+     *  where a wheel report has to land. */
+    const spend = (dy: number, x: number, y: number) => {
+      const taken = takeNotches(carry, dy, cellHeight());
+      carry = taken.carry;
+      if (taken.notches === 0) return;
+      const modes = currentModes();
+      const route = scrollRoute(modes);
+      const up = taken.notches > 0; // finger down the glass = toward earlier content
+      console.log('[terminal] scroll', route, taken.notches);
+      if (route === 'local') {
+        term.scrollLines(-taken.notches);
+        return;
+      }
+      for (let i = 0; i < Math.abs(taken.notches); i++) {
+        if (route === 'wheel') {
+          term.element?.dispatchEvent(
+            new WheelEvent('wheel', {
+              deltaY: up ? -1 : 1,
+              deltaMode: WheelEvent.DOM_DELTA_LINE,
+              clientX: x,
+              clientY: y,
+              cancelable: true,
+            }),
+          );
+        } else {
+          latest.current.onData(arrowKey(up, modes.decckm));
+        }
+      }
+    };
+
+    const stopCoast = () => {
+      if (coast !== null) cancelAnimationFrame(coast);
+      coast = null;
+    };
+
+    /** Momentum: spend `distance(now) − distance(already spent)` per frame off the analytic decay
+     *  curve, so 60Hz and 120Hz walk the same offsets (proved in scroll-model.test.ts). The wheels
+     *  keep landing where the finger last was. */
+    const startCoast = (v0: number, x: number, y: number) => {
+      if (Math.abs(v0) < FLICK_MIN_VELOCITY) return;
+      console.log('[terminal] coast start', v0.toFixed(3), 'px/ms');
+      const t0 = performance.now();
+      let spent = 0;
+      const step = () => {
+        const t = performance.now() - t0;
+        const d = coastDistance(v0, t);
+        spend(d - spent, x, y);
+        spent = d;
+        coast =
+          Math.abs(coastVelocity(v0, t)) < COAST_MIN_VELOCITY ? null : requestAnimationFrame(step);
+      };
+      coast = requestAnimationFrame(step);
+    };
+
+    const touchStart = (ev: TouchEvent) => {
+      if (coast !== null) {
+        // §4.3: a touch during the coast stops it and does nothing else — not a tap, not a
+        // long-press, not a new pan. preventDefault is what makes WebKit agree about the rest.
+        stopCoast();
+        pan = 'idle';
+        ev.preventDefault();
+        return;
+      }
+      const t = ev.touches[0];
+      if (pan !== 'idle') {
+        // A second finger joining a pan: same scroll, rebased so the handover does not jump.
+        panX = t.clientX;
+        panY = t.clientY;
+        return;
+      }
+      pan = 'pending';
+      panX = t.clientX;
+      panY = t.clientY;
+      carry = 0;
+      tracker = new VelocityTracker();
+      tracker.add(ev.timeStamp, t.clientY);
+    };
+
+    const touchMove = (ev: TouchEvent) => {
+      const t = ev.touches[0];
+      if (pan === 'pending') {
+        // Once WebKit has begun a selection, the moves are its drag handles, not a pan (T4).
+        if (document.getSelection()?.isCollapsed === false) {
+          pan = 'idle';
+          return;
+        }
+        if (Math.hypot(t.clientX - panX, t.clientY - panY) < PAN_SLOP_PX) return;
+        pan = 'panning';
+        panY = t.clientY; // the slop is spent on deciding, not scrolled
+        tracker = new VelocityTracker();
+        tracker.add(ev.timeStamp, t.clientY);
+        ev.preventDefault();
+        return;
+      }
+      if (pan !== 'panning') return;
+      ev.preventDefault();
+      const dy = t.clientY - panY;
+      panX = t.clientX;
+      panY = t.clientY;
+      tracker.add(ev.timeStamp, t.clientY);
+      spend(dy, t.clientX, t.clientY);
+    };
+
+    const touchEnd = (ev: TouchEvent) => {
+      if (ev.touches.length > 0) {
+        // One of two fingers lifted: keep panning on the survivor, rebased.
+        panX = ev.touches[0].clientX;
+        panY = ev.touches[0].clientY;
+        return;
+      }
+      if (pan === 'panning') startCoast(tracker.velocity(), panX, panY);
+      pan = 'idle';
+    };
+
+    const touchCancel = () => {
+      pan = 'idle';
+    };
+
+    // passive: false on start and move — both call preventDefault, and a passive listener's
+    // preventDefault is a console warning, not a cancel.
+    el.addEventListener('touchstart', touchStart, { passive: false });
+    el.addEventListener('touchmove', touchMove, { passive: false });
+    el.addEventListener('touchend', touchEnd);
+    el.addEventListener('touchcancel', touchCancel);
+    return () => {
+      stopCoast();
+      el.removeEventListener('touchstart', touchStart);
+      el.removeEventListener('touchmove', touchMove);
+      el.removeEventListener('touchend', touchEnd);
+      el.removeEventListener('touchcancel', touchCancel);
     };
   }
 

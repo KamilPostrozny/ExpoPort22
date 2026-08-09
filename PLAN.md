@@ -262,12 +262,38 @@ the screen — through the same path the output takes, which keeps the replay in
 native `TextInput` lands in T6/T7. The `:2222` pin from the mismatch test is still on the phone,
 harmless — nothing else uses that endpoint.
 
-**T6 — Scroll gesture system** deps: T4, T5
+**T6 — Scroll gesture system** ✅ implemented 2026-08-09 (not device-verified) · deps: T4, T5
 Touch layer in DOM component: pan-always-scrolls, notch = cell height, three-way routing
 (wheel-at-finger-cell w/ negotiated encoding, alt-screen arrows DECCKM-aware, local scrollback),
 frame-rate-independent momentum, touch-stops-coast. Keep encoding decision inside xterm.js
 side where the protocol is known. *Accept*: `less`, `htop` (mouse on), and plain shell all
 scroll correctly; flick behaves same at 60/120Hz.
+Landed: `src/scroll-model.ts` (every decision, pure and tested in `src/scroll-model.test.ts`:
+three-way routing, px→notch accumulation with carried remainder, DECCKM arrow bytes, analytic
+exponential momentum with a proved 60/120Hz equivalence, release-velocity tracker), the touch
+layer + mode watch in `src/terminal.tsx`, and an `onModes` log consumer in `src/app/terminal.tsx`.
+Decisions: wheel encoding is **not** reimplemented — checked in the xterm 6 sources, a synthetic
+`WheelEvent` dispatched at the finger's `clientX/Y` runs xterm's own CoreMouseService, which
+derives the cell and encodes per the negotiated protocol (SGR out via `onData`, legacy DEFAULT via
+`onBinary`, now both forwarded onto the data bridge; a DEFAULT report past column 95 would be
+UTF-8-mangled by native `send` — ponytail-marked, `sendBase64` is the upgrade). Arrows and local
+scrollback do *not* go through synthetic wheels: `arrowKey` (3 tested lines) through the keystroke
+bridge and public `term.scrollLines` are simpler than relying on xterm's fallback listener chain.
+Pan-beats-drag-select is a slop rule: under 8px of travel the touch is left entirely alone — the
+window WebKit needs to begin its long-press (T4) — past it the touch is claimed and every move
+preventDefaulted; once a selection exists, moves are its drag handles and the pan stands down.
+Momentum spends `distance(now) − distance(spent)` per rAF off the analytic curve `v0·τ(1−e^(−t/τ))`
+(τ=500ms ≈ iOS's own 0.998/ms — a hardware-tuning knob, like the flick thresholds); a touch during
+the coast cancels it and is preventDefaulted into doing nothing else. Mode signal for T11
+(`{altScreen, mouseReporting, decckm}` via `onModes`, `ModeSignal` in `src/scroll-model.ts`): xterm
+exposes the flags read-only (`modes`, `buffer.active.type`) with no change event, so the watch is
+`buffer.onBufferChange` plus pass-through CSI `?h`/`?l` handlers that peek after the parse settles;
+fired on change and once per boot as the baseline. One export-time find: a `'use dom'` module
+refuses re-export statements, so `ModeSignal` is imported from `@/scroll-model`, not `@/terminal`.
+Verified: `bun test` (18), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Not walked
+on hardware** — the device cases are TESTS.md §T6 (T6.1–T6.9). Still open besides that: the tuning
+constants (τ, flick/stop thresholds, slop) are guesses until a thumb meets them; `sendBase64` if a
+pre-SGR mouse app past column 95 ever matters; T7 still owes the native `TextInput` keyboard move.
 
 **T7 — Key bar core** deps: T5
 Glass bar (iOS blur / Android flush): ⋯ circle, pill Ctrl·Esc·Tab·Paste + arrows button,
