@@ -23,7 +23,7 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { parseAnsi, type SpanLine } from '@/ansi-spans';
 import {
@@ -92,6 +92,7 @@ import UploadSheet from '@/upload-sheet';
  */
 export default function SessionScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { fontSize, configureTmux, host, lastUploadDir } = useSettings();
   const session = useSession();
   const tmux = useTmux();
@@ -587,7 +588,12 @@ export default function SessionScreen() {
         style={styles.screen}
         // 'padding' is the iOS behaviour; Android sizes the window itself (T3's sibling will
         // revisit when the bar rides Gboard per §4.10).
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        // KAV measures its own top from `onLayout`, which is *parent-relative*: this one lives
+        // inside the SafeAreaView's padding box, so its y reads 0 while the view really starts
+        // `insets.top` down the screen. Without this the padding is short by exactly that inset
+        // — about one bar height, which put the whole bar behind the keyboard (T13/T6.2).
+        keyboardVerticalOffset={insets.top}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
           screen, so a `bottom` measured from the bar holds whether the keyboard is up or not. */}
       <View style={styles.screen}>

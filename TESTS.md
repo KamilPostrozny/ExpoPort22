@@ -50,14 +50,18 @@ per spend and `[terminal] modes {...}` per mode change.
 - **Expect**: viewport scrolls locally, ~one line per cell height of travel, content follows
   the finger's direction; log says route `local`; nothing is sent to the PTY (no stray input
   at the prompt).
-- [ ]
+- [x]
 
 ### T6.2 — `less` scrolls by arrows, both directions
 - **Setup**: `less /etc/services` (alt screen, no mouse, no DECCKM).
 - **Steps**: pan up (toward earlier lines), then pan down.
 - **Expect**: `less` moves line-by-line both ways; log route `arrows`; `less` shows no `ESC O A`
   garbage — bytes are `CSI A`/`CSI B`.
-- [ ]
+- [x] — with a correction to the premise: on the test host (`10.42.0.71`, Arch, `less` 600+)
+  `less` *does* request application cursor keys, so `[terminal] modes` reads
+  `{"altScreen":true,"mouseReporting":false,"decckm":true}` and the app correctly sent
+  `ESC O A` / `ESC O B`. Byte form tracking the live DECCKM flag is the real assertion and it
+  holds; "less = DECCKM off" is not true of every `less` build.
 
 ### T6.3 — `htop` with mouse on: wheel at the finger's cell
 - **Setup**: `htop` (requests mouse + SGR).
