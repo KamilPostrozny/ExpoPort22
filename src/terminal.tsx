@@ -198,6 +198,15 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     terminal.current = term;
     fit.current = fitAddon;
 
+    // A long-press selection is the system's, not xterm's, so it fires no xterm event and leaves no
+    // other trace: without this line there is no way to tell "the gesture never started" from "it
+    // selected and the menu did not draw".
+    const onSelectionChange = () => {
+      const text = document.getSelection()?.toString() ?? '';
+      console.log('[terminal] selection', JSON.stringify(text.slice(0, 40)));
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+
     term.onData((data) => latest.current.onData(data));
     term.onBell(() => latest.current.onBell());
 

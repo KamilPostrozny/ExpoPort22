@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 
 import { useTheme } from '@/hooks/use-theme';
 import { hydrateSettings } from '@/settings';
@@ -33,6 +34,16 @@ export default function RootLayout() {
 
 function Root() {
   const theme = useTheme();
+
+  // Which app is in front decides what a screenshot from the laptop will actually contain, and the
+  // person switching apps is holding the same phone — so the app says it itself.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) =>
+      console.log('[app]', state),
+    );
+    return () => subscription.remove();
+  }, []);
+
   return (
     <>
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />

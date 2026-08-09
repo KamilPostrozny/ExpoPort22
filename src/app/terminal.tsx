@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
@@ -18,6 +18,13 @@ export default function TerminalHarness() {
   const terminal = useRef<TerminalHandle>(null);
   const [status, setStatus] = useState('—');
 
+  // The screen says when it is on and off screen, because the person tapping is on the same phone
+  // and cannot narrate: the log is the only way to know which screen a screenshot will show.
+  useEffect(() => {
+    console.log('[terminal] screen open');
+    return () => console.log('[terminal] screen closed');
+  }, []);
+
   const write = (text: string) => terminal.current?.write(toBase64(new TextEncoder().encode(text)));
 
   /** On screen and in the Metro console both — the console is the only one of the two that can be
@@ -32,7 +39,9 @@ export default function TerminalHarness() {
     '\x1b[38;5;213m  1 \x1b[0m\x1b[1mexport default function\x1b[0m \x1b[33mTerminalView\x1b[0m() {\r\n',
     '\x1b[38;5;213m  2 \x1b[0m  \x1b[32m// ┌───────────── box drawing ─────────────┐\x1b[0m\r\n',
     '\x1b[38;5;213m  3 \x1b[0m  \x1b[31mconst\x1b[0m nerd = "   ";\r\n',
-    '\x1b[7m  NORMAL  src/terminal.tsx                        3,1   All \x1b[0m\r\n',
+    // 31 columns wide on purpose: the narrowest this app gets is 33, and a status line that wraps
+    // says nothing about the terminal, only about the demo string.
+    `\x1b[7m${' NORMAL  terminal.tsx'.padEnd(24)}3,1 All\x1b[0m\r\n`,
     'link: \x1b]8;;https://docs.expo.dev/guides/dom-components/\x1b\\Expo DOM components\x1b]8;;\x1b\\\r\n',
   ].join('');
 
