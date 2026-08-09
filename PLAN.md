@@ -131,7 +131,7 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 
 Order respects dependencies; ★ = riskiest, front-loaded.
 
-**T1 — Scaffold** ✅ code-complete, device-unverified · deps: none
+**T1 — Scaffold** ✅ done, verified on device 2026-08-09 · deps: none
 `create-expo` (⚠ shim npm 11 — npm 12 leaves empty dir, see memory), SDK 57, TS, Expo Router,
 dev-client config, `app.json` (portrait+landscape, phone-only, camera usage string), fonts
 copied from design project + loaded, theme module (4 flavours × 26 colours, semantic roles,
@@ -143,10 +143,11 @@ chrome roles, `colorSchemeNotification`), `src/settings.ts` (singleton +
 `src/app/_layout.tsx` (font load + hydrate behind the splash), `src/app/index.tsx`
 (throwaway palette/font harness, T5 replaces it with Setup), `src/core.test.ts` (`bun test`).
 Expo template screens, demo components and demo assets deleted. Verified: `bun test`,
-`tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Still open**: no prebuild/dev
-build has been run, so nothing is confirmed on hardware — first device run happens in T2.
+`tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20, and on an iPhone — fonts render, the
+flavour picker restyles live. The palette later moved to `@catppuccin/palette` (see AGENTS.md);
+all 104 hexes were checked identical first, so nothing on screen changed.
 
-**T2 ★ — expo-ssh native module, iOS** ✅ code-complete, device-unverified · deps: T1
+**T2 ★ — expo-ssh native module, iOS** ✅ done, verified on device 2026-08-09 · deps: T1
 Swift Expo Module wrapping Citadel: connect/disconnect, host-key callback→JS promise,
 ed25519 pubkey auth (seed passed from JS), shell channel (PTY, `TERM`, resize, base64 data
 events both ways), exec channel (run, collect stdout, exit code), SFTP (mkdir mode, readdir
@@ -162,11 +163,13 @@ imports directly (NIOSSH/Crypto/NIOCore/Logging) — through React Native's `spm
 CocoaPods has no SPM support of its own. iOS deployment target 17.0 (Citadel's floor) via
 `expo-build-properties`. Shell output is base64 (a read can split a UTF-8 sequence), input is a
 plain string. Host-key answers that arrive before the handshake asks are held, not dropped.
-Verified: `bun test`, `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20, podspec parses.
-**Still open**: nothing built or run — first `pod install`/device run is the acceptance walk. RN
-warns that SPM products under static linking can fail to link; if it does, the fix is
-`USE_FRAMEWORKS=dynamic` (`expo-build-properties` `ios.useFrameworks: "dynamic"`), not tried yet.
-Android module is a name-only stub until T3.
+Verified: `bun test`, `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20, podspec parses,
+and the whole accept list walked against a real host on an iPhone — connect with the TOFU
+fingerprint prompt, `ls` over an exec channel, shell I/O, and a file into `/tmp/port22` confirmed
+by `listDirectory`. RN's static-linking warning for SPM products never bit; `USE_FRAMEWORKS=dynamic`
+was not needed. **Still open**: Android is a name-only stub until T3. Note the harness reports into
+on-screen state rather than `console.log` — §7 forbids logging host, session bytes or filenames
+even in debug, so Metro can only ever show that JS did not throw.
 
 **T3 ★ — expo-ssh native module, Android** deps: T2 (API fixed by T2)
 Same TS API, Kotlin + sshj impl. *Accept*: same demo passes on Android.
@@ -237,9 +240,14 @@ themed everywhere via roles. *Accept*: design-side-by-side review of every scree
 platforms, all four flavours.
 
 **T13 — Device verification + builds** deps: all
-Walk §4 acceptance criteria on physical iPhone & Android; eas/local build profiles;
-document sideload (iOS) and APK install. *Accept*: checklist in repo with every item
-ticked on hardware.
+Walk §4 acceptance criteria on physical iPhone & Android. *Accept*: checklist in repo with every
+item ticked on hardware.
+The iOS half of the build/sideload story landed early, in T2, because nothing else could be
+verified without it: `.github/workflows/ipa.yml` builds an unsigned Debug dev client on
+`macos-26`/Xcode 26.6 (older toolchains cannot compile `expo-modules-jsi`) and publishes it as the
+rolling `dev` prerelease; `docs/ship.md` is the laptop half — download, netmuxd, `xtool install`,
+which signs with the free Apple ID. Free provisioning expires weekly, so a re-sign is a re-run of
+that, not a rebuild. Android APK install is still unwritten.
 
 ---
 
