@@ -429,13 +429,48 @@ device cases are TESTS.md §T9 (T9.1–T9.10; T9.6/T9.7 need T10's UI to drive, 
 half needs T11). Still open besides that: `move-window -a/-b` needs tmux ≥ 3.2; the
 `session_attached` ceiling above.
 
-**T10 — Tab switcher** deps: T9, T7
+**T10 — Tab switcher** ✅ implemented 2026-08-09 (not device-verified) · deps: T9, T7
 Card grid + snapshot rendering (ANSI→styled text mini-view), zoom-in/out transitions
 (button tap + drag-following bar-swipe-up per prototype `zoomFollow`), select/close/create/
 reorder gestures incl. swipe-to-close rubber-band and drag with dashed slot, new-tab birth
 from +, Done, count header, last-window-ends-session. Android: container-transform + FAB +
 predictive back instead of Safari zoom. *Accept*: all gestures on device, reorder issues
 `move-window`, snapshots refresh while grid open.
+Landed: `src/ansi-spans.ts` (SGR→spans parser + xterm-256 palette computation, tested in
+`src/ansi-spans.test.ts`), `src/switcher-model.ts` (every decision, pure and tested in
+`src/switcher-model.test.ts`: slot geometry and zoom interpolation as fractions of the
+prototype's 402pt design width, the reorder mapping, swipe thresholds, the + birth frame),
+`src/switcher.tsx` (the grid, the cards with their tap/fling/long-press-drag gestures, and
+`useSwitcherCards` — the list kept warm from connect, snapshots on a ~2s beat reusing T9's
+`POLL_MS` while the grid is open), and the zoom state machine + stage wrapper in
+`src/app/terminal.tsx`.
+Decisions: **ANSI parsing is ported minimal, not adopted** — the npm check (AGENTS.md) found
+`anser` already in the tree (react-native's LogBox dependency) and read its API: it resolves
+colours to its own hardcoded palette (RGB strings, or HTML class names), so mapping its output
+back onto the theme's Catppuccin slots means reverse-engineering colour strings; `ansi-parser`
+(dormant ~9 years) and `ansi_up`/`ansi-to-react` (DOM renderers) fit worse. The parser here
+keeps slots symbolic (0–255 or `#hex`) and the theme maps them at render; slots 16–255 are
+xterm's own cube/gray *algorithm*, computed, not a hand-copied table. **The switcher is an
+in-screen overlay, not a router route**: the zoom scales the LIVE terminal surface into a
+specific card slot, which needs both layers in one coordinate space with one shared progress
+value — a modal route would cover the very view that must keep rendering mid-transition. The
+zoom itself is one tested function (`zoomFrame`): height as the clip (the prototype's
+clip-path), radius, and a centre-origin-compensated translate, driven by two shared values
+(progress + finger drift at the prototype's 0.6) from both entries — tabs tap and T7's bar
+swipe-up, whose `onSwitcherDrag` hook grew into `(phase, dx, dy)` for the drag-follow. Reorder
+speaks **tmux indices, never array positions** (`reorderArgs` from the pre-drag list — gapped
+indices shift nothing), the optimistic order holds until `moveWindow` + re-list answer, and
+what tmux did is what the grid then shows. Kills are optimistic and idempotent — the ✕ hit
+rides the card's own tap gesture by position, because a Pressable under an RNGH Tap can
+double-fire and a second `kill-window` against a renumbered index is not a no-op. Closing the
+last window just drops the grid: the PTY dies with the window and T5's §4.9 machine owns the
+screen from there. No haptic on select (§7); the lift has one.
+Verified: `bun test` (106), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Not
+walked on hardware** — the device cases are TESTS.md §T10 (T10.1–T10.14). Still open besides
+that: the Android variants (container-transform, FAB, predictive back — §4.10) are T3-era
+work, untouched; keyboard re-raise on return uses a `focusSignal` counter prop on KeyBar,
+worth a device look; snapshot cards render bg colour per span but no reverse-video/underline
+(deliberate subset).
 
 **T11 — Bar-swipe window switching + ribbon** deps: T9, T7
 Horizontal bar swipe: page-slide cards, rounded corners during drag, name pills strip,

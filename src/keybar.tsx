@@ -74,6 +74,9 @@ export type KeyBarProps = {
   onHeight: (height: number) => void;
   /** Raise the keyboard when this flips true — the session just connected. */
   active: boolean;
+  /** Bump to raise the keyboard again — the switcher closing back onto the terminal (T10), the
+   *  prototype's `kbShown: true` on return. A counter, not a boolean: every close counts. */
+  focusSignal?: number;
   /** T9's derived "tabs available": tmux present AND conf applied (§4.5). False renders no tabs
    *  circle at all — no tmux (or a toggled-off config) is silence, not a message (§7). */
   showTabs: boolean;
@@ -83,10 +86,13 @@ export type KeyBarProps = {
   /** §4.6: an upload in flight. The ⋯ circle tints accent and goes inert — the whole progress
    *  UI. Both flows flip it (quick-attach included, via `useUploadBusy`). */
   sending?: boolean;
-  /** TODO(T10): tabs circle tap opens the switcher. */
+  /** T10: tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
-  /** TODO(T10): bar swipe ↑ with the keyboard already up becomes the drag into the switcher. */
-  onSwitcherDrag?: () => void;
+  /** T10: bar swipe ↑ with the keyboard already up becomes the drag into the switcher — the
+   *  prototype's `zoomFollow`. Fired per move with the pan's translation once the swipe has
+   *  classified as up-with-keyboard-shown, then once with 'end' on release; the screen turns
+   *  dy into zoom progress and decides commit-or-spring-back. Only wired while `showTabs`. */
+  onSwitcherDrag?: (phase: 'move' | 'end', dx: number, dy: number) => void;
   /** TODO(T11): bar swipe ↔ switches tmux window; +1 = next (leftward swipe), −1 = previous. */
   onBarSwipeHorizontal?: (direction: 1 | -1) => void;
 };
@@ -185,6 +191,11 @@ export default function KeyBar(props: KeyBarProps) {
     if (props.active) input.current?.focus();
   }, [props.active]);
 
+  // The switcher closed back onto the terminal: same move (0 = never signalled, skip mount).
+  useEffect(() => {
+    if (props.focusSignal) input.current?.focus();
+  }, [props.focusSignal]);
+
   /**
    * The per-key seam: every typed key passes through here one at a time — chords apply, then the
    * bytes go out. T12's dictation leading-space filter and held-delete repeat are built HERE and
@@ -240,24 +251,43 @@ export default function KeyBar(props: KeyBarProps) {
   // The bar swipe (§4.4): ↓ hides the keyboard, ↑ shows it — or hands over to T10's switcher
   // drag when it is already up. Horizontal is T11's window switch; the hook fires on release.
   // Keys never fire during a swipe: the pan activating cancels the childrens' touches.
+  /** The swipe became T10's switcher drag: every further move is forwarded as zoom progress. */
+  const zooming = useRef(false);
   const pan = Gesture.Pan()
     .runOnJS(true)
     .maxPointers(1)
     .onBegin(() => {
       swipe.current = null;
+      zooming.current = false;
     })
     .onUpdate((e) => {
+      if (zooming.current) {
+        props.onSwitcherDrag?.('move', e.translationX, e.translationY);
+        return;
+      }
       if (swipe.current !== null) return;
       const s = classifyBarSwipe(e.translationX, e.translationY);
       if (s === null) return;
       swipe.current = s;
       if (s === 'down') Keyboard.dismiss();
       else if (s === 'up') {
-        if (input.current?.isFocused()) props.onSwitcherDrag?.(); // TODO(T10)
-        else input.current?.focus();
+        if (input.current?.isFocused()) {
+          // Keyboard already up: this swipe is the drag into the switcher (§4.4) — where there
+          // is a switcher to drag into. Without tmux the gesture is silence, like the button.
+          if (props.showTabs && props.onSwitcherDrag) {
+            zooming.current = true;
+            Keyboard.dismiss(); // the prototype drops the keyboard the moment the grab starts
+            props.onSwitcherDrag('move', e.translationX, e.translationY);
+          }
+        } else input.current?.focus();
       }
     })
     .onEnd((e) => {
+      if (zooming.current) {
+        zooming.current = false;
+        props.onSwitcherDrag?.('end', e.translationX, e.translationY);
+        return;
+      }
       // TODO(T11): the real thresholds (70px, or 30px flicked) and the page-slide live there.
       if (swipe.current === 'horizontal' && Math.abs(e.translationX) > 30) {
         props.onBarSwipeHorizontal?.(e.translationX < 0 ? 1 : -1);

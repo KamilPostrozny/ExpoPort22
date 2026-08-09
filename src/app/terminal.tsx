@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +14,14 @@ import {
   Text,
   View,
 } from 'react-native';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { pushYank } from '@/clipboard';
@@ -30,9 +39,19 @@ import {
   type Session,
 } from '@/session';
 import { endpoint, getSettings, updateSettings, useSettings } from '@/settings';
+import Switcher, { useSwitcherCards, type Card } from '@/switcher';
+import {
+  ZOOM_COMMIT,
+  gridTop,
+  plusFrame,
+  slotFrame,
+  zoomFrame,
+  zoomProgress,
+  type Frame,
+} from '@/switcher-model';
 import TerminalView, { type TerminalHandle } from '@/terminal';
-import { useTmux } from '@/tmux';
-import { deriveConfigStatus, tabsAvailable } from '@/tmux-model';
+import { killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
+import { deriveConfigStatus, tabsAvailable, type TmuxWindow } from '@/tmux-model';
 import { MONO, type Theme } from '@/theme';
 import { pick, sendFile, useUploadBusy, type UploadKind } from '@/upload';
 import { joinPath, sanitizeFilename, stampName } from '@/upload-model';
@@ -134,8 +153,218 @@ export default function SessionScreen() {
     ]);
   };
 
+  /* --- T10: the tab switcher (§4.5) ---
+   *
+   * An in-screen overlay, not an Expo Router route, on purpose: the zoom transition scales the
+   * LIVE terminal surface into a specific card slot and back, which needs the terminal and the
+   * grid in one coordinate space with one shared progress value. A modal route would cover (or
+   * unmount) the very view that has to keep rendering mid-transition. The grid sits behind the
+   * stage; the stage wrapper below animates over it, driven by tested math in switcher-model.
+   */
+  type SwPhase = 'closed' | 'drag' | 'opening' | 'open' | 'closing' | 'birth';
+  const [sw, setSw] = useState<SwPhase>('closed');
+  const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
+  const [focusSignal, setFocusSignal] = useState(0);
+  const scrollY = useRef(0);
+  const prog = useSharedValue(0); // 0 = terminal at rest, 1 = terminal inside its card slot
+  const dragX = useSharedValue(0); // finger drift during the bar-swipe-up follow
+  const alpha = useSharedValue(1); // the stage fades out at the end of the zoom-out, back in first on return
+  const slotSV = useSharedValue<Frame>({ x: 0, y: 0, w: 1, h: 1 });
+  const stageSV = useSharedValue({ w: 390, h: 800 });
+
+  const connected = session.status === 'connected';
+  const showTabs = tabsAvailable(tmux.present, deriveConfigStatus(configureTmux, tmux.config));
+  const { cards, setCards, refresh } = useSwitcherCards(showTabs && connected, sw !== 'closed');
+
+  /** The active window's grid position — tmux's fresher poll first, the list's flag second. */
+  const activePos = () => {
+    const byIndex = cards.findIndex((c) => c.win.index === tmux.windowIndex);
+    if (byIndex >= 0) return byIndex;
+    const byFlag = cards.findIndex((c) => c.win.active);
+    return byFlag >= 0 ? byFlag : 0;
+  };
+
+  /** Grid position → the card's frame in stage coordinates (headroom above the grid, minus the
+   *  grid's own scroll) — where the zoom aims. */
+  const zoomSlot = (pos: number): Frame => {
+    const w = stage?.w ?? 390;
+    const f = slotFrame(pos, w);
+    return { ...f, y: gridTop(w) + f.y - scrollY.current };
+  };
+
+  const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
+  const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
+
+  const finishClose = () => {
+    setSw('closed');
+    setFocusSignal((n) => n + 1); // the prototype re-raises the keyboard on return
+  };
+
+  const commitOpen = () => {
+    setSw('opening');
+    dragX.value = withTiming(0, { duration: 250 });
+    // The prototype fades the surface out only near the end, once it covers its card.
+    alpha.value = withDelay(180, withTiming(0, { duration: 140 }));
+    prog.value = withTiming(1, ZOOM_OUT, (done) => {
+      if (done) runOnJS(setSw)('open');
+    });
+  };
+
+  const springBack = () => {
+    setSw('closing');
+    alpha.value = withTiming(1, { duration: 120 });
+    dragX.value = withTiming(0, { duration: 200 });
+    prog.value = withTiming(0, ZOOM_IN, (done) => {
+      if (done) runOnJS(finishClose)();
+    });
+  };
+
+  const openSwitcher = () => {
+    if (sw !== 'closed' || stage === null) return;
+    console.log('[switcher] open (tabs tap)');
+    setOpen('none');
+    Keyboard.dismiss();
+    slotSV.value = zoomSlot(activePos());
+    commitOpen();
+  };
+
+  // The bar-swipe-up drag-follow (prototype `zoomFollow`): progress tracks the finger, release
+  // past the threshold commits, anything less springs back.
+  const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number) => {
+    if (stage === null) return;
+    if (phase === 'move') {
+      if (sw === 'closed') {
+        console.log('[switcher] open (bar drag)');
+        setOpen('none');
+        slotSV.value = zoomSlot(activePos());
+        setSw('drag');
+      } else if (sw !== 'drag') return;
+      prog.value = zoomProgress(dy, stage.w);
+      dragX.value = dx;
+    } else if (sw === 'drag') {
+      if (prog.value > ZOOM_COMMIT) commitOpen();
+      else springBack();
+    }
+  };
+
+  const closeTo = (pos: number) => {
+    slotSV.value = zoomSlot(pos);
+    springBack();
+  };
+
+  const selectCard = (pos: number, win: TmuxWindow) => {
+    if (sw !== 'open') return;
+    console.log('[switcher] select', win.id);
+    void selectWindow(win.index); // §7: no haptic on tab select
+    closeTo(pos);
+  };
+
+  const killCard = (win: TmuxWindow) => {
+    if (!cards.some((c: Card) => c.win.id === win.id)) return; // already killed: indices renumber
+    console.log('[switcher] kill', win.id);
+    const remaining = cards.filter((c: Card) => c.win.id !== win.id);
+    setCards(remaining); // optimistic: the card leaves before tmux answers
+    void killWindow(win.index);
+    if (remaining.length === 0) {
+      // Last window: the shell behind the PTY dies with it, the §4.9 state machine takes the
+      // screen. Just drop the grid — the Disconnected face is about to cover everything.
+      prog.value = 0;
+      dragX.value = 0;
+      alpha.value = 1;
+      setSw('closed');
+    }
+  };
+
+  const birthCard = () => {
+    if (sw !== 'open' || stage === null) return;
+    console.log('[switcher] new window');
+    void newWindow(); // tmux switches the attached client to it, so the terminal lands on it
+    slotSV.value = plusFrame(stage.w, stage.h);
+    prog.value = 1; // teleport the (invisible) surface into the + button…
+    setSw('birth');
+    alpha.value = withTiming(1, { duration: 200 });
+    prog.value = withTiming(0, { duration: 400, easing: Easing.out(Easing.cubic) }, (done) => {
+      if (done) runOnJS(finishClose)(); // …and grow it to full screen, Safari's new-tab birth
+    });
+  };
+
+  // The session went away (backgrounded, killed, last window closed): the grid has nothing to
+  // stand on. Reset without animation; the §4.9 overlay is already up.
+  useEffect(() => {
+    if (!connected && sw !== 'closed') {
+      prog.value = 0;
+      dragX.value = 0;
+      alpha.value = 1;
+      setSw('closed');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+
+  // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
+  // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
+  // compensated for RN's centre-origin scale — all from the one tested function.
+  const wrapperStyle = useAnimatedStyle(() => {
+    const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value);
+    return {
+      height: f.height,
+      borderRadius: f.radius,
+      opacity: alpha.value,
+      transform: [{ translateX: f.translateX }, { translateY: f.translateY }, { scale: f.scale }],
+    };
+  });
+
+  // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
+  // with it; border width divided by scale so it reads ~3pt on screen throughout.
+  const ringStyle = useAnimatedStyle(() => {
+    const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value);
+    return {
+      opacity: f.ringOpacity,
+      borderRadius: f.radius,
+      borderWidth: prog.value > 0 ? 3 / f.scale : 0,
+    };
+  });
+
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
+      {/* The measured area both layers share: the switcher grid behind, the zooming stage
+          wrapper in front, one coordinate space. */}
+      <View
+        style={styles.screen}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          setStage({ w: width, h: height });
+          stageSV.value = { w: width, h: height };
+        }}>
+      {sw !== 'closed' && stage !== null && (
+        <Switcher
+          theme={theme}
+          stageW={stage.w}
+          cards={cards}
+          interactive={sw === 'open'}
+          onSelect={selectCard}
+          onKill={killCard}
+          onNew={birthCard}
+          onDone={() => closeTo(activePos())}
+          onMove={async ({ from, to }) => {
+            await moveWindow(from, to);
+            await refresh(true); // landing indices are tmux's call (renumbering) — re-list
+          }}
+          onScrollY={(y) => {
+            scrollY.current = y;
+          }}
+        />
+      )}
+
+      {/* The stage wrapper the zoom animates: at rest an invisible identity, mid-transition the
+          clipped, scaled, ringed terminal surface riding into its card slot. */}
+      <Animated.View
+        pointerEvents={sw === 'closed' ? 'auto' : 'none'}
+        style={[
+          stage === null
+            ? styles.screen
+            : [styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }],
+          stage !== null && wrapperStyle,
+        ]}>
       <KeyboardAvoidingView
         style={styles.screen}
         // 'padding' is the iOS behaviour; Android sizes the window itself (T3's sibling will
@@ -183,13 +412,16 @@ export default function SessionScreen() {
         open={open}
         onOpenChange={setOpen}
         onHeight={setBarHeight}
-        active={session.status === 'connected'}
+        active={connected}
+        focusSignal={focusSignal}
         sending={sending}
         // §4.5: the tabs button exists only with tmux present AND the config applied — so the
         // Settings toggle going off takes the button with it, and a host without tmux never
         // shows one (§7: silence, not a message).
-        showTabs={tabsAvailable(tmux.present, deriveConfigStatus(configureTmux, tmux.config))}
+        showTabs={showTabs}
         windowIndex={tmux.windowIndex ?? undefined}
+        onTabsTap={openSwitcher}
+        onSwitcherDrag={onSwitcherDrag}
       />
 
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the
@@ -223,6 +455,14 @@ export default function SessionScreen() {
       )}
       </View>
       </KeyboardAvoidingView>
+
+      {/* the transition's accent ring, clipping and scaling with the wrapper */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
+      />
+      </Animated.View>
+      </View>
 
       {pendingUpload !== null && (
         <UploadSheet
@@ -320,6 +560,7 @@ function Status({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  stageWrapper: { position: 'absolute', top: 0, left: 0, overflow: 'hidden' },
   terminal: { flex: 1 },
   status: {
     position: 'absolute',

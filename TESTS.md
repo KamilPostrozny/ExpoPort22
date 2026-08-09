@@ -455,3 +455,130 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   the absolute path plus **one trailing space**, unexecuted; the path also appears as an
   "upload path" clipboard slot.
 - [ ]
+
+## T10 — Tab switcher
+
+All cases: a real host with configured tmux, session attached (`tmux attach` or `tmux` typed
+into the phone session), at least three windows made beforehand (`tmux new-window` twice from
+the shell) unless said otherwise. The switcher logs every action as `[switcher] …`; T9's
+`[ssh] exec` lines show the `select/kill/new/move-window` commands going out on exec channels,
+never through the PTY. Reorder assertions read `tmux list-windows` on a laptop attached to the
+same session.
+
+### T10.1 — Open via tabs tap: terminal zooms into its card slot
+- **Setup**: attached, three windows, window 2 active (badge shows 2).
+- **Steps**: tap the tabs circle.
+- **Expect**: keyboard drops; the live terminal shrinks into the grid slot of the *active*
+  card (second position if order is 1·2·3) with rounded corners, an accent ring riding the
+  transition, and the bottom (bar area) clipped away — then fades, leaving the grid. Log:
+  `[switcher] open (tabs tap)`.
+- [ ]
+
+### T10.2 — Open via bar-swipe-up: progress tracks the finger, cancel springs back
+- **Setup**: keyboard up (tap the bar first if not).
+- **Steps**: touch the bar and drag up slowly ~40pt, hold; wiggle up and down without
+  releasing; release. Then repeat, dragging past half the screen before releasing.
+- **Expect**: first release (below the ~25% commit threshold): the terminal has shrunk part-way
+  *following the finger* — growing and shrinking as the finger wiggles, drifting sideways with
+  it — and springs back to full screen; the keyboard was dismissed when the drag began. Second
+  release: the shrink completes into the active card's slot and the grid stays. Log:
+  `[switcher] open (bar drag)`. With the keyboard down, the same swipe only raises the
+  keyboard (T7.9 behaviour unchanged).
+- [ ]
+
+### T10.3 — Grid shows every window: name, directory, colour snapshot
+- **Setup**: window 1 at a shell in `~`, window 2 running `ls --color` output in `/tmp`,
+  window 3 in `vim`.
+- **Steps**: open the switcher; look.
+- **Expect**: three cards in a 2-column grid over the crust background, each with the tmux
+  window name under it and the directory leaf under that (`tmp` for `/tmp`); card 2's snapshot
+  shows `ls --color`'s colours (blue directories on the card, not grey text); card 3 shows
+  vim's UI shape. Text is JBMono, sized so the pane's full width fits the card.
+- [ ]
+
+### T10.4 — Active card wears the accent ring
+- **Steps**: open the switcher from window 2; look; Done; `tmux select-window -t :1` from the
+  laptop; open again.
+- **Expect**: the active card (and only it) has the accent-coloured 2pt ring and accent-tinted
+  name; after the laptop switch, the ring is on window 1's card (one ~2s beat allowed).
+- [ ]
+
+### T10.5 — Tap selects: `select-window` + zoom back down
+- **Steps**: from window 1, open the switcher, tap window 3's card.
+- **Expect**: the terminal zooms out of card 3's slot back to full screen (ring fading out),
+  the PTY now shows window 3 (tmux redrew it under the zoom), the badge says 3, the keyboard
+  comes back up. Log shows `[switcher] select @N` and an exec `select-window -t :3` — nothing
+  typed into the PTY.
+- [ ]
+
+### T10.6 — Snapshots refresh while the grid is open
+- **Setup**: in a background window run `watch date`; open the switcher from another window.
+- **Steps**: keep the grid open ~10s, watching the `watch date` card.
+- **Expect**: the card's clock ticks — the snapshot re-captures on the ~2s beat without the
+  grid being touched. Scroll position and card order do not jump when it refreshes.
+- [ ]
+
+### T10.7 — ✕ closes a window
+- **Steps**: open the switcher; tap the ✕ on a non-active card.
+- **Expect**: the card animates out and the grid reflows (header count drops by one);
+  `tmux list-windows` on the laptop shows the window gone; the exec log shows `kill-window`.
+  The remaining cards keep their order.
+- [ ]
+
+### T10.8 — Left fling closes, right swipe rubber-bands
+- **Steps**: on one card, drag left slowly past half the card width and release. On another,
+  flick left fast (~50pt). On a third, drag right and release.
+- **Expect**: both leftward gestures close (the slow one rides the finger 1:1, fading as it
+  goes; the flick closes from less travel because it was quick); the rightward drag moves the
+  card only a third of the finger's travel and springs back — rightward never closes. A
+  vertical drag on a card scrolls the grid instead.
+- [ ]
+
+### T10.9 — Long-press lifts, drag reorders, drop issues `move-window`
+- **Setup**: windows 1·2·3 in order; laptop watching `watch -n1 'tmux list-windows'`.
+- **Steps**: press and hold card 1 (~300ms) until it lifts (grows slightly, tilts, drops a
+  shadow, ring turns mauve — with a haptic tick on the lift); drag it over slot 3 — the other
+  cards spring aside and a dashed placeholder marks the target slot; release.
+- **Expect**: the card settles into slot 3; log shows `[switcher] reorder {"from":1,"to":3}`
+  and an exec `move-window -a -s :1 -t :3`; the laptop's `list-windows` shows the new order;
+  the phone's grid order survives the next snapshot beat (no jump back). Dropping a card back
+  on its own slot runs no command at all.
+- [ ]
+
+### T10.10 — + births a new terminal out of the button
+- **Steps**: open the switcher, tap +.
+- **Expect**: a new terminal grows out of the + button's corner to full screen (Safari
+  new-tab); the PTY is sitting at a fresh shell in a new tmux window (tmux switched the
+  attached client); exec log shows `new-window`; the badge shows the new index; reopening the
+  switcher shows one more card and the header count up by one.
+- [ ]
+
+### T10.11 — Done ✓ returns to the active window
+- **Steps**: open the switcher; scroll or do nothing; tap the ✓ circle.
+- **Expect**: the terminal zooms out of the *active* card's slot back to full screen; same
+  window as before, nothing selected, no tmux command in the log; keyboard returns.
+- [ ]
+
+### T10.12 — Closing the last window ends the session
+- **Setup**: one window left (header says "1 Tab").
+- **Steps**: ✕ (or fling) the last card.
+- **Expect**: the grid drops, `kill-window` goes out, tmux ends the session, the shell behind
+  the PTY exits — and the §4.9 **Disconnected** screen appears with its Reconnect/Setup
+  buttons (the T5 state machine, not a crash, not a frozen grid). Reconnect gets a plain
+  shell, per §4.9 no auto-attach.
+- [ ]
+
+### T10.13 — No haptic on tab select
+- **Steps**: with the phone in hand, tap a card to select it; then long-press one to lift it.
+- **Expect**: selecting fires **no** haptic (§7 says exactly so — deliberate); the lift does
+  (it is a pick-up, not a select). The tabs *circle* on the bar still ticks like every bar
+  key (T7's rule, unchanged).
+- [ ]
+
+### T10.14 — Header count tracks reality
+- **Steps**: open the switcher with 3 windows; from the laptop `tmux new-window`; wait a
+  beat; then `tmux kill-window -t :4`; wait.
+- **Expect**: "3 Tabs" → "4 Tabs" → "3 Tabs" within ~2s each, with cards appearing/leaving to
+  match — the grid follows tmux even when the phone did not cause the change. (One window
+  reads "1 Tab", not "1 Tabs".)
+- [ ]
