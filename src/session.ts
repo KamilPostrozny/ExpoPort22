@@ -15,6 +15,7 @@ import { useSyncExternalStore } from 'react';
 
 import type { HostKeyEvent } from '../modules/expo-ssh/src/ExpoSSH.types';
 import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
+import { toBase64 } from '@/base64';
 import { forgetHostKey, hostKeyVerdict, pinHostKey, pinnedHostKey } from '@/host-keys';
 import { loadOrCreateKey } from '@/keys';
 import { endpoint, getSettings } from '@/settings';
@@ -33,6 +34,9 @@ const MAX_AUTOMATIC_ATTEMPTS = 2;
  *  the webview died redraws only on its next output; the upgrade path is asking tmux to redraw,
  *  which is T9's side channel and not worth a state machine of our own before then. */
 const MAX_HISTORY_CHUNKS = 500;
+
+/** Home the cursor, clear the screen, clear the scrollback. */
+const CLEAR_SCREEN = toBase64(new TextEncoder().encode('\x1b[H\x1b[2J\x1b[3J'));
 
 export type Session =
   /** No connection, and none wanted: the user is on Setup. */
@@ -92,6 +96,10 @@ export async function connect(): Promise<void> {
     await ExpoSSH.connect(settings.host, settings.port, settings.username, key.seedBase64);
     await ExpoSSH.startShell(size.cols, size.rows, TERM);
     shellOpen = true;
+    // A new shell starts on a clean screen. Without this the last session's rows are still there,
+    // and the new login prints underneath them — two banners, of which only the lower one is true.
+    // It goes through `emit`, so a terminal attaching later replays the clear before the output.
+    emit(CLEAR_SCREEN);
     failures = 0;
     set({ status: 'connected' });
     // A plain shell, never `tmux attach` of our own accord (§4.9) — the startup command is the
@@ -166,11 +174,15 @@ export function attachTerminal(write: (base64: string) => void): () => void {
   };
 }
 
-ExpoSSH.addListener('onShellData', ({ data }) => {
-  history.push(data);
+/** Everything the terminal is meant to show, in order: onto the screen if one is attached, and
+ *  into the history either way — the history is what a webview that boots later replays. */
+function emit(base64: string) {
+  history.push(base64);
   if (history.length > MAX_HISTORY_CHUNKS) history.shift();
-  sink?.(data);
-});
+  sink?.(base64);
+}
+
+ExpoSSH.addListener('onShellData', ({ data }) => emit(data));
 
 ExpoSSH.addListener('onShellClose', () => {
   shellOpen = false;
