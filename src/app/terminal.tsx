@@ -1,62 +1,78 @@
+import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { toBase64 } from '@/base64';
 import { useTheme } from '@/hooks/use-theme';
-import { useSettings } from '@/settings';
+import {
+  answerHostKey,
+  attachTerminal,
+  disconnect,
+  forgetPinnedHostKey,
+  reconnect,
+  send,
+  setSize,
+  useSession,
+  type Session,
+} from '@/session';
+import { endpoint, getSettings, useSettings } from '@/settings';
 import TerminalView, { type TerminalHandle } from '@/terminal';
+import { MONO, type Theme } from '@/theme';
 
-/** Throwaway harness for T4: no host, no SSH — the terminal echoes what you type, and the buttons
- *  push at it the sequences a real session would (colour, bold, a link, a yank, a bell). T5 wires
- *  the same component to a PTY and deletes this. */
-export default function TerminalHarness() {
+/**
+ * The session on screen: the terminal, and — over it, whenever there is no shell behind it — the
+ * three states §4.9 asks for. The terminal itself stays mounted through all of them, so a reconnect
+ * comes back to the same scrollback in a webview that is already booted.
+ *
+ * The bar at the bottom is a placeholder for T7's key bar. Keyboard input still goes through
+ * xterm's own hidden textarea; T6/T7 move it to a native `TextInput` for the reasons T4 measured.
+ */
+export default function SessionScreen() {
   const theme = useTheme();
   const { fontSize } = useSettings();
+  const session = useSession();
   const terminal = useRef<TerminalHandle>(null);
-  const native = useRef<TextInput>(null);
-  const [status, setStatus] = useState('—');
+  const [booted, setBooted] = useState(false);
 
-  // The screen says when it is on and off screen, because the person tapping is on the same phone
-  // and cannot narrate: the log is the only way to know which screen a screenshot will show.
+  // Which screen is in front decides what a screenshot taken from the laptop contains, and the
+  // person tapping is holding the same phone.
   useEffect(() => {
     console.log('[terminal] screen open');
     return () => console.log('[terminal] screen closed');
   }, []);
 
-  const write = (text: string) => terminal.current?.write(toBase64(new TextEncoder().encode(text)));
+  // Attach only once the webview is up — its first size report is the earliest proof of that, and
+  // output written before it lands goes nowhere. Until then the session holds the bytes.
+  useEffect(
+    () => (booted ? attachTerminal((base64) => terminal.current?.write(base64)) : undefined),
+    [booted],
+  );
 
-  /** On screen and in the Metro console both — the console is the only one of the two that can be
-   *  read from the machine the fix is being written on. */
-  const report = (line: string) => {
-    console.log('[terminal]', line);
-    setStatus(line);
+  // The TOFU prompt (§4.1). Keyed on the fingerprint rather than the session object so it is raised
+  // once per unknown key, not once per re-render that happens to be in `connecting`.
+  const fingerprint = session.status === 'connecting' ? (session.hostKey?.fingerprint ?? null) : null;
+  useEffect(() => {
+    if (fingerprint === null) return;
+    Alert.alert(
+      'Unknown host',
+      `${endpoint(getSettings())} has not been seen before.\n\ned25519 ${fingerprint}\n\n` +
+        'Check it against `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the machine itself. ' +
+        'Trusting it pins it: a different key later is refused, not asked about.',
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => answerHostKey(false) },
+        { text: 'Trust', onPress: () => answerHostKey(true) },
+      ],
+      { cancelable: false },
+    );
+  }, [fingerprint]);
+
+  const leave = async () => {
+    await disconnect();
+    router.back();
   };
-
-  const DEMO = [
-    '\x1b[1;34m~/Projects/ExpoPort22\x1b[0m $ vim src/terminal.tsx\r\n',
-    '\x1b[38;5;213m  1 \x1b[0m\x1b[1mexport default function\x1b[0m \x1b[33mTerminalView\x1b[0m() {\r\n',
-    '\x1b[38;5;213m  2 \x1b[0m  \x1b[32m// ┌───────────── box drawing ─────────────┐\x1b[0m\r\n',
-    '\x1b[38;5;213m  3 \x1b[0m  \x1b[31mconst\x1b[0m nerd = "   ";\r\n',
-    // 31 columns wide on purpose: the narrowest this app gets is 33, and a status line that wraps
-    // says nothing about the terminal, only about the demo string.
-    `\x1b[7m${' NORMAL  terminal.tsx'.padEnd(24)}3,1 All\x1b[0m\r\n`,
-    'link: \x1b]8;;https://docs.expo.dev/guides/dom-components/\x1b\\Expo DOM components\x1b]8;;\x1b\\\r\n',
-  ].join('');
-
-  const actions: [string, () => void][] = [
-    ['demo', () => write(DEMO)],
-    ['bell', () => write('\x07')],
-    ['yank', () => write(`\x1b]52;c;${toBase64(new TextEncoder().encode('yanked from tmux'))}\x07`)],
-    ['osc52 read', () => write('\x1b]52;c;?\x07')],
-    ['focus', () => terminal.current?.focus()],
-    // The experiment behind the long-press question: raise the keyboard from a *native* input, so
-    // nothing inside the webview has focus. If a long-press then selects, the answer for §4.2 is to
-    // take keyboard input natively and leave the page to display and selection alone.
-    ['native kbd', () => native.current?.focus()],
-  ];
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
@@ -64,58 +80,138 @@ export default function TerminalHarness() {
         ref={terminal}
         theme={theme}
         fontSize={fontSize}
-        onData={async (data) => {
-          report(`data ${JSON.stringify(data)}`);
-          // Local echo, the one job a host would otherwise do: CR becomes CRLF, delete rubs out.
-          write(data === '\r' ? '\r\n' : data === '\x7f' ? '\b \b' : data);
+        onData={async (data) => send(data)}
+        onResize={async (cols, rows) => {
+          setSize(cols, rows);
+          setBooted(true);
         }}
-        onResize={async (cols, rows) => report(`resize ${cols}×${rows}`)}
-        onBell={async () => {
-          report('bell');
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onBell={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+        // §4.7: a yank lands on the phone's pasteboard. The slot history is T8's.
+        onClipboard={async (text) => {
+          await Clipboard.setStringAsync(text);
         }}
-        onClipboard={async (text) => report(`yank: ${text}`)}
         onLink={async (url) => {
-          report(`link: ${url}`);
           await WebBrowser.openBrowserAsync(url);
         }}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
 
-      <TextInput
-        ref={native}
-        style={styles.offscreen}
-        autoCapitalize="none"
-        autoCorrect={false}
-        onChangeText={(text) => report(`native key ${JSON.stringify(text)}`)}
-      />
-
+      {/* Stand-in for T7's key bar: the two things a session cannot be tested without. */}
       <View style={styles.bar}>
-        {actions.map(([label, action]) => (
-          <Pressable
-            key={label}
-            onPress={action}
-            style={[styles.pill, { backgroundColor: theme.surface }]}>
-            <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
-          </Pressable>
-        ))}
-        {/* One line, never wrapping: a status that grows a second line changes the bar's height,
-            which resizes the terminal, which writes a new status — the terminal never settles. */}
-        <Text numberOfLines={1} style={[styles.status, { color: theme.muted }]}>
-          {status}
-        </Text>
+        <Pressable
+          onPress={() => terminal.current?.focus()}
+          style={[styles.pill, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.pillLabel, { color: theme.foreground }]}>Keyboard</Text>
+        </Pressable>
+        <Pressable onPress={leave} style={[styles.pill, { backgroundColor: theme.surface }]}>
+          <Text style={[styles.pillLabel, { color: theme.foreground }]}>Disconnect</Text>
+        </Pressable>
       </View>
+
+      {session.status !== 'connected' && (
+        <Status session={session} theme={theme} onSetup={leave} />
+      )}
     </SafeAreaView>
+  );
+}
+
+/** The three not-connected states (§4.9). Each says what happened, in one sentence, and offers the
+ *  only two moves there are: try again, or go back to Setup. */
+function Status({
+  session,
+  theme,
+  onSetup,
+}: {
+  session: Session;
+  theme: Theme;
+  onSetup: () => void;
+}) {
+  const button = (label: string, colour: string, textColour: string, onPress: () => void) => (
+    <Pressable key={label} onPress={onPress} style={[styles.action, { backgroundColor: colour }]}>
+      <Text style={[styles.actionLabel, { color: textColour }]}>{label}</Text>
+    </Pressable>
+  );
+
+  const forget = () =>
+    Alert.alert(
+      'Forget this host key?',
+      'The next connection will ask you to trust a key again — and if something is answering in ' +
+        'the machine’s place, that is the key you would be trusting.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Forget', style: 'destructive', onPress: () => forgetPinnedHostKey() },
+      ],
+    );
+
+  // Nerd Font glyphs: the font is bundled and already loaded, so this is an icon without an icon
+  // set. \uf1e6 is a plug, \uf071 a warning triangle — written as escapes so a copy of this file
+  // through a tool that does not carry the private-use plane still says what it meant.
+  const where = endpoint(getSettings());
+  const face =
+    session.status === 'disconnected'
+      ? {
+          glyph: '\uf1e6',
+          tint: theme.muted,
+          headline: 'Disconnected',
+          sentence: `The connection to ${where} ended. Backgrounding the app does that every time.`,
+        }
+      : session.status === 'failed'
+        ? {
+            glyph: '\uf071',
+            tint: theme.warning,
+            headline: 'Cannot connect',
+            sentence: session.message,
+          }
+        : {
+            glyph: null,
+            tint: theme.muted,
+            headline: 'Connecting',
+            sentence: `Opening a shell on ${where}.`,
+          };
+
+  return (
+    <View style={[styles.status, { backgroundColor: theme.background }]}>
+      {face.glyph === null ? (
+        <ActivityIndicator size="large" color={theme.accent} />
+      ) : (
+        <Text style={[styles.glyph, { color: face.tint }]}>{face.glyph}</Text>
+      )}
+      <Text style={[styles.headline, { color: theme.foreground }]}>{face.headline}</Text>
+      <Text style={[styles.sentence, { color: theme.muted }]}>{face.sentence}</Text>
+
+      <View style={styles.actions}>
+        {session.status !== 'connecting' &&
+          button('Reconnect', theme.accent, theme.onAccent, reconnect)}
+        {session.status === 'failed' &&
+          session.mismatch &&
+          button('Forget host key', theme.danger, theme.onAccent, forget)}
+        {button('Setup', theme.surface, theme.foreground, onSetup)}
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   terminal: { flex: 1 },
-  bar: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 8 },
+  bar: { flexDirection: 'row', gap: 8, padding: 8 },
   pill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  label: { fontSize: 13, fontWeight: '600' },
-  status: { fontSize: 13, fontWeight: '600', flexBasis: '100%' },
-  // Focusable and on screen, but nothing to look at: this is the keyboard's owner, not a field.
-  offscreen: { position: 'absolute', top: 0, left: 0, width: 1, height: 1, opacity: 0 },
+  pillLabel: { fontSize: 13, fontWeight: '600' },
+  status: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 32,
+  },
+  glyph: { fontFamily: MONO, fontSize: 44 },
+  headline: { fontSize: 24, fontWeight: '700' },
+  sentence: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 8 },
+  action: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
+  actionLabel: { fontSize: 16, fontWeight: '600' },
 });

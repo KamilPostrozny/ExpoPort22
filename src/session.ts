@@ -1,0 +1,214 @@
+/**
+ * The session: one connection, one PTY, and the lifecycle §4.9 describes.
+ *
+ * A module singleton read through `useSyncExternalStore`, like `settings` — the Setup screen, the
+ * terminal screen and the AppState listener are three callers of one connection and none of them
+ * owns it, so it cannot live in a component. It also outlives every screen: a route change must not
+ * drop a shell.
+ *
+ * Shell output goes to whoever is attached and into a buffer until someone is. The webview takes a
+ * moment to boot and the login banner is already on its way while it does.
+ */
+
+import { AppState } from 'react-native';
+import { useSyncExternalStore } from 'react';
+
+import type { HostKeyEvent } from '../modules/expo-ssh/src/ExpoSSH.types';
+import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
+import { forgetHostKey, hostKeyVerdict, pinHostKey, pinnedHostKey } from '@/host-keys';
+import { loadOrCreateKey } from '@/keys';
+import { endpoint, getSettings } from '@/settings';
+
+const TERM = 'xterm-256color';
+
+/** Two in a row and we stop trying (§4.9). A third automatic attempt is a loop, not a recovery. */
+const MAX_AUTOMATIC_ATTEMPTS = 2;
+
+/** Output held for a terminal that has not attached yet. A cap, because a session left running
+ *  with no screen on it is otherwise a slow memory leak; the far end of a screenful is what the
+ *  user would have seen anyway. */
+const MAX_BUFFERED_CHUNKS = 500;
+
+export type Session =
+  /** No connection, and none wanted: the user is on Setup. */
+  | { status: 'idle' }
+  /** `hostKey` set means the handshake is waiting on the TOFU answer (§4.1). */
+  | { status: 'connecting'; hostKey: HostKeyEvent | null }
+  | { status: 'connected' }
+  /** We were up and the socket went away. Backgrounding does this every time, and it is expected. */
+  | { status: 'disconnected' }
+  /** We could not get up. `mismatch` is the one failure with a recovery of its own. */
+  | { status: 'failed'; message: string; mismatch: boolean };
+
+let state: Session = { status: 'idle' };
+let failures = 0;
+/** What the last `startShell`/`resize` was told. The terminal reports its real size a beat after
+ *  the webview boots, which can be either side of the shell opening. */
+let size = { cols: 80, rows: 24 };
+let shellOpen = false;
+let sink: ((base64: string) => void) | null = null;
+let buffered: string[] = [];
+/** Set when *we* are the ones refusing, so the rejection can say why in English rather than
+ *  surfacing whatever the SSH library says when a handshake is abandoned. */
+let refusal: { message: string; mismatch: boolean } | null = null;
+
+const listeners = new Set<() => void>();
+
+function set(next: Session) {
+  state = next;
+  console.log('[session]', JSON.stringify(next));
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export function getSession(): Session {
+  return state;
+}
+
+export function useSession(): Session {
+  return useSyncExternalStore(subscribe, getSession, getSession);
+}
+
+/* --- the connection --- */
+
+export async function connect(): Promise<void> {
+  if (state.status === 'connecting') return;
+  const settings = getSettings();
+  refusal = null;
+  buffered = [];
+  set({ status: 'connecting', hostKey: null });
+  try {
+    const key = await loadOrCreateKey();
+    // Stays pending through the host-key round trip below.
+    await ExpoSSH.connect(settings.host, settings.port, settings.username, key.seedBase64);
+    await ExpoSSH.startShell(size.cols, size.rows, TERM);
+    shellOpen = true;
+    failures = 0;
+    set({ status: 'connected' });
+    // A plain shell, never `tmux attach` of our own accord (§4.9) — the startup command is the
+    // user's line and it replays on every reconnect, which is what makes a reconnect feel like a
+    // resume rather than a fresh login.
+    if (settings.startupCommand) await ExpoSSH.send(`${settings.startupCommand}\n`);
+  } catch (error) {
+    shellOpen = false;
+    // A half-open connection after a failed shell open would make the next `connect` fail for a
+    // reason that has nothing to do with the network.
+    await ExpoSSH.disconnect().catch(() => {});
+    // Our own refusals are not worth retrying: the same key will be offered and refused again, and
+    // a re-prompt on every foreground is how a user gets trained to tap Trust.
+    failures = refusal ? MAX_AUTOMATIC_ATTEMPTS : failures + 1;
+    set({ status: 'failed', ...(refusal ?? { message: describe(error), mismatch: false }) });
+  }
+}
+
+/** The user's own disconnect (§4.1): back to Setup, and nothing reconnects behind it. */
+export async function disconnect(): Promise<void> {
+  shellOpen = false;
+  failures = 0;
+  buffered = [];
+  set({ status: 'idle' });
+  await ExpoSSH.disconnect().catch(() => {});
+}
+
+/** The manual Reconnect button. A tap is a fresh start — the two-strike count only governs the
+ *  retries nobody asked for. */
+export function reconnect(): Promise<void> {
+  failures = 0;
+  return connect();
+}
+
+/** Answers the TOFU prompt (§4.1). Trusting pins the key for this endpoint from here on. */
+export async function answerHostKey(trust: boolean): Promise<void> {
+  if (state.status !== 'connecting' || state.hostKey === null) return;
+  const { hostKey } = state;
+  set({ status: 'connecting', hostKey: null });
+  if (trust) await pinHostKey(endpoint(getSettings()), hostKey.key);
+  else refusal = { message: 'You did not trust this host key.', mismatch: false };
+  await ExpoSSH.verifyHostKey(trust);
+}
+
+/** Unpins the current endpoint, so the next connect asks again. The confirmation belongs to
+ *  whoever calls this — there is no undo, and the pin is the only thing that would have caught a
+ *  machine-in-the-middle. */
+export function forgetPinnedHostKey(): Promise<void> {
+  return forgetHostKey(endpoint(getSettings()));
+}
+
+/* --- the PTY --- */
+
+/** Keystrokes and the replies the terminal writes on the app's behalf. Dropped when no shell is
+ *  open: every caller is a finger on a key that is still on screen while a session is coming back. */
+export function send(text: string): void {
+  if (shellOpen) ExpoSSH.send(text).catch(() => {});
+}
+
+export function setSize(cols: number, rows: number): void {
+  size = { cols, rows };
+  if (shellOpen) ExpoSSH.resize(cols, rows).catch(() => {});
+}
+
+/** Points shell output at a terminal and hands it whatever arrived before it existed. */
+export function attachTerminal(write: (base64: string) => void): () => void {
+  sink = write;
+  for (const chunk of buffered.splice(0)) write(chunk);
+  return () => {
+    if (sink === write) sink = null;
+  };
+}
+
+ExpoSSH.addListener('onShellData', ({ data }) => {
+  if (sink) {
+    sink(data);
+    return;
+  }
+  buffered.push(data);
+  if (buffered.length > MAX_BUFFERED_CHUNKS) buffered.shift();
+});
+
+ExpoSSH.addListener('onShellClose', () => {
+  shellOpen = false;
+  if (state.status === 'connected') set({ status: 'disconnected' });
+});
+
+ExpoSSH.addListener('onHostKey', async (hostKey) => {
+  const where = endpoint(getSettings());
+  const verdict = hostKeyVerdict(await pinnedHostKey(where), hostKey.key);
+  console.log('[session] host key', verdict, hostKey.fingerprint);
+  if (verdict === 'ask') {
+    set({ status: 'connecting', hostKey });
+    return;
+  }
+  if (verdict === 'mismatch') {
+    refusal = {
+      message:
+        `${where} offered a different host key from the one you trusted. Either the machine was ` +
+        `rebuilt, or something is answering in its place. Forget the old key only if you know why ` +
+        `it changed.`,
+      mismatch: true,
+    };
+  }
+  await ExpoSSH.verifyHostKey(verdict === 'trust');
+});
+
+/* --- lifecycle (§4.9) --- */
+
+AppState.addEventListener('change', async (next) => {
+  if (next !== 'active') return;
+  // Backgrounding kills the socket, but nothing tells us until something is sent — so ask, with a
+  // round trip a half-open TCP cannot fake.
+  if (state.status === 'connected' && !(await ExpoSSH.isAlive(2000).catch(() => false))) {
+    shellOpen = false;
+    set({ status: 'disconnected' });
+  }
+  const dead = state.status === 'disconnected' || state.status === 'failed';
+  if (dead && failures < MAX_AUTOMATIC_ATTEMPTS) connect();
+});
+
+function describe(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error)).trim();
+  return message === '' ? 'The connection failed.' : message;
+}

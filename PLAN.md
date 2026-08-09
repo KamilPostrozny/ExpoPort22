@@ -224,6 +224,26 @@ Key gen (@noble/ed25519 + SecureStore), Setup screen per design (Latte-friendly)
 TOFU prompt modal, pinned-key store + mismatch hard-fail, connect → terminal screen,
 startup command, Disconnect, reconnect state machine (§4.9) with the three status screens.
 *Accept*: full connect/disconnect/reconnect loop on device against real host.
+Landed: `src/session.ts` (the state machine and the only thing that talks to `ExpoSSH`),
+`src/host-keys.ts` (TOFU pin in SecureStore + the `hostKeyVerdict` decision, tested in
+`src/core.test.ts`), `src/app/index.tsx` (Setup, replacing the T1/T2 harness) and
+`src/app/terminal.tsx` (the session screen with the three §4.9 states, replacing the T4 harness).
+Added `expo-clipboard` — the Copy on the public key (§4.1) and the OSC 52 yank landing on the
+pasteboard (§4.7); it is a native module, so it needs a build, not a reload.
+Decisions: the session is a module singleton like `settings`, because it outlives every screen and
+three unrelated callers (both screens, the AppState listener) drive one connection. Shell output
+buffers until a terminal attaches — the webview boots slower than the login banner arrives — and
+the terminal attaches on its *first size report*, the earliest proof the DOM side is up. Pins store
+the key blob, not the fingerprint: comparing display strings is comparing a summary. A refusal of
+ours (mismatch, or Cancel on the prompt) spends the whole automatic-retry budget on the spot, so a
+refused key is not re-offered on every foreground until the user is trained to tap Trust. The
+endpoint is base64url'd into the SecureStore key rather than character-substituted, since
+substitution maps two endpoints onto one pin. Keyboard input still goes through xterm's textarea;
+the native `TextInput` decided above is T6/T7's, and the bar here is two buttons standing in for
+T7. "Forget host key" sits on the mismatch screen for now; §4.8 moves it into Settings in T12.
+Verified: `bun test` (10), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20.
+**Still open**: the device walk — connect, disconnect, background/foreground reconnect, and the
+mismatch refusal against a real host.
 
 **T6 — Scroll gesture system** deps: T4, T5
 Touch layer in DOM component: pan-always-scrolls, notch = cell height, three-way routing

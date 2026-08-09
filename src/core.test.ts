@@ -10,9 +10,17 @@ mock.module('@react-native-async-storage/async-storage', () => ({
   default: { getItem: async () => null, setItem: async () => {} },
 }));
 
+mock.module('expo-secure-store', () => ({
+  WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'stub',
+  getItemAsync: async () => null,
+  setItemAsync: async () => {},
+  deleteItemAsync: async () => {},
+}));
+
 const { THEMES, resolveTheme } = await import('@/theme');
 const { DEFAULTS, clampFontSize, decode, endpoint, validate } = await import('@/settings');
 const { isHttpLink, parseOsc52 } = await import('@/terminal-protocol');
+const { hostKeyVerdict } = await import('@/host-keys');
 
 test('ANSI black and white swap ends between a light and a dark flavour', () => {
   const mocha = THEMES.mocha;
@@ -87,4 +95,12 @@ test('validation says what is wrong in plain English', () => {
     'Username cannot be empty or contain spaces.'
   );
   expect(endpoint(ok)).toBe('box.lan:22');
+});
+
+test('a pinned host key is trusted, an unpinned one asked about, a changed one refused', () => {
+  expect(hostKeyVerdict(null, 'AAAAC3Nz')).toBe('ask'); // first contact
+  expect(hostKeyVerdict('AAAAC3Nz', 'AAAAC3Nz')).toBe('trust');
+  // The one that matters: a different key is never a prompt (§4.1), because a prompt is what an
+  // attacker in the middle needs the user to tap through.
+  expect(hostKeyVerdict('AAAAC3Nz', 'AAAAC3Nx')).toBe('mismatch');
 });

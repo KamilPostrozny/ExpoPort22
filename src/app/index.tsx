@@ -1,166 +1,122 @@
+import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import ExpoSSH from '../../modules/expo-ssh/src/ExpoSSHModule';
 import { useTheme } from '@/hooks/use-theme';
-import { toBase64 } from '@/base64';
 import { loadOrCreateKey, type KeyPair } from '@/keys';
-import { updateSettings, useSettings } from '@/settings';
-import { MONO, MONO_BOLD, THEME_CHOICES } from '@/theme';
+import { connect } from '@/session';
+import { getSettings, updateSettings, useSettings, validate } from '@/settings';
+import { MONO } from '@/theme';
 
-/** Throwaway harness until T5 puts the Setup screen here. Two jobs: prove T1 (bundled Nerd Font,
- *  live flavour switch, `auto` follows the system) and walk the T2 acceptance list — connect to a
- *  real host, `ls` over an exec channel, shell I/O, one file over SFTP. */
-export default function Scratch() {
+/**
+ * Setup (§4.1): the one host, the one key, and the button that starts a session. The fields are the
+ * settings store itself rather than a draft — there is nothing to cancel, and the same values are
+ * what a reconnect uses hours later.
+ *
+ * The key is generated on first launch, not on demand: it is what the user has to paste into
+ * `authorized_keys` before anything here can work, so it must be on screen before they ask.
+ */
+export default function Setup() {
   const theme = useTheme();
   const settings = useSettings();
   const [key, setKey] = useState<KeyPair | null>(null);
-  const [lines, setLines] = useState<string[]>([]);
-
-  // On screen and in Metro both: the phone is where you notice, the console is where you read a
-  // stack trace and scroll back past the 120 lines this keeps.
-  const log = (line: string) => {
-    console.log('[harness]', line);
-    setLines((l) => [...l.slice(-120), line]);
-  };
+  // The port is edited as text so a half-typed field can be empty; `validate` has the last word.
+  const [port, setPort] = useState(String(settings.port));
+  const [problem, setProblem] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    loadOrCreateKey().then(setKey, (error) => log(`key: ${error}`));
+    loadOrCreateKey().then(setKey, (error) => setProblem(`Could not read the key: ${error}`));
   }, []);
 
-  useEffect(() => {
-    const hostKey = ExpoSSH.addListener('onHostKey', ({ fingerprint }) => {
-      Alert.alert('Unknown host', `ed25519 ${fingerprint}`, [
-        { text: 'Cancel', style: 'cancel', onPress: () => ExpoSSH.verifyHostKey(false) },
-        { text: 'Trust', onPress: () => ExpoSSH.verifyHostKey(true) },
-      ]);
-    });
-    const data = ExpoSSH.addListener('onShellData', ({ data }) =>
-      log(new TextDecoder().decode(Uint8Array.from(atob(data), (c) => c.charCodeAt(0)))),
-    );
-    const closed = ExpoSSH.addListener('onShellClose', () => log('— shell closed —'));
-    return () => {
-      hostKey.remove();
-      data.remove();
-      closed.remove();
-    };
-  }, []);
-
-  /** Every button is the same shape: say what it did, or say what went wrong. */
-  const attempt = (label: string, action: () => Promise<unknown>) => async () => {
-    log(`> ${label}`);
-    try {
-      const result = await action();
-      if (typeof result === 'string' && result !== '') log(result.trimEnd());
-    } catch (error) {
-      log(`! ${error}`);
-    }
+  const start = () => {
+    const invalid = validate(getSettings());
+    setProblem(invalid);
+    if (invalid !== null) return;
+    connect();
+    router.push('/terminal');
   };
 
-  const actions: [string, () => Promise<unknown>][] = [
-    ['connect', () => ExpoSSH.connect(settings.host, settings.port, settings.username, key!.seedBase64)],
-    ['exec ls', () => ExpoSSH.exec('ls', 1 << 16)],
-    ['shell', () => ExpoSSH.startShell(80, 24, 'xterm-256color')],
-    ['send date', () => ExpoSSH.send('date\n')],
-    [
-      'upload',
-      () =>
-        ExpoSSH.upload(toBase64(new TextEncoder().encode('port22\n')), '/tmp/port22/hello.txt', [
-          '/tmp/port22',
-        ]),
-    ],
-    ['ls /tmp/port22', () => ExpoSSH.listDirectory('/tmp/port22').then((e) => JSON.stringify(e))],
-    ['alive?', () => ExpoSSH.isAlive(2000).then(String)],
-    ['disconnect', () => ExpoSSH.disconnect()],
-  ];
-
-  const cycle = () => {
-    const next = THEME_CHOICES[(THEME_CHOICES.indexOf(settings.theme) + 1) % THEME_CHOICES.length];
-    updateSettings({ theme: next });
+  const copyKey = async () => {
+    if (key === null) return;
+    await Clipboard.setStringAsync(key.publicKeyLine);
+    setCopied(true);
   };
 
   const field = (
+    label: string,
     value: string,
     onChangeText: (text: string) => void,
     placeholder: string,
     keyboardType?: 'numeric',
   ) => (
-    <TextInput
-      value={value}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor={theme.placeholder}
-      autoCapitalize="none"
-      autoCorrect={false}
-      keyboardType={keyboardType}
-      style={[styles.field, { color: theme.foreground, borderColor: theme.border }]}
-    />
+    <View style={[styles.row, { backgroundColor: theme.panel }]}>
+      <Text style={[styles.label, { color: theme.muted }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={theme.placeholder}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType={keyboardType}
+        style={[styles.input, { color: theme.foreground }]}
+      />
+    </View>
   );
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text selectable style={[styles.log, { color: theme.muted }]}>
-          {key?.publicKeyLine ?? 'generating key…'}
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Text style={[styles.title, { color: theme.foreground }]}>Port22</Text>
+        <Text style={[styles.caption, { color: theme.muted }]}>
+          One host, one key. The private half never leaves this phone.
         </Text>
 
-        <View style={styles.row}>
-          {field(settings.host, (host) => updateSettings({ host }), 'host')}
+        <View style={[styles.fields, { backgroundColor: theme.border }]}>
+          {field('Host', settings.host, (host) => updateSettings({ host }), 'hostname or IP')}
           {field(
-            String(settings.port),
-            (port) => updateSettings({ port: Number(port) || 0 }),
-            'port',
+            'Port',
+            port,
+            (text) => {
+              setPort(text);
+              updateSettings({ port: Number(text) });
+            },
+            '22',
             'numeric',
           )}
-          {field(settings.username, (username) => updateSettings({ username }), 'user')}
+          {field('User', settings.username, (username) => updateSettings({ username }), 'login name')}
+          {field(
+            'On connect',
+            settings.startupCommand ?? '',
+            (text) => updateSettings({ startupCommand: text === '' ? null : text }),
+            'optional command, e.g. tmux attach',
+          )}
         </View>
 
-        <View style={styles.buttons}>
-          {actions.map(([label, action]) => (
-            <Pressable
-              key={label}
-              disabled={key === null}
-              onPress={attempt(label, action)}
-              style={[styles.pill, { backgroundColor: theme.surface }]}>
-              <Text style={[styles.pillLabel, { color: theme.foreground }]}>{label}</Text>
-            </Pressable>
-          ))}
-        </View>
+        {problem !== null && <Text style={[styles.problem, { color: theme.danger }]}>{problem}</Text>}
 
-        <Text selectable style={[styles.log, { color: theme.foreground }]}>
-          {lines.join('\n')}
-        </Text>
-
-        <Pressable
-          onPress={() => router.push('/terminal')}
-          style={[styles.pill, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.pillLabel, { color: theme.foreground }]}>terminal (T4)</Text>
+        <Pressable onPress={start} style={[styles.connect, { backgroundColor: theme.accent }]}>
+          <Text style={[styles.connectLabel, { color: theme.onAccent }]}>Connect</Text>
         </Pressable>
 
-        <Pressable onPress={cycle} style={[styles.pill, { backgroundColor: theme.accent }]}>
-          <Text style={[styles.pillLabel, { color: theme.onAccent }]}>
-            {settings.theme}
-            {settings.theme === 'auto' ? ` · ${theme.name}` : ''}
+        <Text style={[styles.caption, { color: theme.muted }]}>
+          Add this line to ~/.ssh/authorized_keys on the host. Port22 never writes it for you.
+        </Text>
+        <View style={[styles.card, { backgroundColor: theme.panel }]}>
+          <Text selectable style={[styles.key, { color: theme.foreground }]}>
+            {key?.publicKeyLine ?? 'generating…'}
           </Text>
-        </Pressable>
-
-        <Text style={[styles.mono, { color: theme.foreground, fontSize: settings.fontSize }]}>
-          {'     ~/Projects/ExpoPort22 $ tmux attach'}
-        </Text>
-        <Text
-          style={[
-            styles.mono,
-            { color: theme.foreground, fontFamily: MONO_BOLD, fontSize: settings.fontSize },
-          ]}>
-          {'bold 0O1lI |=> <-> ligature-free'}
-        </Text>
-
-        <View style={styles.swatches}>
-          {theme.ansi.map((hex, i) => (
-            <View key={i} style={[styles.ansi, { backgroundColor: hex }]} />
-          ))}
+          <Pressable
+            onPress={copyKey}
+            disabled={key === null}
+            style={[styles.copy, { backgroundColor: theme.surface }]}>
+            <Text style={[styles.copyLabel, { color: theme.foreground }]}>
+              {copied ? 'Copied' : 'Copy'}
+            </Text>
+          </Pressable>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -169,27 +125,27 @@ export default function Scratch() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { padding: 24, gap: 10 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  field: {
-    flex: 1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    fontFamily: MONO,
-    fontSize: 13,
-  },
-  buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pill: {
+  content: { padding: 24, gap: 12 },
+  title: { fontSize: 34, fontWeight: '700' },
+  caption: { fontSize: 13, lineHeight: 18 },
+  card: { borderRadius: 12, overflow: 'hidden' },
+  // The dividers are the gaps: the container is painted in the border colour and each row covers
+  // its own share of it, which is one hairline between rows and none against the card's edges.
+  fields: { borderRadius: 12, overflow: 'hidden', gap: StyleSheet.hairlineWidth },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  label: { width: 96, paddingLeft: 14, fontSize: 15 },
+  input: { flex: 1, paddingVertical: 13, paddingRight: 14, fontSize: 16 },
+  problem: { fontSize: 14, lineHeight: 19 },
+  connect: { borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
+  connectLabel: { fontSize: 17, fontWeight: '600' },
+  key: { fontFamily: MONO, fontSize: 11, lineHeight: 16, padding: 14 },
+  copy: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 14,
+    marginHorizontal: 14,
+    marginBottom: 14,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 18,
+    borderRadius: 10,
   },
-  pillLabel: { fontSize: 14, fontWeight: '600' },
-  log: { fontFamily: MONO, fontSize: 11 },
-  mono: { fontFamily: MONO },
-  swatches: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 },
-  ansi: { width: 22, height: 22 },
+  copyLabel: { fontSize: 14, fontWeight: '600' },
 });
