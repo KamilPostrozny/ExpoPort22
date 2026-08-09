@@ -65,9 +65,13 @@ export function breadcrumb(dir: string): string[] {
 /** Directories first, then names — the design's listing order, and what makes a collision with
  *  the chosen filename visible before it happens. */
 export function sortEntries(entries: RemoteEntry[]): RemoteEntry[] {
-  return [...entries].sort((a, b) =>
-    a.isDirectory !== b.isDirectory ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name),
-  );
+  // SFTP hands back `.` and `..`; the sheet draws its own "up" row, so listing them gives three
+  // navigation rows, one of which walks into the directory it is already in (T13/T8.8).
+  return entries
+    .filter((entry) => entry.name !== '.' && entry.name !== '..')
+    .sort((a, b) =>
+      a.isDirectory !== b.isDirectory ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name),
+    );
 }
 
 /** The listing's size column: `3 KB`, `14 MB` — one significant unit, like the design. */

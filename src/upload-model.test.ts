@@ -97,6 +97,16 @@ test('directories first, then names', () => {
   expect(sorted.map((e) => e.name)).toEqual(['incoming', 'releases', 'bundle.tar.gz', 'nginx.conf']);
 });
 
+test('the dot entries SFTP returns are dropped — the sheet draws its own up row', () => {
+  const sorted = sortEntries([
+    { name: '..', isDirectory: true, size: 0 },
+    { name: 'releases', isDirectory: true, size: 0 },
+    { name: '.', isDirectory: true, size: 0 },
+    { name: '.bashrc', isDirectory: false, size: 300 }, // a real dotfile still belongs
+  ]);
+  expect(sorted.map((e) => e.name)).toEqual(['releases', '.bashrc']);
+});
+
 test('sizes read like the design', () => {
   expect(formatSize(820)).toBe('820 B');
   expect(formatSize(3 * 1024)).toBe('3 KB');

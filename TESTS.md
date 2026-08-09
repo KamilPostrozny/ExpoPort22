@@ -432,7 +432,8 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Steps**: tap Paste once.
 - **Expect**: `echo yanked` appears at the prompt, **not run** — no Return travels, the cursor
   sits at the end of the typed text. Pressing Return manually runs it (proof the text is real).
-- [ ]
+- [x] — one `[ssh] send echo yanked` with no `\r` behind it; the screenshot shows it at the
+  prompt with the cursor after it, unexecuted.
 
 ### T8.5 — Long-press popover: previews, provenance, pasteboard slot, banner once
 - **Setup**: at least one yank in the slots; copy something in another iOS app first.
@@ -449,7 +450,11 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Expect**: both lines land at the prompt as typed input — the shell may show continuation,
   but nothing runs until a manual Return. The yank's own embedded newline travels because it is
   *content*; the app appends none of its own.
-- [ ]
+- [x] — **failed first, fixed during the walk.** A three-line yank pasted bare ran the first two
+  lines and left the third at the prompt: the app typed the text raw, so fish (bracketed paste
+  on) read the embedded newlines as Return presses. Fix: track DECSET 2004 on the mode signal
+  and wrap clipboard text in `ESC[200~ … ESC[201~`. Re-run: the same yank lands as one
+  unexecuted continuation block, wire shows `ESC[200~echo alpha-1…`.
 
 ### T8.7 — ⋯ menu: three pickers reachable
 - **Setup**: connected, keyboard up.
@@ -458,7 +463,9 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   picker, Photo or video the photo library (no permission prompt — PHPicker), Camera asks for
   camera permission once then opens the camera; cancelling any picker returns to the terminal
   with nothing typed and no sheet.
-- [ ]
+- [x] — all three pickers opened and cancelled back to the terminal with nothing typed; the
+  keyboard dropped as the menu opened (`52 × 26` → `52 × 41`). Pickers are system UI and a
+  cancel leaves no log trace, so the three-picker half is eye-verified.
 
 ### T8.8 — Destination sheet: browse, breadcrumb, descend
 - **Setup**: pick a file via ⋯ → Files.
