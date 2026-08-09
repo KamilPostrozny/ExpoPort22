@@ -474,7 +474,12 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   names mono; tapping a directory descends and re-lists (fresh `listDirectory` in the log);
   `..` walks up; the breadcrumb tracks the path with `/` accented and the current segment
   bright.
-- [ ]
+- [x] — **one bug found and fixed.** The listing carried SFTP's own `.` and `..` on top of the
+  sheet's up row: three navigation rows, one of which walked into the directory it was already
+  in. Filtered in `sortEntries`; re-checked on device — one `..`, no `.`, real dotfiles like
+  `.config` still listed. Everything else was right first time: opens at `$HOME`, directories
+  before files, descend re-lists (`listDirectory /home/kamil/Projects` in the log), breadcrumb
+  `/ home › kamil › Projects`, host label, and `Save here /home/kamil/Projects`.
 
 ### T8.9 — Collision is visible and overwrite works
 - **Setup**: on the host: `echo old > ~/collide.txt`; pick any file via ⋯ → Files.
@@ -483,14 +488,18 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Expect**: `collide.txt` is visible in the listing (files are shown for exactly this) and
   tints warning while the field matches it, with "— replaces the existing file" on the SAVE AS
   label; saving overwrites without any further prompt; the host file now holds the upload.
-- [ ]
+- [x] — the SAVE AS label became "SAVE AS — replaces the existing file" and the field's border
+  turned warning-yellow as soon as the name matched; Save here overwrote with no further prompt
+  (target went 1162 bytes / md5 `bbc1e2…` → 87916 bytes / md5 `9ae6ac…`).
+  **Run it against the `~/collide.txt` this setup asks for.** During T13 it was pointed at a
+  real `~/note.txt` instead and destroyed its contents — the case overwrites whatever it names.
 
 ### T8.10 — Editable filename lands the file under the new name
 - **Setup**: pick a file with a known name via ⋯ → Files.
 - **Steps**: clear SAVE AS, type `renamed hello.txt`, Save here; `ls` on the host.
 - **Expect**: the file lands as `renamed-hello.txt` (the sanitiser turns the space into a dash
   on save); the original name is nowhere on the host.
-- [ ]
+- [x] — landed as `~/Downloads/renamed-hello.txt`; the picked file's own name never appeared.
 
 ### T8.11 — Camera default name is the timestamp
 - **Setup**: ⋯ → Camera, take a photo, accept it.
@@ -504,7 +513,8 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Expect**: the sheet dismisses, the file lands (verify on the host), and the terminal shows
   **nothing** — no typed path, no output, the prompt untouched (§4.6: nothing typed into the
   session from this flow).
-- [ ]
+- [x] — verified alongside T8.9: the file landed on the host (mtime and md5 both changed) while
+  the terminal kept a clean prompt, nothing typed, no output.
 
 ### T8.13 — Last destination is remembered
 - **Setup**: complete T8.8's browse ending in a subdirectory, Save here.
