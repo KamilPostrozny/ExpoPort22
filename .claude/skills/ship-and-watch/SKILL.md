@@ -196,6 +196,33 @@ fixed. Three bugs in T4 were invisible in the log and obvious in the picture: le
 ransom note (cell measured before the webfont arrived), bold runs wider than their cells (only the
 regular face was preloaded), and a long-press that did nothing (the `user-select` chain).
 
+## 5.3 Walking the accept list — one step at a time
+
+The user is the hands; you are the eyes and the memory. Do not hand over a checklist of eight
+things and ask how it went — that returns "seems fine", which verifies nothing.
+
+Ask for **one action at a time**, in this shape:
+
+> **Step 3 of 7 — tap `demo`.** I am checking: colours, bold pitch, box drawing, the three Nerd Font
+> glyphs. Tell me when it is done.
+
+Then, before asking for the next one:
+
+1. Read the log for what that action should have produced.
+2. Screenshot if the step changes what is drawn (§5.2).
+3. Say what passed, what failed, and what you are doing about the failure — then give the next step.
+
+Rules that make this worth the user's time:
+
+- Name the exact control and the exact expected evidence. "Try the terminal" is not a step.
+- One step may need a state the phone is not in (screen off, wrong screen). Ask for that as its own
+  step rather than folding it into the next.
+- A step whose evidence never arrives is a failure, not a skip. Say so, fix it, re-run *that* step
+  before moving on.
+- Keep the numbering visible (`4 of 7`) so the user can see the end from anywhere in the middle.
+- Fix in place: when a step fails, fix, reload (§5.1), and re-ask the same step. Do not carry a
+  broken step forward "to come back to later".
+
 ## 6. Report
 
 Say which path was taken, what is now on the phone, and what the log showed — including the case
