@@ -168,6 +168,34 @@ app is connected — after the reload, confirm from the log that a bundle was ac
 The edit → reload → read-the-log loop is yours to run end to end; the user's only manual step is the
 first relaunch after a bundler takeover.
 
+## 5.2 Screenshot the phone
+
+The log cannot see pixels, and half of a terminal's bugs are pixels. `pymobiledevice3` takes a real
+screenshot over the same netmuxd socket, with **no root** — it falls back to a userspace tunnel on
+iOS 17+ by itself:
+
+```bash
+env USBMUXD_SOCKET_ADDRESS=$HOME/.local/share/port22/nm.sock \
+  pymobiledevice3 developer dvt screenshot shot.png
+```
+
+Then Read the PNG. Two traps:
+
+- **No `UNIX:` prefix here**, unlike xtool and libimobiledevice: pymobiledevice3 splits the value on
+  `:` and dies with `invalid literal for int()`. The same variable wants a different format for the
+  two toolchains.
+- **A black frame means the screen is off**, not that the app crashed. Ask for the phone to be woken
+  rather than debugging a rendering bug that is not there.
+
+Installed with `uv tool install pymobiledevice3`. `idevicescreenshot` from libimobiledevice does
+*not* work on iOS 17+ (`Could not start screenshotr service: Invalid service` — it wants a mounted
+Developer Disk Image); pymobiledevice3 is the one that handles the modern tunnel.
+
+Take a screenshot after any change that alters what is drawn, and before declaring a visual thing
+fixed. Three bugs in T4 were invisible in the log and obvious in the picture: letters spaced like a
+ransom note (cell measured before the webfont arrived), bold runs wider than their cells (only the
+regular face was preloaded), and a long-press that did nothing (the `user-select` chain).
+
 ## 6. Report
 
 Say which path was taken, what is now on the phone, and what the log showed — including the case

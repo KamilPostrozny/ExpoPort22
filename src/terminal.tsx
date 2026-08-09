@@ -88,8 +88,16 @@ const CSS = `
   ${FONT_FACES}
   html, body { margin: 0; height: 100%; overflow: hidden; }
   /* Long-press has to reach the system edit menu (§4.2), so the rows stay real selectable text —
-     xterm turns selection off because it drives its own from mouse events, which a finger is not. */
-  .xterm .xterm-rows { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+     xterm turns selection off because it drives its own from mouse events, which a finger is not.
+     The whole chain down to the rows has to allow it: WebKit starts the gesture from the container
+     under the finger, so one "none" anywhere above the text is enough to stop it happening. */
+  .xterm, .xterm .xterm-screen, .xterm .xterm-rows, .xterm .xterm-rows * {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+  /* Except the parts that are not text: the hidden textarea and the measuring elements. */
+  .xterm .xterm-helpers { -webkit-user-select: none; user-select: none; }
   /* The webview must not rubber-band: a pan is a scroll for the session, never for the page. */
   .xterm-viewport { overscroll-behavior: none; }
 `;
@@ -103,15 +111,19 @@ const CSS = `
  */
 function fontReport(fontSize: number): string {
   const loaded = document.fonts.check(`${fontSize}px ${MONO}`);
+  const bold = document.fonts.check(`bold ${fontSize}px ${MONO}`);
   const context = document.createElement('canvas').getContext('2d');
   if (!context) return `font ${MONO} loaded=${loaded} (no canvas to measure with)`;
-  const width = (family: string, text: string) => {
-    context.font = `${fontSize}px ${family}`;
+  /** `font` is a full CSS font shorthand, so a weight can sit in front of the size. */
+  const width = (font: string, text: string) => {
+    context.font = font;
     return context.measureText(text).width.toFixed(2);
   };
+  const regular = `${fontSize}px ${MONO}`;
   return (
-    `font ${MONO} loaded=${loaded} cell=${width(MONO, 'M')} ` +
-    `nerd-glyph=${width(MONO, '')} system-mono-cell=${width('monospace', 'M')}`
+    `font ${MONO} loaded=${loaded} bold=${bold} cell=${width(regular, 'M')} ` +
+    `bold-cell=${width(`bold ${regular}`, 'M')} ` +
+    `nerd-glyph=${width(regular, '')} system-mono-cell=${width(`${fontSize}px monospace`, 'M')}`
   );
 }
 
@@ -138,6 +150,34 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
   );
 
   useEffect(() => {
+    let disposed = false;
+    let cleanup = () => {};
+
+    // xterm measures the cell once, when it opens, and never again on its own. Opening before the
+    // bundled font has arrived measures the fallback, and every row is then laid out at a pitch the
+    // glyphs do not fill — the letters end up spaced apart like a ransom note. So: font first,
+    // terminal second. The file is local, so the wait is a frame, not a network round trip.
+    // Both faces, not just the regular one: bold is a separate file, and a bold run rendered from
+    // the system fallback is wider than the cell it was measured for.
+    Promise.all([
+      document.fonts.load(`${fontSize}px ${MONO}`),
+      document.fonts.load(`bold ${fontSize}px ${MONO}`),
+    ])
+      .catch((error) => console.log('[terminal] font failed to load:', String(error)))
+      .then(() => {
+        if (disposed) return;
+        console.log('[terminal]', fontReport(fontSize));
+        cleanup = boot();
+      });
+
+    return () => {
+      disposed = true;
+      cleanup();
+    };
+  }, []);
+
+  /** Builds the terminal and everything hanging off it; returns its teardown. */
+  function boot() {
     const term = new Terminal({
       fontFamily: MONO,
       fontSize,
@@ -192,26 +232,14 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
       settle = setTimeout(resize, 150);
     });
     observer.observe(host.current!);
-
-    // The first fit has to wait for the font: xterm measures the cell when it opens, and a cell
-    // measured in the fallback font is a whole session at the wrong width.
-    document.fonts.load(`${fontSize}px ${MONO}`).then(
-      () => {
-        console.log('[terminal]', fontReport(fontSize));
-        resize();
-      },
-      (error) => {
-        console.log('[terminal] font failed to load:', String(error), '—', fontReport(fontSize));
-        resize();
-      },
-    );
+    resize();
 
     return () => {
       clearTimeout(settle);
       observer.disconnect();
       term.dispose();
     };
-  }, []);
+  }
 
   // A flavour change restyles the live session (§4.8); a font-size change resizes it (§4.2).
   // Keyed on the flavour's *name*, not the theme object: the object is rebuilt by the bridge on
