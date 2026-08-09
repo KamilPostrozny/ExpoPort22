@@ -202,16 +202,19 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - **Setup**: `vim` on a multi-line file; separately a shell with history.
 - **Steps**: open the arrows popover (button tints accent), tap ↑ ↓ ← → in vim; quit; at the
   prompt tap ↑ then ↓.
-- **Expect**: vim's cursor moves cell by cell (SS3 — DECCKM on, watch `[session] modes`
+- **Expect** (verified — `^[[C` at the prompt with `"decckm":false`, then `^[OB`, `^[OC`, `^[OD`
+  inside vim with `"decckm":true`; same button, form following the live flag):
+  vim's cursor moves cell by cell (SS3 — DECCKM on, watch `[session] modes`
   say `"decckm":true`); at the prompt ↑/↓ walk shell history (CSI — DECCKM off). Popover
   stays open across taps; outside tap or the button closes it.
-- [ ]
+- [x] — see the byte evidence folded into **Expect** above; the popover stayed open across the
+  whole run of taps.
 
 ### T7.8 — Home/End at a prompt
 - **Setup**: shell prompt, type a long command, caret at the end.
 - **Steps**: arrows popover → Home, then End.
 - **Expect**: caret jumps to line start, then line end (CSI H / CSI F; shells map both).
-- [ ]
+- [x] — `^[[H` then `^[[F` on the wire.
 
 ### T7.9 — Bar swipe ↓ hides the keyboard, ↑ shows it
 - **Setup**: keyboard up (it rises on connect).
@@ -220,7 +223,9 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - **Expect**: keyboard slides away (bar stays, docked at the bottom, terminal grows —
   `[terminal] size` logs a taller grid); swipe up raises it again; the second ↑ is a no-op
   for now — TODO(T10) switcher drag.
-- [ ]
+- [x] — the grid logged `52 × 26` → `52 × 41` on the ↓ swipe and back to `52 × 26` on the ↑,
+  with no bytes on the wire between them. (The "second ↑ is a no-op" line is stale: T10
+  shipped, so that gesture is the switcher drag now — T10.2.)
 
 ### T7.10 — Keys never fire during a bar swipe
 - **Setup**: shell prompt, keyboard up.
@@ -228,7 +233,9 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - **Expect**: keyboard hides, but no key fires (nothing at the prompt, Ctrl not armed) —
   the pan activating cancels the press. The press-in dim may flash; the send must not
   happen.
-- [ ]
+- [x] — swipes started on Esc/Ctrl fired no key: nothing on the wire across six swipe pairs
+  (each visible as the grid flipping `52 × 26` ↔ `52 × 41`), while deliberate presses of the
+  same keys sent normally. The press-in dim does flash during the swipe, which the case allows.
 
 ### T7.11 — Press feedback: dim/shrink + haptic on touch, not on echo
 - **Setup**: any key; airplane-mode-slow or `sleep`-blocked session is the interesting case.
@@ -242,7 +249,8 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - **Steps**: tap the grid once with two fingers (quick, no movement); then two-finger *pan*.
 - **Expect**: the tap opens the Settings stub (T12 alert; `[terminal] two-finger tap` in the
   log) and does not scroll; the pan scrolls exactly as in T6.6 and opens nothing.
-- [ ]
+- [x] — `[terminal] two-finger tap` then `[settings] sheet open` (the T12 sheet now, not the
+  stub alert). The two-finger pan scrolling and opening nothing is T6.6's evidence.
 
 ### T7.13 — Native input owns the keyboard; selection works with it up (the T4 fix)
 - **Setup**: fresh connect (keyboard rises on its own), text on screen.
@@ -253,7 +261,16 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   unfought); the long-press selects with the system edit menu even while the keyboard is up
   — the architecture T4 measured for. Backspace and held-delete: single deletes work;
   auto-repeat on hold is TODO(T12).
-- [ ]
+- [ ] **partial — one half fails.** Keyboard **down**: selects correctly, edit menu and all.
+  Typing echoes through the native input all session, no webview keyboard ever appears, and a
+  tap dismisses the keyboard as intended. Keyboard **up**: the long-press *does* select
+  (`[terminal] selection "Mem"` at the keyboard-up geometry `52 × 26`) — but the touch blurs the
+  native input, the keyboard drops, and the refit to `52 × 41` reflows the grid under the
+  selection, which then moves or vanishes. The log pairs them every time: `selection "Disk"`
+  immediately followed by `size 52 × 41`. Fix chosen (user, during the walk): take the upgrade
+  path §252 already names — xterm's own selection via `term.select`/`getSelectionPosition` with
+  a Copy control on the bar, so no WebKit gesture is involved. Re-run this case after that
+  lands.
 
 ## T9 — tmux side-channel + config push
 
@@ -272,7 +289,10 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   gained exactly one `source-file -q ~/.config/port22/port22.conf` line; `[tmux]` state says
   `"config":"applied"`; the tabs circle appears on the bar. (Settings row showing "applied" is
   T12 — until then the log line is the assertion.)
-- [ ]
+- [x] — on a genuinely virgin host (`tmux kill-server`, `rm -rf ~/.config/port22`, source line
+  stripped): probe reported `config:"not-applied"`, then `[tmux] configure: applied`. Host side
+  gained `~/.config/port22/port22.conf` (`# port22-conf-v1`, `set -g @port22 1`) and exactly one
+  `source-file -q …` line at `~/.tmux.conf:62`, rest of that file untouched.
 
 ### T9.2 — Works on a fish login shell
 - **Setup**: host user's shell is fish (`chsh -s $(which fish)` or already so).
@@ -280,7 +300,9 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - **Expect**: identical outcome — no parse errors in the log (`Unknown command`, `Missing end`
   are the fish tells), verify still answers `1`. Every exec line the log shows is the
   fish-and-sh common ground pinned in `src/tmux-model.test.ts`.
-- [ ]
+- [x] — the T9.1 round trip above *was* the fish run: this host's login shell is fish 4.8.1
+  (`Shell: fish 4.8.1` in its own greeting). No `Unknown command` or `Missing end` anywhere in
+  the log.
 
 ### T9.3 — Toggle off: tabs affordance gone, no push on next connect
 - **Setup**: connected with config applied (T9.1); host conf files present.
@@ -289,7 +311,10 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - **Expect**: the tabs circle does not render (derived state needs toggle AND applied); the log
   shows probe but **no** SFTP upload and no `configure:` line; `~/.config/port22` stays absent.
   The poll still runs — the ribbon feed does not depend on the toggle.
-- [ ]
+- [x] — `[settings] configureTmux → false`, then a reconnect with zero `configure` and zero
+  `upload` lines, `~/.config/port22` still absent, state `"config":"not-applied"` (which is what
+  hides the circle), and 7 poll beats in the same window — the feed is independent of the
+  toggle, as designed.
 
 ### T9.4 — No tmux on the host: zero tmux UI, zero message
 - **Setup**: a host (or container) without tmux on PATH.
@@ -304,7 +329,9 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - **Steps**: from the laptop: `tmux select-window -t :2`, then `:1`.
 - **Expect**: within ~2s (one poll beat) the badge follows to 2, then back; log shows one
   `[tmux]` line per change, not one per poll.
-- [ ]
+- [x] — the laptop *is* the host (10.42.0.71), so a shell here is a genuine second client.
+  `select-window -t 3` from it moved the app's feed to `windowIndex: 3` untouched, having
+  already tracked 1 → 2. One `[tmux]` line per change, not per poll beat.
 
 ### T9.6 — capture-pane snapshot carries ANSI colour
 - **Setup**: attached to tmux; something colourful on screen (`ls --color`, `git log`).
@@ -330,7 +357,8 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - **Expect**: log flips to `"foreground":{"command":"sleep","pid":…}` within a beat, then back
   to `"foreground":null` (fish = idle) after the interrupt. vim and `claude` likewise register;
   a bare prompt never does.
-- [ ]
+- [x] — driven from the host side (`send-keys 'sleep 100' Enter`, then `C-c`): the feed went
+  `null` → `{"command":"sleep","pid":348866}` → `null`, one beat each way.
 
 ### T9.9 — Version bump replaces an old conf
 - **Setup**: on the host: `printf '# port22-conf-v0\nset -g mouse on\n' > ~/.config/port22/port22.conf`.
@@ -338,16 +366,25 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - **Expect**: log shows the read-back, the push (content differs), and `configure: applied`;
   the file on the host now starts `# port22-conf-v1`. Reconnecting again shows the read-back
   and **no** second upload — byte-identical content skips the push.
-- [ ]
+- [x] — planted `# port22-conf-v0` (md5 `4399f4…`, 2 lines); the reconnect replaced it with v1
+  (md5 `d122c2…`, 30 lines) and the source-line count stayed 1, not 2. The second reconnect left
+  the file's mtime at the first push's `23:40:25`, so nothing was re-uploaded. Note for the
+  reader: `configure: applied` logs on *every* connect — it reports the verify round-trip, not
+  an upload. The mtime is what tells a push from a skip.
 
 ### T9.10 — Failed push changes nothing visible
 - **Setup**: on the host: `chmod 500 ~/.config` (or `chattr +i` the port22 dir) so the SFTP
-  write fails; no `port22.conf` present.
+  write fails; no `port22.conf` present. (What was actually used, and gentler on a live desktop:
+  `rm -rf ~/.config/port22 && touch ~/.config/port22` — a regular file where the directory has
+  to be. No permissions touched, and undone with a single `rm`.)
 - **Steps**: connect; use the session.
 - **Expect**: the session works normally; log shows `[tmux] configure failed …` and state stays
   `"config":"not-applied"`; no tabs circle, no alert, no banner — §7's "failed conf push
   changes nothing visible". Restore with `chmod 700 ~/.config`; the next connect applies.
-- [ ]
+- [x] — `[ssh] upload failed: …SFTPMessage.Status error 1` then `[tmux] configure failed,
+  nothing visible changes: …`, state stayed `"config":"not-applied"`, and the screenshot shows
+  the bar without a tabs circle (the pill stretches into its place). Session fully usable, no
+  alert, no banner.
 
 ## T8 — Clipboard + ⋯ menu + uploads
 
