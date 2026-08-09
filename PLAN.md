@@ -172,7 +172,7 @@ was not needed. **Still open**: Android is a name-only stub until T3.
 **T3 ★ — expo-ssh native module, Android** deps: T2 (API fixed by T2)
 Same TS API, Kotlin + sshj impl. *Accept*: same demo passes on Android.
 
-**T4 ★ — Terminal DOM component** ✅ built, **not yet verified on device** · deps: T1
+**T4 ★ — Terminal DOM component** ✅ done, verified on device 2026-08-09 · deps: T1
 xterm.js in expo-dom component: Nerd Font CSS, Catppuccin theme injection, font-size prop,
 fit/resize→cols/rows callback, data in/out bridge, selection + native edit menu, OSC 8
 link addon (http/https only), OSC 52 handler (write→bridge, read→drop), `CSI ?996n` reply,
@@ -189,10 +189,20 @@ the fonts `useFonts` loads, so the two `.ttf`s are copied into `public/fonts/` �
 `expo export:embed` puts inside `www.bundle`, which is the DOM bundle's base URL. Resize is
 debounced 150ms in the DOM, where the cell size is known. `TerminalHandle` deliberately does not
 extend `DOMImperativeFactory` (its index signature would type `write` as taking any `JSONValue`).
-Verified so far off-device only: `bun test`, `tsc --noEmit`, `expo export -p ios` (DOM bundle +
-`public/` copy present), `expo-doctor` 20/20. **Still open**: everything the accept list actually
-asks — glyph metrics, the system edit menu over `.xterm-rows`, link taps, bell haptics — needs the
-harness on hardware. Mouse reports (`onBinary`) are still unforwarded; T6 owns their encoding.
+Verified: `bun test`, `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20, and on the iPhone
+against the harness — the webview boots (`DOM Bundled src/terminal.tsx`), the bundled font is
+measurably in it (`loaded=true cell=7.80 nerd-glyph=7.80`, the private-use glyph on the same advance
+as `M`), keystrokes reach native, the bell fires, an OSC 52 yank arrives decoded while an OSC 52
+*read* produces nothing, an OSC 8 link activates, and the size settles at one value per layout.
+Three bugs only the device could show, fixed in `9da57be`: `<Link asChild>` throws in render because
+expo-router's Slot refuses an array `style`; the theme effect keyed on the `theme` *object* looped
+forever, since the bridge rebuilds that object every render; and the harness's own status text
+rewrapped its bar, resizing the terminal underneath it. The diagnostics that caught all three (font
+report, size log, one line per bridge callback) stayed in — §7 says log freely, and a webview has no
+other way to speak.
+**Still open**: colours, bold and box drawing are eye-checked only; the long-press system edit menu
+over `.xterm-rows` is unproven, and it may yet fight xterm's own selection (T6 territory, where a
+pan becomes a scroll). Mouse reports (`onBinary`) are still unforwarded — T6 owns their encoding.
 
 **T5 — Session wiring + Setup flow** deps: T2/T3, T4
 Key gen (@noble/ed25519 + SecureStore), Setup screen per design (Latte-friendly), validation,
