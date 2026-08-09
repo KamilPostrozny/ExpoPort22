@@ -2,11 +2,21 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useRef } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/use-theme';
+import KeyBar, { ArrowsPopover, BarMenu, type BarPopover } from '@/keybar';
 import {
   answerHostKey,
   attachTerminal,
@@ -27,8 +37,10 @@ import { MONO, type Theme } from '@/theme';
  * three states §4.9 asks for. The terminal itself stays mounted through all of them, so a reconnect
  * comes back to the same scrollback in a webview that is already booted.
  *
- * The bar at the bottom is a placeholder for T7's key bar. Keyboard input still goes through
- * xterm's own hidden textarea; T6/T7 move it to a native `TextInput` for the reasons T4 measured.
+ * Below the terminal sits T7's key bar, and inside the bar the native `TextInput` that owns the
+ * keyboard (T4's decision — the webview never takes focus). KeyboardAvoidingView is what docks the
+ * bar above the keyboard and shrinks the terminal with it, which is also what triggers §4.2's
+ * debounced resize.
  */
 export default function SessionScreen() {
   const theme = useTheme();
@@ -36,6 +48,10 @@ export default function SessionScreen() {
   const session = useSession();
   const terminal = useRef<TerminalHandle>(null);
   const detach = useRef<(() => void) | null>(null);
+  const [open, setOpen] = useState<BarPopover>('none');
+  const [decckm, setDecckm] = useState(false);
+  /** The bar stack's measured height — the `popBase` the popovers anchor on. */
+  const [barHeight, setBarHeight] = useState(60);
 
   // Which screen is in front decides what a screenshot taken from the laptop contains, and the
   // person tapping is holding the same phone.
@@ -71,8 +87,27 @@ export default function SessionScreen() {
     router.back();
   };
 
+  // TODO(T12): the real Settings sheet (§4.8). Both doors — the ⋯ menu row and the two-finger
+  // tap on the grid — already lead here; until the sheet exists this stub keeps Disconnect
+  // reachable, which is the one Settings action a session cannot be tested without.
+  const openSettings = () => {
+    setOpen('none');
+    Alert.alert('Settings', 'The settings sheet lands in T12.', [
+      { text: 'Disconnect', style: 'destructive', onPress: leave },
+      { text: 'Close', style: 'cancel' },
+    ]);
+  };
+
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
+      <KeyboardAvoidingView
+        style={styles.screen}
+        // 'padding' is the iOS behaviour; Android sizes the window itself (T3's sibling will
+        // revisit when the bar rides Gboard per §4.10).
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
+          screen, so a `bottom` measured from the bar holds whether the keyboard is up or not. */}
+      <View style={styles.screen}>
       <TerminalView
         ref={terminal}
         theme={theme}
@@ -93,23 +128,45 @@ export default function SessionScreen() {
         onLink={async (url) => {
           await WebBrowser.openBrowserAsync(url);
         }}
-        // T6 produces the signal, T11's ribbon consumes it. Until then the Metro log is the
-        // consumer — the DOM side logs the same line, so a missing one here is a bridge fault.
-        onModes={async (modes) => console.log('[session] modes', JSON.stringify(modes))}
+        // T6 produces the signal; the bar's arrows cluster consumes DECCKM now, T11's ribbon
+        // takes the rest later. The log line stays — a missing one is a bridge fault.
+        onModes={async (modes) => {
+          console.log('[session] modes', JSON.stringify(modes));
+          setDecckm(modes.decckm);
+        }}
+        onTwoFingerTap={async () => openSettings()}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
 
-      {/* Stand-in for T7's key bar: the two things a session cannot be tested without. */}
-      <View style={styles.bar}>
-        <Pressable
-          onPress={() => terminal.current?.focus()}
-          style={[styles.pill, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.pillLabel, { color: theme.foreground }]}>Keyboard</Text>
-        </Pressable>
-        <Pressable onPress={leave} style={[styles.pill, { backgroundColor: theme.surface }]}>
-          <Text style={[styles.pillLabel, { color: theme.foreground }]}>Disconnect</Text>
-        </Pressable>
+      <KeyBar
+        theme={theme}
+        decckm={decckm}
+        sendBytes={send}
+        open={open}
+        onOpenChange={setOpen}
+        onHeight={setBarHeight}
+        active={session.status === 'connected'}
+      />
+
+      {/* The popover layer: outside-tap scrim over everything (bar included, as in the
+          prototype), popovers anchored `popBase` up. */}
+      {open !== 'none' && (
+        <View style={StyleSheet.absoluteFill}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen('none')} />
+          {open === 'arrows' ? (
+            <ArrowsPopover
+              theme={theme}
+              decckm={decckm}
+              bottom={barHeight + 6}
+              sendBytes={send}
+            />
+          ) : (
+            <BarMenu theme={theme} bottom={barHeight + 6} onOpenSettings={openSettings} />
+          )}
+        </View>
+      )}
       </View>
+      </KeyboardAvoidingView>
 
       {session.status !== 'connected' && (
         <Status session={session} theme={theme} onSetup={leave} />
@@ -197,9 +254,6 @@ function Status({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   terminal: { flex: 1 },
-  bar: { flexDirection: 'row', gap: 8, padding: 8 },
-  pill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  pillLabel: { fontSize: 13, fontWeight: '600' },
   status: {
     position: 'absolute',
     top: 0,

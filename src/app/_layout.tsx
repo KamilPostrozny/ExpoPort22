@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useTheme } from '@/hooks/use-theme';
 import { hydrateSettings } from '@/settings';
@@ -44,8 +45,10 @@ function Root() {
     return () => subscription.remove();
   }, []);
 
+  // GestureHandlerRootView: T7's bar swipes run on react-native-gesture-handler, which needs
+  // exactly one of these above every GestureDetector.
   return (
-    <>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
@@ -53,6 +56,6 @@ function Root() {
           contentStyle: { backgroundColor: theme.background },
         }}
       />
-    </>
+    </GestureHandlerRootView>
   );
 }

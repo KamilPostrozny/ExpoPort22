@@ -295,12 +295,52 @@ on hardware** — the device cases are TESTS.md §T6 (T6.1–T6.9). Still open b
 constants (τ, flick/stop thresholds, slop) are guesses until a thumb meets them; `sendBase64` if a
 pre-SGR mouse app past column 95 ever matters; T7 still owes the native `TextInput` keyboard move.
 
-**T7 — Key bar core** deps: T5
+**T7 — Key bar core** ✅ implemented 2026-08-09 (not device-verified) · deps: T5
 Glass bar (iOS blur / Android flush): ⋯ circle, pill Ctrl·Esc·Tab·Paste + arrows button,
 tabs circle+badge; press feedback + haptics; sticky/locked Ctrl with chord strip; arrows
 cluster popover; keyboard show/hide via bar swipe ↓/↑; two-finger-tap → Settings; d-pad and
 popover anchoring above ribbon/strip as in prototype (`popBase` stacking). *Accept*: chords
 reach host (`^C` kills a running `sleep`), arrows work in vim.
+Landed: `src/keybar-model.ts` (every decision, pure and tested in `src/keybar-model.test.ts`:
+Ctrl machine off→armed→locked with the 300ms double-tap window, `^X = letter & 0x1f` control
+bytes, `applyCtrl` for typed keys, the six DECCKM-aware nav sequences — up/down *are* T6's
+`arrowKey`, imported not copied — the TextInput diff, bar-swipe classification at the
+prototype's 10/24px thresholds), `src/keybar.tsx` (the bar, chord strip, both popovers, the
+glass recipe, and the invisible native `TextInput`), the two-finger tap in `src/terminal.tsx`
++ `isTwoFingerTap` in `src/scroll-model.ts` (it lives with the touch layer's brain), KeyBar +
+KeyboardAvoidingView wiring in `src/app/terminal.tsx`, GestureHandlerRootView in
+`src/app/_layout.tsx`. Added `expo-blur` (native module — build, not reload).
+Decisions: **the native `TextInput` owns the keyboard now** (T4's device-proven decision) —
+uncontrolled, invisible, its `onChangeText` diffed against what it last held (`diffInput`:
+DELs in code points, then the insert), Return via `submitBehavior="submit"` so it never
+blurs; `emitKey` is the single per-key seam T12's dictation filter and held-delete land in.
+The webview side now *disables* xterm's helper textarea outright — xterm's own mousedown
+focus call no-ops, focus stays on the body, which is both "the webview never takes focus"
+and exactly the focus state T4 measured long-press selection to need; `TerminalHandle.focus`
+is deleted, nothing may raise the webview keyboard. Chords apply to typed letters too, not
+just strip caps; a non-chordable key passes through and leaves the arm standing. Keyboard
+docking is plain `KeyboardAvoidingView` (`padding`) — the terminal shrinks with it, which is
+what fires §4.2's debounced resize for free. Bar swipes are one RNGH Pan (`runOnJS`, no
+worklets); its activation cancels the childrens' presses, which is the whole "swiping never
+presses keys" guarantee. The popovers do *not* live inside the bar: RN cannot hit-test
+children drawn outside their parent's bounds, so `open` is lifted and the screen renders
+scrim + popover in a layer over the stage, anchored at `popBase` = the bar stack's height,
+which KeyBar itself reports via `onHeight` on layout — one measured number that already
+includes the chord strip and will include T11's ribbon for free. Everything else (Ctrl,
+input) stays in the bar. Icons are SF Symbols via the already-installed `expo-symbols`,
+with text fallbacks (react-native-svg stays out).
+Hooks left, all live on `KeyBarProps`: `onPasteLongPress` (T8 clipboard popover; tap-paste
+reads the phone pasteboard until T8's slots), the disabled UPLOAD FILE menu section (T8),
+`windowIndex` (T9 badge feed, default 1), `onTabsTap` + `onSwitcherDrag` (T10),
+`onBarSwipeHorizontal(direction)` (T11 — fires on release past 30px, thresholds are T11's to
+finish), the ribbon's slot between anchor and chord strip (T11), the Settings stub alert in
+`src/app/terminal.tsx` with a working Disconnect (T12 sheet replaces it — Disconnect must
+not be lost in the swap), and `emitKey` (T12 dictation filter + held-delete).
+Verified: `bun test` (41), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Not
+walked on hardware** — the device cases are TESTS.md §T7 (T7.1–T7.13). Still open besides
+that: BlurView intensity 40 vs the design's `blur(14px)` is an eye-match guess; whether
+WKWebView really resigns the TextInput's first responder on touch (T4 measured it once, this
+build must confirm); Android bar (flush surfaces, Gboard docking) is T3/T10-era work.
 
 **T8 — Clipboard + ⋯ menu + uploads** deps: T7, T2/T3
 Clipboard slots store (OSC52 feed + pasteboard, pins persisted), Paste tap/long-press

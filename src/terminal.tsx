@@ -29,6 +29,7 @@ import {
   arrowKey,
   coastDistance,
   coastVelocity,
+  isTwoFingerTap,
   modesEqual,
   scrollRoute,
   takeNotches,
@@ -45,8 +46,6 @@ import { MONO, type Theme } from '@/theme';
 export type TerminalHandle = {
   /** Shell output, base64 — the wire format `ExpoSSH` emits. */
   write(base64: string): void;
-  /** Raises the keyboard: the hidden textarea xterm keeps is what the OS is focusing. */
-  focus(): void;
 };
 
 export type TerminalProps = {
@@ -68,6 +67,9 @@ export type TerminalProps = {
    *  the baseline. T11's context ribbon is the consumer; §4.3's scroll routing reads the same flags
    *  but inside the webview, where they are fresh rather than a bridge hop old. */
   onModes: (modes: ModeSignal) => Promise<void>;
+  /** A two-finger tap on the grid — §4.8's second door to Settings. Detected here because the
+   *  touch layer below already owns the two-finger *pan*, and only it can tell the two apart. */
+  onTwoFingerTap: () => Promise<void>;
   ref?: Ref<TerminalHandle>;
   dom?: DOMProps;
 };
@@ -163,7 +165,6 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
 
   const handle: TerminalHandle = {
     write: (base64) => terminal.current?.write(fromBase64(base64)),
-    focus: () => terminal.current?.focus(),
   };
   useDOMImperativeHandle(
     (ref ?? null) as Ref<DOMImperativeFactory>,
@@ -219,6 +220,12 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     term.open(host.current!);
     terminal.current = term;
     fit.current = fitAddon;
+
+    // T7: the keyboard is native now (T4's decision), so the webview must never take focus. The
+    // helper textarea xterm keeps for real keyboards is disabled outright — xterm's own mousedown
+    // focus call then no-ops and focus stays on the body, which is also exactly the state T4
+    // measured long-press selection to need.
+    if (term.textarea) term.textarea.disabled = true;
 
     // A long-press selection is the system's, not xterm's, so it fires no xterm event and leaves no
     // other trace: without this line there is no way to tell "the gesture never started" from "it
@@ -352,6 +359,9 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     let carry = 0;
     let tracker = new VelocityTracker();
     let coast: number | null = null;
+    /** For the two-finger tap (§4.8): how many fingers this touch ever had, and when it began. */
+    let fingers = 0;
+    let downAt = 0;
 
     // Measured, not asked for: the screen element is exactly `rows` cells tall, and xterm's cell
     // metrics live on internal services.
@@ -429,12 +439,15 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
         // A second finger joining a pan: same scroll, rebased so the handover does not jump.
         panX = t.clientX;
         panY = t.clientY;
+        fingers = Math.max(fingers, ev.touches.length);
         return;
       }
       pan = 'pending';
       panX = t.clientX;
       panY = t.clientY;
       carry = 0;
+      fingers = ev.touches.length;
+      downAt = ev.timeStamp;
       tracker = new VelocityTracker();
       tracker.add(ev.timeStamp, t.clientY);
     };
@@ -472,6 +485,12 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
         return;
       }
       if (pan === 'panning') startCoast(tracker.velocity(), panX, panY);
+      // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
+      // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.
+      if (pan === 'pending' && isTwoFingerTap(fingers, false, ev.timeStamp - downAt)) {
+        console.log('[terminal] two-finger tap');
+        latest.current.onTwoFingerTap();
+      }
       pan = 'idle';
     };
 

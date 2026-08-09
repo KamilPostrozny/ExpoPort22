@@ -114,3 +114,13 @@ export class VelocityTracker {
 
 /** How far a touch may wander before it stops being a possible long-press and becomes a pan. */
 export const PAN_SLOP_PX = 8;
+
+/** Longer than this and two stationary fingers are a rest, not a tap. */
+export const TWO_FINGER_TAP_MS = 300;
+
+/** A two-finger *tap* on the grid opens Settings (§4.8's second door): exactly two fingers, no
+ *  finger ever moved past the slop (`panned` false), and quick. A two-finger *pan* is a scroll
+ *  (§4.3) and never gets here. */
+export function isTwoFingerTap(fingers: number, panned: boolean, durationMs: number): boolean {
+  return fingers === 2 && !panned && durationMs < TWO_FINGER_TAP_MS;
+}

@@ -111,3 +111,116 @@ per spend and `[terminal] modes {...}` per mode change.
   `[terminal]` twin from the DOM side); on exit both flags return false; htop entry/exit flips
   `mouseReporting` true/false. One line per change, not one per keystroke.
 - [ ]
+
+## T7 — Key bar core
+
+All cases: connected to a real host, terminal on screen, unless said otherwise. The bar's
+decisions are unit-tested (`src/keybar-model.test.ts`); these cases are the finger-and-host
+half. Stubs in play: Settings is a T12 stub alert (with a working Disconnect), Paste
+long-press is a T8 no-op, the tabs badge shows the default `1` until T9's feed, tabs tap and
+switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
+
+### T7.1 — A chord reaches the host: ^C kills a running sleep
+- **Setup**: at a shell prompt, run `sleep 100`.
+- **Steps**: tap Ctrl (tints accent, chord strip appears), tap the `C · interrupt` cap — or
+  tap Ctrl then type `c` on the keyboard.
+- **Expect**: `^C` echoes, `sleep` dies, prompt returns; Ctrl disarms (tint gone, strip
+  slides away) after the one chord.
+- [ ]
+
+### T7.2 — Ctrl double-tap locks and sends repeated chords
+- **Setup**: shell prompt with a longish command typed (do the typing *before* locking —
+  while locked, every letter chords).
+- **Steps**: double-tap Ctrl (<300ms apart) — accentA tint + halo; type `a`, then `e`; tap
+  the `C` cap twice; tap Ctrl once.
+- **Expect**: while locked every letter chords (`^A`/`^E` jump to start/end of the line) and
+  the strip stays up through repeated caps (`^C` twice = two fresh prompts); the single tap
+  unlocks (tint + strip gone) and letters type normally again.
+- [ ]
+
+### T7.3 — All five strip caps are observable
+- **Setup**: shell prompt with some history; then `sleep 100` for Z.
+- **Steps**: arm Ctrl before each: `R` → reverse-i-search prompt appears (Esc leaves it);
+  `L` → screen clears to one prompt line; with `sleep 100` running, `Z` → `[1]+ Stopped`;
+  `C` at an empty prompt → `^C` + fresh prompt; `D` at an empty prompt of a nested shell
+  (`bash` first) → the nested shell exits (§7: instant, no confirmation).
+- **Expect**: each cap sends its byte once and disarms; captions read interrupt · suspend ·
+  history · clear · EOF.
+- [ ]
+
+### T7.4 — Esc leaves vim insert mode
+- **Setup**: `vim`, press `i`, type a word.
+- **Steps**: tap Esc, then type `:q!` + Return (keyboard).
+- **Expect**: `-- INSERT --` vanishes on the Esc tap; the `:q!` reaches the command line —
+  proof the byte was ESC (0x1b), not text.
+- [ ]
+
+### T7.5 — Tab completes in the shell
+- **Setup**: shell prompt, type `ls /et`.
+- **Steps**: tap Tab.
+- **Expect**: completes to `/etc/` (0x09 went down the PTY).
+- [ ]
+
+### T7.6 — Paste types the pasteboard
+- **Setup**: copy a string on the phone (e.g. from Notes): `echo pasted-ok`.
+- **Steps**: tap Paste at a prompt. Then long-press Paste (~420ms).
+- **Expect**: the text is *typed* at the prompt, no Return of ours (never executes, §4.4);
+  long-press does nothing yet — TODO(T8) clipboard popover.
+- [ ]
+
+### T7.7 — Arrows navigate in vim (DECCKM) and walk history at a prompt
+- **Setup**: `vim` on a multi-line file; separately a shell with history.
+- **Steps**: open the arrows popover (button tints accent), tap ↑ ↓ ← → in vim; quit; at the
+  prompt tap ↑ then ↓.
+- **Expect**: vim's cursor moves cell by cell (SS3 — DECCKM on, watch `[session] modes`
+  say `"decckm":true`); at the prompt ↑/↓ walk shell history (CSI — DECCKM off). Popover
+  stays open across taps; outside tap or the button closes it.
+- [ ]
+
+### T7.8 — Home/End at a prompt
+- **Setup**: shell prompt, type a long command, caret at the end.
+- **Steps**: arrows popover → Home, then End.
+- **Expect**: caret jumps to line start, then line end (CSI H / CSI F; shells map both).
+- [ ]
+
+### T7.9 — Bar swipe ↓ hides the keyboard, ↑ shows it
+- **Setup**: keyboard up (it rises on connect).
+- **Steps**: swipe down anywhere on the bar; then swipe up on it; then swipe up again with
+  the keyboard already up.
+- **Expect**: keyboard slides away (bar stays, docked at the bottom, terminal grows —
+  `[terminal] size` logs a taller grid); swipe up raises it again; the second ↑ is a no-op
+  for now — TODO(T10) switcher drag.
+- [ ]
+
+### T7.10 — Keys never fire during a bar swipe
+- **Setup**: shell prompt, keyboard up.
+- **Steps**: start the ↓ swipe with the finger ON the Esc key; likewise across Ctrl/Tab.
+- **Expect**: keyboard hides, but no key fires (nothing at the prompt, Ctrl not armed) —
+  the pan activating cancels the press. The press-in dim may flash; the send must not
+  happen.
+- [ ]
+
+### T7.11 — Press feedback: dim/shrink + haptic on touch, not on echo
+- **Setup**: any key; airplane-mode-slow or `sleep`-blocked session is the interesting case.
+- **Steps**: press and hold a key; watch and feel.
+- **Expect**: the key dims and shrinks while touched and the light haptic fires on the
+  *touch*, immediately — even when the session is slow to echo (§4.4: on touch, not echo).
+- [ ]
+
+### T7.12 — Two-finger tap opens Settings; two-finger pan still scrolls
+- **Setup**: shell with scrollback (`seq 1 200`).
+- **Steps**: tap the grid once with two fingers (quick, no movement); then two-finger *pan*.
+- **Expect**: the tap opens the Settings stub (T12 alert; `[terminal] two-finger tap` in the
+  log) and does not scroll; the pan scrolls exactly as in T6.6 and opens nothing.
+- [ ]
+
+### T7.13 — Native input owns the keyboard; selection works with it up (the T4 fix)
+- **Setup**: fresh connect (keyboard rises on its own), text on screen.
+- **Steps**: type a command — watch it echo; touch the terminal once — keyboard should
+  hide; swipe the bar ↑ to bring it back; with the keyboard UP, long-press a word.
+- **Expect**: typing reaches the PTY through the native input (webview never focused — no
+  webview keyboard flicker); touching the terminal dismisses the keyboard (native default,
+  unfought); the long-press selects with the system edit menu even while the keyboard is up
+  — the architecture T4 measured for. Backspace and held-delete: single deletes work;
+  auto-repeat on hold is TODO(T12).
+- [ ]
