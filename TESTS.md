@@ -531,11 +531,16 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Expect**: the circle is accent-filled with the glyph in background colour for the duration
   of the SFTP write, and tapping it does nothing; it returns to glass when the send settles —
   that is the entire progress UI (§4.4/§4.6).
-- [ ] — first attempt never reached the send: picking a video threw
-  `PHPhotosErrorDomain error 3164` **uncaught in a promise** (the library could not export that
-  asset), so the app showed a red box instead of a message. `pick()` now catches and shows one
-  "Could not read the file" alert, matching §4.6. The tint half still needs a large file that
-  actually exports.
+- [x] — **three bugs on the way through.** (1) Picking a video threw
+  `PHPhotosErrorDomain error 3164` **uncaught in a promise** — a red box instead of a message;
+  `pick()` now catches it and shows one "Could not read the file" alert. (2) The busy tint sat
+  *under* Glass's blur and light-mode white overlay, so in Latte the accent washed out and the
+  glyph (painted in `theme.background`) nearly vanished; it is drawn over the glass now, with its
+  own radius, because an absolutely-filled child squared off the circle's edge when left to the
+  parent's clip. (3) The ssh logging proxy printed the whole base64 upload, which put tens of MB
+  through Metro's socket — `RangeError: Max payload size exceeded`, HMR dead, log gone; long
+  strings now log as a head plus their length. After those: the circle is solid accent with a
+  readable glyph for the duration of the send and ignores taps throughout.
 
 ### T8.15 — Unwritable destination: one alert, nothing typed, nothing left
 - **Setup**: on the host: `mkdir -p ~/noentry && chmod 500 ~/noentry`; upload via ⋯ → Files.
