@@ -369,10 +369,23 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
       report();
     };
     resizer.current = resize;
+    // Throttled, not debounced. A keyboard edge is one discrete step and so produces exactly one
+    // tick: a trailing debounce held the host off for 150ms for nothing, and until tmux repaints,
+    // the rows the keyboard uncovers hold whatever the fit dragged out of scrollback — which is
+    // what read as the terminal settling last, after the keyboard had gone (T14, device). A real
+    // ramp (rotation, the font-size drag) still gets at most one report per window plus the final
+    // one, which is all §4.2 ever wanted.
+    let lastReport = 0;
+    const flush = () => {
+      lastReport = Date.now();
+      report();
+    };
     const observer = new ResizeObserver(() => {
       fitAddon.fit();
       clearTimeout(settle);
-      settle = setTimeout(report, 150);
+      const since = Date.now() - lastReport;
+      if (since >= 150) flush();
+      else settle = setTimeout(flush, 150 - since);
     });
     observer.observe(host.current!);
     resize();
