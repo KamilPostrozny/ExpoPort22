@@ -7,8 +7,8 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  Dimensions,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -91,8 +91,8 @@ import UploadSheet from '@/upload-sheet';
  * comes back to the same scrollback in a webview that is already booted.
  *
  * Below the terminal sits T7's key bar, and inside the bar the native `TextInput` that owns the
- * keyboard (T4's decision — the webview never takes focus). KeyboardAvoidingView is what docks the
- * bar above the keyboard and shrinks the terminal with it, which is also what triggers §4.2's
+ * keyboard (T4's decision — the webview never takes focus). `keyboardPad` is what docks the bar
+ * above the keyboard and shrinks the terminal with it, which is also what triggers §4.2's
  * debounced resize.
  */
 export default function SessionScreen() {
@@ -119,6 +119,32 @@ export default function SessionScreen() {
   const [pendingUpload, setPendingUpload] = useState<{ base64: string; suggestedName: string } | null>(
     null,
   );
+  /**
+   * The keyboard's overlap, as bottom padding for the stage — what `KeyboardAvoidingView` used to
+   * do here, minus its timing. KAV animates the padding on the keyboard's own curve, so the two
+   * move together and the keyboard is over the bar for the first frames of the slide. Here the
+   * shrink is a plain state write on `keyboardWillChangeFrame`, which iOS fires *before* the
+   * animation starts: the terminal is out of the way by the time the keyboard leaves the bottom
+   * edge. Going back down is `keyboardDidHide`, deliberately — dropping at `WillHide` would open a
+   * gap under the bar for the length of the slide, so the terminal waits the keyboard out instead.
+   */
+  const [keyboardPad, setKeyboardPad] = useState(0);
+  useEffect(() => {
+    // Android has no Will* events, and its window already resizes for Gboard (§4.10's docking):
+    // padding here would subtract the keyboard twice.
+    if (Platform.OS !== 'ios') return;
+    const subs = [
+      Keyboard.addListener('keyboardWillChangeFrame', (e) => {
+        // The stage's bottom is the window's bottom less the safe-area strip SafeAreaView already
+        // pads; only what the keyboard covers beyond that is padding of ours.
+        const overlap = Dimensions.get('window').height - e.endCoordinates.screenY;
+        // The hide's own WillChangeFrame reports no overlap — `keyboardDidHide` owns that edge.
+        if (overlap > 0) setKeyboardPad(Math.max(0, overlap - insets.bottom));
+      }),
+      Keyboard.addListener('keyboardDidHide', () => setKeyboardPad(0)),
+    ];
+    return () => subs.forEach((sub) => sub.remove());
+  }, [insets.bottom]);
 
   // Which screen is in front decides what a screenshot taken from the laptop contains, and the
   // person tapping is holding the same phone.
@@ -698,22 +724,10 @@ export default function SessionScreen() {
             : [styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }],
           stage !== null && wrapperStyle,
         ]}>
-      <KeyboardAvoidingView
-        style={styles.screen}
-        // 'padding' is the iOS behaviour. On Android the window itself resizes for Gboard
-        // (`softwareKeyboardLayoutMode` defaults to `resize`, and SDK 57's edge-to-edge feeds the
-        // IME inset into that resize), so the bar rides the keyboard by layout alone — §4.10's
-        // docking — and the terminal's shrink fires §4.2's debounced resize the same way. A KAV
-        // behavior here would subtract the keyboard a second time; undefined renders a plain View.
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        // KAV measures its own top from `onLayout`, which is *parent-relative*: this one lives
-        // inside the SafeAreaView's padding box, so its y reads 0 while the view really starts
-        // `insets.top` down the screen. Without this the padding is short by exactly that inset
-        // — about one bar height, which put the whole bar behind the keyboard (T13/T6.2).
-        keyboardVerticalOffset={insets.top}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
-          screen, so a `bottom` measured from the bar holds whether the keyboard is up or not. */}
-      <View style={styles.screen}>
+          screen, so a `bottom` measured from the bar holds whether the keyboard is up or not —
+          absolute children sit inside the padding box, which is exactly the uncovered rect. */}
+      <View style={[styles.screen, { paddingBottom: keyboardPad }]}>
       {/* T14: the terminal view's search bar — up exactly while the shared search is armed. The
           same string as the switcher's field; prev/next walk the addon's occurrences; Done
           disarms both views. */}
@@ -894,7 +908,6 @@ export default function SessionScreen() {
         </View>
       )}
       </View>
-      </KeyboardAvoidingView>
 
       {/* the transition's accent ring, clipping and scaling with the wrapper */}
       <Animated.View
