@@ -442,7 +442,17 @@ export default function SessionScreen() {
     const pos = activePos();
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
-    commitOpen();
+    // The bar flick pays the open's one-off costs — the phase render, the holdSize marshal into
+    // the webview, the keyboard starting down — frames before its commit, under the finger. The
+    // tap paid them all on the flight's first frame, which is the initial hitch (device,
+    // 2026-08-11). So: flip the phase now, fly two frames later. Progress sits at 0 in the gap,
+    // so nothing on screen moves until the flight's first frame is clean.
+    setSw('opening');
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (swRef.current === 'opening') commitOpen(); // a disconnect mid-gap resets to closed
+      }),
+    );
   };
 
   // The bar-swipe-up drag-follow (prototype `zoomFollow`): progress tracks the finger, release
