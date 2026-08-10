@@ -15,6 +15,7 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollView,
 } from 'react-native';
 import Animated, {
   Easing,
@@ -78,9 +79,7 @@ import Switcher, {
 } from '@/switcher';
 import {
   SEARCH_BAR_H,
-  fabFrame,
   gridTop,
-  plusFrame,
   slotFrame,
   snapshotType,
   termPad,
@@ -290,6 +289,7 @@ export default function SessionScreen() {
   const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
   const scrollY = useRef(0);
+  const gridRef = useRef<ScrollView>(null);
   const prog = useSharedValue(0); // 0 = terminal at rest, 1 = terminal inside its card slot
   const dragX = useSharedValue(0); // finger drift during the bar-swipe-up follow
   const alpha = useSharedValue(1); // the stage fades out at the end of the zoom-out, back in first on return
@@ -489,25 +489,34 @@ export default function SessionScreen() {
     console.log('[switcher] new window');
     // A fresh window has no history to match — birth disarms the search (prototype's newTab).
     if (searchRef.current.on) disarmSearch();
-    // tmux switches the attached client to it, so the terminal lands on it. Re-list once it has:
-    // the card list is only refreshed while the grid is up, so without this the next open still
-    // holds the OLD window as active and aims the zoom at its slot — the flight lands on the
-    // wrong card and the grid snaps right on landing (user, 2026-08-10).
-    newWindow()
-      .then(() => refresh(false))
-      .catch((error) => console.log('[switcher] new window failed:', error));
-    // Nothing to leave a hole for: this one grows out of the + button, not out of a card, and the
-    // window it belongs to has no card in the grid yet.
-    setZoomId(null);
-    // The birth origin: iOS's + circle, or the Android FAB (§4.10) — same growth either way.
-    slotSV.value =
-      Platform.OS === 'android' ? fabFrame(stage.w, stage.h) : plusFrame(stage.w, stage.h);
-    prog.value = 1; // teleport the (invisible) surface into the + button…
+    // The birth is its card's zoom-in, seen whole (user, 2026-08-10): the new card pops into the
+    // grid first, then the surface flies into it — the same flight as a select, aimed at a slot
+    // that did not exist a beat ago. `birth` holds the gestures off while the card lands.
     setSw('birth');
-    alpha.value = withTiming(1, { duration: 200 });
-    prog.value = withTiming(0, { duration: 400, easing: Easing.out(Easing.cubic) }, (done) => {
-      if (done) runOnJS(finishClose)(); // …and grow it to full screen, Safari's new-tab birth
-    });
+    newWindow()
+      .then(() => refresh(false)) // tmux has switched the client to it; the fresh list names it
+      .then((wins) => {
+        const pos = wins?.findIndex((w) => w.active) ?? -1;
+        if (!wins || pos < 0) {
+          // The window never appeared, or the ~2s poll superseded this re-list mid-flight: the
+          // grid stays open with the new card in it, one tap from the flight it missed.
+          setSw('open');
+          return;
+        }
+        ribbonForWindow(wins[pos]); // as with a select: under the zoom, not a beat after it
+        setZoomId(wins[pos].id);
+        // The new card is the last row, possibly below the fold — reveal it on the frame after
+        // its row has laid out, then give the eye a beat to see it exist before the flight.
+        requestAnimationFrame(() => gridRef.current?.scrollToEnd({ animated: false }));
+        setTimeout(() => {
+          slotSV.value = zoomSlot(pos);
+          springBack();
+        }, 160);
+      })
+      .catch((error) => {
+        console.log('[switcher] new window failed:', error);
+        setSw('open');
+      });
   };
 
   // The session went away (backgrounded, killed, last window closed): the grid has nothing to
@@ -924,6 +933,7 @@ export default function SessionScreen() {
           onScrollY={(y) => {
             scrollY.current = y;
           }}
+          gridRef={gridRef}
           zoomId={zoomId}
           fade={alpha}
         />

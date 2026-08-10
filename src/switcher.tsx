@@ -12,7 +12,7 @@
 
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   Platform,
   Pressable,
@@ -33,6 +33,7 @@ import Animated, {
   withSpring,
   withTiming,
   runOnJS,
+  type SharedValue,
 } from 'react-native-reanimated';
 
 import { highlightLine, parseAnsi, spanColor, type SpanLine } from '@/ansi-spans';
@@ -96,6 +97,8 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
   const liveRef = useRef(live);
   liveRef.current = live;
 
+  /** Resolves with the fresh window list (undefined if superseded or failed) — the birth flow
+   *  needs the new window's identity the moment it exists, not a state-update later. */
   const refresh = useCallback(async (withSnapshots: boolean) => {
     // Newest-started refresh wins: a poll's listWindows can start before a move-window lands on
     // the host and resolve after the post-move re-list, snapping the grid back to the stale
@@ -128,6 +131,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
       const alive = new Set(wins.map((win) => win.id));
       for (const id of shown.current.keys()) if (!alive.has(id)) shown.current.delete(id);
       setCards(wins.map((win) => ({ win, snap: shown.current.get(win.id) ?? null })));
+      return wins;
     } catch (error) {
       console.log('[switcher] refresh failed:', error);
     }
@@ -237,6 +241,18 @@ export type SwitcherProps = {
   onMove: (args: { from: number; to: number }) => Promise<void>;
   /** The grid's scroll offset, so the screen can aim the zoom at a card's on-screen slot. */
   onScrollY: (y: number) => void;
+  /** The grid's scroll view, so the birth flow can reveal the new card before flying into it. */
+  gridRef: RefObject<ScrollView | null>;
+  /** The window the zoom is flying into (or out of), and the flying surface's own opacity.
+   *
+   *  That one card is not drawn while the surface is in the air. The surface is meant to be
+   *  covering its slot the whole way, but it rides the finger sideways during a bar-swipe grab
+   *  (`dragX` at 0.6), so any drift slides it off the slot and the card shows up beside it —
+   *  the same window rendered twice, once in hand and once already parked (user, 2026-08-10,
+   *  screenshot). Hiding it needs no state of its own: it is exactly the surface's complement,
+   *  so the two crossfade, and an interrupted transition can't strand either one visible. */
+  zoomId: string | null;
+  fade: SharedValue<number>;
 };
 
 /** The reorder spring — the prototype's overshooting cubic-bezier(0.3,1.3,0.45,1), near enough. */
@@ -340,6 +356,7 @@ export default function Switcher(props: SwitcherProps) {
         </View>
       )}
       <ScrollView
+        ref={props.gridRef}
         style={styles.grid}
         scrollEnabled={interactive && dragId === null}
         onScroll={(e) => props.onScrollY(e.nativeEvent.contentOffset.y)}
@@ -378,6 +395,8 @@ export default function Switcher(props: SwitcherProps) {
               closable={props.total > 1}
               reorderable={!filtered}
               interactive={interactive}
+              flying={card.win.id === props.zoomId}
+              fade={props.fade}
               onTap={() => props.onSelect(pos, card.win)}
               onKill={() => props.onKill(card.win)}
               onDragStart={() => dragStart(card.win.id, pos)}
@@ -477,6 +496,8 @@ function WindowCard({
   closable,
   reorderable,
   interactive,
+  flying,
+  fade,
   onTap,
   onKill,
   onDragStart,
@@ -501,6 +522,10 @@ function WindowCard({
   /** False while the grid is filtered — a narrowed grid isn't the real order (§T14). */
   reorderable: boolean;
   interactive: boolean;
+  /** This is the card the zoom is flying into or out of — it wears the surface's complement
+   *  (see `zoomId` on SwitcherProps), so its slot stands empty for the whole flight. */
+  flying: boolean;
+  fade: SharedValue<number>;
   onTap: () => void;
   onKill: () => void;
   onDragStart: () => void;
@@ -642,7 +667,7 @@ function WindowCard({
       { scale: 1 + 0.06 * lift.value },
       { rotate: `${2 * lift.value}deg` },
     ],
-    opacity: swipeOpacity(swipeX.value, stageW),
+    opacity: swipeOpacity(swipeX.value, stageW) * (flying ? 1 - fade.value : 1),
     shadowOpacity: 0.55 * lift.value,
   }));
 

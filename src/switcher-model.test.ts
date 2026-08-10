@@ -7,10 +7,8 @@ import { expect, test } from 'bun:test';
 
 import {
   ZOOM_COMMIT,
-  fabFrame,
   gridHeight,
   gridTop,
-  plusFrame,
   reorder,
   reorderArgs,
   shouldClose,
@@ -150,24 +148,31 @@ test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
   expect(zoomed.ringOpacity).toBe(1);
 });
 
+test('zoomFrame leaves rest square and is screen-round the moment it moves', () => {
+  const stage = { w: 402, h: 874 };
+  const slot = slotFrame(0, 402);
+  // On screen the corner is `radius * scale` — that is what the eye compares to the phone's own.
+  const onScreen = (t: number) => {
+    const f = zoomFrame(t, 0, slot, stage);
+    return f.radius * f.scale;
+  };
+  // Square at rest: the wrapper is the live terminal's own clipping box there.
+  expect(onScreen(0)).toBe(0);
+  // Rounded to the display's corner within the first eighth of the flight, and monotonically —
+  // no pop from square on the first moving frame.
+  expect(onScreen(0.06)).toBeCloseTo(29.6, 1);
+  expect(onScreen(0.12)).toBeCloseTo(56, 0);
+  // …then closing on the card's 14pt by the time it lands in the slot.
+  expect(onScreen(0.5)).toBeLessThan(onScreen(0.12));
+  expect(onScreen(1)).toBeCloseTo(14);
+});
+
 test('zoomFrame rides the finger drift at 0.6 like the prototype', () => {
   const stage = { w: 402, h: 874 };
   const slot = slotFrame(0, 402);
   const still = zoomFrame(0.5, 0, slot, stage);
   const drifted = zoomFrame(0.5, 100, slot, stage);
   expect(drifted.translateX - still.translateX).toBeCloseTo(60);
-});
-
-test('plusFrame sits on the bottom bar, left side', () => {
-  const f = plusFrame(402, 874);
-  expect(f).toEqual({ x: 34, y: 874 - 93, w: 49, h: 49 });
-});
-
-test('fabFrame sits on the bottom bar, right side, in absolute dp', () => {
-  const f = fabFrame(412, 892);
-  expect(f).toEqual({ x: 412 - 68, y: 892 - 70, w: 56, h: 56 });
-  // Material dp do not scale with the screen: a wider stage moves the FAB, never resizes it.
-  expect(fabFrame(500, 892).w).toBe(56);
 });
 
 test('snapshotFontSize fits the pane columns to the card, clamped to legible', () => {

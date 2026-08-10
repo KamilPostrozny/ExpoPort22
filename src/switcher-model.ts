@@ -30,6 +30,29 @@ const ROW_PITCH = 298 / DESIGN_W;
 const GRID_TOP = 12 / DESIGN_W;
 /** The card's own corner radius (14pt at design width). */
 const CARD_R = 14 / DESIGN_W;
+/**
+ * The display's own corner radius — where the flying surface's rounding STARTS, so the terminal
+ * reads as the phone's screen shrinking rather than as a rectangle that rounds off somewhere over
+ * the grid (user, 2026-08-10). 62pt is the radius of the device the prototype is drawn at
+ * (402pt wide), scaled with everything else here.
+ *
+ * ponytail: a constant, not the real display radius. Apple exposes it only through
+ * `UIScreen._displayCornerRadius`; the one npm wrapper for that
+ * (`react-native-screen-corner-radius`) is a private-API read behind an old-architecture bridge
+ * module, which RN 0.86 runs bridgeless. It would also be answering a question this geometry does
+ * not quite ask: SafeAreaView already insets the stage off the top and bottom of the display, so
+ * these corners are near the screen's, never on them. Scaling one number is the same answer to
+ * within a few points on every phone that has round corners at all. If a device ever reads wrong,
+ * the fix is that module, or a `Device.modelId` table.
+ */
+const SCREEN_R = 62 / DESIGN_W;
+/**
+ * How much of the flight the rounding takes to arrive: rounded within ~40ms of the surface first
+ * moving, and exactly square at rest. Not merely square-looking — at rest the wrapper is the
+ * terminal's own box, `overflow: hidden`, and a 62pt radius there clips the corner characters of
+ * the top line off the live terminal.
+ */
+const ROUND_IN = 0.12;
 
 export function gridTop(width: number): number {
   return GRID_TOP * width;
@@ -187,24 +210,11 @@ export function zoomFrame(
     height,
     translateX: x - (stage.w * (1 - scale)) / 2,
     translateY: y - (height * (1 - scale)) / 2,
-    radius: ((CARD_R * stage.w) / S) * t,
+    // Screen corner → card corner, in what the eye actually measures: the radius ON SCREEN, which
+    // is this one times `scale`. Hence the divide — at t=1 it comes back to the card's own 14pt.
+    radius: (((SCREEN_R + (CARD_R - SCREEN_R) * t) * stage.w) / scale) * Math.min(t / ROUND_IN, 1),
     ringOpacity: Math.min(t * 2, 1),
   };
-}
-
-/** The + button's frame — where a new terminal is born from (Safari new-tab). The switcher's
- *  bottom bar: 34pt side padding, 49pt circle, 44pt above the bottom, at design width. */
-export function plusFrame(width: number, height: number): Frame {
-  const u = width / DESIGN_W;
-  return { x: 34 * u, y: height - (44 + 49) * u, w: 49 * u, h: 49 * u };
-}
-
-/** The Android FAB's frame — the container transform's birth origin (§4.10, design §5c). The
- *  grid's bottom bar puts it 12dp from the right and 14dp above the bottom; 56dp is Material's
- *  FAB size. These are absolute dp, not design-width fractions: Material chrome does not scale
- *  with the screen the way the iOS bar's 402pt-relative geometry does. */
-export function fabFrame(width: number, height: number): Frame {
-  return { x: width - 12 - 56, y: height - 14 - 56, w: 56, h: 56 };
 }
 
 /* --- the snapshot's type size --- */
