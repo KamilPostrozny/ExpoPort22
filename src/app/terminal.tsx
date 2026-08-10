@@ -608,9 +608,12 @@ export default function SessionScreen() {
         ]}>
       <KeyboardAvoidingView
         style={styles.screen}
-        // 'padding' is the iOS behaviour; Android sizes the window itself (T3's sibling will
-        // revisit when the bar rides Gboard per §4.10).
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        // 'padding' is the iOS behaviour. On Android the window itself resizes for Gboard
+        // (`softwareKeyboardLayoutMode` defaults to `resize`, and SDK 57's edge-to-edge feeds the
+        // IME inset into that resize), so the bar rides the keyboard by layout alone — §4.10's
+        // docking — and the terminal's shrink fires §4.2's debounced resize the same way. A KAV
+        // behavior here would subtract the keyboard a second time; undefined renders a plain View.
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         // KAV measures its own top from `onLayout`, which is *parent-relative*: this one lives
         // inside the SafeAreaView's padding box, so its y reads 0 while the view really starts
         // `insets.top` down the screen. Without this the padding is short by exactly that inset

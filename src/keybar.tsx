@@ -11,6 +11,11 @@
  *
  * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
  * lives in `src/keybar-model.ts`, tested; this file renders and executes.
+ *
+ * Android (§4.10, design §5a + `Port22-Android-Prototype.dc.html`) keeps this exact geometry and
+ * hands only the system layer to Material: no blur — an elevated `surface0` container — 16pt bar
+ * corners, 12pt keys, 20pt popovers, 8pt side margins. (PLAN §3's "40pt buttons, 8–12pt radii,
+ * mantle" line predates the Android design frames, which kept the 49pt bar; the design wins.)
  */
 
 import { BlurView } from 'expo-blur';
@@ -134,6 +139,15 @@ const GLASS_BORDER = 'rgba(255,255,255,0.12)';
 const KEY_TINT = 'rgba(127,132,156,0.16)';
 const HAIRLINE = 'rgba(127,132,156,0.25)';
 
+/* --- the Android skin's metrics (see the header): same sizes, Material corners --- */
+const ANDROID = Platform.OS === 'android';
+/** The 49pt circles and pill: iOS capsules, Android's 16pt Material corners. */
+const BAR_RADIUS = ANDROID ? 16 : 24.5;
+/** The 35pt keys inside the pill (and the arrows button). */
+const KEY_RADIUS = ANDROID ? 12 : 18;
+/** The bar row's side margins — Android's bar docks 8pt from the edges (design §5a). */
+const SIDE_MARGIN = ANDROID ? 8 : 24;
+
 function rgba(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
@@ -153,6 +167,23 @@ export function Glass({
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
 }) {
+  // §4.10: no blur on Android — the design's "elevated tonal surface container" (`surface0` plus
+  // a small shadow) takes the recipe's place, popover corners capped at the prototype's 20.
+  if (ANDROID)
+    return (
+      <View
+        style={[
+          {
+            borderRadius: Math.min(radius, 20),
+            overflow: 'hidden',
+            backgroundColor: theme.surface,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.45)',
+          },
+          style,
+        ]}>
+        {children}
+      </View>
+    );
   return (
     <View
       style={[
@@ -392,7 +423,7 @@ export default function KeyBar(props: KeyBarProps) {
           <Key onPress={props.sending ? undefined : () => toggle('menu')} style={styles.circleSlot}>
             <Glass
               theme={theme}
-              radius={24.5}
+              radius={BAR_RADIUS}
               style={styles.circle}>
               {/* §4.6's busy tint, drawn *over* the glass rather than under it. As the container's
                   backgroundColor it sat beneath Glass's blur and its light-mode white overlay,
@@ -406,7 +437,7 @@ export default function KeyBar(props: KeyBarProps) {
                   // the circle's edge on device even inside `overflow: 'hidden'` (T13/T8.14).
                   style={[
                     StyleSheet.absoluteFill,
-                    { backgroundColor: theme.accent, borderRadius: 24.5 },
+                    { backgroundColor: theme.accent, borderRadius: BAR_RADIUS },
                   ]}
                 />
               )}
@@ -428,7 +459,7 @@ export default function KeyBar(props: KeyBarProps) {
             </Glass>
           </Key>
 
-          <Glass theme={theme} radius={24.5} style={styles.pill}>
+          <Glass theme={theme} radius={BAR_RADIUS} style={styles.pill}>
             <View
               style={[styles.keysRow, props.pills != null && { opacity: 0 }]}
               pointerEvents={props.pills != null ? 'none' : 'auto'}
@@ -484,7 +515,7 @@ export default function KeyBar(props: KeyBarProps) {
 
           {props.showTabs && (
             <Key onPress={props.onTabsTap /* TODO(T10): opens the switcher */} style={styles.circleSlot}>
-              <Glass theme={theme} radius={24.5} style={styles.circle}>
+              <Glass theme={theme} radius={BAR_RADIUS} style={styles.circle}>
                 <SymbolView
                   name="square.on.square"
                   size={19}
@@ -778,7 +809,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    paddingHorizontal: 24,
+    paddingHorizontal: SIDE_MARGIN,
     paddingTop: 5,
     paddingBottom: 6,
   },
@@ -802,7 +833,7 @@ const styles = StyleSheet.create({
   key: {
     height: 35,
     paddingHorizontal: 8,
-    borderRadius: 18,
+    borderRadius: KEY_RADIUS,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -827,7 +858,7 @@ const styles = StyleSheet.create({
   arrowsButton: {
     width: 35,
     height: 35,
-    borderRadius: 18,
+    borderRadius: KEY_RADIUS,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -840,7 +871,7 @@ const styles = StyleSheet.create({
   capCaption: { fontSize: 8.5 },
 
   /* popovers, hanging off the popBase anchor */
-  arrowsPop: { position: 'absolute', right: 24 },
+  arrowsPop: { position: 'absolute', right: SIDE_MARGIN },
   arrowsGlass: { flexDirection: 'row', gap: 7, padding: 6 },
   dpad: { gap: 4 },
   dpadRow: { flexDirection: 'row', gap: 4 },
@@ -850,7 +881,7 @@ const styles = StyleSheet.create({
   popDivider: { width: 1, opacity: 0.5, marginVertical: 3 },
   homeEnd: { gap: 4 },
   homeEndKey: { width: 56, height: 34, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  menuPop: { position: 'absolute', left: 24, width: 256 },
+  menuPop: { position: 'absolute', left: SIDE_MARGIN, width: 256 },
   menuHeader: {
     paddingHorizontal: 18,
     paddingTop: 11,

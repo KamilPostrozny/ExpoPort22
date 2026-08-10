@@ -413,6 +413,78 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   a Copy control on the bar, so no WebKit gesture is involved. Re-run this case after that
   lands.
 
+## T7A — Key bar, Android skin (emulator)
+
+All cases on the Android **emulator** (gated on T3.0's build), connected to the host machine's
+sshd at `10.0.2.2` unless said otherwise. The skin is a Platform branch inside `Glass` plus
+platform metric constants — same key set, same model, so T7's byte-level cases are not
+repeated here; this section is the Material surface and the Gboard docking. The design truth
+is `docs/design/Port22-Design.dc.html` §5a and `Port22-Android-Prototype.dc.html`, **not**
+§3's old "40pt/8–12pt" line. Haptics may be inert on the emulator — feel them on hardware,
+only observe no crash here.
+
+### T7A.1 — Flush surfaces: no blur anywhere on the bar stack
+- **Setup**: connected, keyboard up, dark flavour (Mocha).
+- **Steps**: look at the ⋯ circle, the pill, the tabs circle; tap Ctrl (chord strip), the
+  arrows button (popover), long-press Paste (clipboard popover), ⋯ (menu). Eye-check each
+  against design §5a / the Android prototype.
+- **Expect**: every surface is an opaque `surface0` container with a small drop shadow — no
+  blur, no translucency, no specular border. Terminal content behind a popover is fully
+  hidden, not frosted.
+- [ ]
+
+### T7A.2 — Metrics: geometry kept, Material corners
+- **Setup**: bar on screen, keyboard up.
+- **Steps**: screenshot; measure against the design frames (49pt bar height, 16pt corners on
+  circles and pill — visibly squarer than iOS capsules — 12pt key radius, 8pt side margins,
+  popover corners at 20pt).
+- **Expect**: matches the Android prototype's frame; the bar reads docked (8pt from the
+  screen edges), not floating on 24pt margins like iOS.
+- [ ]
+
+### T7A.3 — Icons render via text fallback (no blank keys)
+- **Setup**: connected, tmux configured (so the tabs circle shows).
+- **Steps**: look at ⋯ (circle), the arrows button, the tabs circle, and the pin marks in
+  the clipboard popover.
+- **Expect**: `⋯`, `✛`, `▣`+badge, `●`/`○` all visible — SF Symbols don't exist here, so
+  the `fallback` text glyphs must carry every icon. No empty circle, no invisible pin.
+- [ ]
+
+### T7A.4 — Bar rides Gboard: docking up/down + terminal resize
+- **Setup**: connected (keyboard rises on connect).
+- **Steps**: watch the bar as Gboard animates up; dismiss it (bar swipe ↓); watch the Metro
+  log for `[terminal] size`.
+- **Expect**: keyboard up → the bar sits directly on top of Gboard, no gap and no
+  double-height dead strip (the old `height` KAV would have subtracted the keyboard twice);
+  keyboard down → the bar drops to the gesture-pill area. Each transition logs a new
+  `[terminal] size` — the window resize is what fires §4.2's debounced resize.
+- [ ]
+
+### T7A.5 — Bar swipe ↓/↑ hides and shows Gboard
+- **Setup**: keyboard up.
+- **Steps**: swipe down on the bar; swipe up on it.
+- **Expect**: Gboard slides away and the terminal grows (taller grid in the log); the ↑
+  swipe raises it again — same behaviour as T7.9, now via the Android window resize.
+- [ ]
+
+### T7A.6 — Chord strip + arrows + clipboard popovers: flush and functional
+- **Setup**: shell prompt; some text copied on the emulator for the pasteboard row.
+- **Steps**: tap Ctrl then the `C` cap; open the arrows popover, tap ↑; long-press Paste,
+  tap a clipboard row.
+- **Expect**: each renders as an opaque elevated surface (T7A.1's skin) and works: `^C` on
+  the wire, history walks on ↑, the row's text is typed unexecuted. Captions and headers
+  (chord captions, CLIPBOARD, UPLOAD FILE) render in Roboto — the system default, no
+  fontFamily set — while key glyphs stay JetBrains Mono.
+- [ ]
+
+### T7A.7 — Haptics on press do not crash
+- **Setup**: any key.
+- **Steps**: press keys, caps, arrows.
+- **Expect**: presses dim/shrink and send; no red screen from `expo-haptics` (the emulator
+  usually has no vibrator — the call must no-op, not throw). Feel the actual haptic on
+  hardware, not here.
+- [ ]
+
 ## T9 — tmux side-channel + config push
 
 All cases: a real host with a fish login shell unless said otherwise. The side-channel has no

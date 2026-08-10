@@ -54,8 +54,11 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
   border `0.5px rgba(255,255,255,0.12)`.
 - Bar geometry: 49pt circles, 49pt pill, 35pt keys (18pt radius), 24pt side margins,
   hairline divider before the arrows button; popovers 26pt corners; ribbon/chord caps ~50pt wide with 8.5pt captions.
-- Android: same Catppuccin roles, flush `#181825` surfaces instead of glass, 40pt buttons,
-  8–12pt radii, FAB for new tab, gesture pill, Roboto for chrome text, JBMono for terminal.
+- Android: same Catppuccin roles and the **same geometry** — the design's Android frames (§5a +
+  `Port22-Android-Prototype.dc.html`) keep the 49pt bar and supersede this file's older
+  "40pt buttons, mantle" summary. Elevated `surface0` containers instead of glass (no blur, small
+  shadow), 16pt bar corners, 12pt keys, 20pt popovers, 8pt side margins, bar docked flush to
+  Gboard; FAB for new tab, gesture pill, Roboto for chrome text, JBMono for terminal.
 
 ---
 
@@ -366,7 +369,19 @@ Verified: `bun test` (41), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 2
 walked on hardware** — the device cases are TESTS.md §T7 (T7.1–T7.13). Still open besides
 that: BlurView intensity 40 vs the design's `blur(14px)` is an eye-match guess; whether
 WKWebView really resigns the TextInput's first responder on touch (T4 measured it once, this
-build must confirm); Android bar (flush surfaces, Gboard docking) is T3/T10-era work.
+build must confirm).
+**Android half (2026-08-10)**: a Platform branch inside `Glass` skins every consumer — bar,
+popovers, chord strip, T11's ribbon — at once: no blur, an elevated `surface0` container with a
+small shadow, and Material metrics (16pt bar corners, 12pt keys, 20pt-capped popovers, 8pt side
+margins) as platform constants beside the iOS ones. The design's own Android frames keep the
+49pt geometry, so §3's old "40pt/8–12pt/mantle" line was corrected, not followed. Docking: KAV
+behavior is now `undefined` on Android — the edge-to-edge window itself resizes for Gboard
+(`softwareKeyboardLayoutMode` defaults to `resize`), which docks the bar and fires §4.2's resize;
+the old `height` behavior would have subtracted the keyboard twice. Zero code for the rest:
+chrome text sets no fontFamily (Android default is Roboto), and `SymbolView` with a string name
+renders its `fallback` prop on Android, so no key goes blank. Still open: the emulator eye-walk
+(TESTS.md §T7A), and whether the safe-area bottom inset leaves a strip between bar and Gboard
+while it is up.
 
 **T8 — Clipboard + ⋯ menu + uploads** ✅ implemented 2026-08-09 (not device-verified) · deps: T7, T2/T3
 Clipboard slots store (OSC52 feed + pasteboard, pins persisted), Paste tap/long-press
