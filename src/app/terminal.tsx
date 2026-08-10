@@ -125,8 +125,9 @@ export default function SessionScreen() {
    * move together and the keyboard is over the bar for the first frames of the slide. Here the
    * shrink is a plain state write on `keyboardWillChangeFrame`, which iOS fires *before* the
    * animation starts: the terminal is out of the way by the time the keyboard leaves the bottom
-   * edge. Going back down is `keyboardDidHide`, deliberately — dropping at `WillHide` would open a
-   * gap under the bar for the length of the slide, so the terminal waits the keyboard out instead.
+   * edge. `keyboardWillHide` is the same trick going back down — the keyboard draws over the app,
+   * so growing at the start of the slide exposes nothing, it just means what the keyboard uncovers
+   * is already the right size.
    */
   const [keyboardPad, setKeyboardPad] = useState(0);
   useEffect(() => {
@@ -142,10 +143,10 @@ export default function SessionScreen() {
         // value padded the entire stage away for a frame or two (seen on device).
         if (e.endCoordinates.screenY <= 0) return;
         const overlap = Dimensions.get('window').height - e.endCoordinates.screenY;
-        // The hide's own WillChangeFrame reports no overlap — `keyboardDidHide` owns that edge.
+        // The hide's own WillChangeFrame reports no overlap — `keyboardWillHide` owns that edge.
         if (overlap > 0) setKeyboardPad(Math.max(0, overlap - insets.bottom));
       }),
-      Keyboard.addListener('keyboardDidHide', () => setKeyboardPad(0)),
+      Keyboard.addListener('keyboardWillHide', () => setKeyboardPad(0)),
     ];
     return () => subs.forEach((sub) => sub.remove());
   }, [insets.bottom]);
