@@ -240,6 +240,9 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
       theme: xtermTheme(theme),
       scrollback: 10_000,
       cursorBlink: true,
+      // T14: the search addon's highlight decorations ride `registerDecoration`, which xterm 6
+      // gates behind this flag (thrown on device: "You must set the allowProposedApi option").
+      allowProposedApi: true,
       // xterm drops non-http schemes before this, and `isHttpLink` says so again: the host writes
       // these strings, and one of the two checks is a version bump away from changing.
       linkHandler: {

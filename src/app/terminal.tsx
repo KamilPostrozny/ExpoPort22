@@ -245,11 +245,18 @@ export default function SessionScreen() {
 
   // The armed query drives the addon's decorations (and lands on the next occurrence). It runs
   // whichever view is in front, so a card tap arrives on an already-highlighted terminal.
+  // Every handle call is `?.()` on the METHOD, not just the ref: expo/dom's native proxy answers
+  // `undefined` for every imperative prop until the webview boots and posts its registration —
+  // a plain call in that window is a TypeError that unmounts the screen (found on device).
+  const searchEverArmed = useRef(false);
   useEffect(() => {
     if (!connected) return;
-    if (search.on && search.q.trim() !== '') terminal.current?.search(search.q.trim());
-    else {
-      terminal.current?.searchOff();
+    if (search.on && search.q.trim() !== '') {
+      searchEverArmed.current = true;
+      terminal.current?.search?.(search.q.trim());
+    } else if (searchEverArmed.current) {
+      searchEverArmed.current = false;
+      terminal.current?.searchOff?.();
       setOcc(null);
     }
   }, [search.on, search.q, connected]);
@@ -740,8 +747,8 @@ export default function SessionScreen() {
               onPress={() => {
                 const q = search.q.trim();
                 if (q === '') return;
-                if (dir === 'prev') terminal.current?.searchPrev(q);
-                else terminal.current?.searchNext(q);
+                if (dir === 'prev') terminal.current?.searchPrev?.(q);
+                else terminal.current?.searchNext?.(q);
               }}
               style={({ pressed }) => [
                 styles.searchStep,
