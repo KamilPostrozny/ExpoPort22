@@ -394,22 +394,12 @@ export default function SessionScreen() {
 
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
-
-  /** A select that switches windows has a settle overlay riding the zoom (see `selectCard`) —
-   *  this marks it for `finishClose`, which decides at the landing whether the redraw already
-   *  came (drop it now) or is still in flight (hold until its first byte, capped). */
-  const zoomSettle = useRef(false);
+  /** How long a window-switching select waits for tmux's redraw before flying anyway. The LAN
+   *  roundtrip is ~100–150ms in the logs; this is the wedge guard, not the expected path. */
+  const ZOOM_REDRAW_CAP_MS = 400;
 
   const finishClose = () => {
     setSw('closed');
-    if (zoomSettle.current) {
-      zoomSettle.current = false;
-      if (redrawn.current) clearBarSwipe();
-      else {
-        onShellData.current = clearBarSwipe;
-        settleCap.current = setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
-      }
-    }
     // The keys come back exactly as they were left (`keysWereUp`) — except onto an armed search
     // hit, where you came to read, not type (T14). The size hold outlives the zoom by exactly
     // that keyboard: released at the end of the animation it measures a stage with no keyboard in
@@ -513,29 +503,33 @@ export default function SessionScreen() {
     if (sw !== 'open') return;
     console.log('[switcher] select', win.id);
     ribbonForWindow(win); // as with the bar swipe: under the zoom, not a beat after it
-    // Switching windows redraws the pane twice under the flight — the local refit for the new
-    // chrome, then tmux's authoritative repaint a roundtrip later — and the gap between them is
-    // old-window content flashing through the zoom (user, 2026-08-11). T11's settle overlay is
-    // the cure here too: it lives inside the flying wrapper, so mounted now it rides the whole
-    // flight showing the very snapshot the tapped card shows, and drops at the redraw's first
-    // byte (or the cap) once the zoom has landed — see `finishClose`.
-    if (win.index !== tmux.windowIndex) {
-      redrawn.current = false;
-      onShellData.current = () => {
-        redrawn.current = true;
-      };
-      zoomSettle.current = true;
-      setPageSwipe({
-        names: [],
-        pos,
-        target: pos,
-        phase: 'settle',
-        settled: cards.find((c) => c.win.id === win.id)?.snap ?? null,
-      });
-    }
     void selectWindow(win.index); // §7: no haptic on tab select
-    closeTo(pos);
+    // A switch changes the chrome, the size and the content of the pane — and the open grid is
+    // the one moment all of that is invisible: it covers the terminal completely. So the refit
+    // (holdSize lets it through while `open`), the resize report and tmux's redraw all happen
+    // under the grid, and the flight leaves only once the redraw's first byte is back (capped —
+    // an unanswered select must not wedge the grid). Doing any of it mid-flight was the hitch,
+    // masking it with an overlay was ~60ms of React at the flight's first frame — both device,
+    // 2026-08-11. Same tab: nothing changes underneath, fly at once.
+    if (win.index !== tmux.windowIndex) {
+      const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
+      const fly = () => {
+        if (selectSeq.current !== mine) return;
+        selectSeq.current++;
+        if (onShellData.current === land) onShellData.current = null;
+        if (swRef.current === 'open') closeTo(pos);
+      };
+      const land = () => requestAnimationFrame(fly);
+      onShellData.current = land;
+      setTimeout(fly, ZOOM_REDRAW_CAP_MS);
+    } else {
+      closeTo(pos);
+    }
   };
+
+  /** The one select whose redraw-wait may still fly — bumped by every new select (superseding
+   *  the last) and by the flight itself (making the cap timer a no-op after the redraw won). */
+  const selectSeq = useRef(0);
 
   const killCard = (win: TmuxWindow) => {
     // The last window is unkillable (user decision, 2026-08-10): killing it ends the tmux
@@ -1113,7 +1107,7 @@ export default function SessionScreen() {
         // guard is state, read in the same tick, so nothing slips through; the release re-reports
         // unconditionally, which is what makes dropping a report here safe.
         onResize={async (cols, rows, cellW, cellH, topInset) => {
-          if ((sw !== 'closed' && sw !== 'closing') || kbSettle) {
+          if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
             console.log('[terminal] size held, not sent:', cols, '×', rows);
             return;
           }
@@ -1125,15 +1119,15 @@ export default function SessionScreen() {
         // the terminal keeps the geometry it had at rest until the grid is gone, so the panes the
         // cards capture are the panes the user was just looking at.
         //
-        // Except the way back in. A select can change the chrome under the pane — a different
-        // window's ribbon appears or leaves with `ribbonForWindow`, "under the zoom" by design —
-        // and a hold across `closing` deferred that refit to the release settle, ~150ms after the
-        // landing: the pane rewrapping in plain view, on every switch between windows whose
-        // ribbons differ (device, 2026-08-11, screenshots). Fitting and reporting during the
-        // zoom-in puts the reflow back under the flight. The pad is frozen and the stage height
-        // is the wrapper's animation, not the box's — the only mid-`closing` resize possible is
-        // that chrome change.
-        holdSize={(sw !== 'closed' && sw !== 'closing') || kbSettle}
+        // Except while the grid stands fully over it. A select can change the chrome under the
+        // pane — a different window's ribbon appears or leaves with `ribbonForWindow` — and a
+        // hold across `open` deferred that refit to the release settle, ~150ms after the landing:
+        // the pane rewrapping in plain view on every switch between windows whose ribbons differ
+        // (device, 2026-08-11, screenshots). While `open` the terminal is invisible, so the fit,
+        // the report and tmux's redraw all run there for free; `selectCard` waits for the
+        // redraw's first byte before it flies. Every phase where the terminal is on screen and
+        // moving — opening, drag, birth, closing — stays held.
+        holdSize={(sw !== 'closed' && sw !== 'open') || kbSettle}
         // Every boot, not just the first: iOS reaps a backgrounded webview, and the one that comes
         // back is empty even though the shell behind it never went anywhere.
         onBoot={async () => {
