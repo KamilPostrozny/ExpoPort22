@@ -126,7 +126,7 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 - Background kills socket (expected). Foreground: dead → auto reconnect, re-auth, new PTY plain shell (startup command replays if set; **no auto tmux attach**). Two consecutive failures → stop, show manual Reconnect. Distinct Disconnected vs Cannot-connect states (icon, headline, sentence, Setup/Reconnect buttons) + Connecting spinner.
 
 ### 4.10 Android specifics (design file §2f/2g)
-- Same functionality, Material skin: flush mantle surfaces, no blur; bar rides Gboard (WindowInsets); switcher per design §5c — the same shared-progress transform (the prototypes share the zoom verbatim; "container-transform" is its Material name), grid bottom bar of **Done text button (left) · Roboto count · 56dp FAB (right, births the new tab)** — this file's older "top-left back" was the §2g draft, superseded — and system back closes the grid; gesture pill instead of home indicator. Everything else identical.
+- Same functionality, Material skin: flush mantle surfaces, no blur; bar rides Gboard (WindowInsets); switcher per design §5c — the same shared-progress transform (the prototypes share the zoom verbatim; "container-transform" is its Material name), grid bottom bar of **Done text button (left) · Roboto count · 56dp FAB (right, births the new tab)** — this file's older "top-left back" was the §2g draft, superseded — and system back walks §5d's ladder — settings sheet dismisses, the destination browser goes up one directory then dismisses from `/`, popovers/⋯ menu close, the grid closes into the pane, and at the bare terminal back is **home** (backgrounds the app; never a pop to Setup, which would skip the disconnect); gesture pill instead of home indicator. Everything else identical.
 
 ---
 
@@ -621,10 +621,41 @@ mismatch screen — during a mismatch the sheet is unreachable, so that copy is 
 (§4.1's only recovery there).
 Verified: `bun test` (137), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Not
 walked on hardware** — the device cases are TESTS.md §T12 (T12.1–T12.16, the last being the
-cross-feature regression walk that seeds T13). Still open besides that: the "both platforms"
-half of the accept (Android sheet, Gboard docking, adaptive icon still template art —
-§4.10/T3-era); the dictation single-space ceiling above; whether the Modal-hosted RNGH pan
-needs `GestureHandlerRootView` exactly as written is an on-device check.
+cross-feature regression walk that seeds T13). Still open besides that: the dictation
+single-space ceiling above; whether the Modal-hosted RNGH pan needs `GestureHandlerRootView`
+exactly as written is an on-device check.
+Android half (2026-08-10): the "both platforms" accept. **Sheets** — the settings sheet's whole
+Android skin turned out to be one radius: `panel`/`surface`/the overlay grabber already render
+the design's mantle/surface0/ov0 through the theme roles, so only the 28dp Material corner
+(§5d) is platform-branched; the upload sheet's `pageSheet` is iOS-only and rendered full-screen
+on Android, so there it is a transparent Modal with a tap-to-cancel gap and a 28dp-cornered
+sheet below (the prototype's fading scrim is skipped: RN's `slide` animates the whole modal
+tree, so a scrim would ride the slide — not worth a second hand-rolled sheet), plus the
+`Did*` keyboard events Android actually fires for the SAVE AS lift. **Back (§5d)** — one
+BackHandler subscription in the terminal screen now walks the ladder T10A started: switcher →
+pane (as before), popover/⋯ menu → closed, and at the bare terminal `BackHandler.exitApp()`,
+whose task-root default is moveTaskToBack — §5d's "terminal → home", replacing the old silent
+pop to Setup that skipped the disconnect. The two sheets need no subscription: RN Modals take
+Android back natively via `onRequestClose`, where the settings sheet already dismissed and the
+upload sheet now goes up one directory, dismissing only from `/` (iOS keeps plain cancel there
+— its `onRequestClose` fires only after the pull-down has already dismissed). **Icon** — the
+T3-era template art in `android-icon-*.png` is gone: foreground and monochrome are lifted from
+T12's own `icon.png` (green-channel alpha mask → solid `#89b4fa` / white, glyph scaled ⅔ so it
+reads the same optical size once the launcher shows the inner 72/108, well inside the 66/108
+safe circle), the background image is dropped for the flat crust `backgroundColor` already in
+`app.json`. **Verified no-ops, on evidence** — splash: the plugin feeds root props (image,
+colours, `dark`) to Android 12+ itself (`getAndroidSplashConfig` merges root into `android`);
+permissions: document-picker's plugin touches only iOS entitlements (SAF needs nothing),
+image-picker's own manifest declares CAMERA + legacy `maxSdkVersion:32` storage, the 13+ photo
+picker needs no permission, and the existing `microphonePermission: false` blocks RECORD_AUDIO
+— so `app.json` gains nothing, deliberately; status/nav bars: SDK 57 enforces edge-to-edge and
+`_layout`'s `<StatusBar>` already follows `theme.isDark`, the gesture pill draws over the app's
+own ground, and 3-button nav's contrast scrim is the system's own. Verified: `bun test` (140),
+`tsc --noEmit`, `expo export -p android`, `expo-doctor` 20/20 — no Android SDK on this box, so
+never compiled or run; the emulator cases are TESTS.md §T12A (T12A.1–T12A.9). Still open on
+this half: §5d's clipboard-as-bottom-sheet and the upload snackbar-with-UNDO (divergences the
+task slices never claimed — future Android polish), and Gboard's held-delete `onKeyPress`
+coverage plus dictation-chunk shape, flagged in T12A.9 rather than guessed at.
 
 **T13 — Device verification + builds** deps: all
 Walk §4 acceptance criteria on physical iPhone & Android. *Accept*: checklist in repo with every

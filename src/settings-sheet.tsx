@@ -21,7 +21,7 @@
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useEffect } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -41,6 +41,10 @@ import { FLAVOURS, MONO, THEMES, type Theme, type ThemeChoice } from '@/theme';
 
 /** How far offscreen the sheet starts and returns to — comfortably past its own height. */
 const TRAVEL = 620;
+/** Design §5d: Material sheets corner at 28; everything else here — mantle ground, surface0 cards
+ *  at 16, the 36×5 overlay grabber — is what the Android frames already show, through the same
+ *  theme roles, so the radius is the whole Android skin. */
+const SHEET_RADIUS = Platform.OS === 'android' ? 28 : 24;
 const SLIDE = { duration: 340, easing: Easing.bezier(0.32, 0.72, 0.3, 1) };
 
 /** The prototype's cross-flavour neutrals (overlay-grey at fixed alpha, same literal on all four
@@ -269,8 +273,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: SHEET_RADIUS,
+    borderTopRightRadius: SHEET_RADIUS,
     paddingHorizontal: 20,
     paddingTop: 8,
     boxShadow: '0 -12px 40px rgba(0,0,0,0.45)',

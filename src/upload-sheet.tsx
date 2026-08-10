@@ -17,12 +17,14 @@ import {
   Dimensions,
   Keyboard,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { RemoteEntry } from '../modules/expo-ssh/src/ExpoSSH.types';
 import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
@@ -49,8 +51,16 @@ export type UploadSheetProps = {
   onSave: (dir: string, filename: string) => void;
 };
 
+/** Android ignores `presentationStyle` and would render the Modal edge-to-edge, so the design's
+ *  bottom-sheet look (§5d: 28dp corners, a gap showing the terminal above) is drawn by hand: a
+ *  transparent Modal, a tap-to-cancel gap, and the rounded sheet below it. The prototype's
+ *  fading scrim is skipped — RN's `slide` animates the whole modal tree, so a scrim would ride
+ *  the slide instead of fading; not worth a second hand-rolled sheet for a dimming layer. */
+const ANDROID = Platform.OS === 'android';
+
 export default function UploadSheet(props: UploadSheetProps) {
   const { theme } = props;
+  const insets = useSafeAreaInsets();
   const [dir, setDir] = useState<string | null>(null);
   const [entries, setEntries] = useState<RemoteEntry[] | null>(null);
   const [name, setName] = useState(props.suggestedName);
@@ -68,16 +78,20 @@ export default function UploadSheet(props: UploadSheetProps) {
 
   // `WillChangeFrame` rather than Show/Hide: it is the one that also fires when the keyboard
   // resizes under a language switch or a floating-to-docked change, and it carries the frame.
+  // Android has no Will* events at all, and a translucent-status-bar Modal window does not
+  // adjustResize either — so the Did* pair does the same padding job there.
   useEffect(() => {
     const height = (frame: { screenY: number; height: number }) =>
       // A keyboard parked off-screen (hidden, or the hardware-keyboard bar) reports a screenY at
       // or past the window's bottom edge; only the part that actually overlaps is padding.
       Math.max(0, Dimensions.get('window').height - frame.screenY);
     const subs = [
-      Keyboard.addListener('keyboardWillChangeFrame', (e) =>
+      Keyboard.addListener(ANDROID ? 'keyboardDidShow' : 'keyboardWillChangeFrame', (e) =>
         setKeyboardPad(height(e.endCoordinates)),
       ),
-      Keyboard.addListener('keyboardWillHide', () => setKeyboardPad(0)),
+      Keyboard.addListener(ANDROID ? 'keyboardDidHide' : 'keyboardWillHide', () =>
+        setKeyboardPad(0),
+      ),
     ];
     return () => subs.forEach((sub) => sub.remove());
   }, []);
@@ -155,16 +169,32 @@ export default function UploadSheet(props: UploadSheetProps) {
     </Pressable>
   );
 
+  // §5d's back rule: system back walks the browser up one directory first, and dismisses only
+  // from the top ('/', where the `..` row also stops). iOS reaches onRequestClose solely from
+  // the pageSheet pull-down, which has already dismissed natively — only cancel is right there.
+  const systemBack = () => {
+    if (ANDROID && dir !== null && dir !== '/') setDir(parentPath(dir));
+    else props.onCancel();
+  };
+
   return (
     <Modal
       animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={props.onCancel}
+      presentationStyle={ANDROID ? undefined : 'pageSheet'}
+      transparent={ANDROID}
+      statusBarTranslucent
+      onRequestClose={systemBack}
       visible>
+      {/* The tap-to-cancel gap over the terminal — the Android sheet's "not full screen". */}
+      {ANDROID && <Pressable style={{ height: insets.top + 46 }} onPress={props.onCancel} />}
       {/* The SAVE AS field sits at the bottom of the sheet, so a raised keyboard covers both it
           and the Save button unless the content is lifted (found on device, T13/T8.9). */}
       <View
-        style={[styles.sheet, { backgroundColor: theme.background, paddingBottom: keyboardPad }]}>
+        style={[
+          styles.sheet,
+          ANDROID && styles.sheetAndroid,
+          { backgroundColor: theme.background, paddingBottom: keyboardPad },
+        ]}>
         <View style={styles.grabberRow}>
           <View style={[styles.grabber, { backgroundColor: theme.border }]} />
         </View>
@@ -223,7 +253,13 @@ export default function UploadSheet(props: UploadSheetProps) {
           )}
         </View>
 
-        <View style={[styles.footer, { backgroundColor: theme.panel, borderTopColor: theme.border }]}>
+        <View
+          style={[
+            styles.footer,
+            { backgroundColor: theme.panel, borderTopColor: theme.border },
+            // Edge-to-edge puts the gesture pill inside the modal's window on Android.
+            ANDROID && keyboardPad === 0 && { paddingBottom: insets.bottom + 12 },
+          ]}>
           <Text style={[styles.saveAs, { color: theme.muted }]}>
             SAVE AS{collision ? ' — replaces the existing file' : ''}
           </Text>
@@ -265,6 +301,13 @@ export default function UploadSheet(props: UploadSheetProps) {
 
 const styles = StyleSheet.create({
   sheet: { flex: 1 },
+  /* §5d: Material sheets corner at 28. */
+  sheetAndroid: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
+    boxShadow: '0 -10px 30px rgba(0,0,0,0.5)',
+  },
   grabberRow: { alignItems: 'center', paddingTop: 8, paddingBottom: 2 },
   grabber: { width: 36, height: 5, borderRadius: 3 },
   header: {

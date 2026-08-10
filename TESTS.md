@@ -1269,3 +1269,109 @@ After all T12 changes, re-run the headline case of each earlier section — one 
 - T10.2 — bar-swipe-up drag opens the switcher, cancel springs back.
 - T11.1 — horizontal bar swipe hops a window with pills + live redraw.
 - [ ]
+
+## T12A — Android polish (emulator)
+
+All cases on the Android **emulator** (gated on T3.0's build), connected to the host machine's
+sshd at `10.0.2.2` — same harness as §T7A/§T10A. What is Android-only here: the sheets' 28dp
+Material corners and the upload sheet's hand-drawn bottom-sheet look, §5d's system-back ladder
+(sheet → dismiss, browser → up a directory then dismiss, popover → close, terminal → home; the
+switcher's rung is §T10A.4), the regenerated adaptive icon, and the permission/edge-to-edge
+audit. Everything else on these surfaces is the same code as iOS — walk §T12 only if a case
+below turns something up.
+
+### T12A.1 — Settings sheet: Material skin, swipe-dismiss, back dismisses
+- **Setup**: connected, keyboard up.
+- **Steps**: ⋯ → Settings; look at the sheet; drag it down past a third and release; reopen;
+  press system back.
+- **Expect**: the sheet slides up with 28dp top corners, flat mantle ground, surface0 cards —
+  no blur anywhere. The swipe-dismiss rides the finger and releases exactly as on iOS (same
+  tested rule). System back dismisses the sheet with the slide-out — it never pops the route
+  or reaches the terminal. Log: `[settings] sheet closed`.
+- [ ]
+
+### T12A.2 — Upload sheet: bottom-sheet look, browse, back goes up a directory
+- **Setup**: connected; a host directory tree at least two levels deep under `$HOME`.
+- **Steps**: ⋯ → Files, pick a file; in the browser descend two directories; press system
+  back twice; press it repeatedly until the sheet is gone; note when it dismissed.
+- **Expect**: the sheet is not full-screen — 28dp top corners, a gap above showing the
+  terminal, tap on the gap cancels. Each back walks up exactly one directory (breadcrumb and
+  listing follow, same as tapping `..`); from `/` — where the `..` row also disappears — back
+  dismisses the sheet instead. Nothing typed into the session at any point.
+- [ ]
+
+### T12A.3 — Back closes popovers and the ⋯ menu first
+- **Setup**: connected, keyboard up.
+- **Steps**: open the ⋯ menu; press back; open the arrows popover; press back; long-press
+  Paste (clipboard popover); press back; press back once more with nothing open.
+- **Expect**: each press closes just the open popover — the bar, keyboard state and route all
+  stay put. The final press (nothing open) is T12A.4's case.
+- [ ]
+
+### T12A.4 — Terminal-level back is "home", never a silent pop to Setup
+- **Setup**: connected, nothing open over the terminal.
+- **Steps**: press system back; relaunch from the recents/launcher; wait for §4.9's
+  foreground reconnect; from the Disconnected/Cannot-connect overlay press back again.
+- **Expect**: back backgrounds the app (launcher home) — it does NOT pop to the Setup screen
+  (the old pop skipped `leave()`'s disconnect; leaving is the sheet's Disconnect / the
+  overlay's Setup button's job). Coming back foregrounds into the reconnect flow (§4.9), and
+  back from the overlay backgrounds again the same way.
+- [ ]
+
+### T12A.5 — Adaptive icon on the launcher, themed/monochrome on 13+
+- **Setup**: app installed; emulator API 33+.
+- **Steps**: find the icon on the launcher (round mask) and in settings/app-info (squircle or
+  square); on API 33+ enable themed icons in the launcher's wallpaper settings; long-press
+  the icon for the shortcut popup's small icon.
+- **Expect**: every mask shows the `>_` glyph in flavour blue on crust — the same art as the
+  iOS icon, never the Expo template's — with the glyph comfortably inside every mask shape
+  (safe-zone margins hold). Themed mode shows the monochrome `>_` tinted to the wallpaper
+  palette. No white box, no letterboxed square.
+- [ ]
+
+### T12A.6 — Splash on cold start, both system themes
+- **Steps**: force-stop; launch with the system in dark mode; force-stop; switch the system
+  to light; launch again.
+- **Expect**: dark start shows the `>_` glyph on Mocha crust, light start Latte crust with
+  Latte blue — the same split the iOS splash has (the plugin's root props feed Android 12+'s
+  splash). The splash holds until fonts + persisted settings are in (no flash of the wrong
+  flavour), then the app is simply there.
+- [ ]
+
+### T12A.7 — Status bar and gesture pill across all four flavours
+- **Setup**: connected, gesture navigation on.
+- **Steps**: in Settings tap Latte, Frappé, Macchiato, Mocha; look at the status bar icons
+  and the gesture-pill area each time; then switch the emulator to 3-button navigation and
+  glance again.
+- **Expect**: edge-to-edge everywhere — the app paints under both bars, SafeAreaView keeps
+  content clear. Status bar icons flip dark-on-Latte / light-on-the-dark-three (the themed
+  `<StatusBar>` in `_layout`). The pill area is transparent over the app's own background in
+  every flavour — no opaque system strip. 3-button nav may draw its own contrast scrim over
+  the buttons; that is the system's, not a bug.
+- [ ]
+
+### T12A.8 — Pickers open and the permission flow (Files / Photo / Camera)
+- **Setup**: fresh install (no permissions granted yet).
+- **Steps**: ⋯ → Files (pick any file); ⋯ → Photo or video (pick from the photo picker);
+  ⋯ → Camera (expect the CAMERA runtime prompt, grant, take a photo); deny-path: revoke
+  camera in app settings, try Camera again, deny the prompt.
+- **Expect**: Files opens the system document UI with no permission prompt (SAF needs none);
+  Photo/video opens the Android photo picker with no permission prompt (13+); Camera prompts
+  once for CAMERA only — never microphone (`microphonePermission: false` blocks
+  RECORD_AUDIO) — and a denial alerts "Could not read the file" at worst, types nothing.
+  Each picked file then lands in the destination browser flow (§T8's cases own the upload).
+- [ ]
+
+### T12A.9 — Gboard sanity: voice input and held backspace
+- **Setup**: connected, empty prompt line, Gboard with voice input enabled.
+- **Steps**: type `echo hi` by key; hold backspace until the line is empty and keep holding
+  ~2s more; then tap the Gboard mic and dictate "hello world"; inspect what the shell got.
+- **Expect**: held backspace auto-repeats DELs while the line has content; once the field is
+  empty the `onKeyPress` fallback keeps sending — watch for repeats stopping early (Android's
+  soft-keyboard `onKeyPress` coverage is the risky half; iOS is the proven path). Dictation:
+  the leading-space filter was built against iOS dictation's prepended space — Gboard commits
+  text differently (often no leading space, sometimes via a composing region that arrives as
+  one chunk). Expected difference, not failure: dictated text may keep or lack a leading
+  space; what must hold is that a real spacebar press is never eaten (a single-space insert
+  always passes) and multi-char commits reach the PTY intact.
+- [ ]

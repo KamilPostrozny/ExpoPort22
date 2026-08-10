@@ -352,16 +352,30 @@ export default function SessionScreen() {
   // OnBackPressedCallback ("Due to enforced predictive back on targetSdk 36, 'onBackPressed()'
   // is disabled by default. Using a workaround to trigger it manually") — so the flag buys no
   // OS peek animation for JS-handled backs, and BackHandler works either way.
+  // T12A folds the rest of §5d's back ladder into the same subscription: switcher first (as
+  // T10A wired it), then an open popover/⋯ menu, and at the terminal itself back is "home" —
+  // `exitApp` invokes the activity's default back, which on a task-root activity backgrounds
+  // the app (moveTaskToBack) rather than finishing it; §4.9's lifecycle owns what follows. It
+  // deliberately never pops the route to Setup: that pop skipped `leave()`'s disconnect, and
+  // leaving is the sheet's Disconnect / the overlay's Setup button's job (same reasoning as
+  // the iOS `gestureEnabled: false` below). The sheets are Modals, whose dialog windows take
+  // the back press natively (`onRequestClose`) before this handler can see it.
   useEffect(() => {
-    if (Platform.OS !== 'android' || sw === 'closed') return;
+    if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (sw === 'open') closeTo(activePos());
+      if (sw !== 'closed') {
+        if (sw === 'open') closeTo(activePos()); // mid-transition: swallowed, the zoom owns the screen
+      } else if (open !== 'none') {
+        setOpen('none');
+      } else {
+        BackHandler.exitApp();
+      }
       return true;
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- closeTo/activePos are per-render
     // closures; cards keeps activePos fresh while the grid sits open across snapshot polls.
-  }, [sw, cards]);
+  }, [sw, cards, open]);
 
   /* --- T11: bar-swipe window hop (§4.4) ---
    *
