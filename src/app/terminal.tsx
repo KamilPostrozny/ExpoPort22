@@ -395,8 +395,21 @@ export default function SessionScreen() {
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
 
+  /** A select that switches windows has a settle overlay riding the zoom (see `selectCard`) —
+   *  this marks it for `finishClose`, which decides at the landing whether the redraw already
+   *  came (drop it now) or is still in flight (hold until its first byte, capped). */
+  const zoomSettle = useRef(false);
+
   const finishClose = () => {
     setSw('closed');
+    if (zoomSettle.current) {
+      zoomSettle.current = false;
+      if (redrawn.current) clearBarSwipe();
+      else {
+        onShellData.current = clearBarSwipe;
+        settleCap.current = setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
+      }
+    }
     // The keys come back exactly as they were left (`keysWereUp`) — except onto an armed search
     // hit, where you came to read, not type (T14). The size hold outlives the zoom by exactly
     // that keyboard: released at the end of the animation it measures a stage with no keyboard in
@@ -500,6 +513,26 @@ export default function SessionScreen() {
     if (sw !== 'open') return;
     console.log('[switcher] select', win.id);
     ribbonForWindow(win); // as with the bar swipe: under the zoom, not a beat after it
+    // Switching windows redraws the pane twice under the flight — the local refit for the new
+    // chrome, then tmux's authoritative repaint a roundtrip later — and the gap between them is
+    // old-window content flashing through the zoom (user, 2026-08-11). T11's settle overlay is
+    // the cure here too: it lives inside the flying wrapper, so mounted now it rides the whole
+    // flight showing the very snapshot the tapped card shows, and drops at the redraw's first
+    // byte (or the cap) once the zoom has landed — see `finishClose`.
+    if (win.index !== tmux.windowIndex) {
+      redrawn.current = false;
+      onShellData.current = () => {
+        redrawn.current = true;
+      };
+      zoomSettle.current = true;
+      setPageSwipe({
+        names: [],
+        pos,
+        target: pos,
+        phase: 'settle',
+        settled: cards.find((c) => c.win.id === win.id)?.snap ?? null,
+      });
+    }
     void selectWindow(win.index); // §7: no haptic on tab select
     closeTo(pos);
   };
