@@ -16,9 +16,11 @@ import {
   shouldClose,
   slotFrame,
   snapshotFontSize,
+  SHOT_PAD,
   swipeOffset,
   swipeOpacity,
   targetSlot,
+  termPad,
   zoomFrame,
   zoomProgress,
 } from '@/switcher-model';
@@ -172,4 +174,15 @@ test('snapshotFontSize fits the pane columns to the card, clamped to legible', (
   expect(snapshotFontSize(173, 20)).toBe(8); // few columns: cap, not billboard type
   expect(snapshotFontSize(173, 500)).toBe(3); // absurd width: floor, unreadable but bounded
   expect(snapshotFontSize(173, 0)).toBe(6); // no data yet: a sane default
+});
+
+// The one number the zoom's crossfade rests on: a card's inset has to BE the terminal's inset
+// after the zoom has shrunk it, or the text steps sideways and down the moment the flying
+// surface hands over to the snapshot underneath it.
+test('a card\'s snapshot inset is the terminal\'s inset seen through the zoom', () => {
+  for (const width of [402, 393, 440]) {
+    const scale = slotFrame(0, width).w / width; // what the zoom shrinks the stage by
+    const cardInset = (SHOT_PAD / 402) * width; // as switcher.tsx applies it
+    expect(cardInset).toBeCloseTo(termPad(width) * scale, 10);
+  }
 });

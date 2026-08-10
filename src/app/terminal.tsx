@@ -77,6 +77,7 @@ import {
   gridTop,
   plusFrame,
   slotFrame,
+  termPad,
   zoomFrame,
   zoomProgress,
   type Frame,
@@ -825,7 +826,15 @@ export default function SessionScreen() {
           slides inside it as a rounded page card, with the neighbour snapshots as its siblings —
           the bar itself stays put, showing the name pills. */}
       <View style={styles.termArea}>
-      <Animated.View style={[styles.termSlide, { backgroundColor: theme.background }, termSlideStyle]}>
+      {/* The pane's own breathing room. It is also what makes the zoom's crossfade seamless: a
+          card's snapshot is inset by exactly this much seen through the zoom (switcher-model
+          derives one from the other), so the text does not move when the surface hands over. */}
+      <Animated.View
+        style={[
+          styles.termSlide,
+          { backgroundColor: theme.background, padding: stage === null ? 0 : termPad(stage.w) },
+          termSlideStyle,
+        ]}>
       <TerminalView
         ref={terminal}
         theme={theme}
@@ -1024,19 +1033,15 @@ type PageSwipe = {
 };
 
 /** The captured pane at page size — T10's Snapshot renderer, fitted to the pane's true columns
- *  inside the box they are drawn in: the page less both `pagePad` insets. Fitting the full page
- *  width overflows that box, and RN folds the overflow into a second line (device). */
-const PAGE_PAD = 6;
-
+ *  inside the box they are drawn in. A page card rides beside the live terminal at 1:1, so its
+ *  inset is the terminal's own, not a number of its own; and the fit has to be of the inset box,
+ *  because fitting the full page width overflows it and RN folds the overflow (device). */
 function PageContent({ snap, stageW, theme }: { snap: PageSnap; stageW: number; theme: Theme }) {
   if (snap === null) return null;
+  const pad = termPad(stageW);
   return (
-    <View style={styles.pagePad}>
-      <Snapshot
-        lines={snap.lines}
-        theme={theme}
-        fontSize={pageFontSize(stageW - 2 * PAGE_PAD, snap.cols)}
-      />
+    <View style={{ flex: 1, padding: pad }}>
+      <Snapshot lines={snap.lines} theme={theme} fontSize={pageFontSize(stageW - 2 * pad, snap.cols)} />
     </View>
   );
 }
@@ -1179,7 +1184,6 @@ const styles = StyleSheet.create({
   termArea: { flex: 1 },
   termSlide: { flex: 1, overflow: 'hidden' },
   page: { borderRadius: PAGE_RADIUS, overflow: 'hidden' },
-  pagePad: { flex: 1, padding: PAGE_PAD },
   status: {
     position: 'absolute',
     top: 0,

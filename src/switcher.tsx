@@ -45,6 +45,7 @@ import {
   shouldClose,
   slotFrame,
   snapshotFontSize,
+  SHOT_PAD,
   swipeOffset,
   swipeOpacity,
   targetSlot,
@@ -65,11 +66,6 @@ export type Card = { win: TmuxWindow; snap: Snap | null };
  *  50k-line scrollback capture never becomes 50k <Text> nodes. */
 const MAX_LINES = 44;
 
-/** The inset between the card's border and its snapshot, at design width. It is part of the type
- *  size, not just the padding: fitting `cols` columns to the card's OUTER width overflows the box
- *  they are actually drawn in by both insets, and RN wraps the overflow — so every line long
- *  enough to matter came back folded in the grid and straight in the terminal (device). */
-const SHOT_PAD = 5;
 
 /**
  * The switcher's data: the window list (kept warm while `enabled`, so the first zoom-out knows

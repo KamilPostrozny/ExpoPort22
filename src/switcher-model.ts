@@ -35,6 +35,23 @@ export function gridTop(width: number): number {
   return GRID_TOP * width;
 }
 
+/**
+ * The gap the pane keeps from the edge of the screen, at design width (user, 2026-08-10). The
+ * terminal had none and the cards had their own, which is why the zoom's crossfade stepped: the
+ * emulator draws from the very top-left of its box, so the text sat a whole inset higher and
+ * further left in the flying surface than in the card it landed on.
+ */
+export const TERM_PAD = 12;
+
+export function termPad(width: number): number {
+  return (TERM_PAD / DESIGN_W) * width;
+}
+
+/** The same gap seen through the zoom. A card is `CARD_W` of the stage, so the inset that lands
+ *  on the terminal's inset is the terminal's times that — derived, never a second number to keep
+ *  in step by hand. */
+export const SHOT_PAD = TERM_PAD * CARD_W;
+
 /** T14: the search field's block above the grid (40pt field + 12pt gap, absolute like the other
  *  controls). The zoom aim adds it — the grid, and every card slot, sits this far lower. */
 export const SEARCH_BAR_H = 52;
