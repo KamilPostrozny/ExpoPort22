@@ -505,7 +505,8 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Setup**: ⋯ → Camera, take a photo, accept it.
 - **Expect**: the sheet's SAVE AS field pre-fills `YYYYMMDDTHHMMSS.jpg` (UTC, this minute) —
   not the camera's own IMG-style name.
-- [ ]
+- [x] — camera shot pre-filled with the UTC stamp, and the send itself went through
+  (`[ssh] upload -> undefined`).
 
 ### T8.12 — "Save here" saves silently
 - **Setup**: any destination upload; the terminal at a prompt with a distinctive line.
@@ -530,14 +531,21 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Expect**: the circle is accent-filled with the glyph in background colour for the duration
   of the SFTP write, and tapping it does nothing; it returns to glass when the send settles —
   that is the entire progress UI (§4.4/§4.6).
-- [ ]
+- [ ] — first attempt never reached the send: picking a video threw
+  `PHPhotosErrorDomain error 3164` **uncaught in a promise** (the library could not export that
+  asset), so the app showed a red box instead of a message. `pick()` now catches and shows one
+  "Could not read the file" alert, matching §4.6. The tint half still needs a large file that
+  actually exports.
 
 ### T8.15 — Unwritable destination: one alert, nothing typed, nothing left
 - **Setup**: on the host: `mkdir -p ~/noentry && chmod 500 ~/noentry`; upload via ⋯ → Files.
 - **Steps**: browse into `noentry` (listing works — read is allowed), Save here.
 - **Expect**: "Could not send the file" alert, once; the terminal shows nothing; `ls ~/noentry`
   on the host shows nothing new; the raw SFTP error is in the log. Restore with `chmod 700`.
-- [ ]
+- [x] — listing the read-only directory worked, the write failed: one alert with a single OK,
+  the terminal untouched behind it, `~/noentry` still empty, and the log carrying both
+  `[ssh] upload failed: …SFTPMessage.Status error 1` and
+  `[upload] failed: /home/kamil/noentry/wllpr-iphone.png`.
 
 ### T8.16 — Quick-attach: `/tmp/port22`, typed path, trailing space
 - **Setup**: connected, cursor at a prompt. **Dep: T11** — the agent ribbon 📎 cap is the only

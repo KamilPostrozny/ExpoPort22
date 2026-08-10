@@ -56,6 +56,21 @@ export function useUploadBusy(): boolean {
 /** One of the three ⋯ sources (or the ribbon cap's). Resolves `null` on cancel — which is not a
  *  failure and shows nothing. */
 export async function pick(kind: UploadKind): Promise<PickedFile | null> {
+  try {
+    return await pickOrThrow(kind);
+  } catch (error) {
+    // The picker can fail after the choice is made — a video the photo library cannot export
+    // (`PHPhotosErrorDomain error 3164`, seen on device, T13/T8.14), a document provider that
+    // goes away mid-read. Both callers fire this from a press handler, so an escaping rejection
+    // is an unhandled one: a red box in dev, silence in production. §4.6's contract is one alert
+    // and nothing else, which is what a failed *read* deserves as much as a failed send.
+    console.log('[upload] picker failed:', error);
+    Alert.alert('Could not read the file');
+    return null;
+  }
+}
+
+async function pickOrThrow(kind: UploadKind): Promise<PickedFile | null> {
   if (kind === 'files') {
     const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
     if (result.canceled) return null;
