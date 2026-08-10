@@ -197,5 +197,13 @@ export function fabFrame(width: number, height: number): Frame {
  *  reads as text, above 8 the card looks like a ransom note. */
 export function snapshotFontSize(cardW: number, cols: number): number {
   if (cols <= 0) return 6;
-  return Math.min(8, Math.max(3, cardW / (cols * 0.6)));
+  return floorFit(Math.min(8, Math.max(3, cardW / (cols * 0.6))));
+}
+
+/** An exact fit is `cols` advances landing on exactly `cardW`, and a float that rounds the last
+ *  one up by a millionth of a point is a line that no longer fits — which RN answers by folding
+ *  it, turning one overflowing character into a card that reads nothing like the terminal. Two
+ *  decimals of type size is under a tenth of a pixel; the slack is free. */
+export function floorFit(size: number): number {
+  return Math.floor(size * 100) / 100;
 }

@@ -63,6 +63,13 @@ export type TerminalProps = {
   onData: (data: string) => Promise<void>;
   /** After a settled rotation, keyboard move or font change — what the host's window size is now. */
   onResize: (cols: number, rows: number) => Promise<void>;
+  /** Hold the size where it is: no fit, no report, until it goes false again (then one of each).
+   *  §4.5's zoom animates the stage's *height*, and the keyboard leaves on the way in — so an
+   *  unheld transition walks the PTY through half a dozen row counts (26 → 41 → 29 → 26 on
+   *  device), tmux reflows the pane for every one of them, and both the surface being scaled and
+   *  every snapshot taken behind it rewrite themselves mid-flight. The terminal is not being
+   *  looked at while this is true; it is being flown into a card. */
+  holdSize: boolean;
   /** The terminal exists and knows its size. Fires again on every reload of the webview — iOS reaps
    *  a backgrounded one — which is the moment the session has to be painted back in. */
   onBoot: () => Promise<void>;
@@ -162,18 +169,28 @@ function fontReport(fontSize: number): string {
   );
 }
 
-export default function TerminalView({ theme, fontSize, ref, ...handlers }: TerminalProps) {
+export default function TerminalView({ theme, fontSize, holdSize, ref, ...handlers }: TerminalProps) {
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
   const search = useRef<SearchAddon | null>(null);
   const resizer = useRef<(() => void) | null>(null);
+  const releaseFit = useRef<(() => void) | null>(null);
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
-  const latest = useRef({ theme, ...handlers });
+  const latest = useRef({ theme, holdSize, ...handlers });
   useEffect(() => {
-    latest.current = { theme, ...handlers };
+    latest.current = { theme, holdSize, ...handlers };
   });
+
+  // Coming out of a hold, the size is measured and reported exactly once — the layout it settles
+  // in is the only one the host ever hears about.
+  const held = useRef(holdSize);
+  useEffect(() => {
+    const released = held.current && !holdSize;
+    held.current = holdSize;
+    if (released) releaseFit.current?.();
+  }, [holdSize]);
 
   // The one decoration set both directions share. Backgrounds must be #RRGGBB (addon contract):
   // every role here is a palette hex. The ruler colours are required by the type; no ruler is on.
@@ -364,11 +381,25 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
       console.log('[terminal] size', term.cols, '×', term.rows);
       latest.current.onResize(term.cols, term.rows);
     };
-    const resize = () => {
+    // `force` re-reports even a size the host was already told about: the only caller is the
+    // release from a hold, and during that hold a report may have been dropped in flight (see
+    // the screen's own guard) — so what the host last heard is not knowable from here.
+    const resize = (force?: boolean) => {
+      if (force) reported = { cols: 0, rows: 0 };
       fitAddon.fit();
       report();
     };
     resizer.current = resize;
+    // Coming out of a hold, the box this document sits in may not have caught up yet: the layout
+    // that ended the hold reaches the webview as a native resize, and the flag that ended it as a
+    // prop, and they do not arrive together. Fitting on the spot measured the stage the keyboard
+    // had not returned to yet and reported 41 rows, then 26 a beat later — the two reflows the
+    // hold exists to prevent (device). So: fit at the settle, and let a real resize preempt it —
+    // the observer clears this timer, and its own flush is the one report.
+    releaseFit.current = () => {
+      clearTimeout(settle);
+      settle = setTimeout(() => resize(true), 150);
+    };
     // Throttled, not debounced. A keyboard edge is one discrete step and so produces exactly one
     // tick: a trailing debounce held the host off for 150ms for nothing, and until tmux repaints,
     // the rows the keyboard uncovers hold whatever the fit dragged out of scrollback — which is
@@ -377,10 +408,12 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     // one, which is all §4.2 ever wanted.
     let lastReport = 0;
     const flush = () => {
+      if (latest.current.holdSize) return; // a timer that matured after the hold began
       lastReport = Date.now();
       report();
     };
     const observer = new ResizeObserver(() => {
+      if (latest.current.holdSize) return; // the zoom's own height animation — see `holdSize`
       fitAddon.fit();
       clearTimeout(settle);
       const since = Date.now() - lastReport;

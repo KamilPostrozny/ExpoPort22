@@ -136,6 +136,15 @@ export default function SessionScreen() {
    * event to ResizeObserver is ~25-35ms, plus a frame to paint).
    */
   const [keyboardPad, setKeyboardPad] = useState(0);
+  /** A keyboard we asked for and have not seen yet — the terminal's size stays held until it
+   *  lands, so the host hears the geometry once. Self-clearing: a focus that never raises one
+   *  (hardware keyboard, a refusal) must not hold the size for the rest of the session. */
+  const [kbSettle, setKbSettle] = useState(false);
+  useEffect(() => {
+    if (!kbSettle) return;
+    const timer = setTimeout(() => setKbSettle(false), 500);
+    return () => clearTimeout(timer);
+  }, [kbSettle]);
   useEffect(() => {
     // Android has no Will* events, and its window already resizes for Gboard (§4.10's docking):
     // padding here would subtract the keyboard twice.
@@ -152,6 +161,7 @@ export default function SessionScreen() {
         // Both edges off this one event: a keyboard parked at or below the window's bottom edge
         // overlaps nothing, which is the hide. `keyboardWillHide` says the same thing later.
         setKeyboardPad(overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0);
+        setKbSettle(false); // the keyboard we were waiting for: this is the final geometry
       }),
     ];
     return () => subs.forEach((sub) => sub.remove());
@@ -333,8 +343,14 @@ export default function SessionScreen() {
   const finishClose = () => {
     setSw('closed');
     // The prototype re-raises the keyboard on return — except onto an armed search hit, where
-    // you came to read, not type (T14).
-    if (!searchRef.current.on) setFocusSignal((n) => n + 1);
+    // you came to read, not type (T14). The size hold outlives the zoom by exactly that keyboard:
+    // released at the end of the animation it measures a stage with no keyboard in it, reports
+    // that, and is corrected ~250ms later — two reflows of every pane on the host, landing just
+    // as the terminal comes back into view (device). Nothing is raised, nothing to wait for.
+    if (!searchRef.current.on) {
+      setKbSettle(true);
+      setFocusSignal((n) => n + 1);
+    }
   };
 
   const commitOpen = () => {
@@ -803,7 +819,22 @@ export default function SessionScreen() {
         theme={theme}
         fontSize={fontSize}
         onData={async (data) => send(data)}
-        onResize={async (cols, rows) => setSize(cols, rows)}
+        // The same hold, on this side of the bridge. `holdSize` is a prop, so it reaches the
+        // webview a frame or two after the zoom has already started animating the stage's height
+        // — long enough for one report to get out (a 25 on every tabs-tap open, device). This
+        // guard is state, read in the same tick, so nothing slips through; the release re-reports
+        // unconditionally, which is what makes dropping a report here safe.
+        onResize={async (cols, rows) => {
+          if (sw !== 'closed' || kbSettle) {
+            console.log('[terminal] size held, not sent:', cols, '×', rows);
+            return;
+          }
+          setSize(cols, rows);
+        }}
+        // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:
+        // the terminal keeps the geometry it had at rest until the grid is gone, so the panes the
+        // cards capture are the panes the user was just looking at.
+        holdSize={sw !== 'closed' || kbSettle}
         // Every boot, not just the first: iOS reaps a backgrounded webview, and the one that comes
         // back is empty even though the shell behind it never went anywhere.
         onBoot={async () => {
@@ -980,12 +1011,20 @@ type PageSwipe = {
   next: PageSnap;
 };
 
-/** The captured pane at page size — T10's Snapshot renderer, fitted to the pane's true columns. */
+/** The captured pane at page size — T10's Snapshot renderer, fitted to the pane's true columns
+ *  inside the box they are drawn in: the page less both `pagePad` insets. Fitting the full page
+ *  width overflows that box, and RN folds the overflow into a second line (device). */
+const PAGE_PAD = 6;
+
 function PageContent({ snap, stageW, theme }: { snap: PageSnap; stageW: number; theme: Theme }) {
   if (snap === null) return null;
   return (
     <View style={styles.pagePad}>
-      <Snapshot lines={snap.lines} theme={theme} fontSize={pageFontSize(stageW, snap.cols)} />
+      <Snapshot
+        lines={snap.lines}
+        theme={theme}
+        fontSize={pageFontSize(stageW - 2 * PAGE_PAD, snap.cols)}
+      />
     </View>
   );
 }
@@ -1128,7 +1167,7 @@ const styles = StyleSheet.create({
   termArea: { flex: 1 },
   termSlide: { flex: 1, overflow: 'hidden' },
   page: { borderRadius: PAGE_RADIUS, overflow: 'hidden' },
-  pagePad: { flex: 1, padding: 6 },
+  pagePad: { flex: 1, padding: PAGE_PAD },
   status: {
     position: 'absolute',
     top: 0,

@@ -65,6 +65,12 @@ export type Card = { win: TmuxWindow; snap: Snap | null };
  *  50k-line scrollback capture never becomes 50k <Text> nodes. */
 const MAX_LINES = 44;
 
+/** The inset between the card's border and its snapshot, at design width. It is part of the type
+ *  size, not just the padding: fitting `cols` columns to the card's OUTER width overflows the box
+ *  they are actually drawn in by both insets, and RN wraps the overflow — so every line long
+ *  enough to matter came back folded in the grid and straight in the terminal (device). */
+const SHOT_PAD = 5;
+
 /**
  * The switcher's data: the window list (kept warm while `enabled`, so the first zoom-out knows
  * which slot is active before the grid has ever opened) and the colour snapshots, refreshed on
@@ -618,10 +624,10 @@ function WindowCard({
       ? { borderWidth: 2, borderColor: theme.accent }
       : { borderWidth: 1, borderColor: theme.border };
 
-  // The columns the snapshot was captured at, not the window's current width: the two agree
-  // except across a resize, and there the live width would re-size type that is still the old
-  // capture's — the next snapshot brings both at once.
-  const fontSize = snapshotFontSize(slot.w, card.snap?.cols ?? card.win.width);
+  // Fitted to the box the text is drawn in — the card less both insets — and to the columns the
+  // snapshot was captured at rather than the window's current width: the two agree except across
+  // a resize, and there the live width would re-size type that is still the old capture's.
+  const fontSize = snapshotFontSize(slot.w - 2 * SHOT_PAD * u, card.snap?.cols ?? card.win.width);
   const directory = card.win.path.split('/').filter(Boolean).pop() ?? '/';
 
   // T14: with a scrollback hit, the card shows the grep's context block instead of the live
@@ -649,7 +655,12 @@ function WindowCard({
           style={[
             styles.shot,
             ring,
-            { height: slot.h, borderRadius: 14 * u, backgroundColor: theme.background, padding: 5 * u },
+            {
+              height: slot.h,
+              borderRadius: 14 * u,
+              backgroundColor: theme.background,
+              padding: SHOT_PAD * u,
+            },
           ]}>
           <Snapshot lines={shownLines} theme={theme} fontSize={fontSize} />
           {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
@@ -690,11 +701,30 @@ export function Snapshot({
 }) {
   if (lines === null) return null;
   return (
-    <Text
-      allowFontScaling={false}
-      style={{ fontFamily: MONO, fontSize, lineHeight: fontSize * 1.4, color: theme.foreground }}>
+    <View>
       {lines.map((line, i) => (
-        <Text key={i}>
+        // One <Text> per captured line, clipped, never wrapped. A pane line is already as wide as
+        // the pane — the emulator wrapped anything longer before it was ever captured — so a line
+        // that does not fit here is this renderer disagreeing with the emulator about how wide a
+        // character is, and it does: a Nerd Font icon the terminal clamps into one cell draws at
+        // its own advance in RN, and half a cell of overflow on a full-width line came back as
+        // `pr` and `t` alone on a line of their own (device). A terminal viewport clips; it does
+        // not reflow. `clip`, not the default `tail`, so nothing spends a cell on an ellipsis.
+        <Text
+          key={i}
+          numberOfLines={1}
+          ellipsizeMode="clip"
+          allowFontScaling={false}
+          style={{
+            fontFamily: MONO,
+            fontSize,
+            lineHeight: fontSize * 1.4,
+            color: theme.foreground,
+          }}>
+          {/* A blank line is an empty span list (ansi-spans), and an empty <Text> is a zero-high
+              one — which would pull every line after it up and slide the snapshot out of step
+              with the pane it copies. A space holds the row open. */}
+          {line.length === 0 && ' '}
           {line.map((span, j) => (
             <Text
               key={j}
@@ -714,10 +744,9 @@ export function Snapshot({
               {span.text}
             </Text>
           ))}
-          {i < lines.length - 1 ? '\n' : null}
         </Text>
       ))}
-    </Text>
+    </View>
   );
 }
 

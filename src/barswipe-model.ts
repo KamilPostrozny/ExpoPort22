@@ -8,7 +8,7 @@
  * `src/barswipe-model.test.ts`; the screen and the bar render and execute.
  */
 
-import { DESIGN_W } from '@/switcher-model';
+import { DESIGN_W, floorFit } from '@/switcher-model';
 
 /* --- page geometry --- */
 
@@ -88,5 +88,5 @@ export function pillOpacity(dist: number): number {
  *  size that fits `cols` columns in the page width (JBMono advance 0.6em), clamped to readable. */
 export function pageFontSize(pageW: number, cols: number): number {
   if (cols <= 0) return 13;
-  return Math.min(24, Math.max(4, pageW / (cols * 0.6)));
+  return floorFit(Math.min(24, Math.max(4, pageW / (cols * 0.6))));
 }
