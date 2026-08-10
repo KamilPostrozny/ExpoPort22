@@ -912,6 +912,83 @@ same session.
   reads "1 Tab", not "1 Tabs".)
 - [ ]
 
+## T10A — Tab switcher, Android (emulator)
+
+All cases on the Android **emulator** (gated on T3.0's build), connected to the host machine's
+sshd at `10.0.2.2`, tmux configured and attached, three windows made beforehand — same harness
+as §T10. The transform, grid, cards and gestures are the SAME code as iOS (both design
+prototypes share the zoom verbatim, opacity stagger included); what is Android-only is the
+grid's bottom bar (Done text button · Roboto count · 56dp FAB), the FAB as the birth origin,
+and the system-back subscription. §T10's gesture cases are not repeated — walk T10A.5 and spot-
+check the rest only if the bar chrome or back handling misbehaves.
+
+### T10A.1 — Container-transform enter/exit (tabs tap and bar-swipe-up)
+- **Setup**: attached, three windows, window 2 active.
+- **Steps**: tap the tabs circle; watch the enter. Tap a card; watch the exit. Then swipe up
+  on the bar slowly (terminal shrinks under the finger), release past ~a third of the travel.
+- **Expect**: the live terminal shrinks into its card slot with rounding corners and the
+  accent ring, fading out only at the end (the card takes over) — the same motion as iOS
+  §T10.1/T10.2, per the Android prototype which shares the transform verbatim. The drag-follow
+  rides the finger, drifts with it horizontally, and a short release springs back to rest.
+- [ ]
+
+### T10A.2 — The bottom bar is Material: Done text · count · FAB
+- **Steps**: open the switcher. Eye-check the bottom bar against design §5c / the Android
+  prototype's grid.
+- **Expect**: left — "Done" as an accent **text button** (pressing washes it 14% accent), no
+  circle, no ✓ glyph, and **no top-left back arrow anywhere** (the design has no grid header);
+  centre — "3 tabs" in Roboto, muted, lowercase; right — a 56dp accent FAB with a plus, 12dp
+  corners, elevated shadow. One window reads "1 tab".
+- [ ]
+
+### T10A.3 — FAB births a window out of itself
+- **Steps**: with 3 windows open the switcher, tap the FAB; on the laptop run
+  `tmux list-windows`.
+- **Expect**: a new terminal grows out of the FAB's bottom-right frame to full screen (the
+  container transform's origin — not iOS's bottom-left + circle), lands on a fresh shell,
+  keyboard raised; `list-windows` shows 4 windows with the new one active. `[switcher] new
+  window` and T9's `new-window` exec line in the log.
+- [ ]
+
+### T10A.4 — Done returns to the active window
+- **Steps**: open the switcher, scroll the grid a little, tap Done.
+- **Expect**: the terminal grows back out of the active card's on-screen slot (scroll
+  respected), same window as before, keyboard re-raised. No `select-window` in the log —
+  returning is not a selection.
+- [ ]
+
+### T10A.5 — Select, ✕/fling close, long-press reorder still work on Android
+- **Steps**: walk §T10.5 (tap selects), §T10.7/T10.8 (✕ and left-fling close, right swipe
+  rubber-bands), §T10.9 (long-press lift → drag → drop reorders; laptop `tmux list-windows`
+  confirms the order) on the emulator.
+- **Expect**: identical behaviour to the iOS cases — the gesture code is shared, so any
+  divergence here is an Android RNGH/Reanimated fault worth its own write-up.
+- [ ]
+
+### T10A.6 — System back closes the grid, never the app
+- **Setup**: switcher open.
+- **Steps**: press the system back button (or predictive-back swipe from the screen edge in
+  gesture nav). Then, with the switcher closed and the terminal up, do NOT press back — that
+  level is §T12A-era (see PLAN).
+- **Expect**: the grid closes into the active pane — the same exit as Done — and the app
+  stays exactly where it was: not backgrounded, not popped to Setup. Back pressed again
+  mid-transition is swallowed (nothing double-fires).
+- [ ]
+
+### T10A.7 — Snapshots refresh while the grid is open
+- **Steps**: §T10.6 on the emulator: with the switcher open, `yes | head -50` from the laptop
+  in another window's pane; wait ~2s beats.
+- **Expect**: that window's card repaints with the new output while the grid stays open.
+- [ ]
+
+### T10A.8 — Closing the last window ends the session
+- **Steps**: §T10.12 on the emulator: close windows until one remains (its ✕ is gone and a
+  left fling rubber-bands — unkillable from the grid); from the laptop `tmux kill-window` the
+  last one.
+- **Expect**: the grid drops, §4.9's Disconnected state owns the screen; no crash, no orphan
+  grid over a dead PTY.
+- [ ]
+
 ## T11 — Bar-swipe window switching + context ribbon
 
 All cases: a real host with configured tmux, session attached, three windows unless said

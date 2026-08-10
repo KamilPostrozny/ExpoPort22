@@ -13,7 +13,7 @@
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   FadeIn,
@@ -221,8 +221,35 @@ export default function Switcher(props: SwitcherProps) {
           ))}
       </ScrollView>
 
-      {/* the bottom bar: + | "N Tabs" | Done ✓ */}
+      {/* The bottom bar. iOS (§4.5): + circle | "N Tabs" | Done ✓. Android (§4.10, design §5c):
+          Done as a text button | Roboto count | the 56dp FAB the container transform births
+          from — same handlers, Material chrome. */}
       <View style={styles.bar}>
+        {Platform.OS === 'android' ? (
+          <>
+            <Pressable
+              onPress={interactive ? props.onDone : undefined}
+              style={({ pressed }) => [
+                styles.doneText,
+                pressed && { backgroundColor: `${theme.accent}24` }, // the prototype's 14% accent wash
+              ]}>
+              <Text style={[styles.doneLabel, { color: theme.accent }]}>Done</Text>
+            </Pressable>
+            <Text style={[styles.countAndroid, { color: theme.muted }]}>
+              {display.length} {display.length === 1 ? 'tab' : 'tabs'}
+            </Text>
+            <Pressable
+              onPress={interactive ? props.onNew : undefined}
+              style={({ pressed }) => [
+                styles.fab,
+                { backgroundColor: theme.accent },
+                pressed && styles.pressed,
+              ]}>
+              <Text style={[styles.fabGlyph, { color: theme.background }]}>+</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
         <Pressable
           onPress={interactive ? props.onNew : undefined}
           style={({ pressed }) => [
@@ -254,6 +281,8 @@ export default function Switcher(props: SwitcherProps) {
             fallback={<Text style={{ color: theme.onAccent, fontSize: 18 }}>✓</Text>}
           />
         </Pressable>
+          </>
+        )}
       </View>
     </View>
   );
@@ -546,13 +575,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 34,
-    paddingTop: 5,
-    paddingBottom: 10,
+    ...Platform.select({
+      android: { paddingHorizontal: 12, paddingTop: 6, paddingBottom: 14 },
+      default: { paddingHorizontal: 34, paddingTop: 5, paddingBottom: 10 },
+    }),
   },
   circle: { width: 49, height: 49, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.6, transform: [{ scale: 0.94 }] },
   count: { fontFamily: MONO, fontSize: 14 },
+  // Android chrome text is Roboto by setting no fontFamily (T7A's finding, zero code).
+  countAndroid: { fontSize: 14, fontWeight: '500' },
+  doneText: { height: 40, paddingHorizontal: 16, borderRadius: 20, justifyContent: 'center' },
+  doneLabel: { fontSize: 14, fontWeight: '500' },
+  // 12dp corner per the working prototype (the §5c still shows 18 — the prototype wins, same
+  // tie-break T7A used). Elevation is the Material shadow; iOS never renders this branch.
+  fab: { width: 56, height: 56, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 6 },
+  fabGlyph: { fontSize: 30, lineHeight: 34 },
   name: { textAlign: 'center', fontFamily: MONO, fontSize: 12, marginTop: 7 },
   sub: { textAlign: 'center', fontFamily: MONO, fontSize: 10, marginTop: 2 },
 });

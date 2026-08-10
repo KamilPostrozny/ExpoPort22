@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -64,6 +65,7 @@ import { endpoint, getSettings, updateSettings, useSettings } from '@/settings';
 import Switcher, { Snapshot, useSwitcherCards, type Card } from '@/switcher';
 import {
   ZOOM_COMMIT,
+  fabFrame,
   gridTop,
   plusFrame,
   slotFrame,
@@ -319,7 +321,9 @@ export default function SessionScreen() {
     console.log('[switcher] new window');
     // tmux switches the attached client to it, so the terminal lands on it
     newWindow().catch((error) => console.log('[switcher] new window failed:', error));
-    slotSV.value = plusFrame(stage.w, stage.h);
+    // The birth origin: iOS's + circle, or the Android FAB (§4.10) — same growth either way.
+    slotSV.value =
+      Platform.OS === 'android' ? fabFrame(stage.w, stage.h) : plusFrame(stage.w, stage.h);
     prog.value = 1; // teleport the (invisible) surface into the + button…
     setSw('birth');
     alpha.value = withTiming(1, { duration: 200 });
@@ -339,6 +343,25 @@ export default function SessionScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
+
+  // §4.10: Android system back closes the grid back into the active pane — it must never pop
+  // the route out from under an open switcher. Subscribed only while the switcher is up;
+  // mid-transition the press is swallowed, the running zoom owns the screen. This is the
+  // BackHandler half only: `predictiveBackGestureEnabled` stays false in app.json because RN
+  // 0.86's ReactActivity opts back into legacy dispatch itself — an always-enabled
+  // OnBackPressedCallback ("Due to enforced predictive back on targetSdk 36, 'onBackPressed()'
+  // is disabled by default. Using a workaround to trigger it manually") — so the flag buys no
+  // OS peek animation for JS-handled backs, and BackHandler works either way.
+  useEffect(() => {
+    if (Platform.OS !== 'android' || sw === 'closed') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (sw === 'open') closeTo(activePos());
+      return true;
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- closeTo/activePos are per-render
+    // closures; cards keeps activePos fresh while the grid sits open across snapshot polls.
+  }, [sw, cards]);
 
   /* --- T11: bar-swipe window hop (§4.4) ---
    *

@@ -178,6 +178,14 @@ export function plusFrame(width: number, height: number): Frame {
   return { x: 34 * u, y: height - (44 + 49) * u, w: 49 * u, h: 49 * u };
 }
 
+/** The Android FAB's frame — the container transform's birth origin (§4.10, design §5c). The
+ *  grid's bottom bar puts it 12dp from the right and 14dp above the bottom; 56dp is Material's
+ *  FAB size. These are absolute dp, not design-width fractions: Material chrome does not scale
+ *  with the screen the way the iOS bar's 402pt-relative geometry does. */
+export function fabFrame(width: number, height: number): Frame {
+  return { x: width - 12 - 56, y: height - 14 - 56, w: 56, h: 56 };
+}
+
 /* --- the snapshot's type size --- */
 
 /** A card renders the pane at its true column count, so the type size is whatever makes `cols`

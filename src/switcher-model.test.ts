@@ -7,6 +7,7 @@ import { expect, test } from 'bun:test';
 
 import {
   ZOOM_COMMIT,
+  fabFrame,
   gridHeight,
   gridTop,
   plusFrame,
@@ -156,6 +157,13 @@ test('zoomFrame rides the finger drift at 0.6 like the prototype', () => {
 test('plusFrame sits on the bottom bar, left side', () => {
   const f = plusFrame(402, 874);
   expect(f).toEqual({ x: 34, y: 874 - 93, w: 49, h: 49 });
+});
+
+test('fabFrame sits on the bottom bar, right side, in absolute dp', () => {
+  const f = fabFrame(412, 892);
+  expect(f).toEqual({ x: 412 - 68, y: 892 - 70, w: 56, h: 56 });
+  // Material dp do not scale with the screen: a wider stage moves the FAB, never resizes it.
+  expect(fabFrame(500, 892).w).toBe(56);
 });
 
 test('snapshotFontSize fits the pane columns to the card, clamped to legible', () => {

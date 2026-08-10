@@ -126,7 +126,7 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 - Background kills socket (expected). Foreground: dead → auto reconnect, re-auth, new PTY plain shell (startup command replays if set; **no auto tmux attach**). Two consecutive failures → stop, show manual Reconnect. Distinct Disconnected vs Cannot-connect states (icon, headline, sentence, Setup/Reconnect buttons) + Connecting spinner.
 
 ### 4.10 Android specifics (design file §2f/2g)
-- Same functionality, Material skin: flush mantle surfaces, no blur; bar rides Gboard (WindowInsets); switcher via container-transform, FAB new tab, top-left back, predictive back closes grid; gesture pill instead of home indicator. Everything else identical.
+- Same functionality, Material skin: flush mantle surfaces, no blur; bar rides Gboard (WindowInsets); switcher per design §5c — the same shared-progress transform (the prototypes share the zoom verbatim; "container-transform" is its Material name), grid bottom bar of **Done text button (left) · Roboto count · 56dp FAB (right, births the new tab)** — this file's older "top-left back" was the §2g draft, superseded — and system back closes the grid; gesture pill instead of home indicator. Everything else identical.
 
 ---
 
@@ -508,10 +508,33 @@ last window just drops the grid: the PTY dies with the window and T5's §4.9 mac
 screen from there. No haptic on select (§7); the lift has one.
 Verified: `bun test` (106), `tsc --noEmit`, `expo export -p ios`, `expo-doctor` 20/20. **Not
 walked on hardware** — the device cases are TESTS.md §T10 (T10.1–T10.14). Still open besides
-that: the Android variants (container-transform, FAB, predictive back — §4.10) are T3-era
-work, untouched; keyboard re-raise on return uses a `focusSignal` counter prop on KeyBar,
+that: keyboard re-raise on return uses a `focusSignal` counter prop on KeyBar,
 worth a device look; snapshot cards render bg colour per span but no reverse-video/underline
 (deliberate subset).
+**Android half (2026-08-10)**: the design files collapsed most of the work. The two prototypes
+share the zoom **verbatim** — same `zoomSty`/`zoomFollow`/`REST` strings, same 0.3s/0.12s
+opacity stagger, same 0.6 finger drift, same 0.25 commit — so "container-transform" is the
+Material name for the transform already implemented (end-fade included), not a second
+animation system: no new frame function, and the bar-swipe-up drag-follow is in the Android
+prototype too, riding the same progress. Card metrics are the same fractions (170/396 vs
+173/402, identical 20/16/298 dp grid, 14 radius, same rings) — no card skin branch. What is
+actually Android: (1) the grid's bottom bar, one Platform branch in `switcher.tsx` — Done as
+an accent **text button bottom-left** (§4.10's old "top-left back" was §2g's draft; §5c and
+the prototype have no grid header at all), "n tabs" in Roboto muted, and a 56dp accent FAB
+(12dp corner per the prototype; the §5c still shows 18 — prototype wins, T7A's tie-break);
+(2) `fabFrame` in switcher-model (tested) as the birth origin — absolute Material dp, not
+design-width fractions; (3) a `BackHandler` subscription while the switcher is up: back
+closes the grid into the active pane, swallowed mid-transition. **Predictive back stays
+`predictiveBackGestureEnabled: false`**, on evidence: RN 0.86's `ReactActivity` registers an
+always-enabled `OnBackPressedCallback` ("Due to enforced predictive back on targetSdk 36,
+'onBackPressed()' is disabled by default. Using a workaround to trigger it manually") — RN
+itself routes around predictive dispatch, an enabled callback suppresses the OS peek anyway,
+and JS `BackHandler` cannot feed the progress animation; the flag would buy nothing and risk
+libraries still assuming `onBackPressed`. Revisit when RN forwards back-progress to JS. Still
+open: design §5d wires back at *every* level (sheet → dismiss, browser → up one directory,
+terminal → home) — only the switcher level is wired here (T12A-era), and back at terminal
+level still pops to Setup without disconnecting, the Android twin of the iOS edge-swipe note
+in `terminal.tsx`; the emulator walk is TESTS.md §T10A (T10A.1–T10A.8).
 
 **T11 — Bar-swipe window switching + ribbon** ✅ implemented 2026-08-09 (not device-verified) · deps: T9, T7
 Horizontal bar swipe: page-slide cards, rounded corners during drag, name pills strip,
