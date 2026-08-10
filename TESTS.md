@@ -9,6 +9,53 @@ Conventions:
 - A case that depends on another task's feature says so inline.
 - Tick `[ ]` → `[x]` only on hardware, during the verification phase (T13).
 
+## OPEN BUG — start here (T10.9, switcher reorder)
+
+Unfixed, and the reason this file's T10 section is unfinished. Four fix attempts were made during
+the T13 walk and **all were reverted** — `src/switcher.tsx` is exactly what `origin/main` holds, so
+a fresh session starts from clean code, not from a pile of half-fixes.
+
+**Symptom.** Reorder a card by drag, then grab a card again straight away: the grabbed card is drawn
+over its neighbour — one card on the other's slot, both cards' name/directory labels stacked on top
+of each other, the dashed placeholder marking the *other* slot. It resolves as soon as the grid
+settles, so it is a transient wrong-position, not corrupted state.
+
+**Repro.** Two windows, switcher open. Drag one card onto the other's slot, release, then long-press
+either card within a second or two. Reliable — reproduced many times, including on video.
+
+**What was measured (all of it says the state is correct):**
+- `[switcher] lift {pos, order}` at every lift: `pos` always matched the card's real slot and the
+  order was fresh (`optimistic:false`).
+- `[switcher] anchor {wasX, slotX, propX, swipeX}`: `wasX == slotX == propX` every time (21 for the
+  left column, 218 for the right), `swipeX: 0` — the card is exactly on its slot when lifted, with
+  no leftover swipe offset.
+- `[switcher] first move {tx, ty}`: `{0,0}` — RNGH is not replaying pre-activation drift.
+- `[switcher] cards changed mid-drag`: the props order never shifts under a held drag; only the
+  array identity churns, once per ~2s poll.
+- Host side: `tmux move-window -b -s :15 -t :14` genuinely swaps the two windows' indices
+  (`14 colors @7, 15 fish @9` → `14 fish @9, 15 colors @7`), so the reorder command is correct and
+  the list order really does change.
+
+**Hypotheses ruled out.** Stale card transform (anchor says no); stale/late props order overwriting
+a fresh one (order is stable mid-drag; a sequence guard on `refresh` changed nothing); the previous
+drag's optimistic clear landing mid-gesture (a drag-generation guard changed nothing); gesture
+closures capturing a stale `slot` (mirroring slot into shared values changed nothing); RNGH
+translation counted from touch-down (`first move` is zero); a drag stranded by the poll rebuilding
+gesture objects (the long "mid-drag" log runs were a deliberate hold, not a stuck drag).
+
+**Where to look next.** Nothing measured so far explains the pixels, so the next step is to
+correlate them directly: screen-record the artefact *while* the instrumentation runs, then line up
+frames against log lines to find which render actually draws the card on the wrong slot. Candidates
+not yet examined: `WindowCard`'s `useAnimatedStyle` (is the transform reading a shared value that a
+sibling card also drives?), and whether two cards can briefly hold the same React key while tmux
+renumbers — every move renumbers *both* windows (11,12 → 12,13 → 13,14 …), and the key is
+`card.win.id`.
+
+**Related, undecided.** Repeated reorders inflate tmux indices (`move-window -b/-a` shifts
+neighbours; `src/tmux-model.ts:209` leaves `base-index`/`renumber-windows` to the user), so the tabs
+badge climbs — 1 … 16 over one session. Options: push `set -g renumber-windows on` in the app's
+conf, or leave indices as tmux gives them. Needs a decision, not a fix.
+
 ## Cross-task dependency map
 
 How the remaining slices interlock — read before testing, because a failure in one task's
@@ -626,14 +673,16 @@ same session.
 - **Steps**: keep the grid open ~10s, watching the `watch date` card.
 - **Expect**: the card's clock ticks — the snapshot re-captures on the ~2s beat without the
   grid being touched. Scroll position and card order do not jump when it refreshes.
-- [ ]
+- [x] — `watch -n1 date` on a card read `09:59:20` in one frame and `09:59:50` in the next, grid
+  untouched between them; order and scroll position held.
 
 ### T10.7 — ✕ closes a window
 - **Steps**: open the switcher; tap the ✕ on a non-active card.
 - **Expect**: the card animates out and the grid reflows (header count drops by one);
   `tmux list-windows` on the laptop shows the window gone; the exec log shows `kill-window`.
   The remaining cards keep their order.
-- [ ]
+- [x] — `[switcher] kill @5` → `[ssh] exec tmux kill-window -t :1`; the host went from three
+  windows to `2: colors`, `3: fish`, the survivors keeping their indices.
 
 ### T10.8 — Left fling closes, right swipe rubber-bands
 - **Steps**: on one card, drag left slowly past half the card width and release. On another,
