@@ -512,6 +512,12 @@ export default function SessionScreen() {
     // masking it with an overlay was ~60ms of React at the flight's first frame — both device,
     // 2026-08-11. Same tab: nothing changes underneath, fly at once.
     if (win.index !== tmux.windowIndex) {
+      // With a ribbon appearing or leaving, the pane resizes too — and the select's own redraw
+      // races the refit report across the webview bridge and usually wins (49 × 22 held on every
+      // switch onto claude, device). That byte is not the settled pane: hold the flight until the
+      // resize has actually been reported, then take the next byte — tmux's redraw at that size.
+      const chromeChanges = (recipe !== null) === IDLE_SHELLS.has(win.command);
+      sizeReported.current = false;
       const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
       const fly = () => {
         if (selectSeq.current !== mine) return;
@@ -519,7 +525,10 @@ export default function SessionScreen() {
         if (onShellData.current === land) onShellData.current = null;
         if (swRef.current === 'open') closeTo(pos);
       };
-      const land = () => requestAnimationFrame(fly);
+      const land = () => {
+        if (chromeChanges && !sizeReported.current) return; // stays armed for the next byte
+        requestAnimationFrame(fly);
+      };
       onShellData.current = land;
       setTimeout(fly, ZOOM_REDRAW_CAP_MS);
     } else {
@@ -530,6 +539,9 @@ export default function SessionScreen() {
   /** The one select whose redraw-wait may still fly — bumped by every new select (superseding
    *  the last) and by the flight itself (making the cap timer a no-op after the redraw won). */
   const selectSeq = useRef(0);
+  /** Has a size report gone out to the host since the current select? What a chrome-changing
+   *  select's redraw-wait gates on — see `selectCard`. */
+  const sizeReported = useRef(false);
 
   const killCard = (win: TmuxWindow) => {
     // The last window is unkillable (user decision, 2026-08-10): killing it ends the tmux
@@ -1113,6 +1125,7 @@ export default function SessionScreen() {
           }
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
           setPadTop(topInset);
+          sizeReported.current = true; // a chrome-changing select's redraw-wait gates on this
           setSize(cols, rows);
         }}
         // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:
