@@ -12,7 +12,7 @@
 
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -734,7 +734,7 @@ function WindowCard({
 /** The mini terminal: ANSI spans as nested <Text> runs in JBMono at whatever size fits the
  *  pane's true column count. `null` lines = no capture yet — the card is just its background.
  *  Exported for T11's neighbour page cards, which are the same rendering at page size. */
-export function Snapshot({
+export const Snapshot = memo(function Snapshot({
   lines,
   theme,
   fontSize,
@@ -779,7 +779,7 @@ export function Snapshot({
       ))}
     </View>
   );
-}
+});
 
 /** One span's paint. Reverse video is resolved here rather than at parse time: it swaps whatever
  *  the two colours turned out to be, and the defaults it swaps in are the theme's, which the

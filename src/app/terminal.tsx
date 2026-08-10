@@ -528,10 +528,14 @@ export default function SessionScreen() {
   const onShellData = useRef<(() => void) | null>(null);
   const redrawn = useRef(false);
   const settleCap = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const SLIDE = { duration: 320, easing: Easing.bezier(0.22, 1, 0.36, 1) };
 
   const clearBarSwipe = () => {
+    // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
+    // start of this one: a capture per window is an exec burst and a parse of every answer, and
+    // on the JS thread at the instant the finger goes down that is a stutter in the slide it is
+    // meant to serve (user, 2026-08-10). Nothing on screen is waiting for it.
+    void refresh(true);
     onShellData.current = null;
     if (settleCap.current !== null) clearTimeout(settleCap.current);
     settleCap.current = null;
@@ -553,7 +557,12 @@ export default function SessionScreen() {
     setPageSwipe((s) =>
       s === null
         ? s
-        : { ...s, phase: 'settle', pos: s.target, settled: s.target > s.pos ? s.next : s.prev },
+        : {
+            ...s,
+            phase: 'settle',
+            pos: s.target,
+            settled: cards[s.target]?.snap ?? null,
+          },
     );
     roundSV.value = withTiming(0, { duration: 200 });
     onShellData.current = clearBarSwipe;
@@ -578,10 +587,6 @@ export default function SessionScreen() {
       const pos = activePosIn(cards);
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
       setOpen('none');
-      // The warm list and its snapshots can be stale (a window made from the shell since the last
-      // re-list); this swipe rides what it has, and the refresh makes the next one fresh — it
-      // lands while the slide is frozen, so it reaches the cards after the slide, never under it.
-      void refresh(true);
       console.log('[barswipe] start at', pos, 'of', windows.length);
       setPageSwipe({
         names: windows.map((w) => w.name),
@@ -589,8 +594,6 @@ export default function SessionScreen() {
         count: windows.length,
         target: pos,
         phase: 'drag',
-        prev: pos > 0 ? (cards[pos - 1]?.snap ?? null) : null,
-        next: pos < windows.length - 1 ? (cards[pos + 1]?.snap ?? null) : null,
         settled: null,
       });
       roundSV.value = withTiming(1, { duration: 180 });
@@ -627,6 +630,17 @@ export default function SessionScreen() {
       }
     }
   };
+
+  /* The neighbour pages are mounted whenever the terminal view is up, not when a swipe starts:
+   * mounting them is 53–93ms of React on the JS thread (measured on device), the bar's pan runs
+   * on JS too, and so the first `move` callback of every swipe arrived after that — the hitch at
+   * the beginning (user, 2026-08-10). At rest they sit a full pitch off either edge and cost
+   * nothing to keep; the snapshot inside them is memoised, so the 2s cache beat walks past them.
+   *
+   * The anchor freezes for the length of a swipe: committing switches the active window, and a
+   * neighbour recomputed at that moment would swap its content while the slide is still running. */
+  const anchor = pageSwipe?.pos ?? activePosIn(cards);
+  const neighbour = (side: -1 | 1) => cards[anchor + side]?.snap ?? null;
 
   // The live terminal is itself a page while a swipe is on: it slides and rounds its corners.
   const termSlideStyle = useAnimatedStyle(() => ({
@@ -973,13 +987,13 @@ export default function SessionScreen() {
 
       {/* The neighbour pages while a swipe is live, and the settle overlay after a commit —
           which holds the committed snapshot over the terminal until tmux's redraw has landed. */}
-      {pageSwipe !== null && stage !== null && pageSwipe.phase !== 'settle' && (
+      {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' && (
         <>
-          {pageSwipe.pos > 0 && (
-            <NeighborPage side={-1} snap={pageSwipe.prev} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
+          {anchor > 0 && (
+            <NeighborPage side={-1} snap={neighbour(-1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
           )}
-          {pageSwipe.pos < pageSwipe.count - 1 && (
-            <NeighborPage side={1} snap={pageSwipe.next} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
+          {anchor < cards.length - 1 && (
+            <NeighborPage side={1} snap={neighbour(1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
           )}
         </>
       )}
@@ -1117,8 +1131,6 @@ type PageSwipe = {
   /** drag = finger down; anim = commit/cancel slide running; settle = snapshot holding the
    *  screen while tmux redraws the PTY under it. */
   phase: 'drag' | 'anim' | 'settle';
-  prev: PageSnap;
-  next: PageSnap;
   /** The page the commit landed on, kept for the settle overlay — `pos` has moved to `target` by
    *  then, so which side it came from is no longer derivable. Moving `pos` is the point: the name
    *  pills read their position from it, and leaving it behind snapped the strip back to the tab
