@@ -393,7 +393,23 @@ export default function KeyBar(props: KeyBarProps) {
             <Glass
               theme={theme}
               radius={24.5}
-              style={[styles.circle, props.sending && { backgroundColor: rgba(theme.accent, 0.85) }]}>
+              style={styles.circle}>
+              {/* §4.6's busy tint, drawn *over* the glass rather than under it. As the container's
+                  backgroundColor it sat beneath Glass's blur and its light-mode white overlay,
+                  which washed the accent out to a pale wash and left the glyph — painted in
+                  `theme.background` for contrast against a saturated accent — nearly invisible in
+                  Latte (seen on device, T13/T8.14). */}
+              {props.sending && (
+                <View
+                  pointerEvents="none"
+                  // Its own radius, not the parent's clip: an absolutely-filled child squares off
+                  // the circle's edge on device even inside `overflow: 'hidden'` (T13/T8.14).
+                  style={[
+                    StyleSheet.absoluteFill,
+                    { backgroundColor: theme.accent, borderRadius: 24.5 },
+                  ]}
+                />
+              )}
               <SymbolView
                 name="ellipsis"
                 size={20}

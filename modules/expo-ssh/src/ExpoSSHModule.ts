@@ -41,6 +41,17 @@ const LOG = true;
 const TAP_OUT = new Set(['addListener', 'removeListener', 'removeAllListeners', 'emit']);
 
 /**
+ * An argument as the log should carry it. A base64 upload is the whole file: logging one verbatim
+ * put tens of megabytes through Metro's socket, which answered `RangeError: Max payload size
+ * exceeded`, killed HMR and took the log with it — exactly while a large upload was the thing
+ * being debugged (T13/T8.14). Keystrokes and paths are short and pass through untouched.
+ */
+function brief(arg: unknown): unknown {
+  if (typeof arg !== 'string' || arg.length <= 120) return arg;
+  return `${arg.slice(0, 60)}… (${arg.length} chars)`;
+}
+
+/**
  * Every call, its arguments, and how it settled — into the Metro console.
  *
  * A proxy rather than a hand-written wrapper per method so a function added to the native module
@@ -55,7 +66,7 @@ function logged(module: ExpoSSHModule): ExpoSSHModule {
         return typeof value === 'function' ? value.bind(target) : value;
       }
       return (...args: unknown[]) => {
-        console.log(`[ssh] ${property}`, ...args);
+        console.log(`[ssh] ${property}`, ...args.map(brief));
         const result = value.apply(target, args);
         if (!(result instanceof Promise)) return result;
         return result.then(
