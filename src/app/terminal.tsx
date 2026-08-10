@@ -27,7 +27,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { parseAnsi, type SpanLine } from '@/ansi-spans';
 import {
   PAGE_RADIUS,
   SETTLE_HOLD_MS,
@@ -64,7 +63,13 @@ import {
 } from '@/session';
 import { endpoint, getSettings, updateSettings, useSettings } from '@/settings';
 import { normalizeQuery, windowSurvives } from '@/search-model';
-import Switcher, { Snapshot, useScrollbackSearch, useSwitcherCards, type Card } from '@/switcher';
+import Switcher, {
+  Snapshot,
+  useScrollbackSearch,
+  useSwitcherCards,
+  type Card,
+  type Snap,
+} from '@/switcher';
 import {
   SEARCH_BAR_H,
   ZOOM_COMMIT,
@@ -78,7 +83,7 @@ import {
 } from '@/switcher-model';
 import SettingsSheet from '@/settings-sheet';
 import TerminalView, { type TerminalHandle } from '@/terminal';
-import { capturePane, exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
+import { exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
 import { deriveConfigStatus, tabsAvailable, type TmuxWindow } from '@/tmux-model';
 import { MONO, type Theme } from '@/theme';
 import { pick, quickAttach, sendFile, useUploadBusy, type UploadKind } from '@/upload';
@@ -251,7 +256,17 @@ export default function SessionScreen() {
     deriveConfigStatus(configureTmux, tmux.config),
     tmux.attached,
   );
-  const { cards, setCards, refresh } = useSwitcherCards(showTabs && connected, sw !== 'closed');
+  // T11's page-slide state lives up here with the switcher's: the snapshot cache has to know
+  // when a slide is running, and it is the same "nothing may change while something is moving"
+  // rule the zoom needs. Everything else about the slide is in its own block below.
+  const [pageSwipe, setPageSwipe] = useState<PageSwipe | null>(null);
+  /** Mid-zoom, mid-slide: the moving views must not have their content swapped underneath them. */
+  const frozen = (sw !== 'closed' && sw !== 'open') || pageSwipe !== null;
+  const { cards, setCards, refresh } = useSwitcherCards(
+    showTabs && connected,
+    sw !== 'closed',
+    frozen,
+  );
 
   /* --- T14: one search, shared by the grid and the terminal view --- *
    *
@@ -464,11 +479,14 @@ export default function SessionScreen() {
    * Horizontal bar pan → page-slide: the live terminal and a neighbour snapshot ride the finger
    * as rounded page cards, tab-name pills replace the bar keys, rubber-band at the ends,
    * commit/flick thresholds from the prototype (all in barswipe-model, tested). The neighbour's
-   * content is a FRESH `capture-pane` taken on swipe start (§6); after a commit `select-window`
-   * makes tmux redraw the PTY, and a short settle overlay holds the snapshot until that lands. */
+   * content is the switcher's own snapshot of that window, already in hand at swipe start — a
+   * capture fired here instead landed 100–300ms in, which is a blank card for the whole first
+   * half of a quick flick (user, 2026-08-10). The swipe kicks a refresh for the next one. After
+   * a commit `select-window` makes tmux redraw the PTY, and a short settle overlay holds the
+   * snapshot until that lands. */
   const swipeX = useSharedValue(0);
   const roundSV = useSharedValue(0); // page corner radius, 0→1 of PAGE_RADIUS
-  const [pageSwipe, setPageSwipe] = useState<PageSwipe | null>(null);
+  // `pageSwipe` itself is declared with the switcher state above (the cache freezes on it).
   const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
     null,
   );
@@ -496,15 +514,6 @@ export default function SessionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageSwipe?.phase]);
 
-  const grabNeighbor = (win: TmuxWindow, key: 'prev' | 'next') => {
-    capturePane(win.index)
-      .then((text) => {
-        const snap = { lines: parseAnsi(text).slice(0, 80), cols: win.width };
-        setPageSwipe((s) => (s === null ? s : { ...s, [key]: snap }));
-      })
-      .catch(() => {}); // window died between list and capture: the page stays a blank card
-  };
-
   const onBarSwipe = (phase: 'start' | 'move' | 'end', dx: number) => {
     if (stage === null) return;
     if (phase === 'start') {
@@ -514,9 +523,10 @@ export default function SessionScreen() {
       const pos = activePosIn(cards);
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
       setOpen('none');
-      // The warm list can be stale (a window made from the shell since the last re-list); this
-      // swipe rides what it has, and the re-list makes the next one fresh.
-      void refresh(false);
+      // The warm list and its snapshots can be stale (a window made from the shell since the last
+      // re-list); this swipe rides what it has, and the refresh makes the next one fresh — it
+      // lands while the slide is frozen, so it reaches the cards after the slide, never under it.
+      void refresh(true);
       console.log('[barswipe] start at', pos, 'of', windows.length);
       setPageSwipe({
         names: windows.map((w) => w.name),
@@ -524,12 +534,10 @@ export default function SessionScreen() {
         count: windows.length,
         target: pos,
         phase: 'drag',
-        prev: null,
-        next: null,
+        prev: pos > 0 ? (cards[pos - 1]?.snap ?? null) : null,
+        next: pos < windows.length - 1 ? (cards[pos + 1]?.snap ?? null) : null,
       });
       roundSV.value = withTiming(1, { duration: 180 });
-      if (pos > 0) grabNeighbor(windows[pos - 1], 'prev');
-      if (pos < windows.length - 1) grabNeighbor(windows[pos + 1], 'next');
       swipeX.value = rubber(dx, pos, windows.length);
     } else if (phase === 'move') {
       const info = swipeInfo.current;
@@ -954,9 +962,9 @@ export default function SessionScreen() {
 
 /* --- T11: the page-slide's cards --- */
 
-/** A neighbour's captured pane, parsed for the Snapshot renderer; `null` until the capture lands
- *  (§4.4 accepts ~100–300ms of blank card before the slide attaches). */
-type PageSnap = { lines: SpanLine[]; cols: number } | null;
+/** A neighbour's captured pane, parsed for the Snapshot renderer — the switcher's snapshot of
+ *  that window. `null` only for a window nothing has captured yet: a blank page card. */
+type PageSnap = Snap | null;
 
 type PageSwipe = {
   names: string[];

@@ -54,7 +54,12 @@ import { capturePane, listWindows, searchPane } from '@/tmux';
 import { POLL_MS, type TmuxWindow } from '@/tmux-model';
 import { MONO, MONO_BOLD, type Theme } from '@/theme';
 
-export type Card = { win: TmuxWindow; lines: SpanLine[] | null };
+/** One captured pane, with the column count it was captured at — the two travel together because
+ *  the type size is derived from the columns, and pairing a fresh capture with a stale width (or
+ *  the other way round) is a reflow the user sees as the card rewriting itself. */
+export type Snap = { lines: SpanLine[]; cols: number };
+
+export type Card = { win: TmuxWindow; snap: Snap | null };
 
 /** More than a card can show at any legal font size — parse output is truncated here so a
  *  50k-line scrollback capture never becomes 50k <Text> nodes. */
@@ -66,10 +71,24 @@ const MAX_LINES = 44;
  * a ~2s beat while `live` — the same cadence as T9's poll, for the same reason: fresh enough to
  * watch a build scroll by, cheap enough to leave running. `setCards` is exported for the
  * screen's optimistic updates (a killed window leaves the grid before tmux confirms).
+ *
+ * A snapshot is a snapshot: once a window has one it keeps it until a newer one replaces it, and
+ * a replacement never lands while `frozen` — during the zoom or a page slide, that is. Both rules
+ * exist for the same reason (user, 2026-08-10): a card whose content appears, then reflows a beat
+ * later, then reflows again when dismissing the keyboard resizes the panes underneath, reads as
+ * the grid tripping over itself on the way in. Frozen updates are held and applied whole the
+ * moment nothing is moving.
  */
-export function useSwitcherCards(enabled: boolean, live: boolean) {
+export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolean) {
   const [cards, setCards] = useState<Card[]>([]);
   const seq = useRef(0);
+  /** What the cards show, and what landed while frozen and is waiting its turn — both keyed by
+   *  window id, so a list-only refresh, a reorder, or a window that died mid-capture all keep
+   *  whatever that window last showed. */
+  const shown = useRef(new Map<string, Snap>());
+  const pending = useRef(new Map<string, Snap>());
+  const frozenRef = useRef(frozen);
+  frozenRef.current = frozen;
 
   const refresh = useCallback(async (withSnapshots: boolean) => {
     // Newest-started refresh wins: a poll's listWindows can start before a move-window lands on
@@ -79,28 +98,42 @@ export function useSwitcherCards(enabled: boolean, live: boolean) {
     try {
       const wins = await listWindows();
       if (seq.current !== mine) return;
-      if (!withSnapshots) {
-        setCards((prev) =>
-          wins.map((win) => ({ win, lines: prev.find((c) => c.win.id === win.id)?.lines ?? null })),
+      if (withSnapshots) {
+        const caps = await Promise.all(
+          wins.map((win) =>
+            capturePane(win.index)
+              .then((text) => ({ lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width }))
+              .catch(() => null), // window died between list and capture: it keeps its last snapshot
+          ),
         );
-        return;
+        if (seq.current !== mine) return;
+        const into = frozenRef.current ? pending.current : shown.current;
+        caps.forEach((snap, i) => {
+          if (snap !== null) into.set(wins[i].id, snap);
+        });
       }
-      const caps = await Promise.all(
-        wins.map((win) =>
-          capturePane(win.index)
-            .then((text) => parseAnsi(text).slice(0, MAX_LINES))
-            .catch(() => null), // window died between list and capture: blank card, next beat fixes it
-        ),
-      );
-      if (seq.current !== mine) return;
-      setCards(wins.map((win, i) => ({ win, lines: caps[i] })));
+      // A window that is gone takes its snapshot with it — tmux ids never come back, so anything
+      // still keyed by one is memory a long session would only accumulate.
+      const alive = new Set(wins.map((win) => win.id));
+      for (const id of shown.current.keys()) if (!alive.has(id)) shown.current.delete(id);
+      setCards(wins.map((win) => ({ win, snap: shown.current.get(win.id) ?? null })));
     } catch (error) {
       console.log('[switcher] refresh failed:', error);
     }
   }, []);
 
+  // Nothing is moving any more: whatever landed mid-transition becomes what the cards show.
   useEffect(() => {
-    if (enabled) void refresh(false);
+    if (frozen || pending.current.size === 0) return;
+    for (const [id, snap] of pending.current) shown.current.set(id, snap);
+    pending.current.clear();
+    setCards((prev) => prev.map((c) => ({ ...c, snap: shown.current.get(c.win.id) ?? c.snap })));
+  }, [frozen]);
+
+  // Snapshots from the moment tabs become reachable, not from the moment the grid opens: the
+  // first swipe-up and the first bar swipe both want content that is already there (T14A).
+  useEffect(() => {
+    if (enabled) void refresh(true);
   }, [enabled, refresh]);
 
   useEffect(() => {
@@ -585,7 +618,10 @@ function WindowCard({
       ? { borderWidth: 2, borderColor: theme.accent }
       : { borderWidth: 1, borderColor: theme.border };
 
-  const fontSize = snapshotFontSize(slot.w, card.win.width);
+  // The columns the snapshot was captured at, not the window's current width: the two agree
+  // except across a resize, and there the live width would re-size type that is still the old
+  // capture's — the next snapshot brings both at once.
+  const fontSize = snapshotFontSize(slot.w, card.snap?.cols ?? card.win.width);
   const directory = card.win.path.split('/').filter(Boolean).pop() ?? '/';
 
   // T14: with a scrollback hit, the card shows the grep's context block instead of the live
@@ -594,10 +630,10 @@ function WindowCard({
   // highlight surgery; `highlightLine` returns miss lines untouched, so unmatched cards (a
   // name-only match) re-use every node.
   const shownLines = useMemo(() => {
-    const lines = hit ? parseAnsi(hit.lines.join('\n')) : card.lines;
+    const lines = hit ? parseAnsi(hit.lines.join('\n')) : (card.snap?.lines ?? null);
     if (lines === null || query === '') return lines;
     return lines.map((line) => highlightLine(line, query));
-  }, [hit, card.lines, query]);
+  }, [hit, card.snap, query]);
 
   return (
     <GestureDetector gesture={gesture}>
