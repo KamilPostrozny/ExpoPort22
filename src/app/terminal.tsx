@@ -489,8 +489,13 @@ export default function SessionScreen() {
     console.log('[switcher] new window');
     // A fresh window has no history to match — birth disarms the search (prototype's newTab).
     if (searchRef.current.on) disarmSearch();
-    // tmux switches the attached client to it, so the terminal lands on it
-    newWindow().catch((error) => console.log('[switcher] new window failed:', error));
+    // tmux switches the attached client to it, so the terminal lands on it. Re-list once it has:
+    // the card list is only refreshed while the grid is up, so without this the next open still
+    // holds the OLD window as active and aims the zoom at its slot — the flight lands on the
+    // wrong card and the grid snaps right on landing (user, 2026-08-10).
+    newWindow()
+      .then(() => refresh(false))
+      .catch((error) => console.log('[switcher] new window failed:', error));
     // Nothing to leave a hole for: this one grows out of the + button, not out of a card, and the
     // window it belongs to has no card in the grid yet.
     setZoomId(null);
