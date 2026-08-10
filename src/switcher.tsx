@@ -146,8 +146,10 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
   useEffect(() => {
     if (frozen || pending.current.size === 0) return;
     if (liveRef.current) {
+      // No refresh here either: run at the lift it resolves ~200ms after the landing, which
+      // reads as the cards rewriting themselves at the end of the flight (device, 2026-08-11).
+      // The interval armed at the live flip ticks ~1.7s after landing — that one is the update.
       pending.current.clear();
-      void refresh(true); // the open-beat refresh, moved here from the flight's first frame
       return;
     }
     for (const [id, snap] of pending.current) shown.current.set(id, snap);
@@ -164,8 +166,8 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
   useEffect(() => {
     if (!live) return;
     // `live` flips on the flight's first frame, where a capture burst is a visible stutter — and
-    // its snapshots would land in `pending` only to be dropped at the lift. The lift effect above
-    // runs it instead, clear of any motion (device, 2026-08-11).
+    // its snapshots would land in `pending` only to be dropped at the lift. The first interval
+    // tick is the grid's first update, clear of any motion (device, 2026-08-11).
     if (!frozenRef.current) void refresh(true);
     const timer = setInterval(() => void refresh(true), POLL_MS);
     return () => clearInterval(timer);
