@@ -9,47 +9,32 @@ Conventions:
 - A case that depends on another task's feature says so inline.
 - Tick `[ ]` → `[x]` only on hardware, during the verification phase (T13).
 
-## OPEN BUG — start here (T10.9, switcher reorder)
+## RESOLVED — the switcher reorder-snap (T10.9)
 
-Unfixed, and the reason this file's T10 section is unfinished. Four fix attempts were made during
-the T13 walk and **all were reverted** — `src/switcher.tsx` is exactly what `origin/main` holds, so
-a fresh session starts from clean code, not from a pile of half-fixes.
+Root-caused and fixed on 2026-08-10, after the frame-vs-log correlation this section used to call
+for. The write-up stays because the mechanism is a trap the rest of the codebase can walk into.
 
-**Symptom.** Reorder a card by drag, then grab a card again straight away: the grabbed card is drawn
-over its neighbour — one card on the other's slot, both cards' name/directory labels stacked on top
-of each other, the dashed placeholder marking the *other* slot. It resolves as soon as the grid
-settles, so it is a transient wrong-position, not corrupted state.
+**Root cause.** The drag base (`baseX`/`baseY`) was a Reanimated shared value written from the
+gesture's `onStart` — which runs on the JS thread (`runOnJS(true)`). A JS write to a shared value
+flushes to the UI thread *asynchronously*, so a new drag's first `onUpdate` could read the
+**previous drag's base** and set `x = staleBase + ~0`: the card teleports to its old slot in one
+frame. With the finger held still no further `onUpdate` fires, so the card parks there until the
+drop springs it home — exactly the observed "transient wrong position that resolves on settle",
+with every state probe innocent because the state *was* correct.
 
-**Repro.** Two windows, switcher open. Drag one card onto the other's slot, release, then long-press
-either card within a second or two. Reliable — reproduced many times, including on video.
+**How it was caught.** All-cards position probes at lift (JS-side: always correct) plus a 60fps
+screen recording showed a one-frame, pixel-exact teleport to the pre-reorder slot that JS never
+saw. A `useAnimatedReaction` watchdog logging any single-frame jump >60px then caught it red-handed
+on the UI thread: `JUMP @9 x 218 -> 21`, where 21 was precisely the previous drag's base. The
+mirrored jump (21 → 218) matched the first video.
 
-**What was measured (all of it says the state is correct):**
-- `[switcher] lift {pos, order}` at every lift: `pos` always matched the card's real slot and the
-  order was fresh (`optimistic:false`).
-- `[switcher] anchor {wasX, slotX, propX, swipeX}`: `wasX == slotX == propX` every time (21 for the
-  left column, 218 for the right), `swipeX: 0` — the card is exactly on its slot when lifted, with
-  no leftover swipe offset.
-- `[switcher] first move {tx, ty}`: `{0,0}` — RNGH is not replaying pre-activation drift.
-- `[switcher] cards changed mid-drag`: the props order never shifts under a held drag; only the
-  array identity churns, once per ~2s poll.
-- Host side: `tmux move-window -b -s :15 -t :14` genuinely swaps the two windows' indices
-  (`14 colors @7, 15 fish @9` → `14 fish @9, 15 colors @7`), so the reorder command is correct and
-  the list order really does change.
+**Fix.** `src/switcher.tsx`: the base is a plain `useRef` — every gesture callback already runs on
+JS, so JS-only memory cannot lose the cross-thread race. Verified on hardware: many
+reorder-then-immediately-relift rounds, watchdog silent, no visual glitch.
 
-**Hypotheses ruled out.** Stale card transform (anchor says no); stale/late props order overwriting
-a fresh one (order is stable mid-drag; a sequence guard on `refresh` changed nothing); the previous
-drag's optimistic clear landing mid-gesture (a drag-generation guard changed nothing); gesture
-closures capturing a stale `slot` (mirroring slot into shared values changed nothing); RNGH
-translation counted from touch-down (`first move` is zero); a drag stranded by the poll rebuilding
-gesture objects (the long "mid-drag" log runs were a deliberate hold, not a stuck drag).
-
-**Where to look next.** Nothing measured so far explains the pixels, so the next step is to
-correlate them directly: screen-record the artefact *while* the instrumentation runs, then line up
-frames against log lines to find which render actually draws the card on the wrong slot. Candidates
-not yet examined: `WindowCard`'s `useAnimatedStyle` (is the transform reading a shared value that a
-sibling card also drives?), and whether two cards can briefly hold the same React key while tmux
-renumbers — every move renumbers *both* windows (11,12 → 12,13 → 13,14 …), and the key is
-`card.win.id`.
+**Moral.** Inside `runOnJS(true)` gesture callbacks, do not round-trip scratch state through shared
+values — write-then-read from JS races the UI-thread flush. Shared values are for what the UI
+thread renders; plain refs for what JS computes.
 
 **Related, undecided.** Repeated reorders inflate tmux indices (`move-window -b/-a` shifts
 neighbours; `src/tmux-model.ts:209` leaves `base-index`/`renumber-windows` to the user), so the tabs
@@ -702,7 +687,11 @@ same session.
   and an exec `move-window -a -s :1 -t :3`; the laptop's `list-windows` shows the new order;
   the phone's grid order survives the next snapshot beat (no jump back). Dropping a card back
   on its own slot runs no command at all.
-- [ ]
+- [x] — verified 2026-08-10 with two windows: lift (haptic, mauve ring, tilt), dashed placeholder,
+  neighbour springs aside, `[switcher] reorder {"from":N,"to":M}` on every real move, order
+  survives the ~2s beats and a switcher close/reopen. Host-side index swap was proven on the
+  laptop during the earlier bug hunt. The reorder-snap glitch this case used to trip is fixed —
+  see the RESOLVED section at the top.
 
 ### T10.10 — + births a new terminal out of the button
 - **Steps**: open the switcher, tap +.

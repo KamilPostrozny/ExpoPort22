@@ -273,8 +273,11 @@ function WindowCard({
   // the finger from wherever the spring last put it, and the drop springs to the final slot.
   const x = useSharedValue(slot.x);
   const y = useSharedValue(slot.y);
-  const baseX = useSharedValue(slot.x);
-  const baseY = useSharedValue(slot.y);
+  // Plain ref, not a shared value: every gesture callback runs on JS (`runOnJS(true)`), and a
+  // JS write to a shared value flushes to the UI thread asynchronously — the first onUpdate of
+  // a new drag could read the PREVIOUS drag's base and teleport the card to its old slot
+  // (T10.9). JS-only memory cannot lose that race.
+  const base = useRef({ x: slot.x, y: slot.y });
   const swipeX = useSharedValue(0);
   const swipeT0 = useSharedValue(0);
   const lift = useSharedValue(0);
@@ -311,14 +314,13 @@ function WindowCard({
     .runOnJS(true)
     .activateAfterLongPress(300)
     .onStart(() => {
-      baseX.value = x.value;
-      baseY.value = y.value;
+      base.current = { x: x.value, y: y.value };
       lift.value = withSpring(1, SPRING);
       onDragStart();
     })
     .onUpdate((e) => {
-      x.value = baseX.value + e.translationX;
-      y.value = baseY.value + e.translationY;
+      x.value = base.current.x + e.translationX;
+      y.value = base.current.y + e.translationY;
       onDragMove(x.value, y.value);
     })
     .onFinalize(() => {
