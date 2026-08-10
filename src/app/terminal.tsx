@@ -170,6 +170,14 @@ export default function SessionScreen() {
     const timer = setTimeout(() => setKbSettle(false), 500);
     return () => clearTimeout(timer);
   }, [kbSettle]);
+  /** The listener's math, off the keyboard's current frame instead of an event — for the doors
+   *  that unfreeze the pad with no keyboard move left to re-report it. */
+  const syncPad = () => {
+    if (Platform.OS !== 'ios') return;
+    const frame = Keyboard.metrics();
+    const overlap = frame ? Dimensions.get('window').height - frame.screenY : 0;
+    setKeyboardPad(overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0);
+  };
   useEffect(() => {
     // Android has no Will* events, and its window already resizes for Gboard (§4.10's docking):
     // padding here would subtract the keyboard twice.
@@ -182,6 +190,12 @@ export default function SessionScreen() {
         // with no position — the sheets' Modals raise one on the way in and out. Taking it at face
         // value padded the entire stage away for a frame or two (seen on device).
         if (e.endCoordinates.screenY <= 0) return;
+        // The zoom owns the stage's box while it runs. The tabs-tap dismisses the keyboard in
+        // the same tick the flight starts, and this event lands (often more than once) before
+        // `holdSize` has marshaled into the webview — each pad change resized the webview and
+        // the observer refit xterm mid-flight, which is the hitching (device, 2026-08-11).
+        // Frozen here, the box never moves; `finishClose` reconciles the pad on the way out.
+        if (swRef.current !== 'closed') return;
         const overlap = Dimensions.get('window').height - e.endCoordinates.screenY;
         // Both edges off this one event: a keyboard parked at or below the window's bottom edge
         // overlaps nothing, which is the hide. `keyboardWillHide` says the same thing later.
@@ -392,6 +406,11 @@ export default function SessionScreen() {
     if (!searchRef.current.on && keysWereUp.current) {
       setKbSettle(true);
       setFocusSignal((n) => n + 1);
+    } else {
+      // The pad froze at the open (see the keyboardWillChangeFrame guard) and no keyboard event
+      // is coming to re-report it — ask the OS where the keyboard actually is. Usually that is
+      // "down" (pad 0), but a search-hit select can land with the grid's keyboard still up.
+      syncPad();
     }
   };
 
@@ -527,6 +546,7 @@ export default function SessionScreen() {
       dragX.value = 0;
       alpha.value = 1;
       setSw('closed');
+      syncPad(); // the pad froze at the open; no event is coming to thaw it
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);

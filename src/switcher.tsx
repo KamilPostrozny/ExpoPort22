@@ -147,12 +147,13 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
     if (frozen || pending.current.size === 0) return;
     if (liveRef.current) {
       pending.current.clear();
+      void refresh(true); // the open-beat refresh, moved here from the flight's first frame
       return;
     }
     for (const [id, snap] of pending.current) shown.current.set(id, snap);
     pending.current.clear();
     setCards((prev) => prev.map((c) => ({ ...c, snap: shown.current.get(c.win.id) ?? c.snap })));
-  }, [frozen]);
+  }, [frozen, refresh]);
 
   // Snapshots from the moment tabs become reachable, not from the moment the grid opens: the
   // first swipe-up and the first bar swipe both want content that is already there (T14A).
@@ -162,7 +163,10 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
 
   useEffect(() => {
     if (!live) return;
-    void refresh(true);
+    // `live` flips on the flight's first frame, where a capture burst is a visible stutter — and
+    // its snapshots would land in `pending` only to be dropped at the lift. The lift effect above
+    // runs it instead, clear of any motion (device, 2026-08-11).
+    if (!frozenRef.current) void refresh(true);
     const timer = setInterval(() => void refresh(true), POLL_MS);
     return () => clearInterval(timer);
   }, [live, refresh]);
