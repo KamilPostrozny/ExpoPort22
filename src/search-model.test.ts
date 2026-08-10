@@ -76,6 +76,10 @@ const span = (text: string, fg: number | null = null): SpanLine[number] => ({
   fg,
   bg: null,
   bold: false,
+  underline: false,
+  italic: false,
+  inverse: false,
+  dim: false,
 });
 
 test('highlight marks every occurrence, splitting spans at the boundaries', () => {

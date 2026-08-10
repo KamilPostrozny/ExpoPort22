@@ -6,18 +6,22 @@ import { expect, test } from 'bun:test';
 
 import { parseAnsi, spanColor, xterm256 } from '@/ansi-spans';
 
+/** The attribute flags every span carries, all off — spelled once so the exact-match cases below
+ *  stay about the thing they are testing. */
+const PLAIN = { underline: false, italic: false, inverse: false, dim: false };
+
 test('plain text is one default span per line', () => {
   expect(parseAnsi('hello\nworld')).toEqual([
-    [{ text: 'hello', fg: null, bg: null, bold: false }],
-    [{ text: 'world', fg: null, bg: null, bold: false }],
+    [{ text: 'hello', fg: null, bg: null, bold: false, ...PLAIN }],
+    [{ text: 'world', fg: null, bg: null, bold: false, ...PLAIN }],
   ]);
 });
 
 test('16-colour SGR: normal, bright, background, and reset', () => {
   const [line] = parseAnsi('\x1b[31mred\x1b[0mplain');
   expect(line).toEqual([
-    { text: 'red', fg: 1, bg: null, bold: false },
-    { text: 'plain', fg: null, bg: null, bold: false },
+    { text: 'red', fg: 1, bg: null, bold: false, ...PLAIN },
+    { text: 'plain', fg: null, bg: null, bold: false, ...PLAIN },
   ]);
   expect(parseAnsi('\x1b[92mok')[0][0]).toMatchObject({ fg: 10 });
   expect(parseAnsi('\x1b[44mblue bg')[0][0]).toMatchObject({ bg: 4 });
@@ -44,11 +48,11 @@ test('256-colour and truecolor, fg and bg, with params after the extension still
 });
 
 test('unknown SGR codes and non-SGR sequences are skipped clean', () => {
-  // italic (3), underline (4), reverse (7): ignored, text kept
-  expect(parseAnsi('\x1b[3;4;7mx')[0][0]).toMatchObject({ text: 'x', fg: null, bold: false });
+  // blink (5) and conceal (8): nothing the emulator draws differently, text kept
+  expect(parseAnsi('\x1b[5;8mx')[0][0]).toMatchObject({ text: 'x', fg: null, bold: false });
   // cursor-hide (CSI ?25l), cursor moves, OSC titles: no style change, no leaked bytes
   expect(parseAnsi('\x1b[?25la\x1b[2Jb\x1b]0;title\x07c')).toEqual([
-    [{ text: 'abc', fg: null, bg: null, bold: false }],
+    [{ text: 'abc', fg: null, bg: null, bold: false, ...PLAIN }],
   ]);
   // OSC terminated by ST (ESC \) instead of BEL
   expect(parseAnsi('\x1b]8;;http://x\x1b\\link')[0][0].text).toBe('link');
@@ -65,8 +69,8 @@ test('malformed input never throws and never leaks escape bytes', () => {
 
 test('carriage returns are dropped, adjacent same-style runs coalesce', () => {
   expect(parseAnsi('a\r\nb')).toEqual([
-    [{ text: 'a', fg: null, bg: null, bold: false }],
-    [{ text: 'b', fg: null, bg: null, bold: false }],
+    [{ text: 'a', fg: null, bg: null, bold: false, ...PLAIN }],
+    [{ text: 'b', fg: null, bg: null, bold: false, ...PLAIN }],
   ]);
   // same style across an ignored sequence: one span, not two
   expect(parseAnsi('a\x1b[2Jb')[0]).toHaveLength(1);
@@ -88,4 +92,29 @@ test('spanColor: theme slots for 0–15, computed palette above, passthrough, de
   expect(spanColor(196, ansi)).toBe('#ff0000');
   expect(spanColor('#123456', ansi)).toBe('#123456');
   expect(spanColor(null, ansi)).toBeNull();
+});
+
+// A page card of the T11 slide draws at the same size as the terminal and then hands over to it,
+// so an attribute the parser drops is a line that changes under the user at the handover — which
+// is how the missing underline was found (eza underlines its symlink targets).
+test('dim survives, and 22 ends it with the bold it shares a reset with', () => {
+  expect(parseAnsi('\x1b[2mfaint')[0][0]).toMatchObject({ dim: true });
+  expect(parseAnsi('\x1b[1;2mboth\x1b[22mneither')[0][1]).toMatchObject({
+    text: 'neither',
+    bold: false,
+    dim: false,
+  });
+});
+
+test('underline, italic and reverse survive, and reset clears them', () => {
+  expect(parseAnsi('\x1b[4munder')[0][0]).toMatchObject({ underline: true });
+  expect(parseAnsi('\x1b[4mon\x1b[24moff')[0][1]).toMatchObject({ text: 'off', underline: false });
+  expect(parseAnsi('\x1b[3mit')[0][0]).toMatchObject({ italic: true });
+  expect(parseAnsi('\x1b[7mrev')[0][0]).toMatchObject({ inverse: true });
+  expect(parseAnsi('\x1b[4;3;7;31mall\x1b[0mnone')[0][1]).toMatchObject({
+    underline: false,
+    italic: false,
+    inverse: false,
+    fg: null,
+  });
 });

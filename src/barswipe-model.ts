@@ -48,9 +48,11 @@ export function swipeTarget(dx: number, dtMs: number, pos: number, count: number
   return pos;
 }
 
-/** How long the committed snapshot stays over the terminal after the slide lands, giving tmux's
- *  redraw time to reach the PTY so the reveal is the new window, not one stale frame of the old.
- *  ponytail: a fixed hold; the upgrade is dropping it on the first shell data after select. */
+/** The LONGEST the committed snapshot stays over the terminal after the slide lands, waiting for
+ *  tmux's redraw so the reveal is the new window and not one stale frame of the old. It is a cap,
+ *  not a wait: the redraw itself ends the hold the moment its first byte arrives, which is what
+ *  the eye is actually waiting for. Held flat it was long enough to photograph twice (user,
+ *  2026-08-10) — 320ms of slide and then a third of a second of nothing. */
 export const SETTLE_HOLD_MS = 350;
 
 /* --- the name pills replacing the bar keys during the swipe --- */

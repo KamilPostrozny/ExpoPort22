@@ -15,21 +15,62 @@
 /** `fg`/`bg`: `null` = terminal default, 0–255 = palette slot (theme maps 0–15, `xterm256` the
  *  rest), `#rrggbb` = truecolor passthrough. `hl` marks a T14 search hit — the renderer paints
  *  it over whatever colours the span had. */
-export type Span = { text: string; fg: number | string | null; bg: number | string | null; bold: boolean; hl?: boolean };
+export type Span = {
+  text: string;
+  fg: number | string | null;
+  bg: number | string | null;
+  bold: boolean;
+  /** The attributes a full-size snapshot cannot skip: a page card of the T11 slide hands straight
+   *  over to the live terminal, so anything dropped here is a line that changes the moment the
+   *  overlay lifts — eza underlines its symlink targets, and the underline arriving late was the
+   *  "rendering differs" (user, 2026-08-10). */
+  underline: boolean;
+  italic: boolean;
+  inverse: boolean;
+  /** SGR 2. The emulator draws it as half-strength ink, and so does the snapshot — it is how eza
+   *  greys a backup file, so without it `.tmux.conf.bak` came back at full strength (user,
+   *  2026-08-10). Cleared by 22, which per ECMA-48 ends bold and faint together. */
+  dim: boolean;
+  hl?: boolean;
+};
 export type SpanLine = Span[];
 
-type Style = { fg: number | string | null; bg: number | string | null; bold: boolean };
+type Style = {
+  fg: number | string | null;
+  bg: number | string | null;
+  bold: boolean;
+  underline: boolean;
+  italic: boolean;
+  inverse: boolean;
+  dim: boolean;
+};
 
-/** Apply one SGR parameter list (the `Ps ; Ps …` of `CSI Ps m`) to a style. Handles 0, 1, 22,
- *  30–37/90–97/39 (and the bg forms), 38/48 with `5;n` and `2;r;g;b`; skips what it does not
- *  know, swallowing the extended forms' arguments so `38;5;196;1` still bolds. */
+/** Apply one SGR parameter list (the `Ps ; Ps …` of `CSI Ps m`) to a style. Handles 0, 1/22,
+ *  2/3/4/7 and their 22/23/24/27 undos, 30–37/90–97/39 (and the bg forms), 38/48 with `5;n` and `2;r;g;b`; skips
+ *  what it does not know, swallowing the extended forms' arguments so `38;5;196;1` still bolds. */
 function applySgr(params: string[], style: Style): void {
   for (let i = 0; i < params.length; i++) {
     const p = params[i] === '' ? 0 : Number(params[i]); // empty param = 0, per ECMA-48
     if (Number.isNaN(p)) continue;
-    if (p === 0) Object.assign(style, { fg: null, bg: null, bold: false });
+    if (p === 0)
+      Object.assign(style, {
+        fg: null,
+        bg: null,
+        bold: false,
+        underline: false,
+        italic: false,
+        inverse: false,
+        dim: false,
+      });
     else if (p === 1) style.bold = true;
-    else if (p === 22) style.bold = false;
+    else if (p === 2) style.dim = true;
+    else if (p === 22) Object.assign(style, { bold: false, dim: false });
+    else if (p === 3) style.italic = true;
+    else if (p === 23) style.italic = false;
+    else if (p === 4) style.underline = true;
+    else if (p === 24) style.underline = false;
+    else if (p === 7) style.inverse = true;
+    else if (p === 27) style.inverse = false;
     else if (p >= 30 && p <= 37) style.fg = p - 30;
     else if (p >= 90 && p <= 97) style.fg = p - 90 + 8;
     else if (p === 39) style.fg = null;
@@ -51,7 +92,7 @@ function applySgr(params: string[], style: Style): void {
         i += 4;
       } else break; // malformed extension: drop the rest of this SGR rather than misread it
     }
-    // everything else (italic, underline, reverse, …): ignored, the card is 6pt tall
+    // everything else (blink, conceal, strike, …): ignored — nothing the emulator draws differently
   }
 }
 
@@ -62,14 +103,34 @@ function applySgr(params: string[], style: Style): void {
  */
 export function parseAnsi(text: string): SpanLine[] {
   const lines: SpanLine[] = [[]];
-  const style: Style = { fg: null, bg: null, bold: false };
+  const style: Style = {
+    fg: null,
+    bg: null,
+    bold: false,
+    underline: false,
+    italic: false,
+    inverse: false,
+    dim: false,
+  };
   let run = '';
 
   const flush = () => {
     if (run === '') return;
     const line = lines[lines.length - 1];
     const last = line[line.length - 1];
-    if (last && last.fg === style.fg && last.bg === style.bg && last.bold === style.bold) {
+    // Every attribute has to be in this comparison, not just the colours: two runs that differ
+    // only by one of them would coalesce into a single span wearing the FIRST one's, which is the
+    // same dropped underline by another route.
+    if (
+      last &&
+      last.fg === style.fg &&
+      last.bg === style.bg &&
+      last.bold === style.bold &&
+      last.underline === style.underline &&
+      last.italic === style.italic &&
+      last.inverse === style.inverse &&
+      last.dim === style.dim
+    ) {
       last.text += run; // coalesce: fewer <Text> nodes per card
     } else {
       line.push({ text: run, ...style });

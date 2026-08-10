@@ -771,21 +771,7 @@ export function Snapshot({
           // an empty <Text> — open at its proper height.
           style={{ fontFamily: MONO, fontSize, lineHeight, height: lineHeight, color: theme.foreground }}>
           {line.map((span, j) => (
-            <Text
-              key={j}
-              style={{
-                // A search hit paints over the span's own colours (T14) — dark ink on the
-                // warning yellow, whichever way round the flavour runs.
-                color: span.hl
-                  ? theme.isDark
-                    ? theme.scrim
-                    : theme.foreground
-                  : (spanColor(span.fg, theme.ansi) ?? theme.foreground),
-                backgroundColor: span.hl
-                  ? theme.warning
-                  : (spanColor(span.bg, theme.ansi) ?? undefined),
-                fontFamily: span.bold ? MONO_BOLD : MONO,
-              }}>
+            <Text key={j} style={spanStyle(span, theme)}>
               {span.text}
             </Text>
           ))}
@@ -793,6 +779,28 @@ export function Snapshot({
       ))}
     </View>
   );
+}
+
+/** One span's paint. Reverse video is resolved here rather than at parse time: it swaps whatever
+ *  the two colours turned out to be, and the defaults it swaps in are the theme's, which the
+ *  parser does not know. */
+function spanStyle(span: SpanLine[number], theme: Theme) {
+  // A search hit paints over the span's own colours (T14) — dark ink on the warning yellow,
+  // whichever way round the flavour runs.
+  const hitInk = theme.isDark ? theme.scrim : theme.foreground;
+  // Half-strength ink for SGR 2, the same way the emulator draws it. As alpha on the colour
+  // rather than opacity on the node: opacity on a nested <Text> is not reliably per-span.
+  const half = (colour: string) => `${colour}80`;
+  const ink = spanColor(span.fg, theme.ansi) ?? theme.foreground;
+  const fg = span.dim ? half(ink) : ink;
+  const bg = spanColor(span.bg, theme.ansi) ?? undefined;
+  return {
+    color: span.hl ? hitInk : span.inverse ? (bg ?? theme.background) : fg,
+    backgroundColor: span.hl ? theme.warning : span.inverse ? fg : bg,
+    fontFamily: span.bold ? MONO_BOLD : MONO,
+    fontStyle: span.italic ? ('italic' as const) : undefined,
+    textDecorationLine: span.underline ? ('underline' as const) : undefined,
+  };
 }
 
 /** A one-line label with T14's highlight on every occurrence — the card's name and directory,

@@ -520,10 +520,21 @@ export default function SessionScreen() {
   const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
     null,
   );
+  /** The next byte off the shell, while anyone is waiting for one. A committed swipe is: the
+   *  redraw is what the settle is waiting for, and it is watched for from the moment
+   *  `select-window` goes out — not from the moment the slide lands, because on a LAN it beats
+   *  the 320ms slide home, and a watch armed after it has already arrived waits for a byte an
+   *  idle shell never sends, i.e. the whole cap (user, 2026-08-10: "small delay still there"). */
+  const onShellData = useRef<(() => void) | null>(null);
+  const redrawn = useRef(false);
+  const settleCap = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const SLIDE = { duration: 320, easing: Easing.bezier(0.22, 1, 0.36, 1) };
 
   const clearBarSwipe = () => {
+    onShellData.current = null;
+    if (settleCap.current !== null) clearTimeout(settleCap.current);
+    settleCap.current = null;
     swipeInfo.current = null;
     setPageSwipe(null);
     swipeX.value = 0;
@@ -531,9 +542,23 @@ export default function SessionScreen() {
   };
 
   const settleBarSwipe = () => {
-    setPageSwipe((s) => (s === null ? s : { ...s, phase: 'settle' }));
+    // The redraw already landed while the slide was running: the terminal underneath is the new
+    // window, so there is nothing to hold over it.
+    if (redrawn.current) {
+      clearBarSwipe();
+      return;
+    }
+    // Otherwise the overlay covers the terminal until the redraw arrives; the cap is only for a
+    // redraw that never does.
+    setPageSwipe((s) =>
+      s === null
+        ? s
+        : { ...s, phase: 'settle', pos: s.target, settled: s.target > s.pos ? s.next : s.prev },
+    );
     roundSV.value = withTiming(0, { duration: 200 });
-    setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
+    onShellData.current = clearBarSwipe;
+    const cap = setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
+    settleCap.current = cap;
   };
 
   // The settle overlay (a static copy of the committed page) is mounted: reset the slide offset
@@ -566,6 +591,7 @@ export default function SessionScreen() {
         phase: 'drag',
         prev: pos > 0 ? (cards[pos - 1]?.snap ?? null) : null,
         next: pos < windows.length - 1 ? (cards[pos + 1]?.snap ?? null) : null,
+        settled: null,
       });
       roundSV.value = withTiming(1, { duration: 180 });
       swipeX.value = rubber(dx, pos, windows.length);
@@ -588,6 +614,11 @@ export default function SessionScreen() {
       } else {
         const win = info.windows[target];
         console.log('[barswipe] commit → window', win.index, `(${win.name})`);
+        // Watch for tmux's redraw from here, not from the settle: it usually beats the slide.
+        redrawn.current = false;
+        onShellData.current = () => {
+          redrawn.current = true;
+        };
         void selectWindow(win.index); // tmux redraws the PTY, which replaces the snapshot
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
         swipeX.value = withTiming((info.pos - target) * pagePitch(stage.w), SLIDE, (done) => {
@@ -707,6 +738,9 @@ export default function SessionScreen() {
   // the bounce (user, 2026-08-10).
   const chromePad = ribbonEl === null ? BAR_PAD_TOP : RIBBON_PAD_TOP;
   const padBottom = Math.max(0, padH - chromePad);
+  /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
+   *  the same three numbers, or their text does not line up with the live terminal's. */
+  const paneInsets = { top: padTop, side: padH, bottom: padBottom };
 
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
@@ -907,7 +941,13 @@ export default function SessionScreen() {
         // back is empty even though the shell behind it never went anywhere.
         onBoot={async () => {
           detach.current?.();
-          detach.current = attachTerminal((base64) => terminal.current?.write(base64));
+          detach.current = attachTerminal((base64) => {
+            terminal.current?.write(base64);
+            // A settle waiting on tmux's redraw ends here, at the first byte of it.
+            const settled = onShellData.current;
+            onShellData.current = null;
+            settled?.();
+          });
         }}
         onBell={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
         // §4.7: a yank lands on the phone's pasteboard AND in the clipboard slots. OSC 52 reads
@@ -936,10 +976,10 @@ export default function SessionScreen() {
       {pageSwipe !== null && stage !== null && pageSwipe.phase !== 'settle' && (
         <>
           {pageSwipe.pos > 0 && (
-            <NeighborPage side={-1} snap={pageSwipe.prev} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} x={swipeX} />
+            <NeighborPage side={-1} snap={pageSwipe.prev} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
           )}
           {pageSwipe.pos < pageSwipe.count - 1 && (
-            <NeighborPage side={1} snap={pageSwipe.next} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} x={swipeX} />
+            <NeighborPage side={1} snap={pageSwipe.next} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
           )}
         </>
       )}
@@ -948,10 +988,11 @@ export default function SessionScreen() {
           pointerEvents="none"
           style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }]}>
           <PageContent
-            snap={pageSwipe.target > pageSwipe.pos ? pageSwipe.next : pageSwipe.prev}
+            snap={pageSwipe.settled}
             stageW={stage.w}
             theme={theme}
             cell={cell}
+            insets={paneInsets}
           />
         </View>
       )}
@@ -1078,32 +1119,46 @@ type PageSwipe = {
   phase: 'drag' | 'anim' | 'settle';
   prev: PageSnap;
   next: PageSnap;
+  /** The page the commit landed on, kept for the settle overlay — `pos` has moved to `target` by
+   *  then, so which side it came from is no longer derivable. Moving `pos` is the point: the name
+   *  pills read their position from it, and leaving it behind snapped the strip back to the tab
+   *  just left for the length of the settle, which is a second flicker of the wrong name before
+   *  the keys return (user, 2026-08-10). */
+  settled: PageSnap;
 };
 
 /** The captured pane at page size — T10's Snapshot renderer, fitted to the pane's true columns
- *  inside the box they are drawn in. A page card rides beside the live terminal at 1:1, so its
- *  inset is the terminal's own, not a number of its own; and the fit has to be of the inset box,
- *  because fitting the full page width overflows it and RN folds the overflow (device). */
+ *  inside the box they are drawn in. A page card rides beside the live terminal at 1:1, so every
+ *  number here is the terminal's own: its insets, all three of them, and its cell. Taking the
+ *  plain gap for the top instead of the terminal's row remainder put the page's text 5.5pt below
+ *  the live one, which is a jump at each end of the slide (user, 2026-08-10, two photographs). */
 function PageContent({
   snap,
   stageW,
   theme,
   cell,
+  insets,
 }: {
   snap: PageSnap;
   stageW: number;
   theme: Theme;
   cell: { w: number; h: number };
+  insets: { top: number; side: number; bottom: number };
 }) {
   if (snap === null) return null;
-  const pad = termPad(stageW);
   // Scale 1: a page card rides beside the live terminal, not shrunk into anything.
   return (
-    <View style={{ flex: 1, padding: pad }}>
+    <View
+      style={{
+        flex: 1,
+        paddingTop: insets.top,
+        paddingHorizontal: insets.side,
+        paddingBottom: insets.bottom,
+      }}>
       <Snapshot
         lines={snap.lines}
         theme={theme}
-        {...snapshotType(cell, 1, snap.cols, stageW - 2 * pad)}
+        {...snapshotType(cell, 1, snap.cols, stageW - 2 * insets.side)}
       />
     </View>
   );
@@ -1117,6 +1172,7 @@ function NeighborPage({
   stageW,
   theme,
   cell,
+  insets,
   x,
 }: {
   side: -1 | 1;
@@ -1125,6 +1181,7 @@ function NeighborPage({
   stageW: number;
   theme: Theme;
   cell: { w: number; h: number };
+  insets: { top: number; side: number; bottom: number };
   x: SharedValue<number>;
 }) {
   const style = useAnimatedStyle(() => ({
@@ -1134,7 +1191,7 @@ function NeighborPage({
     <Animated.View
       pointerEvents="none"
       style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }, style]}>
-      <PageContent snap={snap} stageW={stageW} theme={theme} cell={cell} />
+      <PageContent snap={snap} stageW={stageW} theme={theme} cell={cell} insets={insets} />
     </Animated.View>
   );
 }
