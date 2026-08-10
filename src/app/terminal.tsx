@@ -550,7 +550,11 @@ export default function SessionScreen() {
   });
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
+    // The safe-area strips take the switcher's own ground while it is up: the prototype paints the
+    // grid `inset: 0` in crust, and leaving the root at `background` left a lighter bar above and
+    // below the grid (seen on device in Latte, where base and crust are far apart — T13/T10.3).
+    <SafeAreaView
+      style={[styles.screen, { backgroundColor: sw === 'closed' ? theme.background : theme.scrim }]}>
       {/* The measured area both layers share: the switcher grid behind, the zooming stage
           wrapper in front, one coordinate space. */}
       <View

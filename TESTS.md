@@ -616,7 +616,10 @@ same session.
   the PTY now shows window 3 (tmux redrew it under the zoom), the badge says 3, the keyboard
   comes back up. Log shows `[switcher] select @N` and an exec `select-window -t :3` — nothing
   typed into the PTY.
-- [ ]
+- [x] — `[switcher] select @7` → `[ssh] exec tmux select-window -t :2`, poll moved to
+  `windowIndex: 2`, and the screen came back on that window (its `/tmp` prompt under the
+  `ls --color` output) with the badge reading 2 and the keyboard up. Zero `send` lines carried
+  the command — it went out on the exec channel, as §4.5 requires.
 
 ### T10.6 — Snapshots refresh while the grid is open
 - **Setup**: in a background window run `watch date`; open the switcher from another window.
