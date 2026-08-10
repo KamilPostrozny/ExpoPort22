@@ -125,9 +125,10 @@ export default function SessionScreen() {
    * move together and the keyboard is over the bar for the first frames of the slide. Here the
    * shrink is a plain state write on `keyboardWillChangeFrame`, which iOS fires *before* the
    * animation starts: the terminal is out of the way by the time the keyboard leaves the bottom
-   * edge. `keyboardWillHide` is the same trick going back down — the keyboard draws over the app,
-   * so growing at the start of the slide exposes nothing, it just means what the keyboard uncovers
-   * is already the right size.
+   * edge. Both edges hang off that one event. `keyboardWillHide` says the same thing and is the
+   * obvious listener for the way back down, but it arrives ~27ms later, which is a quarter of the
+   * budget between the keyboard starting to move and the webview repainting (measured on device:
+   * event to ResizeObserver is ~25-35ms, plus a frame to paint).
    */
   const [keyboardPad, setKeyboardPad] = useState(0);
   useEffect(() => {
@@ -143,10 +144,10 @@ export default function SessionScreen() {
         // value padded the entire stage away for a frame or two (seen on device).
         if (e.endCoordinates.screenY <= 0) return;
         const overlap = Dimensions.get('window').height - e.endCoordinates.screenY;
-        // The hide's own WillChangeFrame reports no overlap — `keyboardWillHide` owns that edge.
-        if (overlap > 0) setKeyboardPad(Math.max(0, overlap - insets.bottom));
+        // Both edges off this one event: a keyboard parked at or below the window's bottom edge
+        // overlaps nothing, which is the hide. `keyboardWillHide` says the same thing later.
+        setKeyboardPad(overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0);
       }),
-      Keyboard.addListener('keyboardWillHide', () => setKeyboardPad(0)),
     ];
     return () => subs.forEach((sub) => sub.remove());
   }, [insets.bottom]);
