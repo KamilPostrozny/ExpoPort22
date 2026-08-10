@@ -348,24 +348,31 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
       return true;
     });
 
-    // One resize per settled gesture: rotation and the keyboard both animate, and tmux redraws the
-    // whole session for every size it is told about (§4.2).
+    // One *report* per settled gesture: rotation and the keyboard both animate, and tmux redraws
+    // the whole session for every size it is told about (§4.2). The fit itself is not debounced —
+    // it is local and cheap, and holding it back is what made the keyboard look like it beat the
+    // terminal up the screen: the box shrank with the layout while xterm kept drawing the old row
+    // count, so the bottom lines sat under the keyboard for the length of the delay (T14, device).
     let settle: ReturnType<typeof setTimeout>;
     let reported = { cols: 0, rows: 0 };
     // Only a size the host has not been told about is worth a round trip. Without this the same
     // `cols × rows` goes back on every fit, and since the answer re-renders the native side — which
     // re-marshals the props, which re-runs the effect below — it never stops.
-    const resize = () => {
-      fitAddon.fit();
+    const report = () => {
       if (term.cols === reported.cols && term.rows === reported.rows) return;
       reported = { cols: term.cols, rows: term.rows };
       console.log('[terminal] size', term.cols, '×', term.rows);
       latest.current.onResize(term.cols, term.rows);
     };
+    const resize = () => {
+      fitAddon.fit();
+      report();
+    };
     resizer.current = resize;
     const observer = new ResizeObserver(() => {
+      fitAddon.fit();
       clearTimeout(settle);
-      settle = setTimeout(resize, 150);
+      settle = setTimeout(report, 150);
     });
     observer.observe(host.current!);
     resize();

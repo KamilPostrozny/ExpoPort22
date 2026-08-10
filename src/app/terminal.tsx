@@ -137,6 +137,10 @@ export default function SessionScreen() {
       Keyboard.addListener('keyboardWillChangeFrame', (e) => {
         // The stage's bottom is the window's bottom less the safe-area strip SafeAreaView already
         // pads; only what the keyboard covers beyond that is padding of ours.
+        // A `screenY` of 0 is not a keyboard covering the whole window, it is a frame reported
+        // with no position — the sheets' Modals raise one on the way in and out. Taking it at face
+        // value padded the entire stage away for a frame or two (seen on device).
+        if (e.endCoordinates.screenY <= 0) return;
         const overlap = Dimensions.get('window').height - e.endCoordinates.screenY;
         // The hide's own WillChangeFrame reports no overlap — `keyboardDidHide` owns that edge.
         if (overlap > 0) setKeyboardPad(Math.max(0, overlap - insets.bottom));
