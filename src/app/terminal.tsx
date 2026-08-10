@@ -504,6 +504,10 @@ export default function SessionScreen() {
     console.log('[switcher] select', win.id);
     ribbonForWindow(win); // as with the bar swipe: under the zoom, not a beat after it
     void selectWindow(win.index); // §7: no haptic on tab select
+    // The accent outline is `win.active`, which only the ~2s list beat refreshes — flipped
+    // optimistically here (as a kill removes its card), or the old tab stays haloed through
+    // the flight and a beat past it (user, 2026-08-11).
+    setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
     // A switch changes the chrome, the size and the content of the pane — and the open grid is
     // the one moment all of that is invisible: it covers the terminal completely. So the refit
     // (holdSize lets it through while `open`), the resize report and tmux's redraw all happen
@@ -764,7 +768,12 @@ export default function SessionScreen() {
         };
         // Either way tmux redraws the PTY, which replaces the snapshot: `new-window` makes the
         // window it creates the active one, exactly as `select-window` does.
-        if (win) void selectWindow(win.index);
+        if (win) {
+          void selectWindow(win.index);
+          // Same optimistic `active` flip as a card select — the next grid open must not show
+          // the halo a list beat behind.
+          setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
+        }
         else newWindow().catch((error) => console.log('[barswipe] new window failed:', error));
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
         swipeX.value = withTiming((info.pos - target) * pagePitch(stage.w), SLIDE, (done) => {
