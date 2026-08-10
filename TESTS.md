@@ -36,6 +36,41 @@ reorder-then-immediately-relift rounds, watchdog silent, no visual glitch.
 values — write-then-read from JS races the UI-thread flush. Shared values are for what the UI
 thread renders; plain refs for what JS computes.
 
+**Act two — the stranded lift (same session, after the fix above).** Grabbing a card right after
+a drop sometimes froze it mid-lift (pink ring, tilted, finger off) with the pan never finalizing.
+Touch-level probes showed iOS *cancelling* the touch mid-hold — and RNGH's native
+`activateAfterLongPress` timer still maturing the dead touch into a drag with no finger on it.
+A JS-timer manual activation was tried and reverted: `mgr.activate()` from a `setTimeout` only
+applies on the next touch event, so a still hold never lifts. What shipped in `src/switcher.tsx`:
+
+- gestures built once (`useMemo`), per-render values routed through a ref — a gesture object
+  recreated mid-drag makes RNGH swap the native handler under an active gesture;
+- `touchDown` ref tracked in touch callbacks; a ghost activation (touch already cancelled) skips
+  every side effect and the handler self-recovers on the next touch;
+- `started` ref gates `onFinalize` — a pan that lost the race to swipe/tap finalizes too, and
+  running the drop for a drag that never lifted issued phantom `move-window`s from stale state;
+- zIndex driven by React (`dragged`), not `useAnimatedStyle` — a UI-thread zIndex flip when the
+  drop-spring settles re-sorts native siblings, and iOS cancels in-flight touches on re-sorted
+  views (this was the canceller: it fires ~400ms after a drop, exactly under an eager re-grab);
+- children rendered in fixed id order, position via `slotFrame` only, so a grid reorder never
+  reinserts native views; newest-started `refresh` wins (seq guard) so a stale poll can't snap
+  the order back; a drop's delayed optimistic clear leaves the *next* drag's order alone.
+
+Verified on hardware across dozens of reorder-and-immediately-regrab rounds, multi-row drags on a
+6-window grid, swipes and taps interleaved: every drag-start paired with one drag-end, no phantom
+reorders, no stranded lifts.
+
+**Also decided (2026-08-10):** the last window is unkillable — killing it ends the tmux session
+and drops the PTY into a bare shell; the lone card hides ✕ and its swipe rubber-bands. The
+switcher's fire-and-forget tmux calls (`kill`, `new`, `move`) now catch and re-list on failure.
+
+**Open, follow-up:**
+- Target tmux windows by stable `@N` id in every command (`move-window`, `select-window`,
+  `kill-window`, `capture-pane`) instead of index — a rapid re-drag can race the renumbering and
+  hit the wrong window; for kill that is data-loss grade. `src/tmux-model.ts` change with tests.
+- `[ssh] listDirectory failed: SFTPMessage.Status error 1` (EOF) fires once on every app
+  relaunch — some startup path (last-destination restore?) lists before the connection is ready.
+
 **Related, undecided.** Repeated reorders inflate tmux indices (`move-window -b/-a` shifts
 neighbours; `src/tmux-model.ts:209` leaves `base-index`/`renumber-windows` to the user), so the tabs
 badge climbs — 1 … 16 over one session. Options: push `set -g renumber-windows on` in the app's

@@ -12,7 +12,7 @@
 
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -58,10 +58,16 @@ const MAX_LINES = 44;
  */
 export function useSwitcherCards(enabled: boolean, live: boolean) {
   const [cards, setCards] = useState<Card[]>([]);
+  const seq = useRef(0);
 
   const refresh = useCallback(async (withSnapshots: boolean) => {
+    // Newest-started refresh wins: a poll's listWindows can start before a move-window lands on
+    // the host and resolve after the post-move re-list, snapping the grid back to the stale
+    // order for a beat (T10.9). Anything superseded mid-flight drops its result.
+    const mine = ++seq.current;
     try {
       const wins = await listWindows();
+      if (seq.current !== mine) return;
       if (!withSnapshots) {
         setCards((prev) =>
           wins.map((win) => ({ win, lines: prev.find((c) => c.win.id === win.id)?.lines ?? null })),
@@ -75,6 +81,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean) {
             .catch(() => null), // window died between list and capture: blank card, next beat fixes it
         ),
       );
+      if (seq.current !== mine) return;
       setCards(wins.map((win, i) => ({ win, lines: caps[i] })));
     } catch (error) {
       console.log('[switcher] refresh failed:', error);
@@ -124,6 +131,7 @@ export default function Switcher(props: SwitcherProps) {
   const [dragOrder, setDragOrder] = useState<Card[] | null>(null);
   const orderRef = useRef<Card[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
+  const dragIdRef = useRef<string | null>(null);
   const preDrag = useRef<TmuxWindow[]>([]);
   const startPos = useRef(0);
 
@@ -134,6 +142,7 @@ export default function Switcher(props: SwitcherProps) {
     preDrag.current = display.map((c) => c.win);
     startPos.current = pos;
     setDragOrder(display);
+    dragIdRef.current = id;
     setDragId(id);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); // the lift; select stays silent (§7)
   };
@@ -148,6 +157,7 @@ export default function Switcher(props: SwitcherProps) {
   };
 
   const dragEnd = (id: string) => {
+    dragIdRef.current = null;
     setDragId(null);
     const endPos = orderRef.current.findIndex((c) => c.win.id === id);
     const args = reorderArgs(preDrag.current, startPos.current, endPos);
@@ -157,7 +167,11 @@ export default function Switcher(props: SwitcherProps) {
     }
     console.log('[switcher] reorder', JSON.stringify(args));
     // Optimistic order holds until the screen has moved and re-listed — then props are truth.
-    void props.onMove(args).finally(() => setDragOrder(null));
+    // If the NEXT drag already lifted by then, leave its dragOrder alone: clearing it mid-drag
+    // kills that drag's reorders (dragMove bails on null) — its own drop will clear.
+    void props.onMove(args).finally(() => {
+      if (dragIdRef.current === null) setDragOrder(null);
+    });
   };
 
   const dragPos = dragId === null ? -1 : display.findIndex((c) => c.win.id === dragId);
@@ -181,22 +195,30 @@ export default function Switcher(props: SwitcherProps) {
             ]}
           />
         )}
-        {display.map((card, pos) => (
-          <WindowCard
-            key={card.win.id}
-            theme={theme}
-            card={card}
-            slot={slotFrame(pos, stageW)}
-            stageW={stageW}
-            dragged={dragId === card.win.id}
-            interactive={interactive}
-            onTap={() => props.onSelect(pos, card.win)}
-            onKill={() => props.onKill(card.win)}
-            onDragStart={() => dragStart(card.win.id, pos)}
-            onDragMove={(x, y) => dragMove(card.win.id, x, y)}
-            onDragEnd={() => dragEnd(card.win.id)}
-          />
-        ))}
+        {/* Children in a FIXED order (by window id), position purely via `slot`: if the child
+            list re-sorted with the grid order, a reorder would make React reinsert the native
+            views, and iOS cancels the touches of a reinserted subtree — which strands an active
+            drag mid-gesture with no finalize (T10.9's stuck lift). */}
+        {display
+          .map((card, pos) => ({ card, pos }))
+          .sort((a, b) => (a.card.win.id < b.card.win.id ? -1 : 1))
+          .map(({ card, pos }) => (
+            <WindowCard
+              key={card.win.id}
+              theme={theme}
+              card={card}
+              slot={slotFrame(pos, stageW)}
+              stageW={stageW}
+              dragged={dragId === card.win.id}
+              closable={display.length > 1}
+              interactive={interactive}
+              onTap={() => props.onSelect(pos, card.win)}
+              onKill={() => props.onKill(card.win)}
+              onDragStart={() => dragStart(card.win.id, pos)}
+              onDragMove={(x, y) => dragMove(card.win.id, x, y)}
+              onDragEnd={() => dragEnd(card.win.id)}
+            />
+          ))}
       </ScrollView>
 
       {/* the bottom bar: + | "N Tabs" | Done ✓ */}
@@ -249,6 +271,7 @@ function WindowCard({
   slot,
   stageW,
   dragged,
+  closable,
   interactive,
   onTap,
   onKill,
@@ -261,6 +284,8 @@ function WindowCard({
   slot: Frame;
   stageW: number;
   dragged: boolean;
+  /** False for the last remaining window — it is unkillable (no ✕, swipe rubber-bands). */
+  closable: boolean;
   interactive: boolean;
   onTap: () => void;
   onKill: () => void;
@@ -288,60 +313,113 @@ function WindowCard({
     y.value = withSpring(slot.y, SPRING);
   }, [slot.x, slot.y, dragged, x, y]);
 
-  // Swipe-to-close: horizontal only, left rides the finger, right rubber-bands (§4.5).
-  const swipe = Gesture.Pan()
-    .enabled(interactive)
-    .activeOffsetX([-10, 10])
-    .failOffsetY([-10, 10])
-    .onStart(() => {
-      swipeT0.value = Date.now();
-    })
-    .onUpdate((e) => {
-      swipeX.value = swipeOffset(e.translationX);
-    })
-    .onEnd(() => {
-      if (shouldClose(swipeX.value, Date.now() - swipeT0.value, stageW)) {
-        swipeX.value = withTiming(-stageW, { duration: 200 }, () => runOnJS(onKill)());
-      } else {
-        swipeX.value = withSpring(0, SPRING);
-      }
-    });
+  // The gesture is built ONCE (useMemo): the ~2s snapshot poll re-renders every card, and a
+  // gesture object recreated mid-drag makes RNGH swap the native handler under the active
+  // gesture — its update stream dies with no finalize, stranding a lifted card (T10.9's stuck
+  // lift). Everything that changes across renders reaches the callbacks through `live`.
+  const live = useRef({ slot, closable, onTap, onKill, onDragStart, onDragMove, onDragEnd });
+  live.current = { slot, closable, onTap, onKill, onDragStart, onDragMove, onDragEnd };
+  // Stable trampoline for the swipe worklet: worklets can't read a JS ref, runOnJS can hop to it.
+  const killNow = useCallback(() => live.current.onKill(), []);
+  // The swipe worklet needs `closable` on the UI thread — mirror it into a shared value.
+  const closableSV = useSharedValue(closable ? 1 : 0);
+  useEffect(() => {
+    closableSV.value = closable ? 1 : 0;
+  }, [closable, closableSV]);
+  const touchDown = useRef(false);
+  const started = useRef(false);
 
-  // Long-press lifts, then the same finger drags to reorder (§4.5). JS drives the reorder
-  // decisions — targetSlot runs against React state — so the whole pan runs on JS.
-  const drag = Gesture.Pan()
-    .enabled(interactive)
-    .runOnJS(true)
-    .activateAfterLongPress(300)
-    .onStart(() => {
-      base.current = { x: x.value, y: y.value };
-      lift.value = withSpring(1, SPRING);
-      onDragStart();
-    })
-    .onUpdate((e) => {
-      x.value = base.current.x + e.translationX;
-      y.value = base.current.y + e.translationY;
-      onDragMove(x.value, y.value);
-    })
-    .onFinalize(() => {
-      lift.value = withSpring(0, SPRING);
-      onDragEnd(); // the slot-change effect springs the card home
-    });
+  const gesture = useMemo(() => {
+    // Swipe-to-close: horizontal only, left rides the finger, right rubber-bands (§4.5).
+    const swipe = Gesture.Pan()
+      .enabled(interactive)
+      .activeOffsetX([-10, 10])
+      .failOffsetY([-10, 10])
+      .onStart(() => {
+        swipeT0.value = Date.now();
+      })
+      .onUpdate((e) => {
+        swipeX.value = swipeOffset(e.translationX);
+      })
+      .onEnd(() => {
+        if (closableSV.value && shouldClose(swipeX.value, Date.now() - swipeT0.value, stageW)) {
+          swipeX.value = withTiming(-stageW, { duration: 200 }, () => runOnJS(killNow)());
+        } else {
+          swipeX.value = withSpring(0, SPRING);
+        }
+      });
 
-  // One tap gesture decides select vs ✕ by where it landed: a Pressable under an RNGH Tap can
-  // double-fire, and a second kill-window against a renumbered index is not a no-op.
-  const tap = Gesture.Tap()
-    .enabled(interactive)
-    .maxDuration(300)
-    .runOnJS(true)
-    .onEnd((e, success) => {
-      if (!success) return;
-      if (e.x > slot.w - 34 && e.y < 34) onKill();
-      else onTap(); // §7: no haptic on tab select
-    });
+    // Long-press lifts, then the same finger drags to reorder (§4.5). JS drives the reorder
+    // decisions — targetSlot runs against React state — so the whole pan runs on JS.
+    //
+    // The native activateAfterLongPress timer keeps the hold snappy (a JS-timer manual
+    // activation only applies on the NEXT touch event, so a still hold never lifts). Its
+    // failure mode — the timer maturing a touch iOS already cancelled into a drag with no
+    // finger, stranding the card mid-lift (T10.9) — is closed by `touchDown`: touch state
+    // tracked on the JS queue, and a ghost activation skips every side effect. The handler
+    // recovers by itself on the next touch.
+    const drag = Gesture.Pan()
+      .enabled(interactive)
+      .runOnJS(true)
+      .activateAfterLongPress(300)
+      .onTouchesDown(() => {
+        touchDown.current = true;
+      })
+      .onStart((e) => {
+        if (!touchDown.current) return; // ghost activation: the touch was already cancelled
+        started.current = true;
+        // Whatever translation RNGH accumulated before activation must not land on the card as
+        // a first-update jump.
+        base.current = { x: x.value - e.translationX, y: y.value - e.translationY };
+        lift.value = withSpring(1, SPRING);
+        live.current.onDragStart();
+      })
+      .onUpdate((e) => {
+        if (!started.current) return;
+        x.value = base.current.x + e.translationX;
+        y.value = base.current.y + e.translationY;
+        live.current.onDragMove(x.value, y.value);
+      })
+      .onTouchesUp(() => {
+        touchDown.current = false;
+      })
+      .onTouchesCancelled((_e, mgr) => {
+        touchDown.current = false;
+        mgr.fail();
+      })
+      .onFinalize(() => {
+        // A pan that lost the race (swipe/tap won) or failed pre-hold finalizes too — running
+        // the drop for a drag that never lifted issues a phantom reorder from stale drag state.
+        if (!started.current) return;
+        started.current = false;
+        lift.value = withSpring(0, SPRING);
+        live.current.onDragEnd(); // the slot-change effect springs the card home
+      });
 
-  const gesture = Gesture.Race(drag, swipe, tap);
+    // One tap gesture decides select vs ✕ by where it landed: a Pressable under an RNGH Tap can
+    // double-fire, and a second kill-window against a renumbered index is not a no-op.
+    const tap = Gesture.Tap()
+      .enabled(interactive)
+      .maxDuration(300)
+      .runOnJS(true)
+      .onEnd((e, success) => {
+        if (!success) return;
+        if (live.current.closable && e.x > live.current.slot.w - 34 && e.y < 34)
+          live.current.onKill();
+        else live.current.onTap(); // §7: no haptic on tab select
+      });
 
+    return Gesture.Race(drag, swipe, tap);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values and refs are stable;
+    // interactive/stageW only change while no gesture can be active (zoom transitions, rotation).
+  }, [interactive, stageW]);
+
+  // zIndex is deliberately NOT animated: a UI-thread zIndex flip (the lift spring settling
+  // ~400ms after a drop) can re-sort the native siblings, and iOS cancels the in-flight touches
+  // of re-sorted views — which is exactly when an eager re-grab is mid-hold (T10.9). React
+  // drives it from `dragged` instead, so it changes only at commit time.
+  // ponytail: the dropping card cedes the top layer at release rather than at spring-settle; if
+  // the brief crossing of springing cards ever reads wrong, give the drop its own settle state.
   const style = useAnimatedStyle(() => ({
     transform: [
       { translateX: x.value + swipeX.value },
@@ -350,7 +428,6 @@ function WindowCard({
       { rotate: `${2 * lift.value}deg` },
     ],
     opacity: swipeOpacity(swipeX.value, stageW),
-    zIndex: lift.value > 0 ? 10 : 1,
     shadowOpacity: 0.55 * lift.value,
   }));
 
@@ -368,7 +445,11 @@ function WindowCard({
       <Animated.View
         entering={FadeIn.duration(200)}
         exiting={FadeOut.duration(160)}
-        style={[styles.card, { position: 'absolute', left: 0, top: 0, width: slot.w }, style]}>
+        style={[
+          styles.card,
+          { position: 'absolute', left: 0, top: 0, width: slot.w, zIndex: dragged ? 10 : 1 },
+          style,
+        ]}>
         <View
           style={[
             styles.shot,
@@ -377,9 +458,11 @@ function WindowCard({
           ]}>
           <Snapshot lines={card.lines} theme={theme} fontSize={fontSize} />
           {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
-          <View style={[styles.close, { backgroundColor: theme.foreground }]}>
-            <Text style={[styles.closeGlyph, { color: theme.background }]}>✕</Text>
-          </View>
+          {closable && (
+            <View style={[styles.close, { backgroundColor: theme.foreground }]}>
+              <Text style={[styles.closeGlyph, { color: theme.background }]}>✕</Text>
+            </View>
+          )}
         </View>
         <Text
           numberOfLines={1}

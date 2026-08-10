@@ -573,6 +573,43 @@ rolling `dev` prerelease; `docs/ship.md` is the laptop half — download, netmux
 which signs with the free Apple ID. Free provisioning expires weekly, so a re-sign is a re-run of
 that, not a rebuild. Android APK install is still unwritten.
 
+**T14 — Search across every window** 🎨 design in progress · deps: T10, T9, T4
+A search field in the tab switcher that matches **the output of every tmux window**, not just its
+metadata. As the user types, the grid shrinks to the matching windows and each surviving card's
+preview scrolls to the **first occurrence** in that window and highlights the string, so the hit is
+visible in the card itself.
+
+What is matched, per window: the window name, the active pane's foreground process, the pane's
+working directory, **and the whole scrollback**.
+
+Deliberately simple about multiple hits: the grid shows the *first* occurrence per window and
+nothing more. More than one match inside a window means tapping into that window and walking the
+occurrences there — the terminal view gets prev/next-occurrence UI for that.
+
+The search string is **one piece of state shared by the two views**, armed or disarmed as a whole.
+Editing it on the terminal view updates the switcher's field, so coming back to the tabs view finds
+the search still armed and showing the edited string. Disarming works from **either** side — the
+terminal view's search UI and the switcher's field both close it, and the other view reflects that
+immediately.
+
+*Accept*: typing in the switcher narrows the grid to windows whose name, path, process or
+scrollback contains the string, each card showing and highlighting its first hit; tapping a card
+lands in that window with the same string armed and prev/next walking its occurrences; editing the
+string there and returning shows the narrowed grid for the new string; disarming from either view
+leaves both unarmed.
+
+Design is not settled yet; what the walkthrough of the existing code says (2026-08-10):
+- The scrollback cannot come to the phone — 50k lines × N windows per keystroke. The search belongs
+  on the host: `capture-pane -p -e -S - | grep -i -F -m1 -B/-A` per window is one exec per window
+  per settled keystroke and answers with exactly the card's worth of context around the hit. Needs
+  debouncing, and it rides the switcher's existing ~2s snapshot refresh rather than a second one.
+- `LIST_WINDOWS` does not carry `#{pane_current_command}` today — the "process" half of the match
+  needs that field (and `parseWindows` keeps the window name last).
+- Highlighting is span surgery on `parseAnsi` output, so it belongs in `src/ansi-spans.ts`.
+- Open: whether a hit whose text is split by a mid-word colour change has to be found (a plain
+  second capture for line numbers, then a coloured re-capture of that range — two round trips), and
+  what drag-reorder means while the grid is filtered.
+
 ---
 
 ## 6. Open decisions

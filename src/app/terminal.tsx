@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -300,25 +300,25 @@ export default function SessionScreen() {
   };
 
   const killCard = (win: TmuxWindow) => {
+    // The last window is unkillable (user decision, 2026-08-10): killing it ends the tmux
+    // session and drops the PTY back into a bare shell — not a state the switcher can stand
+    // over. The grid hides the lone card's ✕ and rubber-bands its swipe for the same reason.
+    if (cards.length <= 1) return;
     if (!cards.some((c: Card) => c.win.id === win.id)) return; // already killed: indices renumber
     console.log('[switcher] kill', win.id);
-    const remaining = cards.filter((c: Card) => c.win.id !== win.id);
-    setCards(remaining); // optimistic: the card leaves before tmux answers
-    void killWindow(win.index);
-    if (remaining.length === 0) {
-      // Last window: the shell behind the PTY dies with it, the §4.9 state machine takes the
-      // screen. Just drop the grid — the Disconnected face is about to cover everything.
-      prog.value = 0;
-      dragX.value = 0;
-      alpha.value = 1;
-      setSw('closed');
-    }
+    setCards(cards.filter((c: Card) => c.win.id !== win.id)); // optimistic: leaves before tmux answers
+    // A renumber race can leave the index stale — log, re-list, move on.
+    killWindow(win.index).catch((error) => {
+      console.log('[switcher] kill failed:', error);
+      void refresh(false);
+    });
   };
 
   const birthCard = () => {
     if (sw !== 'open' || stage === null) return;
     console.log('[switcher] new window');
-    void newWindow(); // tmux switches the attached client to it, so the terminal lands on it
+    // tmux switches the attached client to it, so the terminal lands on it
+    newWindow().catch((error) => console.log('[switcher] new window failed:', error));
     slotSV.value = plusFrame(stage.w, stage.h);
     prog.value = 1; // teleport the (invisible) surface into the + button…
     setSw('birth');
@@ -555,6 +555,10 @@ export default function SessionScreen() {
     // below the grid (seen on device in Latte, where base and crust are far apart — T13/T10.3).
     <SafeAreaView
       style={[styles.screen, { backgroundColor: sw === 'closed' ? theme.background : theme.scrim }]}>
+      {/* No iOS edge-swipe-back on this screen: it pops to the connect screen WITHOUT running
+          `leave()`'s disconnect, and a rightward card drag near the left edge triggers it by
+          accident (T13). Leaving is `leave()`'s job. */}
+      <Stack.Screen options={{ gestureEnabled: false }} />
       {/* The measured area both layers share: the switcher grid behind, the zooming stage
           wrapper in front, one coordinate space. */}
       <View
@@ -575,7 +579,15 @@ export default function SessionScreen() {
           onNew={birthCard}
           onDone={() => closeTo(activePos())}
           onMove={async ({ from, to }) => {
-            await moveWindow(from, to);
+            // A rapid re-drag can race the previous move's renumbering and send a stale index —
+            // the re-list below is the truth either way. TODO: target windows by `@id` in every
+            // tmux command (move/select/kill/capture) so a stale index can't touch the wrong
+            // window at all; that is a tmux-model change with its own tests.
+            try {
+              await moveWindow(from, to);
+            } catch (error) {
+              console.log('[switcher] move failed:', error);
+            }
             await refresh(true); // landing indices are tmux's call (renumbering) — re-list
           }}
           onScrollY={(y) => {
