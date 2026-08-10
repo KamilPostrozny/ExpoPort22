@@ -16,3 +16,10 @@ android {
     abortOnError false
   }
 }
+
+dependencies {
+  implementation "com.hierynomus:sshj:0.40.0"
+  // sshj's POM already pulls bcprov transitively; explicit because SSHSession.kt imports it
+  // directly (provider swap + Ed25519 public-from-seed).
+  implementation "org.bouncycastle:bcprov-jdk18on:1.80"
+}

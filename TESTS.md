@@ -105,6 +105,80 @@ cases can be rooted in its upstream:
 
 Sections below are appended per task, in implementation order.
 
+## T3 — expo-ssh Android (emulator)
+
+The Kotlin module has never been compiled (no Android SDK on the dev box), so T3.0 gates the
+rest. All cases run on the Android **emulator** against the host machine's sshd — from the
+emulator the host is `10.0.2.2`, not `localhost`. These mirror the T2/T5 accept list: the TS
+layer is byte-identical on both platforms, so any behavioural difference is the Kotlin's fault.
+
+**T3.0 — gradle compiles / module loads (smoke)**
+- Setup: `expo prebuild -p android` + `expo run:android` on a machine with the SDK, dev build
+  installed on the emulator.
+- Steps: launch the app; watch Metro and `adb logcat`.
+- Expect: build succeeds; app boots to Setup with no `Cannot find native module 'ExpoSSH'`;
+  the `[ssh]` proxy logs appear on first call rather than a red screen.
+- [ ]
+
+**T3.1 — first connect: TOFU fingerprint prompt**
+- Setup: host key for `10.0.2.2` not pinned (fresh install, or Forget host key). Emulator's
+  public key in the host machine's `authorized_keys`.
+- Steps: fill Setup with `10.0.2.2`, port 22, user; Connect.
+- Expect: modal shows `ed25519 SHA256:…` matching `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
+  on the host — same string iOS shows, no padding `=`. `connect` stays pending until answered.
+- [ ]
+
+**T3.2 — trust + pin, second connect straight through**
+- Setup: T3.1's prompt on screen.
+- Steps: tap Trust; wait for the shell; Disconnect; Connect again.
+- Expect: first connect lands in a live shell (banner streams in); second connect shows **no
+  prompt** — the pinned key is answered before the handshake asks (held-answer path) and the
+  terminal appears directly.
+- [ ]
+
+**T3.3 — mismatch hard-refusal**
+- Setup: key pinned (T3.2); host key swapped (`ssh-keygen -f /tmp/newkey …` into sshd config +
+  restart, or point Setup at a different machine reusing the pin — easiest: regenerate the host
+  key in a throwaway sshd container on 10.0.2.2).
+- Steps: Connect.
+- Expect: no prompt, no session — the Cannot-connect state with the mismatch sentence.
+  `connect` rejected; nothing pinned anew. Only recovery is Forget host key in Settings.
+- [ ]
+
+**T3.4 — exec `ls`**
+- Setup: connected (T3.2).
+- Steps: from the tmux probe logs or a harness call, run `exec('ls', …)` — the T5 flow already
+  issues `command -v tmux` on connect; check the `[ssh] exec` log pair.
+- Expect: resolves with stdout; a failing command (`command -v tmux` on a host without tmux)
+  rejects and the probe treats it as absent — same as iOS. Nothing echoes into the PTY grid.
+- [ ]
+
+**T3.5 — shell I/O + resize**
+- Setup: connected, terminal on screen.
+- Steps: type `echo hello` + Return; run `vim`, rotate the emulator (or toggle the keyboard),
+  `:q`.
+- Expect: echo and output render; UTF-8 survives chunk splits (paste `é漢字🙂` — no mojibake);
+  vim redraws to the new size after rotation — `resize` reached the PTY.
+- [ ]
+
+**T3.6 — SFTP upload confirmed by listDirectory**
+- Setup: connected; a small file reachable via the Files picker.
+- Steps: ⋯ → UPLOAD FILE → Files; pick the file; save into `/tmp/port22/` (fresh dir).
+- Expect: upload resolves; the destination browser (or a `listDirectory('/tmp/port22')` log)
+  shows the file with its exact byte size; `ls -la /tmp/port22` on the host shows the dir mode
+  0700. A multi-MB file arrives intact (chunked writes) — `sha256sum` matches.
+- [ ]
+
+**T3.7 — disconnect/reconnect lifecycle (§4.9)**
+- Setup: connected.
+- Steps: background the app ~30s, foreground; then `tmux kill-server`-style hard kill of sshd
+  (or toggle the host's Wi-Fi) and foreground again; restore sshd, tap Reconnect.
+- Expect: dead socket detected (`isAlive` round trip, not a local flag), auto reconnect
+  re-auths with **no TOFU prompt** and opens a fresh PTY; two consecutive failures stop with
+  the manual Reconnect screen; Reconnect works once sshd is back. `onShellClose` fired each
+  teardown — no zombie pump threads (logcat shows no repeated `expo-ssh-shell` churn).
+- [ ]
+
 ## T6 — Scroll gesture system
 
 All cases: connected to a real host, terminal on screen. "Notch" = one cell height of finger

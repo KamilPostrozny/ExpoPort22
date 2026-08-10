@@ -169,8 +169,34 @@ fingerprint prompt, `ls` over an exec channel, shell I/O, and a file into `/tmp/
 by `listDirectory`. RN's static-linking warning for SPM products never bit; `USE_FRAMEWORKS=dynamic`
 was not needed. **Still open**: Android is a name-only stub until T3.
 
-**T3 ★ — expo-ssh native module, Android** deps: T2 (API fixed by T2)
+**T3 ★ — expo-ssh native module, Android** ✅ implemented 2026-08-10 (not compiled, not device-verified) · deps: T2 (API fixed by T2)
 Same TS API, Kotlin + sshj impl. *Accept*: same demo passes on Android.
+Landed: `android/src/main/java/expo/modules/ssh/SSHSession.kt` (the sshj wrapper — connect with
+blocking host-key callback, ed25519 from the raw seed, one PTY with pump thread, capped exec with
+exit-status throw, SFTP mkdir-0700/chunked-write/ls, round-trip `isAlive`) and `ExpoSSHModule.kt`
+(the definition: same names, payloads and `SHA256:` unpadded fingerprint as iOS, suspend bodies
+moved to `Dispatchers.IO`). `android/build.gradle` gains sshj + bcprov. TS layer: zero changes.
+Decisions: **sshj 0.40.0** over Apache MINA sshd-client (§6 open decision 1, now settled) — both
+read at source. sshj covers the whole requirement list in-tree, verified at tag v0.40.0:
+`HostKeyVerifier.verify` is a synchronous boolean we can block until JS answers (TOFU),
+`Ed25519KeyFactory.getPrivateKey` takes exactly our 32-byte seed, `SessionChannel` has
+allocatePTY/startShell/changeWindowDimensions/exec-with-exit-status, `SFTPEngine.makeDir(path,
+attrs)` keeps the 0700 that `SFTPClient.mkdir` drops, `RemoteFile.write` writes bytes at offsets.
+MINA covers it too but as an async server+client framework with ed25519 behind optional deps —
+heavy for one blocking connection; sshj's own tests use MINA as the throwaway server. Other
+decisions: Android's stripped "BC" provider is swapped for the bundled bcprov at class-load
+(sshj resolves "Ed25519" by provider name); everything runs on `Dispatchers.IO` because the
+module queue is a single thread and `connect` blocks on the answer `verifyHostKey` delivers —
+same-thread would deadlock the handshake; host-key answers that arrive before the handshake asks
+are held, not dropped (wait/notify mirror of the iOS continuation); `RemoteFile.write` is chunked
+at 32 KB by hand since sshj sends one WRITE packet per call; exec throws on non-zero exit like
+Citadel, which `tmux.ts` already tolerates.
+Verified: `bun test` (139), `tsc --noEmit`, `expo export -p android` — honest ceiling of a box
+with no Android SDK: the Kotlin has **never been compiled** and nothing ran on a device.
+**Still open**: the whole TESTS.md §T3 emulator pass, gated on T3.0 (first gradle build); no
+slf4j binding, so sshj's own logs are NOP on Android (the TS proxy still logs every call);
+`RemoteResourceInfo` never exposes `longname`, so iOS's attribute-less-server fallback for
+`isDirectory` has no Android equivalent.
 
 **T4 ★ — Terminal DOM component** ✅ done, verified on device 2026-08-09 · deps: T1
 xterm.js in expo-dom component: Nerd Font CSS, Catppuccin theme injection, font-size prop,
@@ -614,7 +640,8 @@ Design is not settled yet; what the walkthrough of the existing code says (2026-
 
 ## 6. Open decisions
 
-1. SSH lib choice on Android (sshj vs MINA) — decide in T3 after a spike.
+1. ~~SSH lib choice on Android (sshj vs MINA)~~ — settled in T3: sshj 0.40.0 (see the T3
+   write-up and the header of `modules/expo-ssh/android/.../SSHSession.kt` for the evidence).
 2. Terminal engine fallback: if DOM-component latency/IME proves bad on device in T4,
    plan B is a native terminal view per platform (bigger job) — flag early.
 
