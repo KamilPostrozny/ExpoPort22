@@ -61,8 +61,13 @@ export type TerminalProps = {
   fontSize: number;
   /** Keystrokes, and the replies this file writes on the app's behalf, on their way to the PTY. */
   onData: (data: string) => Promise<void>;
-  /** After a settled rotation, keyboard move or font change — what the host's window size is now. */
-  onResize: (cols: number, rows: number) => Promise<void>;
+  /** After a settled rotation, keyboard move or font change — what the host's window size is now,
+   *  and the cell it is drawing on. The cell is measured rather than assumed because `cols` cells
+   *  do NOT fill the box they sit in: the fit reserves a scrollbar gutter that never renders, ~15pt
+   *  of it, so 48 cells occupy 374 of 395pt on device. A snapshot that spreads the same columns
+   *  across the whole box therefore draws ~6% large — a step in size at the zoom's crossfade, which
+   *  two photographs of the same card caught (2026-08-10). */
+  onResize: (cols: number, rows: number, cellW: number, cellH: number) => Promise<void>;
   /** Hold the size where it is: no fit, no report, until it goes false again (then one of each).
    *  §4.5's zoom animates the stage's *height*, and the keyboard leaves on the way in — so an
    *  unheld transition walks the PTY through half a dozen row counts (26 → 41 → 29 → 26 on
@@ -375,11 +380,19 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // Only a size the host has not been told about is worth a round trip. Without this the same
     // `cols × rows` goes back on every fit, and since the answer re-renders the native side — which
     // re-marshals the props, which re-runs the effect below — it never stops.
+    // The cell the emulator settled on, read off the rendered screen rather than computed: no
+    // private renderer API, and it accounts for whatever rounding the fit did.
+    const cell = () => {
+      const screen = host.current?.querySelector('.xterm-screen') as HTMLElement | null;
+      if (screen === null || term.cols === 0 || term.rows === 0) return { w: 0, h: 0 };
+      return { w: screen.clientWidth / term.cols, h: screen.clientHeight / term.rows };
+    };
     const report = () => {
       if (term.cols === reported.cols && term.rows === reported.rows) return;
       reported = { cols: term.cols, rows: term.rows };
-      console.log('[terminal] size', term.cols, '×', term.rows);
-      latest.current.onResize(term.cols, term.rows);
+      const { w, h } = cell();
+      console.log('[terminal] size', term.cols, '×', term.rows, 'cell', w.toFixed(2), '×', h.toFixed(2));
+      latest.current.onResize(term.cols, term.rows, w, h);
     };
     // `force` re-reports even a size the host was already told about: the only caller is the
     // release from a hold, and during that hold a report may have been dropped in flight (see

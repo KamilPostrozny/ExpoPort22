@@ -214,7 +214,42 @@ export function fabFrame(width: number, height: number): Frame {
  *  reads as text, above 8 the card looks like a ransom note. */
 export function snapshotFontSize(cardW: number, cols: number): number {
   if (cols <= 0) return 6;
-  return floorFit(Math.min(8, Math.max(3, cardW / (cols * 0.6))));
+  return floorFit(Math.min(8, Math.max(3, cardW / (cols * MONO_ADVANCE))));
+}
+
+/** JetBrains Mono's advance, in ems — what RN lays the snapshot's text out on, and what the
+ *  emulator's cell measures too (7.79 at 13pt on device). The catch is not the cell, it is that
+ *  `cols` of them do not fill the box: see `snapshotType`. */
+export const MONO_ADVANCE = 0.6;
+
+export type SnapType = { fontSize: number; lineHeight: number };
+
+/**
+ * The type a snapshot draws its pane at: the terminal's own cell, scaled by the zoom. Fitting the
+ * columns to the box instead — the obvious thing, and what this did first — is wrong because the
+ * emulator's own columns do not fill their box: its fit holds back a scrollbar gutter that never
+ * renders. Handing that slack to the snapshot drew it ~6% large, so the zoom's crossfade stepped
+ * in size as well as position (device, two photographs). The cell comes measured from the
+ * emulator; `cols`/`boxW` only cap it, for a pane some other client sized wider than the card it
+ * has to be drawn in.
+ */
+export function snapshotType(
+  cell: { w: number; h: number },
+  scale: number,
+  cols: number,
+  boxW: number,
+): SnapType {
+  const fromCell = cell.w * scale;
+  if (fromCell <= 0 || cols <= 0) {
+    // No metrics yet (nothing has been rendered): the columns are all there is to go on.
+    const fontSize = snapshotFontSize(boxW, cols);
+    return { fontSize, lineHeight: fontSize * 1.4 };
+  }
+  const shrink = Math.min(1, boxW / (cols * fromCell));
+  return {
+    fontSize: floorFit((fromCell * shrink) / MONO_ADVANCE),
+    lineHeight: cell.h * scale * shrink,
+  };
 }
 
 /** An exact fit is `cols` advances landing on exactly `cardW`, and a float that rounds the last

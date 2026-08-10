@@ -16,6 +16,7 @@ import {
   shouldClose,
   slotFrame,
   snapshotFontSize,
+  snapshotType,
   SHOT_PAD,
   swipeOffset,
   swipeOpacity,
@@ -185,4 +186,31 @@ test('a card\'s snapshot inset is the terminal\'s inset seen through the zoom', 
     const cardInset = (SHOT_PAD / 402) * width; // as switcher.tsx applies it
     expect(cardInset).toBeCloseTo(termPad(width) * scale, 10);
   }
+});
+
+// The bug two photographs caught: 48 columns occupy less than the box they sit in, because the
+// emulator's fit holds back a scrollbar gutter it never draws. A snapshot that fits the columns
+// to the whole box instead spends that gutter on type, ~6% large — a step in size at the
+// crossfade, on top of any step in position.
+test('a snapshot draws the emulator cell through the zoom, not the box divided by columns', () => {
+  const cell = { w: 7.79, h: 18 }; // measured on device at 13pt
+  const scale = 0.43;
+  const box = 200; // roomier than 48 of those cells need — the gutter the emulator held back
+  const type = snapshotType(cell, scale, 48, box);
+  expect(type.fontSize * 0.6).toBeCloseTo(cell.w * scale, 1); // advance matches the live one
+  expect(type.lineHeight).toBeCloseTo(cell.h * scale, 6);
+  expect(48 * type.fontSize * 0.6).toBeLessThan(box); // and leaves the same slack the pane does
+});
+
+test('a pane too wide for its card is capped by the columns, both metrics together', () => {
+  const cell = { w: 8, h: 18 };
+  const type = snapshotType(cell, 1, 100, 200); // 100 cells want 800, the box has 200
+  expect(100 * type.fontSize * 0.6).toBeLessThanOrEqual(200);
+  expect(type.lineHeight).toBeCloseTo(18 * 0.25, 6); // shrunk by the same quarter, not left tall
+});
+
+test('with no cell measured yet a snapshot still fits its columns', () => {
+  const type = snapshotType({ w: 0, h: 0 }, 0.43, 48, 168);
+  expect(type.fontSize).toBeCloseTo(snapshotFontSize(168, 48));
+  expect(type.lineHeight).toBeGreaterThan(type.fontSize);
 });

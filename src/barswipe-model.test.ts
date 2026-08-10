@@ -11,7 +11,6 @@ import {
   PAGE_GAP,
   PILL_GAP,
   PILL_ITEM,
-  pageFontSize,
   pagePitch,
   pillCont,
   pillDist,
@@ -81,9 +80,3 @@ test('pill scale and opacity: full at centre, saturating one window out', () => 
 
 /* --- neighbour page type size --- */
 
-test('pageFontSize fits the columns, clamped', () => {
-  expect(pageFontSize(390, 50)).toBeCloseTo(13);
-  expect(pageFontSize(390, 500)).toBe(4); // absurdly wide pane: floor
-  expect(pageFontSize(390, 10)).toBe(24); // narrow pane: ceiling
-  expect(pageFontSize(390, 0)).toBe(13); // no width known: the default size
-});

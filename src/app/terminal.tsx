@@ -30,7 +30,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   PAGE_RADIUS,
   SETTLE_HOLD_MS,
-  pageFontSize,
   pagePitch,
   rubber,
   swipeTarget,
@@ -77,6 +76,7 @@ import {
   gridTop,
   plusFrame,
   slotFrame,
+  snapshotType,
   termPad,
   zoomFrame,
   zoomProgress,
@@ -137,6 +137,9 @@ export default function SessionScreen() {
    * event to ResizeObserver is ~25-35ms, plus a frame to paint).
    */
   const [keyboardPad, setKeyboardPad] = useState(0);
+  /** The emulator's measured cell (see TerminalProps.onResize). Every snapshot's type comes from
+   *  this, so a card draws the pane at the size the flying surface hands over at. */
+  const [cell, setCell] = useState({ w: 0, h: 0 });
   /** A keyboard we asked for and have not seen yet — the terminal's size stays held until it
    *  lands, so the host hears the geometry once. Self-clearing: a focus that never raises one
    *  (hardware keyboard, a refusal) must not hold the size for the rest of the session. */
@@ -716,6 +719,7 @@ export default function SessionScreen() {
         <Switcher
           theme={theme}
           stageW={stage.w}
+          cell={cell}
           cards={visibleCards}
           total={cards.length}
           query={search.on ? search.q : ''}
@@ -845,11 +849,12 @@ export default function SessionScreen() {
         // — long enough for one report to get out (a 25 on every tabs-tap open, device). This
         // guard is state, read in the same tick, so nothing slips through; the release re-reports
         // unconditionally, which is what makes dropping a report here safe.
-        onResize={async (cols, rows) => {
+        onResize={async (cols, rows, cellW, cellH) => {
           if (sw !== 'closed' || kbSettle) {
             console.log('[terminal] size held, not sent:', cols, '×', rows);
             return;
           }
+          if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
           setSize(cols, rows);
         }}
         // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:
@@ -889,10 +894,10 @@ export default function SessionScreen() {
       {pageSwipe !== null && stage !== null && pageSwipe.phase !== 'settle' && (
         <>
           {pageSwipe.pos > 0 && (
-            <NeighborPage side={-1} snap={pageSwipe.prev} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} x={swipeX} />
+            <NeighborPage side={-1} snap={pageSwipe.prev} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} x={swipeX} />
           )}
           {pageSwipe.pos < pageSwipe.count - 1 && (
-            <NeighborPage side={1} snap={pageSwipe.next} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} x={swipeX} />
+            <NeighborPage side={1} snap={pageSwipe.next} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} x={swipeX} />
           )}
         </>
       )}
@@ -904,6 +909,7 @@ export default function SessionScreen() {
             snap={pageSwipe.target > pageSwipe.pos ? pageSwipe.next : pageSwipe.prev}
             stageW={stage.w}
             theme={theme}
+            cell={cell}
           />
         </View>
       )}
@@ -1036,12 +1042,27 @@ type PageSwipe = {
  *  inside the box they are drawn in. A page card rides beside the live terminal at 1:1, so its
  *  inset is the terminal's own, not a number of its own; and the fit has to be of the inset box,
  *  because fitting the full page width overflows it and RN folds the overflow (device). */
-function PageContent({ snap, stageW, theme }: { snap: PageSnap; stageW: number; theme: Theme }) {
+function PageContent({
+  snap,
+  stageW,
+  theme,
+  cell,
+}: {
+  snap: PageSnap;
+  stageW: number;
+  theme: Theme;
+  cell: { w: number; h: number };
+}) {
   if (snap === null) return null;
   const pad = termPad(stageW);
+  // Scale 1: a page card rides beside the live terminal, not shrunk into anything.
   return (
     <View style={{ flex: 1, padding: pad }}>
-      <Snapshot lines={snap.lines} theme={theme} fontSize={pageFontSize(stageW - 2 * pad, snap.cols)} />
+      <Snapshot
+        lines={snap.lines}
+        theme={theme}
+        {...snapshotType(cell, 1, snap.cols, stageW - 2 * pad)}
+      />
     </View>
   );
 }
@@ -1053,6 +1074,7 @@ function NeighborPage({
   pitch,
   stageW,
   theme,
+  cell,
   x,
 }: {
   side: -1 | 1;
@@ -1060,6 +1082,7 @@ function NeighborPage({
   pitch: number;
   stageW: number;
   theme: Theme;
+  cell: { w: number; h: number };
   x: SharedValue<number>;
 }) {
   const style = useAnimatedStyle(() => ({
@@ -1069,7 +1092,7 @@ function NeighborPage({
     <Animated.View
       pointerEvents="none"
       style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }, style]}>
-      <PageContent snap={snap} stageW={stageW} theme={theme} />
+      <PageContent snap={snap} stageW={stageW} theme={theme} cell={cell} />
     </Animated.View>
   );
 }

@@ -44,7 +44,7 @@ import {
   reorderArgs,
   shouldClose,
   slotFrame,
-  snapshotFontSize,
+  snapshotType,
   SHOT_PAD,
   swipeOffset,
   swipeOpacity,
@@ -209,6 +209,8 @@ export function useScrollbackSearch(query: string, cards: Card[], active: boolea
 export type SwitcherProps = {
   theme: Theme;
   stageW: number;
+  /** The emulator's measured cell — what every snapshot's type is derived from (`snapshotType`). */
+  cell: { w: number; h: number };
   /** Already narrowed by the screen while the search is armed. */
   cards: Card[];
   /** The unfiltered count — the "N of M Tabs" label's M. */
@@ -359,6 +361,7 @@ export default function Switcher(props: SwitcherProps) {
               key={card.win.id}
               theme={theme}
               card={card}
+              cell={props.cell}
               hit={props.hits[card.win.id]}
               query={nq}
               slot={slotFrame(pos, stageW)}
@@ -458,6 +461,7 @@ function frameStyle(f: Frame) {
 function WindowCard({
   theme,
   card,
+  cell,
   hit,
   query,
   slot,
@@ -474,6 +478,7 @@ function WindowCard({
 }: {
   theme: Theme;
   card: Card;
+  cell: { w: number; h: number };
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
    *  armed, so the card shows the first occurrence instead of the pane's bottom. */
   hit: SearchHit | null | undefined;
@@ -638,10 +643,11 @@ function WindowCard({
       ? { borderWidth: 2, borderColor: theme.accent }
       : { borderWidth: 1, borderColor: theme.border };
 
-  // Fitted to the box the text is drawn in — the card less both insets — and to the columns the
-  // snapshot was captured at rather than the window's current width: the two agree except across
-  // a resize, and there the live width would re-size type that is still the old capture's.
-  const fontSize = snapshotFontSize(slot.w - 2 * SHOT_PAD * u, card.snap?.cols ?? card.win.width);
+  // The emulator's cell, shrunk by exactly what the zoom shrinks the stage by — so the card draws
+  // the pane the size the flying surface hands over at. The columns are the capture's own, not the
+  // window's current width: the two agree except across a resize, and there the live width would
+  // cap type that belongs to the older capture.
+  const type = snapshotType(cell, slot.w / stageW, card.snap?.cols ?? card.win.width, slot.w - 2 * SHOT_PAD * u);
   const directory = card.win.path.split('/').filter(Boolean).pop() ?? '/';
 
   // T14: with a scrollback hit, the card shows the grep's context block instead of the live
@@ -676,7 +682,7 @@ function WindowCard({
               padding: SHOT_PAD * u,
             },
           ]}>
-          <Snapshot lines={shownLines} theme={theme} fontSize={fontSize} />
+          <Snapshot lines={shownLines} theme={theme} {...type} />
           {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
           {closable && (
             <View style={[styles.close, { backgroundColor: theme.foreground }]}>
@@ -708,10 +714,13 @@ export function Snapshot({
   lines,
   theme,
   fontSize,
+  lineHeight,
 }: {
   lines: SpanLine[] | null;
   theme: Theme;
+  /** Both from `snapshotType` — the emulator's cell through the zoom, not a fit of our own. */
   fontSize: number;
+  lineHeight: number;
 }) {
   if (lines === null) return null;
   return (
@@ -729,16 +738,14 @@ export function Snapshot({
           numberOfLines={1}
           ellipsizeMode="clip"
           allowFontScaling={false}
-          style={{
-            fontFamily: MONO,
-            fontSize,
-            lineHeight: fontSize * 1.4,
-            color: theme.foreground,
-          }}>
-          {/* A blank line is an empty span list (ansi-spans), and an empty <Text> is a zero-high
-              one — which would pull every line after it up and slide the snapshot out of step
-              with the pane it copies. A space holds the row open. */}
-          {line.length === 0 && ' '}
+          // `height` as well as `lineHeight`, and it is what keeps the rows in step with the pane:
+          // a line height alone is rounded to whole points at render (7.745 asked, 8 drawn) and
+          // the error compounds down the block — 3% by line 25, which is most of a row (device).
+          // A box per line is laid out instead, and layout rounds each line's ABSOLUTE position to
+          // the device pixel, so every row lands within a third of a point of where the pane has
+          // it, with nothing accumulating. It also holds a blank line — an empty span list, and so
+          // an empty <Text> — open at its proper height.
+          style={{ fontFamily: MONO, fontSize, lineHeight, height: lineHeight, color: theme.foreground }}>
           {line.map((span, j) => (
             <Text
               key={j}
