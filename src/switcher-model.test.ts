@@ -29,6 +29,7 @@ const win = (index: number, active = false): TmuxWindow => ({
   index,
   name: `w${index}`,
   active,
+  command: 'fish',
   path: '/home/kamil',
   width: 80,
 });

@@ -152,22 +152,24 @@ export type TmuxWindow = {
   path: string;
   /** Columns in the active pane: the snapshot card must render this wide or every line folds. */
   width: number;
+  /** The active pane's foreground process — the "process" half of T14's metadata match. */
+  command: string;
 };
 
 export const LIST_WINDOWS =
   `tmux list-windows -F '` +
-  ['#{window_id}', '#{window_index}', '#{window_active}', '#{pane_current_path}', '#{pane_width}', '#{window_name}'].join(SEP) +
+  ['#{window_id}', '#{window_index}', '#{window_active}', '#{pane_current_path}', '#{pane_width}', '#{pane_current_command}', '#{window_name}'].join(SEP) +
   `' 2>/dev/null; true`;
 
-/** A line that is not six-plus fields with an `@N` id and numeric index/width is not a window —
+/** A line that is not seven-plus fields with an `@N` id and numeric index/width is not a window —
  *  tmux writes its own diagnostics into this stream, and one of those must not become a card. */
 export function parseWindows(stdout: string): TmuxWindow[] {
   const windows: TmuxWindow[] = [];
   for (const line of stdout.split('\n')) {
     if (line === '') continue;
     const fields = line.split(SEP);
-    if (fields.length < 6) continue;
-    const [id, index, active, path, width] = fields;
+    if (fields.length < 7) continue;
+    const [id, index, active, path, width, command] = fields;
     if (!/^@\d+$/.test(id) || !/^\d+$/.test(index) || !/^\d+$/.test(width)) continue;
     windows.push({
       id,
@@ -175,7 +177,8 @@ export function parseWindows(stdout: string): TmuxWindow[] {
       active: active === '1',
       path,
       width: Number(width),
-      name: fields.slice(5).join(SEP),
+      command,
+      name: fields.slice(6).join(SEP),
     });
   }
   return windows;

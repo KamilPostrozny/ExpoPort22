@@ -1375,3 +1375,87 @@ below turns something up.
   space; what must hold is that a real spacebar press is never eaten (a single-space insert
   always passes) and multi-char commits reach the PTY intact.
 - [ ]
+
+## T14 — Search across every window (deferred to the device phase, 2026-08-10)
+
+Implemented against the design project's iOS prototype; Android is the same layout in Material
+chrome (§5d). Both platforms walk every case; T14.7 is Android-only.
+
+### T14.1 — The grid narrows on all four match surfaces
+- **Setup**: connected, tmux with ≥3 windows: one named `logs`, one whose pane cwd is
+  `~/port22`, one running `htop`, and scrollback in some window containing a string (e.g. run
+  `echo search-beacon-502`) that appears in no name/cwd/process.
+- **Steps**: open the switcher; type, one after another, a window name fragment (`log`), a cwd
+  fragment (`port2`), a process name (`htop`), and the scrollback-only string (`beacon-502`).
+  Watch the count label and the cards between queries.
+- **Expect**: each query narrows the grid to just the matching window(s) — filtered-out cards
+  fade in place, survivors pack into the top slots; the label reads "N of M Tabs" (Android:
+  "N of M tabs"); metadata matches narrow instantly, the scrollback match lands after the
+  ~300ms settle + one grep round trip. Name/cwd fragments show the yellow highlight on the
+  card's name/directory label.
+- [ ]
+
+### T14.2 — First occurrence visible and highlighted in the card
+- **Setup**: a window whose scrollback holds the query far above the visible screen (e.g.
+  `echo needle-x99; seq 1 200`), search armed with `needle-x99`.
+- **Steps**: read the surviving card without tapping it.
+- **Expect**: the card shows the context *around the hit* (not the pane's bottom), the hit
+  ~40% down the card, painted yellow with dark ink. Card colours around it survive (the
+  context is a coloured capture). Disarm (✕): the card returns to the live bottom-of-pane
+  snapshot on the next beat.
+- [ ]
+
+### T14.3 — No window contains it
+- **Steps**: with the switcher open, type a string in no window (`zzqx7`).
+- **Expect**: every card falls away, the centered "No window contains “zzqx7”" state shows,
+  the label reads "0 of M". Backspacing to a matching prefix brings cards back.
+- [ ]
+
+### T14.4 — Card tap lands armed: highlights, i/N, prev/next, keyboard down
+- **Setup**: search armed on a string with ≥2 occurrences in one window's scrollback.
+- **Steps**: tap that window's card; watch arrival; then walk ∧/∨ through the occurrences;
+  check the i/N label at each step; wrap past the last.
+- **Expect**: the zoom lands with the keyboard DOWN (came to read), the terminal's search bar
+  up holding the same string, every occurrence decorated, the active one distinct (yellow vs
+  selection tint), the view scrolled to an occurrence, i/N counting correctly and wrapping.
+  Prev/next buttons sit inert (dimmed) when the string has no occurrence in this window.
+- [ ]
+
+### T14.5 — Edit in the terminal, return to the grid: same search, new narrowing
+- **Setup**: T14.4's end state.
+- **Steps**: edit the string in the terminal's bar to one matching a *different* window; then
+  open the switcher (tabs button or bar swipe up).
+- **Expect**: while still in the terminal view the decorations re-run live per keystroke; the
+  reopened grid arrives with the field already holding the edited string and the narrowing
+  already re-run for it (grep settle ≤ ~1s after open). The search never disarmed in between.
+- [ ]
+
+### T14.6 — Disarm from either side, birth disarms, reorder locked while filtered
+- **Steps**: (a) with search armed, tap the field's ✕ in the switcher — check the terminal's
+  bar is gone too when closing into a window. (b) Re-arm, tap into a window, tap Done on the
+  terminal's search bar — reopen the switcher: field empty, grid full. (c) Re-arm in the
+  switcher, long-press a surviving card and try to drag. (d) With search armed, tap +.
+- **Expect**: (a)+(b) disarming from one view disarms both — no half-armed state anywhere.
+  (c) the card never lifts: reorder is off while filtered (tap and swipe-to-close still
+  work). (d) the new window births with the search disarmed and the keyboard up.
+- [ ]
+
+### T14.7 — Android: Material chrome and back ladder (Android only)
+- **Steps**: walk T14.1 and T14.4 on the Android build; with search armed and the switcher
+  open, press system back; in the terminal view with the search bar up, press back.
+- **Expect**: the search field and bar are Material — 16dp corners, surface container, no
+  glass, Roboto for chrome text (the field's input is the terminal mono only in the terminal
+  bar). Back from the open switcher closes the grid into the active pane with the search
+  STILL armed (grid state preserved for the next open); back at the terminal goes home as
+  before — the search bar does not eat the press.
+- [ ]
+
+### T14.8 — Cost and cadence sanity
+- **Setup**: 4+ windows, one with a deliberately huge scrollback (`seq 1 50000`), Metro logs
+  visible (`[search]` lines).
+- **Steps**: type a 6-char query at typing speed into the switcher's field; watch the log.
+- **Expect**: greps fire once per settled pause (not per keystroke) — one `[search] grep
+  settled` line per pause, N execs each; typing stays 60fps; the huge-scrollback window's
+  grep answers within ~1s on Wi-Fi and its card carries only the context block (the 50k lines
+  never crossed).
+- [ ]

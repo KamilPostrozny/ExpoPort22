@@ -668,7 +668,7 @@ rolling `dev` prerelease; `docs/ship.md` is the laptop half — download, netmux
 which signs with the free Apple ID. Free provisioning expires weekly, so a re-sign is a re-run of
 that, not a rebuild. Android APK install is still unwritten.
 
-**T14 — Search across every window** 🎨 design in progress · deps: T10, T9, T4
+**T14 — Search across every window** ✅ implemented 2026-08-10 (device walk pending, TESTS.md T14.*) · deps: T10, T9, T4
 A search field in the tab switcher that matches **the output of every tmux window**, not just its
 metadata. As the user types, the grid shrinks to the matching windows and each surviving card's
 preview scrolls to the **first occurrence** in that window and highlights the string, so the hit is
@@ -693,17 +693,77 @@ lands in that window with the same string armed and prev/next walking its occurr
 string there and returning shows the narrowed grid for the new string; disarming from either view
 leaves both unarmed.
 
-Design is not settled yet; what the walkthrough of the existing code says (2026-08-10):
-- The scrollback cannot come to the phone — 50k lines × N windows per keystroke. The search belongs
-  on the host: `capture-pane -p -e -S - | grep -i -F -m1 -B/-A` per window is one exec per window
-  per settled keystroke and answers with exactly the card's worth of context around the hit. Needs
-  debouncing, and it rides the switcher's existing ~2s snapshot refresh rather than a second one.
-- `LIST_WINDOWS` does not carry `#{pane_current_command}` today — the "process" half of the match
-  needs that field (and `parseWindows` keeps the window name last).
-- Highlighting is span surgery on `parseAnsi` output, so it belongs in `src/ansi-spans.ts`.
-- Open: whether a hit whose text is split by a mid-word colour change has to be found (a plain
-  second capture for line numbers, then a coloured re-capture of that range — two round trips), and
-  what drag-reorder means while the grid is filtered.
+**Fuzzy verdict (spike run 2026-08-10): not viable — substring stays the only mode.** Evidence,
+per the two halves:
+
+- *Scrollback* is where fuzzy dies, on arithmetic before implementation. Subsequence matching
+  (`abc` → `a.*b.*c`, the `grep -E` shape) over a 5k-line corpus built from this design's own
+  window content (cargo build output, nginx logs, htop, prompts) matches far too many lines:
+  6-char queries still hit 5–15% of all lines — `cargob` matches 15% of lines where substring
+  matches 0% — because an ~80-char line contains nearly every short subsequence. And the grid
+  narrows per *window*: with 50k lines of scrollback, a window survives when ANY line matches, so
+  P(survive) = 1−(1−p)^50000 ≈ 1 for any per-line rate above ~0.001%. Measured: per-line 0.01% →
+  window survives 99.3% of the time. No minimum query length in typing range fixes that, and a
+  toggle doesn't change the arithmetic — a fuzzy mode would simply never narrow the grid.
+  (Spike script: subsequence + substring rates by query length, plus the window-survival curve.)
+- *Metadata* fuzzy alone is technically fine — the `fzf` npm package (fzf-for-js) was read:
+  `new Fzf(list, {selector, casing})`, `find(q)` → `{item, score, positions: Set<number>}`,
+  positions being exactly the k-disjoint highlight indices; `fuse.js` (maintained, 7.x) offers
+  ranges via `includeMatches`. But fzf-for-js's last publish is 2023-04, and the accept criterion
+  required "grid-narrowing … behaviour otherwise unchanged in both modes" — with scrollback
+  unable to go fuzzy, a fuzzy toggle would either lie (metadata fuzzy, scrollback secretly
+  substring) or not narrow. A toggle that changes only three short metadata strings is not worth
+  a mode. Not built, and the spike's own text below records what was checked.
+
+The original spike brief, kept for the record:
+
+- *Metadata* (window name, process, cwd) is already on the phone — fuzzy there is cheap. Package
+  check first, per AGENTS.md: the `fzf` npm package (fzf-for-js, a port of fzf's ranking
+  algorithm) and `fuse.js` are the candidates; read their actual APIs before ruling either in or
+  out. The dataset is N windows × three short strings, so hand-rolled subsequence scoring is the
+  fallback if neither fits — not a third library.
+- *Scrollback* stays on the host, so fuzzy there means changing the grep: explode the query into a
+  subsequence pattern (`abc` → `a[^x]*b[^x]*c` shape, metacharacters escaped) and run
+  `grep -i -E -m1` instead of `-F` — still one exec per window per settled keystroke, still
+  `-B/-A` for the card's context. `fzf --filter` ranks better but cannot be assumed installed on
+  the host; `agrep` even less so — POSIX grep is the only tool the design may rely on.
+
+Questions the spike must answer with evidence, not assumption: **noise** — short fuzzy queries
+match nearly every line of scrollback; does a minimum query length fix it, or does fuzzy need an
+explicit toggle in the search field rather than being the default? — and **highlighting** — a
+fuzzy hit is scattered characters, not one contiguous span, so the span surgery in
+`src/ansi-spans.ts` has to mark k disjoint ranges per line, and the mid-word colour-change problem
+below gets strictly worse. *Accept (fuzzy)*: a written verdict in this task (viable or not, with
+the evidence); if viable, a substring↔fuzzy toggle on the shared search state, with the
+grid-narrowing, first-hit and highlight behaviour otherwise unchanged in both modes.
+
+How it was built (2026-08-10, design from the claude.ai/design project's iOS prototype; Android
+takes the same layout with Material chrome per its §5d divergence list):
+- The scrollback stays on the host: `capture-pane -p -e -S - -t :N | grep -i -F -n -m1 -B14 -A20`
+  per window per settled keystroke (300ms debounce), built and parsed in `src/search-model.ts`
+  (tested); `-B14/-A20` because the card renders the context block from the top, which puts the
+  hit ~40% down — the prototype's scroll-to-first-occurrence with no scroll machinery.
+- `LIST_WINDOWS` now carries `#{pane_current_command}` (name still last); the metadata half
+  (name · cwd · process) matches on the phone, instantly, while the greps ride the debounce.
+- Highlighting is span surgery in `src/ansi-spans.ts` (`highlightLine`): the match runs over the
+  line's joined text, so a hit split by a mid-word colour change highlights whole on the phone.
+  The host-side grep, though, runs over the escaped capture — a colour-split hit is *found* only
+  if its bytes are contiguous. Ceiling accepted (ponytail note in search-model): the upgrade is a
+  plain capture for line numbers + a coloured re-capture, two round trips per window.
+- The terminal view's half is `@xterm/addon-search` 0.16.0 (API read: public-API-only —
+  `registerDecoration`, `translateToString` — so xterm 6 carries it): decorations highlight every
+  occurrence, `findNext/findPrevious` walk them, `onDidChangeResults` feeds the "i/N" label over
+  the bridge. Nothing hand-rolled. Ceiling, accepted: the addon walks xterm's own buffer — what
+  was ever painted at the phone — so tmux history from before this attach, or from time spent in
+  another window, is findable in the *grid* (host grep) but not walkable in the terminal view.
+  The upgrade if it ever matters is host-side `copy-mode \; send -X search-backward`, which walks
+  the true 50k lines and highlights through the PTY, at the price of putting the pane into
+  copy-mode from a phone UI that then has to own exiting it.
+- One piece of state, armed or disarmed as a whole, lives in the screen
+  (`src/app/terminal.tsx`): the switcher's field and the terminal bar edit the same string;
+  disarm (✕ or Done) clears both; a card tapped with the search armed lands with the keyboard
+  down (you came to read); birthing a new window disarms.
+- Drag-reorder is disabled while the grid is filtered — a narrowed grid isn't the real order.
 
 ---
 

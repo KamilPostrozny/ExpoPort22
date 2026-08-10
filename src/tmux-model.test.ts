@@ -122,21 +122,23 @@ const line = (fields: string[]) => fields.join(SEP);
 
 test('list-windows output parses, name last so separators in names shift nothing', () => {
   const output = [
-    line(['@0', '1', '0', '/home/kamil/dev', '80', 'fish']),
-    line(['@3', '2', '1', '/home/kamil', '120', `weird${SEP}name: with everything\t`]),
+    line(['@0', '1', '0', '/home/kamil/dev', '80', 'cargo', 'fish']),
+    line(['@3', '2', '1', '/home/kamil', '120', 'vim', `weird${SEP}name: with everything\t`]),
   ].join('\n');
   expect(parseWindows(output)).toEqual([
-    { id: '@0', index: 1, active: false, path: '/home/kamil/dev', width: 80, name: 'fish' },
+    { id: '@0', index: 1, active: false, path: '/home/kamil/dev', width: 80, command: 'cargo', name: 'fish' },
     // The name survives with the separator inside it — it is the tail, rejoined.
-    { id: '@3', index: 2, active: true, path: '/home/kamil', width: 120, name: `weird${SEP}name: with everything\t` },
+    { id: '@3', index: 2, active: true, path: '/home/kamil', width: 120, command: 'vim', name: `weird${SEP}name: with everything\t` },
   ]);
 });
 
 test('lines that are not windows (tmux diagnostics, junk) never become cards', () => {
   expect(parseWindows('')).toEqual([]);
   expect(parseWindows('no server running on /tmp/tmux-501/default\n')).toEqual([]);
-  expect(parseWindows(line(['not-an-id', '1', '0', '/', '80', 'x']))).toEqual([]);
-  expect(parseWindows(line(['@1', 'NaN', '0', '/', '80', 'x']))).toEqual([]);
+  expect(parseWindows(line(['not-an-id', '1', '0', '/', '80', 'sh', 'x']))).toEqual([]);
+  expect(parseWindows(line(['@1', 'NaN', '0', '/', '80', 'sh', 'x']))).toEqual([]);
+  // A six-field line is the OLD format — reject rather than misread the command as the name.
+  expect(parseWindows(line(['@1', '1', '0', '/', '80', 'x']))).toEqual([]);
 });
 
 test('window commands target by validated integer index only', () => {

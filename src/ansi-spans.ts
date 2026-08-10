@@ -13,8 +13,9 @@
  */
 
 /** `fg`/`bg`: `null` = terminal default, 0–255 = palette slot (theme maps 0–15, `xterm256` the
- *  rest), `#rrggbb` = truecolor passthrough. */
-export type Span = { text: string; fg: number | string | null; bg: number | string | null; bold: boolean };
+ *  rest), `#rrggbb` = truecolor passthrough. `hl` marks a T14 search hit — the renderer paints
+ *  it over whatever colours the span had. */
+export type Span = { text: string; fg: number | string | null; bg: number | string | null; bold: boolean; hl?: boolean };
 export type SpanLine = Span[];
 
 type Style = { fg: number | string | null; bg: number | string | null; bold: boolean };
@@ -109,6 +110,43 @@ export function parseAnsi(text: string): SpanLine[] {
   }
   flush();
   return lines;
+}
+
+/**
+ * T14's span surgery: mark every case-insensitive occurrence of `query` in a line of spans. The
+ * match runs over the line's *joined* text, so a hit split across spans — a mid-word colour
+ * change — still highlights whole, as k adjacent marked pieces; spans are split at the match
+ * boundaries so the mark never bleeds into neighbouring text. Untouched lines are returned
+ * as-is (same array), so a re-render without hits re-uses every node.
+ */
+export function highlightLine(line: SpanLine, query: string): SpanLine {
+  const q = query.toLowerCase();
+  if (q === '') return line;
+  const joined = line.map((s) => s.text).join('').toLowerCase();
+  if (!joined.includes(q)) return line;
+
+  // Every position covered by some occurrence, in [start, end) ranges.
+  const ranges: [number, number][] = [];
+  for (let i = joined.indexOf(q); i >= 0; i = joined.indexOf(q, i + q.length)) {
+    ranges.push([i, i + q.length]);
+  }
+
+  const out: SpanLine = [];
+  let pos = 0;
+  for (const span of line) {
+    let offset = 0; // within this span
+    for (const [start, end] of ranges) {
+      const from = Math.max(start - pos, offset);
+      const to = Math.min(end - pos, span.text.length);
+      if (to <= from || from >= span.text.length) continue;
+      if (from > offset) out.push({ ...span, text: span.text.slice(offset, from) });
+      out.push({ ...span, text: span.text.slice(from, to), hl: true });
+      offset = to;
+    }
+    if (offset < span.text.length) out.push({ ...span, text: span.text.slice(offset) });
+    pos += span.text.length;
+  }
+  return out;
 }
 
 /** Slots 16–255 of the xterm palette, computed the way xterm computes them: a 6×6×6 colour cube

@@ -13,7 +13,17 @@
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type StyleProp,
+  type TextStyle,
+} from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   FadeIn,
@@ -25,7 +35,8 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 
-import { parseAnsi, spanColor, type SpanLine } from '@/ansi-spans';
+import { highlightLine, parseAnsi, spanColor, type SpanLine } from '@/ansi-spans';
+import { SEARCH_DEBOUNCE_MS, normalizeQuery, type SearchHit } from '@/search-model';
 import {
   gridHeight,
   gridTop,
@@ -39,7 +50,7 @@ import {
   targetSlot,
   type Frame,
 } from '@/switcher-model';
-import { capturePane, listWindows } from '@/tmux';
+import { capturePane, listWindows, searchPane } from '@/tmux';
 import { POLL_MS, type TmuxWindow } from '@/tmux-model';
 import { MONO, MONO_BOLD, type Theme } from '@/theme';
 
@@ -102,12 +113,59 @@ export function useSwitcherCards(enabled: boolean, live: boolean) {
   return { cards, setCards, refresh };
 }
 
+/* --- T14: the scrollback half of the search --- */
+
+/**
+ * One host-side grep per window per settled keystroke (§T14: the scrollback cannot come to the
+ * phone). Answers land as `win.id → SearchHit | null`; a window not in the map hasn't answered
+ * yet. Stale answers are kept until the next settle replaces them — dropping them on every
+ * keystroke would blink the whole grid empty for a debounce beat.
+ */
+export function useScrollbackSearch(query: string, cards: Card[], active: boolean) {
+  const [byId, setById] = useState<Record<string, SearchHit | null>>({});
+  const seq = useRef(0);
+  const latest = useRef(cards);
+  latest.current = cards;
+  // Re-fire when the window set changes (a new window while armed gets its grep too).
+  const ids = cards.map((c) => c.win.id).join(',');
+
+  useEffect(() => {
+    const q = normalizeQuery(query);
+    if (!active || q === '') {
+      seq.current++;
+      setById({});
+      return;
+    }
+    const mine = ++seq.current;
+    const timer = setTimeout(() => {
+      const wins = latest.current.map((c) => c.win);
+      void Promise.all(wins.map((w) => searchPane(w.index, q).catch(() => null))).then((hits) => {
+        if (seq.current !== mine) return;
+        console.log('[search] grep settled:', q, hits.filter(Boolean).length, 'of', wins.length);
+        setById(Object.fromEntries(wins.map((w, i) => [w.id, hits[i]])));
+      });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query, active, ids]);
+
+  return byId;
+}
+
 /* --- the grid --- */
 
 export type SwitcherProps = {
   theme: Theme;
   stageW: number;
+  /** Already narrowed by the screen while the search is armed. */
   cards: Card[];
+  /** The unfiltered count — the "N of M Tabs" label's M. */
+  total: number;
+  /** T14's shared search state: the raw string as typed, and the scrollback answers per window.
+   *  Empty query = disarmed; this grid and the terminal's search bar edit the same string. */
+  query: string;
+  hits: Record<string, SearchHit | null>;
+  onQuery: (q: string) => void;
+  onClearSearch: () => void;
   /** Gestures live only while the grid is fully open — not during the zoom transitions. */
   interactive: boolean;
   onSelect: (pos: number, win: TmuxWindow) => void;
@@ -126,6 +184,9 @@ const SPRING = { damping: 16, stiffness: 220, mass: 1 };
 
 export default function Switcher(props: SwitcherProps) {
   const { theme, stageW, cards, interactive } = props;
+  /** A filtered grid isn't the real order — reorder is off while a query is armed (§T14). */
+  const filtered = normalizeQuery(props.query) !== '';
+  const nq = normalizeQuery(props.query);
 
   /** Local order during (and just after) a drag: `null` = props order is the truth. */
   const [dragOrder, setDragOrder] = useState<Card[] | null>(null);
@@ -179,7 +240,45 @@ export default function Switcher(props: SwitcherProps) {
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }]}>
+      {/* T14: the search field. Same string as the terminal view's bar; the ✕ disarms both. */}
+      <View style={styles.searchWrap}>
+        <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
+          <SymbolView
+            name="magnifyingglass"
+            size={14}
+            tintColor={theme.muted}
+            //  is the Nerd Font magnifier, already bundled — the Android face of the icon.
+            fallback={
+              <Text style={{ color: theme.muted, fontSize: 13, fontFamily: MONO }}>{''}</Text>
+            }
+          />
+          <TextInput
+            value={props.query}
+            onChangeText={props.onQuery}
+            placeholder="Search windows and output"
+            placeholderTextColor={theme.placeholder}
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            style={[styles.searchInput, { color: theme.foreground }]}
+          />
+          {props.query !== '' && (
+            <Pressable
+              onPress={props.onClearSearch}
+              hitSlop={10}
+              style={[styles.searchClear, { backgroundColor: theme.muted }]}>
+              <Text style={[styles.searchClearGlyph, { color: theme.scrim }]}>✕</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
       <View style={{ height: top }} />
+      {filtered && display.length === 0 && (
+        <View style={styles.noHits} pointerEvents="none">
+          <Text style={[styles.noHitsLead, { color: theme.muted }]}>No window contains</Text>
+          <Text style={[styles.noHitsQuery, { color: theme.foreground }]}>“{props.query.trim()}”</Text>
+        </View>
+      )}
       <ScrollView
         style={styles.grid}
         scrollEnabled={interactive && dragId === null}
@@ -207,10 +306,15 @@ export default function Switcher(props: SwitcherProps) {
               key={card.win.id}
               theme={theme}
               card={card}
+              hit={props.hits[card.win.id]}
+              query={nq}
               slot={slotFrame(pos, stageW)}
               stageW={stageW}
               dragged={dragId === card.win.id}
-              closable={display.length > 1}
+              // The unkillable-last-window rule counts every window, not the narrowed grid: a
+              // search filtered to one card must still let that window close (§T14).
+              closable={props.total > 1}
+              reorderable={!filtered}
               interactive={interactive}
               onTap={() => props.onSelect(pos, card.win)}
               onKill={() => props.onKill(card.win)}
@@ -236,7 +340,9 @@ export default function Switcher(props: SwitcherProps) {
               <Text style={[styles.doneLabel, { color: theme.accent }]}>Done</Text>
             </Pressable>
             <Text style={[styles.countAndroid, { color: theme.muted }]}>
-              {display.length} {display.length === 1 ? 'tab' : 'tabs'}
+              {filtered
+                ? `${display.length} of ${props.total} tabs`
+                : `${display.length} ${display.length === 1 ? 'tab' : 'tabs'}`}
             </Text>
             <Pressable
               onPress={interactive ? props.onNew : undefined}
@@ -265,7 +371,9 @@ export default function Switcher(props: SwitcherProps) {
           />
         </Pressable>
         <Text style={[styles.count, { color: theme.foreground }]}>
-          {display.length} {display.length === 1 ? 'Tab' : 'Tabs'}
+          {filtered
+            ? `${display.length} of ${props.total} Tabs`
+            : `${display.length} ${display.length === 1 ? 'Tab' : 'Tabs'}`}
         </Text>
         <Pressable
           onPress={interactive ? props.onDone : undefined}
@@ -297,10 +405,13 @@ function frameStyle(f: Frame) {
 function WindowCard({
   theme,
   card,
+  hit,
+  query,
   slot,
   stageW,
   dragged,
   closable,
+  reorderable,
   interactive,
   onTap,
   onKill,
@@ -310,11 +421,18 @@ function WindowCard({
 }: {
   theme: Theme;
   card: Card;
+  /** T14: the scrollback answer for this window — its context replaces the live snapshot while
+   *  armed, so the card shows the first occurrence instead of the pane's bottom. */
+  hit: SearchHit | null | undefined;
+  /** Normalized query; '' = search disarmed. */
+  query: string;
   slot: Frame;
   stageW: number;
   dragged: boolean;
   /** False for the last remaining window — it is unkillable (no ✕, swipe rubber-bands). */
   closable: boolean;
+  /** False while the grid is filtered — a narrowed grid isn't the real order (§T14). */
+  reorderable: boolean;
   interactive: boolean;
   onTap: () => void;
   onKill: () => void;
@@ -388,7 +506,7 @@ function WindowCard({
     // tracked on the JS queue, and a ghost activation skips every side effect. The handler
     // recovers by itself on the next touch.
     const drag = Gesture.Pan()
-      .enabled(interactive)
+      .enabled(interactive && reorderable)
       .runOnJS(true)
       .activateAfterLongPress(300)
       .onTouchesDown(() => {
@@ -440,8 +558,9 @@ function WindowCard({
 
     return Gesture.Race(drag, swipe, tap);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values and refs are stable;
-    // interactive/stageW only change while no gesture can be active (zoom transitions, rotation).
-  }, [interactive, stageW]);
+    // interactive/stageW/reorderable only change while no gesture can be active (zoom
+    // transitions, rotation, typing in the search field).
+  }, [interactive, stageW, reorderable]);
 
   // zIndex is deliberately NOT animated: a UI-thread zIndex flip (the lift spring settling
   // ~400ms after a drop) can re-sort the native siblings, and iOS cancels the in-flight touches
@@ -469,6 +588,17 @@ function WindowCard({
   const fontSize = snapshotFontSize(slot.w, card.win.width);
   const directory = card.win.path.split('/').filter(Boolean).pop() ?? '/';
 
+  // T14: with a scrollback hit, the card shows the grep's context block instead of the live
+  // snapshot — the hit sits ~40% down the block (search-model's -B/-A split), which is the
+  // prototype's scroll-to-first-occurrence without scroll machinery. Either content gets the
+  // highlight surgery; `highlightLine` returns miss lines untouched, so unmatched cards (a
+  // name-only match) re-use every node.
+  const shownLines = useMemo(() => {
+    const lines = hit ? parseAnsi(hit.lines.join('\n')) : card.lines;
+    if (lines === null || query === '') return lines;
+    return lines.map((line) => highlightLine(line, query));
+  }, [hit, card.lines, query]);
+
   return (
     <GestureDetector gesture={gesture}>
       <Animated.View
@@ -485,7 +615,7 @@ function WindowCard({
             ring,
             { height: slot.h, borderRadius: 14 * u, backgroundColor: theme.background, padding: 5 * u },
           ]}>
-          <Snapshot lines={card.lines} theme={theme} fontSize={fontSize} />
+          <Snapshot lines={shownLines} theme={theme} fontSize={fontSize} />
           {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
           {closable && (
             <View style={[styles.close, { backgroundColor: theme.foreground }]}>
@@ -493,14 +623,18 @@ function WindowCard({
             </View>
           )}
         </View>
-        <Text
-          numberOfLines={1}
-          style={[styles.name, { color: card.win.active ? theme.accent : theme.foreground }]}>
-          {card.win.name}
-        </Text>
-        <Text numberOfLines={1} style={[styles.sub, { color: theme.muted }]}>
-          {directory}
-        </Text>
+        <HlText
+          text={card.win.name}
+          query={query}
+          theme={theme}
+          style={[styles.name, { color: card.win.active ? theme.accent : theme.foreground }]}
+        />
+        <HlText
+          text={directory}
+          query={query}
+          theme={theme}
+          style={[styles.sub, { color: theme.muted }]}
+        />
       </Animated.View>
     </GestureDetector>
   );
@@ -529,8 +663,16 @@ export function Snapshot({
             <Text
               key={j}
               style={{
-                color: spanColor(span.fg, theme.ansi) ?? theme.foreground,
-                backgroundColor: spanColor(span.bg, theme.ansi) ?? undefined,
+                // A search hit paints over the span's own colours (T14) — dark ink on the
+                // warning yellow, whichever way round the flavour runs.
+                color: span.hl
+                  ? theme.isDark
+                    ? theme.scrim
+                    : theme.foreground
+                  : (spanColor(span.fg, theme.ansi) ?? theme.foreground),
+                backgroundColor: span.hl
+                  ? theme.warning
+                  : (spanColor(span.bg, theme.ansi) ?? undefined),
                 fontFamily: span.bold ? MONO_BOLD : MONO,
               }}>
               {span.text}
@@ -543,8 +685,88 @@ export function Snapshot({
   );
 }
 
+/** A one-line label with T14's highlight on every occurrence — the card's name and directory,
+ *  so a metadata-only match still shows where it matched. */
+function HlText({
+  text,
+  query,
+  theme,
+  style,
+}: {
+  text: string;
+  query: string;
+  theme: Theme;
+  style: StyleProp<TextStyle>;
+}) {
+  const lo = text.toLowerCase();
+  if (query === '' || !lo.includes(query)) {
+    return (
+      <Text numberOfLines={1} style={style}>
+        {text}
+      </Text>
+    );
+  }
+  const parts: { t: string; hl: boolean }[] = [];
+  let i = 0;
+  for (let j = lo.indexOf(query); j >= 0; j = lo.indexOf(query, i)) {
+    if (j > i) parts.push({ t: text.slice(i, j), hl: false });
+    parts.push({ t: text.slice(j, j + query.length), hl: true });
+    i = j + query.length;
+  }
+  if (i < text.length) parts.push({ t: text.slice(i), hl: false });
+  return (
+    <Text numberOfLines={1} style={style}>
+      {parts.map((p, k) => (
+        <Text
+          key={k}
+          style={
+            p.hl && {
+              backgroundColor: theme.warning,
+              color: theme.isDark ? theme.scrim : theme.foreground,
+            }
+          }>
+          {p.t}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
   grid: { flex: 1 },
+  // T14's search field: 40pt + 12pt gap = switcher-model's SEARCH_BAR_H, which the zoom aim
+  // adds. iOS is the prototype's 13pt radius; Android takes Material's 16dp (§5d: buttons 16).
+  searchWrap: { paddingHorizontal: 20, paddingBottom: 12 },
+  searchField: {
+    height: 40,
+    borderRadius: Platform.OS === 'android' ? 16 : 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  // Android chrome text is Roboto by setting no fontFamily (T7A's finding, zero code).
+  searchInput: { flex: 1, fontSize: 14, paddingVertical: 0 },
+  searchClear: {
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchClearGlyph: { fontSize: 9, fontWeight: '700' },
+  noHits: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  noHitsLead: { fontSize: 15 },
+  noHitsQuery: { fontFamily: MONO, fontSize: 14 },
   placeholder: {
     position: 'absolute',
     borderRadius: 14,

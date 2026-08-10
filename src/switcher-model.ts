@@ -35,6 +35,10 @@ export function gridTop(width: number): number {
   return GRID_TOP * width;
 }
 
+/** T14: the search field's block above the grid (40pt field + 12pt gap, absolute like the other
+ *  controls). The zoom aim adds it — the grid, and every card slot, sits this far lower. */
+export const SEARCH_BAR_H = 52;
+
 export function rowPitch(width: number): number {
   return ROW_PITCH * width;
 }

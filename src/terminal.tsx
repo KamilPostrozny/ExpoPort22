@@ -15,6 +15,7 @@
  */
 
 import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
 import { Terminal, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useDOMImperativeHandle, type DOMImperativeFactory, type DOMProps } from 'expo/dom';
@@ -46,6 +47,13 @@ import { MONO, type Theme } from '@/theme';
 export type TerminalHandle = {
   /** Shell output, base64 — the wire format `ExpoSSH` emits. */
   write(base64: string): void;
+  /** T14: highlight every occurrence of `query` in the buffer and land on the next one. The
+   *  incremental form — a growing query stays on the same hit while it still matches. */
+  search(query: string): void;
+  searchNext(query: string): void;
+  searchPrev(query: string): void;
+  /** Disarm: clear the decorations and the cached term. */
+  searchOff(): void;
 };
 
 export type TerminalProps = {
@@ -70,6 +78,9 @@ export type TerminalProps = {
   /** A two-finger tap on the grid — §4.8's second door to Settings. Detected here because the
    *  touch layer below already owns the two-finger *pan*, and only it can tell the two apart. */
   onTwoFingerTap: () => Promise<void>;
+  /** T14: the search addon's live occurrence count — `index` is 0-based, −1 past the highlight
+   *  limit; `count` 0 = no hits. Feeds the "i/N" label beside the terminal's search field. */
+  onSearchResults: (index: number, count: number) => Promise<void>;
   ref?: Ref<TerminalHandle>;
   dom?: DOMProps;
 };
@@ -155,6 +166,7 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
+  const search = useRef<SearchAddon | null>(null);
   const resizer = useRef<(() => void) | null>(null);
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
@@ -163,8 +175,29 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     latest.current = { theme, ...handlers };
   });
 
+  // The one decoration set both directions share. Backgrounds must be #RRGGBB (addon contract):
+  // every role here is a palette hex. The ruler colours are required by the type; no ruler is on.
+  const searchOptions = () => {
+    const t = latest.current.theme;
+    return {
+      decorations: {
+        matchBackground: t.selection,
+        activeMatchBackground: t.warning,
+        matchOverviewRuler: t.warning,
+        activeMatchColorOverviewRuler: t.warning,
+      },
+    };
+  };
+
   const handle: TerminalHandle = {
     write: (base64) => terminal.current?.write(fromBase64(base64)),
+    search: (query) => {
+      if (query === '') search.current?.clearDecorations();
+      else search.current?.findNext(query, { ...searchOptions(), incremental: true });
+    },
+    searchNext: (query) => search.current?.findNext(query, searchOptions()),
+    searchPrev: (query) => search.current?.findPrevious(query, searchOptions()),
+    searchOff: () => search.current?.clearDecorations(),
   };
   useDOMImperativeHandle(
     (ref ?? null) as Ref<DOMImperativeFactory>,
@@ -217,9 +250,18 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+    // T14's terminal-side search. Checked (AGENTS.md): @xterm/addon-search 0.16.0 rides only the
+    // public API (registerDecoration, translateToString), so xterm 6 carries it; its decorations
+    // are the highlight, its result event the "i/N" label — nothing reimplemented here.
+    const searchAddon = new SearchAddon();
+    term.loadAddon(searchAddon);
+    const searchResults = searchAddon.onDidChangeResults(({ resultIndex, resultCount }) => {
+      latest.current.onSearchResults(resultIndex, resultCount);
+    });
     term.open(host.current!);
     terminal.current = term;
     fit.current = fitAddon;
+    search.current = searchAddon;
 
     // T7: the keyboard is native now (T4's decision), so the webview must never take focus. The
     // helper textarea xterm keeps for real keyboards is disabled outright — xterm's own mousedown
@@ -331,6 +373,7 @@ export default function TerminalView({ theme, fontSize, ref, ...handlers }: Term
       clearTimeout(settle);
       observer.disconnect();
       teardownTouch();
+      searchResults.dispose();
       term.dispose();
     };
   }

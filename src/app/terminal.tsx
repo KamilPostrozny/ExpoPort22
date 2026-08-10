@@ -13,6 +13,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Animated, {
@@ -62,8 +63,10 @@ import {
   type Session,
 } from '@/session';
 import { endpoint, getSettings, updateSettings, useSettings } from '@/settings';
-import Switcher, { Snapshot, useSwitcherCards, type Card } from '@/switcher';
+import { normalizeQuery, windowSurvives } from '@/search-model';
+import Switcher, { Snapshot, useScrollbackSearch, useSwitcherCards, type Card } from '@/switcher';
 import {
+  SEARCH_BAR_H,
   ZOOM_COMMIT,
   fabFrame,
   gridTop,
@@ -218,20 +221,56 @@ export default function SessionScreen() {
   );
   const { cards, setCards, refresh } = useSwitcherCards(showTabs && connected, sw !== 'closed');
 
-  /** The active window's grid position — tmux's fresher poll first, the list's flag second. */
-  const activePos = () => {
-    const byIndex = cards.findIndex((c) => c.win.index === tmux.windowIndex);
-    if (byIndex >= 0) return byIndex;
-    const byFlag = cards.findIndex((c) => c.win.active);
-    return byFlag >= 0 ? byFlag : 0;
+  /* --- T14: one search, shared by the grid and the terminal view --- *
+   *
+   * `q`/`on` are the whole armed-or-disarmed state: the switcher's field and the terminal's bar
+   * edit the same string, and disarming from either side clears both. The scrollback half runs
+   * host-side greps only while the grid is up; the terminal view searches its own xterm buffer
+   * through the search addon instead — the emulator already holds those 10k lines. */
+  const [search, setSearch] = useState({ q: '', on: false });
+  const searchRef = useRef(search);
+  searchRef.current = search;
+  /** The addon's live "i/N" for the terminal bar; `null` until it first speaks. */
+  const [occ, setOcc] = useState<{ i: number; n: number } | null>(null);
+  const hits = useScrollbackSearch(search.on ? search.q : '', cards, sw !== 'closed' && search.on);
+  const nq = search.on ? normalizeQuery(search.q) : '';
+  const visibleCards =
+    nq === '' ? cards : cards.filter((c) => windowSurvives(c.win, nq, hits[c.win.id]));
+
+  const disarmSearch = () => {
+    console.log('[search] disarmed');
+    setSearch({ q: '', on: false });
+    setOcc(null);
   };
 
-  /** Grid position → the card's frame in stage coordinates (headroom above the grid, minus the
-   *  grid's own scroll) — where the zoom aims. */
+  // The armed query drives the addon's decorations (and lands on the next occurrence). It runs
+  // whichever view is in front, so a card tap arrives on an already-highlighted terminal.
+  useEffect(() => {
+    if (!connected) return;
+    if (search.on && search.q.trim() !== '') terminal.current?.search(search.q.trim());
+    else {
+      terminal.current?.searchOff();
+      setOcc(null);
+    }
+  }, [search.on, search.q, connected]);
+
+  /** The active window's position in `list` — tmux's fresher poll first, the list's flag second. */
+  const activePosIn = (list: Card[]) => {
+    const byIndex = list.findIndex((c) => c.win.index === tmux.windowIndex);
+    if (byIndex >= 0) return byIndex;
+    const byFlag = list.findIndex((c) => c.win.active);
+    return byFlag >= 0 ? byFlag : 0;
+  };
+  /** Over the *visible* list: with a search armed, that is the grid the zoom aims into. The bar
+   *  swipe keeps the full list — it hops real neighbours, not the filtered ones. */
+  const activePos = () => activePosIn(visibleCards);
+
+  /** Grid position → the card's frame in stage coordinates (search field and headroom above the
+   *  grid, minus the grid's own scroll) — where the zoom aims. */
   const zoomSlot = (pos: number): Frame => {
     const w = stage?.w ?? 390;
     const f = slotFrame(pos, w);
-    return { ...f, y: gridTop(w) + f.y - scrollY.current };
+    return { ...f, y: SEARCH_BAR_H + gridTop(w) + f.y - scrollY.current };
   };
 
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
@@ -239,7 +278,9 @@ export default function SessionScreen() {
 
   const finishClose = () => {
     setSw('closed');
-    setFocusSignal((n) => n + 1); // the prototype re-raises the keyboard on return
+    // The prototype re-raises the keyboard on return — except onto an armed search hit, where
+    // you came to read, not type (T14).
+    if (!searchRef.current.on) setFocusSignal((n) => n + 1);
   };
 
   const commitOpen = () => {
@@ -319,6 +360,8 @@ export default function SessionScreen() {
   const birthCard = () => {
     if (sw !== 'open' || stage === null) return;
     console.log('[switcher] new window');
+    // A fresh window has no history to match — birth disarms the search (prototype's newTab).
+    if (searchRef.current.on) disarmSearch();
     // tmux switches the attached client to it, so the terminal lands on it
     newWindow().catch((error) => console.log('[switcher] new window failed:', error));
     // The birth origin: iOS's + circle, or the Android FAB (§4.10) — same growth either way.
@@ -429,7 +472,7 @@ export default function SessionScreen() {
       if (swipeInfo.current !== null || sw !== 'closed' || !connected) return;
       const windows = cards.map((c) => c.win);
       if (windows.length === 0) return;
-      const pos = activePos();
+      const pos = activePosIn(cards);
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
       setOpen('none');
       // The warm list can be stale (a window made from the shell since the last re-list); this
@@ -609,7 +652,12 @@ export default function SessionScreen() {
         <Switcher
           theme={theme}
           stageW={stage.w}
-          cards={cards}
+          cards={visibleCards}
+          total={cards.length}
+          query={search.on ? search.q : ''}
+          hits={hits}
+          onQuery={(q) => setSearch({ q, on: true })}
+          onClearSearch={disarmSearch}
           interactive={sw === 'open'}
           onSelect={selectCard}
           onKill={killCard}
@@ -659,6 +707,57 @@ export default function SessionScreen() {
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
           screen, so a `bottom` measured from the bar holds whether the keyboard is up or not. */}
       <View style={styles.screen}>
+      {/* T14: the terminal view's search bar — up exactly while the shared search is armed. The
+          same string as the switcher's field; prev/next walk the addon's occurrences; Done
+          disarms both views. */}
+      {search.on && (
+        <View style={styles.searchRow}>
+          <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
+            <TextInput
+              value={search.q}
+              onChangeText={(q) => setSearch({ q, on: true })}
+              placeholder="Search this window"
+              placeholderTextColor={theme.placeholder}
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+              style={[styles.searchInput, { color: theme.foreground, fontFamily: MONO }]}
+            />
+            <Text style={[styles.searchCount, { color: theme.muted }]}>
+              {occ === null || search.q.trim() === ''
+                ? ''
+                : occ.n === 0
+                  ? 'none'
+                  : occ.i >= 0
+                    ? `${occ.i + 1}/${occ.n}`
+                    : `${occ.n}`}
+            </Text>
+          </View>
+          {(['prev', 'next'] as const).map((dir) => (
+            <Pressable
+              key={dir}
+              disabled={occ === null || occ.n === 0}
+              onPress={() => {
+                const q = search.q.trim();
+                if (q === '') return;
+                if (dir === 'prev') terminal.current?.searchPrev(q);
+                else terminal.current?.searchNext(q);
+              }}
+              style={({ pressed }) => [
+                styles.searchStep,
+                { backgroundColor: theme.surface, opacity: occ === null || occ.n === 0 ? 0.35 : 1 },
+                pressed && { opacity: 0.6 },
+              ]}>
+              <Text style={{ color: theme.foreground, fontSize: 13, fontWeight: '600' }}>
+                {dir === 'prev' ? '∧' : '∨'}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable onPress={disarmSearch} hitSlop={8}>
+            <Text style={[styles.searchDone, { color: theme.accent }]}>Done</Text>
+          </Pressable>
+        </View>
+      )}
       {/* The terminal area: the flex region above the bar. During a bar swipe the live terminal
           slides inside it as a rounded page card, with the neighbour snapshots as its siblings —
           the bar itself stays put, showing the name pills. */}
@@ -693,6 +792,7 @@ export default function SessionScreen() {
           setModes(next);
         }}
         onTwoFingerTap={async () => openSettings()}
+        onSearchResults={async (i, n) => setOcc({ i, n })}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
       </Animated.View>
@@ -962,6 +1062,33 @@ function Status({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  // T14's terminal-side search bar (design: 38pt field, 12pt radius; Android 16dp per §5d).
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  searchField: {
+    flex: 1,
+    height: 38,
+    borderRadius: Platform.OS === 'android' ? 16 : 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 11,
+  },
+  searchInput: { flex: 1, fontSize: 13, paddingVertical: 0 },
+  searchCount: { fontFamily: MONO, fontSize: 11 },
+  searchStep: {
+    width: 34,
+    height: 38,
+    borderRadius: Platform.OS === 'android' ? 16 : 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchDone: { fontSize: 15, paddingHorizontal: 2 },
   stageWrapper: { position: 'absolute', top: 0, left: 0, overflow: 'hidden' },
   terminal: { flex: 1 },
   termArea: { flex: 1 },

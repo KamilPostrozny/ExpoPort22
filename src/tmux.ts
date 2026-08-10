@@ -15,6 +15,7 @@ import { useSyncExternalStore } from 'react';
 
 import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
 import { toBase64 } from '@/base64';
+import { parseSearchOutput, searchPaneCommand, type SearchHit } from '@/search-model';
 import { getSettings } from '@/settings';
 import {
   APPLY_AND_VERIFY,
@@ -235,6 +236,12 @@ export async function listWindows(): Promise<TmuxWindow[]> {
  *  <Text>. Rejects when the window is gone; the switcher decides what a missing card looks like. */
 export function capturePane(windowIndex: number): Promise<string> {
   return run(capturePaneCommand(windowIndex));
+}
+
+/** T14: first occurrence of `query` in the window's whole scrollback, with the card's context —
+ *  the search stays on the host (one grep per window per settled keystroke). `null` = no hit. */
+export async function searchPane(windowIndex: number, query: string): Promise<SearchHit | null> {
+  return parseSearchOutput(await run(searchPaneCommand(windowIndex, query)));
 }
 
 export async function selectWindow(windowIndex: number): Promise<void> {
