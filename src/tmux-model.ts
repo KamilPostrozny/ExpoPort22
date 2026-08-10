@@ -205,9 +205,17 @@ export function killWindowCommand(index: number): string {
   return `tmux kill-window ${target(index)}`;
 }
 
-/** Untargeted on purpose — tmux picks the index and makes it active, so the attached client is
- *  already looking at it by the time the switcher closes. */
-export const NEW_WINDOW = 'tmux new-window';
+/**
+ * A new window always lands at the END of the list (user, 2026-08-10) — for both doors into one,
+ * the grid's + and a swipe left off the last tab. Untargeted, tmux fills the lowest free index
+ * instead, so with a gap in the list (kill window 2 of 0..4) the next new one appears in the
+ * middle of the grid, where nothing put it. `-a -t {end}` is "after the last window".
+ *
+ * Quoted because the remote shell sees this string first and fish expands a lone `{end}` to `end`
+ * — bash leaves single-element braces alone, fish does not, and the host's shell is not ours to
+ * assume. It still makes the window active, so the attached client is already looking at it.
+ */
+export const NEW_WINDOW = "tmux new-window -a -t ':{end}'";
 
 /** `-b`/`-a` shuffle neighbours out of the way (tmux ≥ 3.2) — a bare move-window refuses an
  *  occupied index, and a drag-reorder's drop slot is always occupied. Landing indices depend on

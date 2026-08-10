@@ -175,3 +175,27 @@ test('killCommand: pgrep the pane shell, kill -9, integers only', () => {
   expect(() => killCommand(-1)).toThrow();
   expect(() => killCommand(NaN)).toThrow();
 });
+
+// A window switch names the command before any poll can name the pid — the ribbon has to change
+// with the slide, because its height is the terminal's and learning about it late reflows the
+// pane after the transition has landed.
+test('a switch names the command, the next poll fills in the pid without restarting it', () => {
+  const switched = ribbonPoll(RIBBON_IDLE, { command: 'htop', pid: null }, 1000);
+  expect(switched).toMatchObject({ command: 'htop', pid: null, startedAt: 1000 });
+
+  const polled = ribbonPoll(switched, { command: 'htop', pid: 42 }, 4000);
+  expect(polled).toMatchObject({ command: 'htop', pid: 42 });
+  expect(polled.instance).toBe(switched.instance); // same process: the timer carries on
+  expect(polled.startedAt).toBe(1000);
+
+  // A quiet beat after that is still the same object, as for any other poll.
+  expect(ribbonPoll(polled, { command: 'htop', pid: 42 }, 6000)).toBe(polled);
+});
+
+test('switching to a window running the same command is a new instance, not a continuation', () => {
+  const first = ribbonPoll(RIBBON_IDLE, { command: 'htop', pid: 42 }, 1000);
+  const second = ribbonPoll(first, { command: 'htop', pid: null }, 5000);
+  expect(second.instance).toBe(first.instance + 1);
+  expect(second.startedAt).toBe(5000);
+  expect(second.pid).toBeNull(); // never the other window's pid — the Kill cap stays inert
+});

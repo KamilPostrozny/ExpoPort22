@@ -319,11 +319,15 @@ export default function KeyBar(props: KeyBarProps) {
   };
 
   const toggle = (which: Exclude<BarPopover, 'none'>) => {
-    const next = open === which ? 'none' : which;
-    // §4.4: opening the ⋯ menu closes other popovers (single-valued state does that) and puts
-    // the keyboard away.
-    if (next === 'menu') Keyboard.dismiss();
-    onOpenChange(next);
+    // §4.4: opening a popover closes the others — single-valued state does that by itself.
+    // The ⋯ menu used to drop the keyboard on the way in, which the reference app never does:
+    // its bar lives in the keyboard's own accessory window and its plus is a UIKit `Menu`, so
+    // the keys stay up under it. Here it was covering for the popovers' anchor, which measured
+    // from the screen's bottom edge rather than the keyboard's — with that fixed the menu fits
+    // above the keys and the dismiss is just a keyboard that goes away for no reason the person
+    // asked for (user, 2026-08-10). Every door the menu opens still puts the keyboard away for
+    // itself: Settings in `openSettings`, the pickers by being system modals.
+    onOpenChange(open === which ? 'none' : which);
   };
 
   // §4.4: long-press (~420ms) opens the clipboard popover; the popover reads the phone

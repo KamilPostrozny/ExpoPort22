@@ -145,7 +145,8 @@ test('window commands target by validated integer index only', () => {
   expect(selectWindowCommand(3)).toBe('tmux select-window -t :3');
   expect(killWindowCommand(0)).toBe('tmux kill-window -t :0');
   expect(capturePaneCommand(2)).toBe('tmux capture-pane -p -e -t :2'); // -e: colours stay escapes
-  expect(NEW_WINDOW).toBe('tmux new-window'); // untargeted: tmux picks and activates
+  // Always the end of the list, never tmux's lowest free index; quoted so fish leaves `{end}` be.
+  expect(NEW_WINDOW).toBe("tmux new-window -a -t ':{end}'");
   // The injection guard: an index is an integer or it is nothing.
   expect(() => selectWindowCommand(1.5)).toThrow();
   expect(() => killWindowCommand(NaN)).toThrow();

@@ -8,7 +8,7 @@
  * `src/barswipe-model.test.ts`; the screen and the bar render and execute.
  */
 
-import { DESIGN_W } from '@/switcher-model';
+import { DESIGN_W, ZOOM_COMMIT } from '@/switcher-model';
 
 /* --- page geometry --- */
 
@@ -46,6 +46,21 @@ export function swipeTarget(dx: number, dtMs: number, pos: number, count: number
   if (dx < -COMMIT_PX || (dx < -FLICK_PX && dtMs < FLICK_MS)) return Math.min(pos + 1, count - 1);
   if (dx > COMMIT_PX || (dx > FLICK_PX && dtMs < FLICK_MS)) return Math.max(pos - 1, 0);
   return pos;
+}
+
+/**
+ * The vertical release, the same question one axis over: does this swipe up open the switcher, or
+ * spring the terminal back? `prog` past `ZOOM_COMMIT` is the slow drag — pull the surface a
+ * quarter of the way into its card and let go. The flick is the other way in: a slight swipe up
+ * off the bar sends the tab to the grid without dragging it there (user, 2026-08-10), and it is
+ * the same finger on the same bar as the horizontal hop, so it is the same 30pt-under-250ms.
+ *
+ * `dy` is the pan's translation — negative is up — so a downward release can never commit no
+ * matter how fast it was, and neither can the 24pt the gesture spends being classified at all
+ * (`BAR_SWIPE_FIRE`), which is where `FLICK_PX`'s extra 6pt of travel is spent.
+ */
+export function zoomCommits(dy: number, dtMs: number, prog: number): boolean {
+  return prog > ZOOM_COMMIT || (-dy > FLICK_PX && dtMs < FLICK_MS);
 }
 
 /** The LONGEST the committed snapshot stays over the terminal after the slide lands, waiting for

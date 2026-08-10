@@ -55,11 +55,21 @@ export const RIBBON_IDLE: RibbonCore = {
  *  as a stopped job. */
 export const Z_CANDIDATE_MS = 6000;
 
-/** A poll answered. Same command, same pid, nothing pending → the same object back, so React
- *  state built on this never re-renders on a quiet beat. */
+/**
+ * A poll answered. Same command, same pid, nothing pending → the same object back, so React
+ * state built on this never re-renders on a quiet beat.
+ *
+ * `pid: null` is the same answer from a different source: a window switch, which knows what the
+ * window it is going to runs (the list carries `pane_current_command`) but not its pid. It is
+ * used so the ribbon changes WITH the slide instead of a poll beat after it — appearing late, it
+ * resizes the terminal once the swipe has already landed, which is a jolt right where the eye is
+ * (user, 2026-08-10). The pid arrives on the next poll and fills in without starting the timer
+ * over; until it does, the Kill cap is inert, which is the safe way round — a stale pid belongs
+ * to another window's process.
+ */
 export function ribbonPoll(
   core: RibbonCore,
-  foreground: { command: string; pid: number } | null,
+  foreground: { command: string; pid: number | null } | null,
   now: number,
 ): RibbonCore {
   if (foreground === null) {
@@ -80,6 +90,16 @@ export function ribbonPoll(
   }
   if (foreground.command === core.command && foreground.pid === core.pid && core.suspended === null) {
     return core;
+  }
+  // The pid catching up with a command a window switch already named: the same process, so the
+  // instance and its timer carry on.
+  if (
+    foreground.pid !== null &&
+    core.pid === null &&
+    foreground.command === core.command &&
+    core.suspended === null
+  ) {
+    return { ...core, pid: foreground.pid };
   }
   // A new foreground (or the suspended job back in front): a new instance, timer from now.
   return {

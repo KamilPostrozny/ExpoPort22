@@ -18,7 +18,9 @@ import {
   pillScale,
   rubber,
   swipeTarget,
+  zoomCommits,
 } from '@/barswipe-model';
+import { ZOOM_COMMIT } from '@/switcher-model';
 
 /* --- rubber band (prototype barMove: a third past the ends) --- */
 
@@ -47,6 +49,30 @@ test('swipeTarget: slow drag commits past 70, flick past 30', () => {
 test('swipeTarget clamps at the ends', () => {
   expect(swipeTarget(200, 100, 0, 4)).toBe(0); // no previous before the first
   expect(swipeTarget(-200, 100, 3, 4)).toBe(3); // no next after the last
+});
+
+/* The screen swipes over one more position than it has windows: the slot past the last tab is a
+ * window that does not exist yet, and committing onto it births one. Nothing in the model knows
+ * that — it is `count + 1` at the two call sites — so this pins what that convention buys. */
+test('a phantom slot past the last window is reachable, and does not rubber-band', () => {
+  const REAL = 3; // windows 0..2, plus the new-tab slot at 3
+  expect(rubber(-50, REAL - 1, REAL + 1)).toBe(-50); // last tab, leftward: rides the finger
+  expect(rubber(-50, REAL - 1, REAL)).toBe(-50 / 3); // …which it would NOT without the phantom
+  expect(swipeTarget(-(COMMIT_PX + 1), 800, REAL - 1, REAL + 1)).toBe(REAL); // commit onto it
+  expect(swipeTarget(FLICK_PX + 5, 200, 0, REAL + 1)).toBe(0); // the first tab still has no left
+  expect(rubber(50, 0, REAL + 1)).toBe(50 / 3); // and still bands there
+});
+
+test('zoomCommits: a quarter dragged, or a slight swipe up', () => {
+  // The slow drag, unchanged: a quarter of the way into the card and let go.
+  expect(zoomCommits(-200, 900, ZOOM_COMMIT + 0.01)).toBe(true);
+  expect(zoomCommits(-200, 900, ZOOM_COMMIT)).toBe(false);
+  // The flick: barely more travel than the 24pt that classified the swipe at all, let go fast.
+  expect(zoomCommits(-(FLICK_PX + 1), 150, 0)).toBe(true);
+  expect(zoomCommits(-(FLICK_PX + 1), FLICK_MS + 50, 0)).toBe(false); // same travel, dawdled
+  expect(zoomCommits(-(FLICK_PX - 1), 150, 0)).toBe(false); // fast, but it never left the bar
+  // Down is not up, however fast — the keyboard drop and the grab are the same gesture, mirrored.
+  expect(zoomCommits(FLICK_PX + 50, 100, 0)).toBe(false);
 });
 
 /* --- page geometry (prototype: 402-wide pages, 28 gap → 430 pitch) --- */
