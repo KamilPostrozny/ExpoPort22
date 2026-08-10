@@ -33,6 +33,7 @@ import {
   pagePitch,
   rubber,
   swipeTarget,
+  zoomCommits,
 } from '@/barswipe-model';
 import { pushYank } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
@@ -77,7 +78,6 @@ import Switcher, {
 } from '@/switcher';
 import {
   SEARCH_BAR_H,
-  ZOOM_COMMIT,
   fabFrame,
   gridTop,
   plusFrame,
@@ -91,7 +91,7 @@ import {
 import SettingsSheet from '@/settings-sheet';
 import TerminalView, { type TerminalHandle } from '@/terminal';
 import { exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
-import { deriveConfigStatus, tabsAvailable, type TmuxWindow } from '@/tmux-model';
+import { IDLE_SHELLS, deriveConfigStatus, tabsAvailable, type TmuxWindow } from '@/tmux-model';
 import { MONO, type Theme } from '@/theme';
 import { pick, quickAttach, sendFile, useUploadBusy, type UploadKind } from '@/upload';
 import { joinPath, sanitizeFilename, stampName } from '@/upload-model';
@@ -143,6 +143,18 @@ export default function SessionScreen() {
    * event to ResizeObserver is ~25-35ms, plus a frame to paint).
    */
   const [keyboardPad, setKeyboardPad] = useState(0);
+  /**
+   * Were the keys up when the last overlay took the terminal? The way back puts them back the way
+   * they were rather than raising them unconditionally — the reference app's `keyboardHidden` is
+   * the bar's own state and the tabs view never writes it, so closing the grid comes back to
+   * whatever the keys were doing before it opened (user, 2026-08-10). Written only by the doors
+   * the *terminal* leaves through; an overlay opening on top of another one leaves it alone.
+   *
+   * ponytail: the keyboard's frame stands in for focus, which is what the bar actually owns. They
+   * part company only with a hardware keyboard attached (focused, no frame) — plumb a focus
+   * callback out of KeyBar if that ever matters.
+   */
+  const keysWereUp = useRef(false);
   /** The emulator's measured cell and the rows it settled on (see TerminalProps.onResize). The
    *  cell is what every snapshot's type comes from, so a card draws the pane at the size the
    *  flying surface hands over at; the rows are what the vertical inset is worked out from. */
@@ -241,18 +253,24 @@ export default function SessionScreen() {
 
   // T12: the Settings sheet (§4.8). Both doors — the ⋯ menu row and the two-finger tap on the
   // grid — land here; the sheet slides over the live terminal, and the prototype puts the
-  // keyboard away for it and raises it again on close.
+  // keyboard away for it and gives back what it took on close.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const openSettings = () => {
     console.log('[settings] sheet open');
     setOpen('none');
+    // The grid's door is the grid's business: opening from up there must not record its
+    // (always down) keys as the terminal's, or closing the grid afterwards would leave a
+    // keyboard behind that was up when the person went in.
+    if (swRef.current === 'closed') keysWereUp.current = keyboardPad > 0;
     Keyboard.dismiss();
     setSettingsOpen(true);
   };
   const closeSettings = () => {
     console.log('[settings] sheet closed');
     setSettingsOpen(false);
-    setFocusSignal((n) => n + 1);
+    // Only onto the terminal, and only if that is where the keys were: closing back onto the
+    // grid would raise the keyboard over it.
+    if (swRef.current === 'closed' && keysWereUp.current) setFocusSignal((n) => n + 1);
   };
 
   /* --- T10: the tab switcher (§4.5) ---
@@ -265,6 +283,10 @@ export default function SessionScreen() {
    */
   type SwPhase = 'closed' | 'drag' | 'opening' | 'open' | 'closing' | 'birth';
   const [sw, setSw] = useState<SwPhase>('closed');
+  /** The phase read from a handler that runs after the render it was written in (same reason as
+   *  `searchRef`) — the settings doors both need to know which screen is in front. */
+  const swRef = useRef(sw);
+  swRef.current = sw;
   const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
   const scrollY = useRef(0);
@@ -272,6 +294,9 @@ export default function SessionScreen() {
   const dragX = useSharedValue(0); // finger drift during the bar-swipe-up follow
   const alpha = useSharedValue(1); // the stage fades out at the end of the zoom-out, back in first on return
   const slotSV = useSharedValue<Frame>({ x: 0, y: 0, w: 1, h: 1 });
+  /** Whose slot `slotSV` is aimed at — the grid leaves that one card undrawn while the surface is
+   *  in the air (see `zoomId` in switcher.tsx). Set wherever the aim is: the two are one decision. */
+  const [zoomId, setZoomId] = useState<string | null>(null);
   const stageSV = useSharedValue({ w: 390, h: 800 });
 
   const connected = session.status === 'connected';
@@ -342,6 +367,8 @@ export default function SessionScreen() {
   /** Over the *visible* list: with a search armed, that is the grid the zoom aims into. The bar
    *  swipe keeps the full list — it hops real neighbours, not the filtered ones. */
   const activePos = () => activePosIn(visibleCards);
+  /** The window sitting in a visible slot — the aim and the card to hide are the same window. */
+  const idAt = (pos: number) => visibleCards[pos]?.win.id ?? null;
 
   /** Grid position → the card's frame in stage coordinates (search field and headroom above the
    *  grid, minus the grid's own scroll) — where the zoom aims. */
@@ -356,12 +383,13 @@ export default function SessionScreen() {
 
   const finishClose = () => {
     setSw('closed');
-    // The prototype re-raises the keyboard on return — except onto an armed search hit, where
-    // you came to read, not type (T14). The size hold outlives the zoom by exactly that keyboard:
-    // released at the end of the animation it measures a stage with no keyboard in it, reports
-    // that, and is corrected ~250ms later — two reflows of every pane on the host, landing just
-    // as the terminal comes back into view (device). Nothing is raised, nothing to wait for.
-    if (!searchRef.current.on) {
+    // The keys come back exactly as they were left (`keysWereUp`) — except onto an armed search
+    // hit, where you came to read, not type (T14). The size hold outlives the zoom by exactly
+    // that keyboard: released at the end of the animation it measures a stage with no keyboard in
+    // it, reports that, and is corrected ~250ms later — two reflows of every pane on the host,
+    // landing just as the terminal comes back into view (device). Nothing is raised, nothing to
+    // wait for.
+    if (!searchRef.current.on && keysWereUp.current) {
       setKbSettle(true);
       setFocusSignal((n) => n + 1);
     }
@@ -390,31 +418,45 @@ export default function SessionScreen() {
     if (sw !== 'closed' || stage === null) return;
     console.log('[switcher] open (tabs tap)');
     setOpen('none');
+    keysWereUp.current = keyboardPad > 0; // read before the dismiss moves it
     Keyboard.dismiss();
-    slotSV.value = zoomSlot(activePos());
+    const pos = activePos();
+    setZoomId(idAt(pos));
+    slotSV.value = zoomSlot(pos);
     commitOpen();
   };
 
   // The bar-swipe-up drag-follow (prototype `zoomFollow`): progress tracks the finger, release
-  // past the threshold commits, anything less springs back.
+  // past the threshold — or a flick that never got that far — commits, anything less springs back.
+  /** Touch-down of the current zoom drag, for `zoomCommits`' flick window. The horizontal hop
+   *  keeps its own in `swipeInfo.t0` for the same reason: the pan reports travel, not time. */
+  const zoomT0 = useRef(0);
   const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number) => {
     if (stage === null) return;
     if (phase === 'move') {
       if (sw === 'closed') {
         console.log('[switcher] open (bar drag)');
         setOpen('none');
-        slotSV.value = zoomSlot(activePos());
+        // This drag exists only as the grab out of a raised keyboard (KeyBar checks `isFocused`
+        // before it forwards one), so the keys were up by construction — and KeyBar has already
+        // dropped them, which makes `keyboardPad` the wrong thing to ask by now.
+        keysWereUp.current = true;
+        zoomT0.current = Date.now();
+        const pos = activePos();
+        setZoomId(idAt(pos));
+        slotSV.value = zoomSlot(pos);
         setSw('drag');
       } else if (sw !== 'drag') return;
       prog.value = zoomProgress(dy, stage.w);
       dragX.value = dx;
     } else if (sw === 'drag') {
-      if (prog.value > ZOOM_COMMIT) commitOpen();
+      if (zoomCommits(dy, Date.now() - zoomT0.current, prog.value)) commitOpen();
       else springBack();
     }
   };
 
   const closeTo = (pos: number) => {
+    setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
     springBack();
   };
@@ -422,6 +464,7 @@ export default function SessionScreen() {
   const selectCard = (pos: number, win: TmuxWindow) => {
     if (sw !== 'open') return;
     console.log('[switcher] select', win.id);
+    ribbonForWindow(win); // as with the bar swipe: under the zoom, not a beat after it
     void selectWindow(win.index); // §7: no haptic on tab select
     closeTo(pos);
   };
@@ -448,6 +491,9 @@ export default function SessionScreen() {
     if (searchRef.current.on) disarmSearch();
     // tmux switches the attached client to it, so the terminal lands on it
     newWindow().catch((error) => console.log('[switcher] new window failed:', error));
+    // Nothing to leave a hole for: this one grows out of the + button, not out of a card, and the
+    // window it belongs to has no card in the grid yet.
+    setZoomId(null);
     // The birth origin: iOS's + circle, or the Android FAB (§4.10) — same growth either way.
     slotSV.value =
       Platform.OS === 'android' ? fabFrame(stage.w, stage.h) : plusFrame(stage.w, stage.h);
@@ -589,24 +635,23 @@ export default function SessionScreen() {
       setOpen('none');
       console.log('[barswipe] start at', pos, 'of', windows.length);
       setPageSwipe({
-        names: windows.map((w) => w.name),
+        names: [...windows.map((w) => w.name), NEW_TAB_NAME],
         pos,
-        count: windows.length,
         target: pos,
         phase: 'drag',
         settled: null,
       });
       roundSV.value = withTiming(1, { duration: 180 });
-      swipeX.value = rubber(dx, pos, windows.length);
+      swipeX.value = rubber(dx, pos, windows.length + 1);
     } else if (phase === 'move') {
       const info = swipeInfo.current;
       if (!info?.live) return;
-      swipeX.value = rubber(dx, info.pos, info.windows.length);
+      swipeX.value = rubber(dx, info.pos, info.windows.length + 1);
     } else {
       const info = swipeInfo.current;
       if (!info?.live) return;
       info.live = false;
-      const target = swipeTarget(dx, Date.now() - info.t0, info.pos, info.windows.length);
+      const target = swipeTarget(dx, Date.now() - info.t0, info.pos, info.windows.length + 1);
       if (target === info.pos) {
         console.log('[barswipe] cancel');
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
@@ -615,14 +660,23 @@ export default function SessionScreen() {
           if (done) runOnJS(clearBarSwipe)();
         });
       } else {
+        // `undefined` at the slot past the last tab — the page sliding in is a window that does
+        // not exist yet, and committing onto it is what births it (user, 2026-08-10).
         const win = info.windows[target];
-        console.log('[barswipe] commit → window', win.index, `(${win.name})`);
+        console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
+        // Its height is the terminal's: change it now, under the slide. A shell that is about to
+        // be born is an idle one.
+        if (win) ribbonForWindow(win);
+        else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
         // Watch for tmux's redraw from here, not from the settle: it usually beats the slide.
         redrawn.current = false;
         onShellData.current = () => {
           redrawn.current = true;
         };
-        void selectWindow(win.index); // tmux redraws the PTY, which replaces the snapshot
+        // Either way tmux redraws the PTY, which replaces the snapshot: `new-window` makes the
+        // window it creates the active one, exactly as `select-window` does.
+        if (win) void selectWindow(win.index);
+        else newWindow().catch((error) => console.log('[barswipe] new window failed:', error));
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
         swipeX.value = withTiming((info.pos - target) * pagePitch(stage.w), SLIDE, (done) => {
           if (done) runOnJS(settleBarSwipe)();
@@ -663,6 +717,17 @@ export default function SessionScreen() {
   }, [fgCommand, fgPid]);
   // A new process instance always arrives compact (design 4a: expansion is never sticky).
   useEffect(() => setRbExpanded(false), [ribbonCore.instance]);
+
+  /** The ribbon for a window we are switching to, named from the list rather than waited for.
+   *  Every switch goes through here — a committed bar swipe, a card tap, a new window — because
+   *  the ribbon's height is the terminal's height, so learning about it a poll beat late means
+   *  the pane reflows after the transition has landed instead of under cover of it. */
+  const ribbonForWindow = (win: TmuxWindow) => {
+    const idle = IDLE_SHELLS.has(win.command);
+    setRibbonCore((c) =>
+      ribbonPoll(c, idle ? null : { command: win.command, pid: null }, Date.now()),
+    );
+  };
 
   const recipe = connected ? selectRecipe(ribbonCore, modes.altScreen) : null;
 
@@ -755,6 +820,9 @@ export default function SessionScreen() {
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
    *  the same three numbers, or their text does not line up with the live terminal's. */
   const paneInsets = { top: padTop, side: padH, bottom: padBottom };
+  /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, and the
+   *  keyboard's own overlap on top, because that layer's bottom is the screen's (see there). */
+  const popBase = barHeight + 6 + keyboardPad;
 
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
@@ -780,12 +848,25 @@ export default function SessionScreen() {
     };
   });
 
+  // The safe-area strips' ground rides the zoom: painted by an animated scrim layer whose
+  // opacity IS the zoom's progress, so the notch and home-bar strips fade crust↔background with
+  // the flight instead of flipping when the phase state lands — flipped at `finishClose` they
+  // held the grid's crust through the whole zoom-in and flashed to background on settle (user,
+  // 2026-08-10). Progress drives every door: open, close, drag-follow, birth.
+  const stripStyle = useAnimatedStyle(() => ({ opacity: prog.value }));
+
   return (
-    // The safe-area strips take the switcher's own ground while it is up: the prototype paints the
-    // grid `inset: 0` in crust, and leaving the root at `background` left a lighter bar above and
-    // below the grid (seen on device in Latte, where base and crust are far apart — T13/T10.3).
-    <SafeAreaView
-      style={[styles.screen, { backgroundColor: sw === 'closed' ? theme.background : theme.scrim }]}>
+    // The root stays `background`; the strip scrim above fades in the switcher's crust ground —
+    // the prototype paints the grid `inset: 0` in crust, and leaving the strips at `background`
+    // left a lighter bar above and below the grid (seen on device in Latte, where base and crust
+    // are far apart — T13/T10.3).
+    <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
+      {/* Yoga positions absolute children off the border box, not the padding box (see the
+          popover layer's note) — so this covers the safe-area strips SafeAreaView pads. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, stripStyle]}
+      />
       {/* No iOS edge-swipe-back on this screen: it pops to the connect screen WITHOUT running
           `leave()`'s disconnect, and a rightward card drag near the left edge triggers it by
           accident (T13). Leaving is `leave()`'s job. */}
@@ -799,7 +880,14 @@ export default function SessionScreen() {
           setStage({ w: width, h: height });
           stageSV.value = { w: width, h: height };
         }}>
-      {sw !== 'closed' && stage !== null && (
+      {/* Mounted from the moment tabs are reachable, not from the moment the zoom starts: a grid
+          of N cards is N snapshot trees of up to MAX_LINES <Text> runs each, and building them on
+          the frame the gesture commits is a stall on that frame — the flight then crosses an empty
+          grid and the cards appear as it lands (user, 2026-08-10). It costs nothing to leave up:
+          the stage wrapper in front of it is opaque and full-screen at rest, so while `closed` this
+          is a static subtree nobody can see or touch. Same condition as the snapshot cache's own
+          `enabled` (T14A) — the content and the views it draws warm together. */}
+      {stage !== null && (sw !== 'closed' || (showTabs && connected)) && (
         <Switcher
           theme={theme}
           stageW={stage.w}
@@ -831,6 +919,8 @@ export default function SessionScreen() {
           onScrollY={(y) => {
             scrollY.current = y;
           }}
+          zoomId={zoomId}
+          fade={alpha}
         />
       )}
 
@@ -845,8 +935,8 @@ export default function SessionScreen() {
           stage !== null && wrapperStyle,
         ]}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
-          screen, so a `bottom` measured from the bar holds whether the keyboard is up or not —
-          absolute children sit inside the padding box, which is exactly the uncovered rect.
+          screen, so it clips and flies with the zoom — but it fills the border box, padding and
+          all (Yoga), so what it covers is the screen and `popBase` adds the keyboard back.
           Its height is the stage's own, fixed, NOT the wrapper's: the wrapper's height is what
           the zoom animates, and a flex child of an animating height does not get clipped by it,
           it gets re-laid-out by it — the terminal area shrinking a little more every frame with
@@ -992,7 +1082,9 @@ export default function SessionScreen() {
           {anchor > 0 && (
             <NeighborPage side={-1} snap={neighbour(-1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
           )}
-          {anchor < cards.length - 1 && (
+          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
+              empty pane the shell about to be born will draw into. */}
+          {anchor < cards.length && (
             <NeighborPage side={1} snap={neighbour(1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
           )}
         </>
@@ -1047,7 +1139,12 @@ export default function SessionScreen() {
       />
 
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the
-          prototype), popovers anchored `popBase` up. */}
+          prototype), popovers anchored `popBase` up. That base carries the keyboard itself:
+          Yoga positions an absolute child off the *border* box, not the padding box (see
+          `positionAbsoluteChild` — border and margin are subtracted, padding is not), so this
+          layer's bottom edge is the screen's, not the stage's padded one. Without the pad in
+          the anchor the popover opened `barHeight` up from the screen bottom — behind the
+          keyboard, invisible (user, 2026-08-10). */}
       {open !== 'none' && (
         <View style={StyleSheet.absoluteFill}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen('none')} />
@@ -1055,13 +1152,13 @@ export default function SessionScreen() {
             <ArrowsPopover
               theme={theme}
               decckm={modes.decckm}
-              bottom={barHeight + 6}
+              bottom={popBase}
               sendBytes={send}
             />
           ) : open === 'clipboard' ? (
             <ClipboardPopover
               theme={theme}
-              bottom={barHeight + 6}
+              bottom={popBase}
               bracketedPaste={modes.bracketedPaste}
               sendBytes={send}
               onClose={() => setOpen('none')}
@@ -1069,7 +1166,7 @@ export default function SessionScreen() {
           ) : (
             <BarMenu
               theme={theme}
-              bottom={barHeight + 6}
+              bottom={popBase}
               onUpload={startUpload}
               onOpenSettings={openSettings}
             />
@@ -1121,11 +1218,13 @@ export default function SessionScreen() {
  *  that window. `null` only for a window nothing has captured yet: a blank page card. */
 type PageSnap = Snap | null;
 
+/** The name pill for the slot past the last tab — the one that births a window on commit. */
+const NEW_TAB_NAME = 'New Tab';
+
 type PageSwipe = {
   names: string[];
-  /** Grid position of the current window at swipe start, and how many there are. */
+  /** Grid position of the current window at swipe start. */
   pos: number;
-  count: number;
   /** Where a commit is headed (= `pos` until the release decides). */
   target: number;
   /** drag = finger down; anim = commit/cancel slide running; settle = snapshot holding the
