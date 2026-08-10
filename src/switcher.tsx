@@ -95,6 +95,10 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
   const pending = useRef(new Map<string, Snap>());
   const frozenRef = useRef(frozen);
   frozenRef.current = frozen;
+  /** Read at the moment a freeze lifts: `live` still true there means the grid is what the
+   *  transition landed in. */
+  const liveRef = useRef(live);
+  liveRef.current = live;
 
   const refresh = useCallback(async (withSnapshots: boolean) => {
     // Newest-started refresh wins: a poll's listWindows can start before a move-window lands on
@@ -115,7 +119,12 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
         if (seq.current !== mine) return;
         const into = frozenRef.current ? pending.current : shown.current;
         caps.forEach((snap, i) => {
-          if (snap !== null) into.set(wins[i].id, snap);
+          if (snap === null) return;
+          // The active window's card is the one the zoom flies into, and the terminal surface
+          // covers exactly that slot for the whole flight — so its content can be replaced now,
+          // unseen, and the crossfade at the end lands on the pane the terminal was showing
+          // rather than on whatever the card held before. Every other card is in plain sight.
+          (wins[i].active ? shown.current : into).set(wins[i].id, snap);
         });
       }
       // A window that is gone takes its snapshot with it — tmux ids never come back, so anything
@@ -128,9 +137,18 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
     }
   }, []);
 
-  // Nothing is moving any more: whatever landed mid-transition becomes what the cards show.
+  // Nothing is moving any more: whatever landed mid-transition becomes what the cards show —
+  // unless what it stopped moving into is the open grid. That instant IS the landing, and a
+  // content swap on that frame is the same jolt as one during the flight. The cards keep what
+  // they have and the live beat updates them a moment later, clear of any motion. Unfreezing
+  // the other way (back to the terminal, or out of a page slide) has no grid on screen to
+  // disturb, so the queue is spent there.
   useEffect(() => {
     if (frozen || pending.current.size === 0) return;
+    if (liveRef.current) {
+      pending.current.clear();
+      return;
+    }
     for (const [id, snap] of pending.current) shown.current.set(id, snap);
     pending.current.clear();
     setCards((prev) => prev.map((c) => ({ ...c, snap: shown.current.get(c.win.id) ?? c.snap })));

@@ -756,8 +756,20 @@ export default function SessionScreen() {
         ]}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
           screen, so a `bottom` measured from the bar holds whether the keyboard is up or not —
-          absolute children sit inside the padding box, which is exactly the uncovered rect. */}
-      <View style={[styles.screen, { paddingBottom: keyboardPad }]}>
+          absolute children sit inside the padding box, which is exactly the uncovered rect.
+          Its height is the stage's own, fixed, NOT the wrapper's: the wrapper's height is what
+          the zoom animates, and a flex child of an animating height does not get clipped by it,
+          it gets re-laid-out by it — the terminal area shrinking a little more every frame with
+          the key bar riding the bottom edge all the way into the card. Then the surface faded
+          and the card underneath showed a pane with no bar and a different vertical scale, which
+          is the jolt at the end of the flight (user, 2026-08-10). Fixed here, the wrapper clips
+          instead: the bar slides out of the bottom of the frame, the pane keeps its geometry the
+          whole way, and the snapshot it lands on is drawing the same rows at the same size. */}
+      <View
+        style={[
+          stage === null ? styles.screen : { height: stage.h },
+          { paddingBottom: keyboardPad },
+        ]}>
       {/* T14: the terminal view's search bar — up exactly while the shared search is armed. The
           same string as the switcher's field; prev/next walk the addon's occurrences; Done
           disarms both views. */}
