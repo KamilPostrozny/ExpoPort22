@@ -643,11 +643,21 @@ function WindowCard({
       ? { borderWidth: 2, borderColor: theme.accent }
       : { borderWidth: 1, borderColor: theme.border };
 
+  // The border is part of the inset, not extra: RN lays a view's content out inside it, so a 2pt
+  // ring plus the full padding put the snapshot 2pt further in than the terminal's own inset lands
+  // — a constant down-and-right step at the crossfade, in both axes, and the last one (device).
+  const shotPad = Math.max(0, SHOT_PAD * u - ring.borderWidth);
+
   // The emulator's cell, shrunk by exactly what the zoom shrinks the stage by — so the card draws
   // the pane the size the flying surface hands over at. The columns are the capture's own, not the
   // window's current width: the two agree except across a resize, and there the live width would
   // cap type that belongs to the older capture.
-  const type = snapshotType(cell, slot.w / stageW, card.snap?.cols ?? card.win.width, slot.w - 2 * SHOT_PAD * u);
+  const type = snapshotType(
+    cell,
+    slot.w / stageW,
+    card.snap?.cols ?? card.win.width,
+    slot.w - 2 * (shotPad + ring.borderWidth),
+  );
   const directory = card.win.path.split('/').filter(Boolean).pop() ?? '/';
 
   // T14: with a scrollback hit, the card shows the grep's context block instead of the live
@@ -679,7 +689,7 @@ function WindowCard({
               height: slot.h,
               borderRadius: 14 * u,
               backgroundColor: theme.background,
-              padding: SHOT_PAD * u,
+              padding: shotPad,
             },
           ]}>
           <Snapshot lines={shownLines} theme={theme} {...type} />
