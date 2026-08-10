@@ -37,8 +37,14 @@ import {
 } from '@/barswipe-model';
 import { pushYank } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
-import KeyBar, { ArrowsPopover, BarMenu, ClipboardPopover, type BarPopover } from '@/keybar';
-import Ribbon from '@/ribbon';
+import KeyBar, {
+  ArrowsPopover,
+  BAR_PAD_TOP,
+  BarMenu,
+  ClipboardPopover,
+  type BarPopover,
+} from '@/keybar';
+import Ribbon, { RIBBON_PAD_TOP } from '@/ribbon';
 import {
   RIBBON_IDLE,
   killCommand,
@@ -142,7 +148,6 @@ export default function SessionScreen() {
    *  cell is what every snapshot's type comes from, so a card draws the pane at the size the
    *  flying surface hands over at; the rows are what the vertical inset is worked out from. */
   const [cell, setCell] = useState({ w: 0, h: 0 });
-  const [rows, setRows] = useState(0);
   /** The terminal area's measured height — the box the rows have to divide into. */
   const [termH, setTermH] = useState(0);
   /** A keyboard we asked for and have not seen yet — the terminal's size stays held until it
@@ -687,15 +692,33 @@ export default function SessionScreen() {
    * the padding takes exactly the remainder away, so the fit that follows lands on the same rows.
    */
   const padH = stage === null ? 0 : termPad(stage.w);
-  const contentH = rows * cell.h;
   // The remainder, halved onto each side — and this is the padding the fit will measure against,
   // so it has to give the rows back exactly the height they came from. Two things make that safe:
   // it is clamped to one row (a stale `rows`, mid-keyboard, cannot ask for an absurd inset), and
   // it is floored to a whole device pixel, so the box can only ever be a rounding hair TOO tall.
   // Rounding it the other way costs a row, which grows the inset by half a row, which costs
   // another — the rows walked 38 → 33 in the log before the floor went in.
-  const slack = contentH > 0 && termH > 0 ? Math.min(Math.max(termH - 2 * padH - contentH, 0), cell.h) : 0;
-  const padV = Math.floor((padH + slack / 2) * PixelRatio.get()) / PixelRatio.get();
+  // Below the last line the eye adds the terminal's inset to whatever the chrome under it keeps
+  // for itself, so the terminal's share is the gap minus that — and the two together come to the
+  // side gap.
+  //
+  // Above, there is no inset of our own at all. `rows × cell` almost never equals the height
+  // available and the remainder has to sit either over the first row or under the last — the bar
+  // is pinned to the bottom, so there is no third place — and both edges were asked to be
+  // minimal (user, 2026-08-10, who pointed out the safe area is already a gap). So the remainder
+  // is the whole top inset, and the safe area is what separates the pane from the notch.
+  // The remainder is worked out from the box and the cell, never from the row count the emulator
+  // reports back: the inset is what that count is measured against, so feeding it back closes a
+  // loop, and the rows jittered 23/24/25/26 inside one keyboard state while it chased itself.
+  // `(box − bottom) mod cell` is the same number, arrived at from the two quantities that do not
+  // depend on it — so the fit lands on exactly the rows this inset was cut for, first time.
+  const chromePad = ribbonEl === null ? BAR_PAD_TOP : RIBBON_PAD_TOP;
+  const padBottom = Math.max(0, padH - chromePad);
+  const px = PixelRatio.get();
+  const padTop =
+    cell.h > 0 && termH > padBottom
+      ? Math.floor(((termH - padBottom) % cell.h) * px) / px
+      : 0;
 
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
@@ -745,7 +768,7 @@ export default function SessionScreen() {
           theme={theme}
           stageW={stage.w}
           cell={cell}
-          padTop={padV}
+          padTop={padTop}
           cards={visibleCards}
           total={cards.length}
           query={search.on ? search.q : ''}
@@ -862,7 +885,12 @@ export default function SessionScreen() {
       <Animated.View
         style={[
           styles.termSlide,
-          { backgroundColor: theme.background, paddingHorizontal: padH, paddingVertical: padV },
+          {
+            backgroundColor: theme.background,
+            paddingHorizontal: padH,
+            paddingTop: padTop,
+            paddingBottom: padBottom,
+          },
           termSlideStyle,
         ]}>
       <TerminalView
@@ -881,7 +909,6 @@ export default function SessionScreen() {
             return;
           }
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
-          setRows(rows);
           setSize(cols, rows);
         }}
         // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:

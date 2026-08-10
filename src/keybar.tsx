@@ -206,6 +206,11 @@ export function Glass({
   );
 }
 
+/** The bar's own top padding (§3). Exported because the terminal above it subtracts this from its
+ *  bottom inset: what the eye reads as the gap under the last line is the two of them added up,
+ *  and it has to come to the same number as the gap at the sides (user, 2026-08-10). */
+export const BAR_PAD_TOP = 5;
+
 /** Every pressable on the bar: dim + shrink while touched, light haptic on touch (not on echo). */
 function Key({
   onPress,
@@ -810,7 +815,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 7,
     paddingHorizontal: SIDE_MARGIN,
-    paddingTop: 5,
+    paddingTop: BAR_PAD_TOP,
     paddingBottom: 6,
   },
   circleSlot: { width: 49, height: 49 },

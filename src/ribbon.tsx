@@ -148,8 +148,13 @@ export default function Ribbon(props: RibbonProps) {
   );
 }
 
+/** The ribbon's own top padding — the same bargain the key bar's makes with the terminal above
+ *  it (see `BAR_PAD_TOP`): when a ribbon is up, it is the ribbon's gap the eye adds to the
+ *  terminal's, not the bar's. */
+export const RIBBON_PAD_TOP = 2;
+
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'center', paddingTop: 2, paddingBottom: 8, paddingHorizontal: 20 },
+  wrap: { alignItems: 'center', paddingTop: RIBBON_PAD_TOP, paddingBottom: 8, paddingHorizontal: 20 },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   pillClosed: { paddingVertical: 8, paddingHorizontal: 13 },
   pillOpen: { paddingVertical: 5, paddingLeft: 13, paddingRight: 7 },
