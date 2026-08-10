@@ -325,7 +325,7 @@ export default function SessionScreen() {
   const [pageSwipe, setPageSwipe] = useState<PageSwipe | null>(null);
   /** Mid-zoom, mid-slide: the moving views must not have their content swapped underneath them. */
   const frozen = (sw !== 'closed' && sw !== 'open') || pageSwipe !== null;
-  const { cards, setCards, refresh } = useSwitcherCards(
+  const { cards, setCards, refresh, refreshCard } = useSwitcherCards(
     showTabs && connected,
     sw !== 'closed',
     frozen,
@@ -442,6 +442,10 @@ export default function SessionScreen() {
     const pos = activePos();
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
+    // The card this zoom-out lands on may be stale (tabs switched since the grid was last up) —
+    // recapture it under the surface, so the crossfade lands on the pane being looked at.
+    const aimed = visibleCards[pos]?.win;
+    if (aimed) void refreshCard(aimed);
     // The bar flick pays the open's one-off costs — the phase render, the holdSize marshal into
     // the webview, the keyboard starting down — frames before its commit, under the finger. The
     // tap paid them all on the flight's first frame, which is the initial hitch (device,
@@ -474,6 +478,8 @@ export default function SessionScreen() {
         const pos = activePos();
         setZoomId(idAt(pos));
         slotSV.value = zoomSlot(pos);
+        const aimed = visibleCards[pos]?.win; // same staleness as the tap door — see openSwitcher
+        if (aimed) void refreshCard(aimed);
         setSw('drag');
       } else if (sw !== 'drag') return;
       prog.value = zoomProgress(dy, stage.w);
@@ -1074,7 +1080,7 @@ export default function SessionScreen() {
         // guard is state, read in the same tick, so nothing slips through; the release re-reports
         // unconditionally, which is what makes dropping a report here safe.
         onResize={async (cols, rows, cellW, cellH, topInset) => {
-          if (sw !== 'closed' || kbSettle) {
+          if ((sw !== 'closed' && sw !== 'closing') || kbSettle) {
             console.log('[terminal] size held, not sent:', cols, '×', rows);
             return;
           }
@@ -1085,7 +1091,16 @@ export default function SessionScreen() {
         // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:
         // the terminal keeps the geometry it had at rest until the grid is gone, so the panes the
         // cards capture are the panes the user was just looking at.
-        holdSize={sw !== 'closed' || kbSettle}
+        //
+        // Except the way back in. A select can change the chrome under the pane — a different
+        // window's ribbon appears or leaves with `ribbonForWindow`, "under the zoom" by design —
+        // and a hold across `closing` deferred that refit to the release settle, ~150ms after the
+        // landing: the pane rewrapping in plain view, on every switch between windows whose
+        // ribbons differ (device, 2026-08-11, screenshots). Fitting and reporting during the
+        // zoom-in puts the reflow back under the flight. The pad is frozen and the stage height
+        // is the wrapper's animation, not the box's — the only mid-`closing` resize possible is
+        // that chrome change.
+        holdSize={(sw !== 'closed' && sw !== 'closing') || kbSettle}
         // Every boot, not just the first: iOS reaps a backgrounded webview, and the one that comes
         // back is empty even though the shell behind it never went anywhere.
         onBoot={async () => {

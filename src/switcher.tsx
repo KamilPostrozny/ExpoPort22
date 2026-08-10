@@ -137,6 +137,23 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
     }
   }, []);
 
+  /** One window's capture straight into `shown`, frozen or not — for the card the zoom-out aims
+   *  at, which the flying surface covers for the whole flight: replaced unseen, the crossfade
+   *  lands on the pane the terminal is showing rather than on however that window looked the
+   *  last time the grid was up (stale exactly when tabs were switched in between). This is the
+   *  one piece of the old open-beat refresh worth its cost — a single capture and a ≤44-line
+   *  parse, not the N-capture burst that stuttered the flight (device, 2026-08-11). */
+  const refreshCard = useCallback(async (win: TmuxWindow) => {
+    try {
+      const text = await capturePane(win.index);
+      const snap = { lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width };
+      shown.current.set(win.id, snap);
+      setCards((prev) => prev.map((c) => (c.win.id === win.id ? { ...c, snap } : c)));
+    } catch (error) {
+      console.log('[switcher] active capture failed:', error); // the card keeps its last snapshot
+    }
+  }, []);
+
   // Nothing is moving any more: whatever landed mid-transition becomes what the cards show —
   // unless what it stopped moving into is the open grid. That instant IS the landing, and a
   // content swap on that frame is the same jolt as one during the flight. The cards keep what
@@ -173,7 +190,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
     return () => clearInterval(timer);
   }, [live, refresh]);
 
-  return { cards, setCards, refresh };
+  return { cards, setCards, refresh, refreshCard };
 }
 
 /* --- T14: the scrollback half of the search --- */
