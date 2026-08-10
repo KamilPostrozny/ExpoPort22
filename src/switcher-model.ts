@@ -14,14 +14,20 @@ export const DESIGN_W = 402;
 
 export type Frame = { x: number; y: number; w: number; h: number };
 
-/** Card 173×240 at 20pt margins, 16pt gutter, 298pt row pitch (240 card + name + directory),
- *  66pt of headroom above the grid — all from the prototype, as fractions of its width. */
+/** Card 173×240 at 20pt margins, 16pt gutter, 298pt row pitch (240 card + name + directory) —
+ *  all from the prototype, as fractions of its width.
+ *
+ *  The prototype's 66pt band above the grid is *the device frame's status bar* (`ios-frame.jsx`
+ *  pads `21px 24px 19px`), not headroom the app draws. On a real phone SafeAreaView already
+ *  insets past the notch, so copying the 66 spent it twice: the grid began ~120pt down and the
+ *  scroll view's clip edge sat that far below the crust's top, which reads as an invisible thing
+ *  the cards disappear under (device, T13/T10.3). 12pt of breathing room is what is left. */
 const CARD_W = 173 / DESIGN_W;
 const CARD_H = 240 / DESIGN_W;
 const MARGIN = 20 / DESIGN_W;
 const COL_PITCH = 189 / DESIGN_W;
 const ROW_PITCH = 298 / DESIGN_W;
-const GRID_TOP = 66 / DESIGN_W;
+const GRID_TOP = 12 / DESIGN_W;
 /** The card's own corner radius (14pt at design width). */
 const CARD_R = 14 / DESIGN_W;
 
