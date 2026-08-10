@@ -41,7 +41,7 @@ export function gridTop(width: number): number {
  * emulator draws from the very top-left of its box, so the text sat a whole inset higher and
  * further left in the flying surface than in the card it landed on.
  */
-export const TERM_PAD = 12;
+export const TERM_PAD = 8;
 
 export function termPad(width: number): number {
   return (TERM_PAD / DESIGN_W) * width;

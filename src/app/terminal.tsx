@@ -9,6 +9,7 @@ import {
   BackHandler,
   Dimensions,
   Keyboard,
+  PixelRatio,
   Platform,
   Pressable,
   StyleSheet,
@@ -137,9 +138,13 @@ export default function SessionScreen() {
    * event to ResizeObserver is ~25-35ms, plus a frame to paint).
    */
   const [keyboardPad, setKeyboardPad] = useState(0);
-  /** The emulator's measured cell (see TerminalProps.onResize). Every snapshot's type comes from
-   *  this, so a card draws the pane at the size the flying surface hands over at. */
+  /** The emulator's measured cell and the rows it settled on (see TerminalProps.onResize). The
+   *  cell is what every snapshot's type comes from, so a card draws the pane at the size the
+   *  flying surface hands over at; the rows are what the vertical inset is worked out from. */
   const [cell, setCell] = useState({ w: 0, h: 0 });
+  const [rows, setRows] = useState(0);
+  /** The terminal area's measured height — the box the rows have to divide into. */
+  const [termH, setTermH] = useState(0);
   /** A keyboard we asked for and have not seen yet — the terminal's size stays held until it
    *  lands, so the host hears the geometry once. Self-clearing: a focus that never raises one
    *  (hardware keyboard, a refusal) must not hold the size for the rest of the session. */
@@ -672,6 +677,26 @@ export default function SessionScreen() {
    *  terminal area only, so the ribbon's own caps stay tappable. */
   const rbScrim = recipe !== null && RECIPES[recipe.id].collapsible && rbExpanded;
 
+  /* --- the pane's insets ---
+   *
+   * Sideways it is the plain gap. Vertically it is the gap PLUS half of whatever the rows could
+   * not divide the box into: `rows × cell` almost never equals the height available, and the
+   * remainder — up to a whole row, 12.6pt of it on device — used to fall entirely below the last
+   * line, which is why the gap to the key bar read as three times the one at the sides (user,
+   * 2026-08-10). Split, it is the same gap above and below. It settles rather than oscillates:
+   * the padding takes exactly the remainder away, so the fit that follows lands on the same rows.
+   */
+  const padH = stage === null ? 0 : termPad(stage.w);
+  const contentH = rows * cell.h;
+  // The remainder, halved onto each side — and this is the padding the fit will measure against,
+  // so it has to give the rows back exactly the height they came from. Two things make that safe:
+  // it is clamped to one row (a stale `rows`, mid-keyboard, cannot ask for an absurd inset), and
+  // it is floored to a whole device pixel, so the box can only ever be a rounding hair TOO tall.
+  // Rounding it the other way costs a row, which grows the inset by half a row, which costs
+  // another — the rows walked 38 → 33 in the log before the floor went in.
+  const slack = contentH > 0 && termH > 0 ? Math.min(Math.max(termH - 2 * padH - contentH, 0), cell.h) : 0;
+  const padV = Math.floor((padH + slack / 2) * PixelRatio.get()) / PixelRatio.get();
+
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
   // compensated for RN's centre-origin scale — all from the one tested function.
@@ -720,6 +745,7 @@ export default function SessionScreen() {
           theme={theme}
           stageW={stage.w}
           cell={cell}
+          padTop={padV}
           cards={visibleCards}
           total={cards.length}
           query={search.on ? search.q : ''}
@@ -829,14 +855,14 @@ export default function SessionScreen() {
       {/* The terminal area: the flex region above the bar. During a bar swipe the live terminal
           slides inside it as a rounded page card, with the neighbour snapshots as its siblings —
           the bar itself stays put, showing the name pills. */}
-      <View style={styles.termArea}>
+      <View style={styles.termArea} onLayout={(e) => setTermH(e.nativeEvent.layout.height)}>
       {/* The pane's own breathing room. It is also what makes the zoom's crossfade seamless: a
           card's snapshot is inset by exactly this much seen through the zoom (switcher-model
           derives one from the other), so the text does not move when the surface hands over. */}
       <Animated.View
         style={[
           styles.termSlide,
-          { backgroundColor: theme.background, padding: stage === null ? 0 : termPad(stage.w) },
+          { backgroundColor: theme.background, paddingHorizontal: padH, paddingVertical: padV },
           termSlideStyle,
         ]}>
       <TerminalView
@@ -855,6 +881,7 @@ export default function SessionScreen() {
             return;
           }
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
+          setRows(rows);
           setSize(cols, rows);
         }}
         // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:

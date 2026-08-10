@@ -211,6 +211,11 @@ export type SwitcherProps = {
   stageW: number;
   /** The emulator's measured cell — what every snapshot's type is derived from (`snapshotType`). */
   cell: { w: number; h: number };
+  /** The terminal's own top inset, in stage points. Sideways a card's inset is a constant share
+   *  of the stage (`SHOT_PAD`), but vertically the terminal's inset absorbs half the row
+   *  remainder and so moves with the layout — and the card's has to move with it, or the text
+   *  steps down at the crossfade by whatever the difference is. */
+  padTop: number;
   /** Already narrowed by the screen while the search is armed. */
   cards: Card[];
   /** The unfiltered count — the "N of M Tabs" label's M. */
@@ -362,6 +367,7 @@ export default function Switcher(props: SwitcherProps) {
               theme={theme}
               card={card}
               cell={props.cell}
+              padTop={props.padTop}
               hit={props.hits[card.win.id]}
               query={nq}
               slot={slotFrame(pos, stageW)}
@@ -462,6 +468,7 @@ function WindowCard({
   theme,
   card,
   cell,
+  padTop,
   hit,
   query,
   slot,
@@ -479,6 +486,8 @@ function WindowCard({
   theme: Theme;
   card: Card;
   cell: { w: number; h: number };
+  /** The terminal's top inset in stage points; through the zoom it is this card's. */
+  padTop: number;
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
    *  armed, so the card shows the first occurrence instead of the pane's bottom. */
   hit: SearchHit | null | undefined;
@@ -647,6 +656,9 @@ function WindowCard({
   // ring plus the full padding put the snapshot 2pt further in than the terminal's own inset lands
   // — a constant down-and-right step at the crossfade, in both axes, and the last one (device).
   const shotPad = Math.max(0, SHOT_PAD * u - ring.borderWidth);
+  // Vertically the terminal's inset is not a constant (it swallows half the row remainder), so
+  // the card's is that one seen through the zoom rather than a number of its own.
+  const shotPadTop = Math.max(0, padTop * (slot.w / stageW) - ring.borderWidth);
 
   // The emulator's cell, shrunk by exactly what the zoom shrinks the stage by — so the card draws
   // the pane the size the flying surface hands over at. The columns are the capture's own, not the
@@ -689,7 +701,9 @@ function WindowCard({
               height: slot.h,
               borderRadius: 14 * u,
               backgroundColor: theme.background,
-              padding: shotPad,
+              paddingHorizontal: shotPad,
+              paddingTop: shotPadTop,
+              paddingBottom: shotPad,
             },
           ]}>
           <Snapshot lines={shownLines} theme={theme} {...type} />
