@@ -9,7 +9,6 @@ import {
   BackHandler,
   Dimensions,
   Keyboard,
-  PixelRatio,
   Platform,
   Pressable,
   StyleSheet,
@@ -148,8 +147,9 @@ export default function SessionScreen() {
    *  cell is what every snapshot's type comes from, so a card draws the pane at the size the
    *  flying surface hands over at; the rows are what the vertical inset is worked out from. */
   const [cell, setCell] = useState({ w: 0, h: 0 });
-  /** The terminal area's measured height — the box the rows have to divide into. */
-  const [termH, setTermH] = useState(0);
+  /** The inset the terminal took above its first row — the row remainder, which it works out
+   *  itself (see TerminalProps.onResize). The cards need it to aim the zoom's crossfade. */
+  const [padTop, setPadTop] = useState(0);
   /** A keyboard we asked for and have not seen yet — the terminal's size stays held until it
    *  lands, so the host hears the geometry once. Self-clearing: a focus that never raises one
    *  (hardware keyboard, a refusal) must not hold the size for the rest of the session. */
@@ -699,26 +699,14 @@ export default function SessionScreen() {
   // Rounding it the other way costs a row, which grows the inset by half a row, which costs
   // another — the rows walked 38 → 33 in the log before the floor went in.
   // Below the last line the eye adds the terminal's inset to whatever the chrome under it keeps
-  // for itself, so the terminal's share is the gap minus that — and the two together come to the
-  // side gap.
-  //
-  // Above, there is no inset of our own at all. `rows × cell` almost never equals the height
-  // available and the remainder has to sit either over the first row or under the last — the bar
-  // is pinned to the bottom, so there is no third place — and both edges were asked to be
-  // minimal (user, 2026-08-10, who pointed out the safe area is already a gap). So the remainder
-  // is the whole top inset, and the safe area is what separates the pane from the notch.
-  // The remainder is worked out from the box and the cell, never from the row count the emulator
-  // reports back: the inset is what that count is measured against, so feeding it back closes a
-  // loop, and the rows jittered 23/24/25/26 inside one keyboard state while it chased itself.
-  // `(box − bottom) mod cell` is the same number, arrived at from the two quantities that do not
-  // depend on it — so the fit lands on exactly the rows this inset was cut for, first time.
+  // for itself — the key bar's 5pt, the ribbon's 2 — so the terminal's share is the gap minus
+  // that, and the two together come to the gap at the sides. Above there is no inset of ours at
+  // all: the row remainder goes there, and the terminal applies it itself, inside its own layout
+  // pass (see TerminalProps.onResize). Worked out here it needed a measured height, which only
+  // arrives after a layout — so every keyboard open laid out once wrong and once right, which is
+  // the bounce (user, 2026-08-10).
   const chromePad = ribbonEl === null ? BAR_PAD_TOP : RIBBON_PAD_TOP;
   const padBottom = Math.max(0, padH - chromePad);
-  const px = PixelRatio.get();
-  const padTop =
-    cell.h > 0 && termH > padBottom
-      ? Math.floor(((termH - padBottom) % cell.h) * px) / px
-      : 0;
 
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
@@ -878,7 +866,7 @@ export default function SessionScreen() {
       {/* The terminal area: the flex region above the bar. During a bar swipe the live terminal
           slides inside it as a rounded page card, with the neighbour snapshots as its siblings —
           the bar itself stays put, showing the name pills. */}
-      <View style={styles.termArea} onLayout={(e) => setTermH(e.nativeEvent.layout.height)}>
+      <View style={styles.termArea}>
       {/* The pane's own breathing room. It is also what makes the zoom's crossfade seamless: a
           card's snapshot is inset by exactly this much seen through the zoom (switcher-model
           derives one from the other), so the text does not move when the surface hands over. */}
@@ -888,7 +876,6 @@ export default function SessionScreen() {
           {
             backgroundColor: theme.background,
             paddingHorizontal: padH,
-            paddingTop: padTop,
             paddingBottom: padBottom,
           },
           termSlideStyle,
@@ -903,12 +890,13 @@ export default function SessionScreen() {
         // — long enough for one report to get out (a 25 on every tabs-tap open, device). This
         // guard is state, read in the same tick, so nothing slips through; the release re-reports
         // unconditionally, which is what makes dropping a report here safe.
-        onResize={async (cols, rows, cellW, cellH) => {
+        onResize={async (cols, rows, cellW, cellH, topInset) => {
           if (sw !== 'closed' || kbSettle) {
             console.log('[terminal] size held, not sent:', cols, '×', rows);
             return;
           }
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
+          setPadTop(topInset);
           setSize(cols, rows);
         }}
         // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:

@@ -67,7 +67,13 @@ export type TerminalProps = {
    *  of it, so 48 cells occupy 374 of 395pt on device. A snapshot that spreads the same columns
    *  across the whole box therefore draws ~6% large — a step in size at the zoom's crossfade, which
    *  two photographs of the same card caught (2026-08-10). */
-  onResize: (cols: number, rows: number, cellW: number, cellH: number) => Promise<void>;
+  onResize: (
+    cols: number,
+    rows: number,
+    cellW: number,
+    cellH: number,
+    padTop: number,
+  ) => Promise<void>;
   /** Hold the size where it is: no fit, no report, until it goes false again (then one of each).
    *  §4.5's zoom animates the stage's *height*, and the keyboard leaves on the way in — so an
    *  unheld transition walks the PTY through half a dozen row counts (26 → 41 → 29 → 26 on
@@ -376,7 +382,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // terminal up the screen: the box shrank with the layout while xterm kept drawing the old row
     // count, so the bottom lines sat under the keyboard for the length of the delay (T14, device).
     let settle: ReturnType<typeof setTimeout>;
-    let reported = { cols: 0, rows: 0 };
+    let reported = { cols: 0, rows: 0, padTop: -1 };
     // Only a size the host has not been told about is worth a round trip. Without this the same
     // `cols × rows` goes back on every fit, and since the answer re-renders the native side — which
     // re-marshals the props, which re-runs the effect below — it never stops.
@@ -387,19 +393,42 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       if (screen === null || term.cols === 0 || term.rows === 0) return { w: 0, h: 0 };
       return { w: screen.clientWidth / term.cols, h: screen.clientHeight / term.rows };
     };
+    // Whole rows, and the remainder above the first one rather than below the last — the gap
+    // under the last line is the key bar's to fill, and it already has one (user, 2026-08-10).
+    // It is done here, inside the document, because the box is known here: worked out on the
+    // React side it took a second layout pass to settle, which is a visible bounce every time
+    // the keyboard opens. Nothing is lost to it — the rows are counted before the inset is
+    // applied, so the inset is exactly what they could not fill.
+    let padTop = 0;
+    const fitRows = () => {
+      const el = host.current;
+      if (el === null) return fitAddon.fit();
+      el.style.paddingTop = '0px';
+      const box = el.clientHeight;
+      fitAddon.fit();
+      const { h } = cell();
+      padTop = h > 0 ? box % h : 0;
+      el.style.paddingTop = `${padTop}px`;
+      fitAddon.fit();
+    };
     const report = () => {
-      if (term.cols === reported.cols && term.rows === reported.rows) return;
-      reported = { cols: term.cols, rows: term.rows };
+      if (term.cols === reported.cols && term.rows === reported.rows && padTop === reported.padTop)
+        return;
+      reported = { cols: term.cols, rows: term.rows, padTop };
       const { w, h } = cell();
-      console.log('[terminal] size', term.cols, '×', term.rows, 'cell', w.toFixed(2), '×', h.toFixed(2));
-      latest.current.onResize(term.cols, term.rows, w, h);
+      console.log(
+        '[terminal] size', term.cols, '×', term.rows,
+        'cell', w.toFixed(2), '×', h.toFixed(2),
+        'padTop', padTop.toFixed(2),
+      );
+      latest.current.onResize(term.cols, term.rows, w, h, padTop);
     };
     // `force` re-reports even a size the host was already told about: the only caller is the
     // release from a hold, and during that hold a report may have been dropped in flight (see
     // the screen's own guard) — so what the host last heard is not knowable from here.
     const resize = (force?: boolean) => {
-      if (force) reported = { cols: 0, rows: 0 };
-      fitAddon.fit();
+      if (force) reported = { cols: 0, rows: 0, padTop: -1 };
+      fitRows();
       report();
     };
     resizer.current = resize;
@@ -427,7 +456,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     };
     const observer = new ResizeObserver(() => {
       if (latest.current.holdSize) return; // the zoom's own height animation — see `holdSize`
-      fitAddon.fit();
+      fitRows();
       clearTimeout(settle);
       const since = Date.now() - lastReport;
       if (since >= 150) flush();
