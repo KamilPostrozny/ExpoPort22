@@ -106,9 +106,6 @@ export type KeyBarProps = {
   /** T9's derived "tabs available": tmux present AND conf applied (§4.5). False renders no tabs
    *  circle at all — no tmux (or a toggled-off config) is silence, not a message (§7). */
   showTabs: boolean;
-  /** The live tmux window index (T9's ~2s poll; null while not attached). The badge falls back
-   *  to the design default `1`. */
-  windowIndex?: number;
   /** §4.6: an upload in flight. The ⋯ circle tints accent and goes inert — the whole progress
    *  UI. Both flows flip it (quick-attach included, via `useUploadBusy`). */
   sending?: boolean;
@@ -527,13 +524,10 @@ export default function KeyBar(props: KeyBarProps) {
               <Glass theme={theme} radius={BAR_RADIUS} style={styles.circle}>
                 <SymbolView
                   name="square.on.square"
-                  size={19}
+                  size={24}
                   tintColor={theme.foreground}
                   fallback={<Text style={keyLabel}>▣</Text>}
                 />
-                <Text style={[styles.badge, { color: theme.foreground }]}>
-                  {props.windowIndex ?? 1}
-                </Text>
               </Glass>
             </Key>
           )}
@@ -824,12 +818,6 @@ const styles = StyleSheet.create({
   },
   circleSlot: { width: 49, height: 49 },
   circle: { width: 49, height: 49, alignItems: 'center', justifyContent: 'center' },
-  badge: {
-    position: 'absolute',
-    fontSize: 10,
-    fontWeight: '600',
-    transform: [{ translateX: 3 }, { translateY: 3 }],
-  },
   pill: { flex: 1, height: 49 },
   keysRow: {
     flex: 1,

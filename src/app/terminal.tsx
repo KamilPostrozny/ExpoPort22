@@ -1233,7 +1233,6 @@ export default function SessionScreen() {
         // Settings toggle going off takes the button with it, and a host without tmux never
         // shows one (§7: silence, not a message).
         showTabs={showTabs}
-        windowIndex={tmux.windowIndex ?? undefined}
         onTabsTap={openSwitcher}
         onSwitcherDrag={onSwitcherDrag}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
