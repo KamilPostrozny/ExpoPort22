@@ -36,6 +36,7 @@ import {
   takeNotches,
   type ModeSignal,
 } from '@/scroll-model';
+import { MONO_ADVANCE } from '@/switcher-model';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
 import { MONO, type Theme } from '@/theme';
 // (`ModeSignal` cannot be re-exported from here: a 'use dom' module allows only its default
@@ -155,6 +156,14 @@ const CSS = `
      looks lighter than the terminal it hands over to. 'antialiased' is grayscale AA — the native
      side's rendering, asked for on the side that can be told. Inherited, so body carries it. */
   body { -webkit-font-smoothing: antialiased; }
+  /* xterm seats glyphs on its cell by setting a letter-spacing of the difference between that cell
+     and the font's own advance, and its cell is the row width divided by the columns — a rounded
+     number, so the spacing is a fraction of a pixel and the advance stops being a whole one. With
+     'pixelExactSize' above choosing a size whose natural advance IS a whole device pixel, that
+     correction is the only thing left putting a fraction back, and a fraction is what the two
+     renderers round differently. Nothing is lost by dropping it: it corrects a rounding this file
+     has already removed. Marked important because xterm writes it inline, and inline loses to it. */
+  .xterm .xterm-rows { letter-spacing: 0 !important; }
   /* Long-press has to reach the system edit menu (§4.2), so the rows stay real selectable text —
      xterm turns selection off because it drives its own from mouse events, which a finger is not.
      The whole chain down to the rows has to allow it: WebKit starts the gesture from the container
@@ -185,17 +194,41 @@ function fontReport(fontSize: number): string {
   /** `font` is a full CSS font shorthand, so a weight can sit in front of the size. */
   const width = (font: string, text: string) => {
     context.font = font;
-    return context.measureText(text).width.toFixed(2);
+    return (context.measureText(text).width / text.length).toFixed(4);
   };
   const regular = `${fontSize}px ${MONO}`;
   return (
-    `font ${MONO} loaded=${loaded} bold=${bold} cell=${width(regular, 'M')} ` +
+    `font ${MONO} loaded=${loaded} bold=${bold} size=${fontSize.toFixed(4)} ` +
+    `dpr=${window.devicePixelRatio} cell=${width(regular, 'M')} ` +
+    `cell100=${width(regular, 'M'.repeat(100))} ` +
     `bold-cell=${width(`bold ${regular}`, 'M')} ` +
     `nerd-glyph=${width(regular, '')} system-mono-cell=${width(`${fontSize}px monospace`, 'M')}`
   );
 }
 
-export default function TerminalView({ theme, fontSize, holdSize, ref, ...handlers }: TerminalProps) {
+/**
+ * The requested size, nudged until one cell is a whole number of device pixels.
+ *
+ * A cell of 23.353 device pixels is a cell whose left edge lands on a different fraction of a
+ * pixel in every column, and the two renderers do not round that fraction the same way: one seats
+ * each glyph on a whole pixel, the other draws it where the arithmetic put it. Neither is wrong
+ * and neither is configurable. The disagreement peaks wherever the running fraction crosses a
+ * half — about every third column at that pitch — so a handful of letters per line came out
+ * crisper in the pane than in the snapshot beside it, which reads as bolder (user, 2026-08-11;
+ * the residual between the two renderings of one line is flat everywhere except `e`, `3`, `2` and
+ * a full stop, spaced three columns apart).
+ *
+ * A whole-pixel cell has no fraction to disagree about. At 3x the advance is `size * 0.6 * 3`, so
+ * the sizes that qualify are 5/9pt apart and the nudge is never more than 2/9 of a point — under
+ * a fiftieth of the size, which is not a size the eye can see, unlike the letters it fixes.
+ */
+function pixelExactSize(size: number, dpr: number): number {
+  const perPixel = MONO_ADVANCE * dpr;
+  return Math.max(1, Math.round(size * perPixel)) / perPixel;
+}
+
+export default function TerminalView({ theme, fontSize: asked, holdSize, ref, ...handlers }: TerminalProps) {
+  const fontSize = pixelExactSize(asked, window.devicePixelRatio || 1);
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
