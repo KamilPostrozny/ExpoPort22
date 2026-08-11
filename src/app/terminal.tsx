@@ -720,7 +720,10 @@ export default function SessionScreen() {
     const mine = ++selectSeq.current; // a second switch mid-wait supersedes this one
     let frames = 0;
     let base = bytesAtStart;
-    let lastFrame = base;
+    // What has arrived ALREADY, not the baseline: "quiet for a frame" about a burst that ended
+    // before this wait was armed is answerable on the first frame, and pinning this to `base`
+    // spent one doing nothing. Identical for a caller that arms at the switch, where they agree.
+    let lastFrame = dataSeq.current;
     let fitted = !chromeChanges;
     const step = () => {
       if (selectSeq.current !== mine) return;
@@ -963,6 +966,15 @@ export default function SessionScreen() {
   const settleBarSwipe = () => {
     probe('slide landed');
     const chromeChanges = pendingRibbon.current?.chrome === true;
+    // Nothing to cover. The overlay hides two things — a refit, and a redraw that has not landed
+    // yet — and on a same-chrome hop over a LAN neither is outstanding by the time the slide is
+    // home (the trace: redraw complete at +35ms against a ~300ms slide). Mounting it anyway costs
+    // a React commit and the wait's own frames AFTER the motion has already stopped, which is the
+    // beat between the card settling and the tab being live (user, 2026-08-11).
+    if (!chromeChanges && dataSeq.current > bytesAtCommit.current) {
+      clearBarSwipe();
+      return;
+    }
     // The overlay covers the terminal until the host has finished redrawing at the size the pane
     // lands at. Its insets FREEZE at this commit's values: the ribbon applied below changes
     // barHeight a layout later, and an overlay tracking the live insets reflowed in plain view
