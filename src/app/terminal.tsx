@@ -687,7 +687,21 @@ export default function SessionScreen() {
     );
   };
 
+  /** The committed hop's ribbon change, held until the settle overlay covers the terminal: the
+   *  swap changes the bar's height and therefore the card's padding, and the webview refit that
+   *  follows repainted the very card the slide was moving — the hitch on every ribboned↔bare
+   *  hop, still visible even collapsed to a single refit (probe trace + user, 2026-08-11). */
+  const pendingRibbon = useRef<{ win: TmuxWindow | null } | null>(null);
+  const applyPendingRibbon = () => {
+    const pending = pendingRibbon.current;
+    if (pending === null) return;
+    pendingRibbon.current = null;
+    if (pending.win) ribbonForWindow(pending.win);
+    else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
+  };
+
   const clearBarSwipe = () => {
+    applyPendingRibbon();
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
     // start of this one: a capture per window is an exec burst and a parse of every answer, and
     // on the JS thread at the instant the finger goes down that is a stutter in the slide it is
@@ -703,14 +717,19 @@ export default function SessionScreen() {
   };
 
   const settleBarSwipe = () => {
+    const pending = pendingRibbon.current !== null;
     // The redraw already landed while the slide was running: the terminal underneath is the new
-    // window, so there is nothing to hold over it.
-    if (redrawn.current) {
+    // window, so there is nothing to hold over it — UNLESS a ribbon change is pending, whose
+    // refit the overlay exists to cover (a bare clear revealed the terminal mid-reflow — the
+    // "even worse" of the first deferral attempt, user, 2026-08-11).
+    if (redrawn.current && !pending) {
       clearBarSwipe();
       return;
     }
-    // Otherwise the overlay covers the terminal until the redraw arrives; the cap is only for a
-    // redraw that never does.
+    // The overlay covers the terminal until the redraw arrives; the cap is only for a redraw
+    // that never does. Its insets FREEZE at this commit's values: the ribbon applied below
+    // changes barHeight a layout later, and an overlay tracking the live insets reflowed in
+    // plain view (same first attempt).
     setPageSwipe((s) =>
       s === null
         ? s
@@ -719,10 +738,15 @@ export default function SessionScreen() {
             phase: 'settle',
             pos: s.target,
             settled: cards[s.target]?.snap ?? null,
+            settleInsets: paneInsets,
           },
     );
+    // Same commit as the overlay's mount: the refit this triggers runs entirely under it.
+    applyPendingRibbon();
     roundSV.value = withTiming(0, { duration: 200 });
-    onShellData.current = clearBarSwipe;
+    // With a refit in flight its SIGWINCH echo is the first byte back — ending the hold on it
+    // revealed the terminal before tmux's post-resize redraw had painted. The cap is the hold.
+    if (!pending) onShellData.current = clearBarSwipe;
     const cap = setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
     settleCap.current = cap;
   };
@@ -751,6 +775,7 @@ export default function SessionScreen() {
         target: pos,
         phase: 'drag',
         settled: null,
+        settleInsets: null,
       });
       roundSV.value = 1; // the rounding itself rides the travel — see termSlideStyle
       swipeX.value = rubber(dx, pos, windows.length + 1);
@@ -773,10 +798,8 @@ export default function SessionScreen() {
         // not exist yet, and committing onto it is what births it (user, 2026-08-10).
         const win = info.windows[target];
         console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
-        // Its height is the terminal's: change it now, under the slide. A shell that is about to
-        // be born is an idle one.
-        if (win) ribbonForWindow(win);
-        else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
+        // Held for the settle overlay — see pendingRibbon.
+        pendingRibbon.current = { win: win ?? null };
         // Watch for tmux's redraw from here, not from the settle: it usually beats the slide.
         redrawn.current = false;
         onShellData.current = () => {
@@ -1280,7 +1303,7 @@ export default function SessionScreen() {
             stageW={stage.w}
             theme={theme}
             cell={cell}
-            insets={paneInsets}
+            insets={pageSwipe.settleInsets ?? paneInsets}
           />
           <Animated.View
             pointerEvents="none"
@@ -1440,6 +1463,9 @@ type PageSwipe = {
    *  just left for the length of the settle, which is a second flicker of the wrong name before
    *  the keys return (user, 2026-08-10). */
   settled: PageSnap;
+  /** The pane insets AS OF the settle's mount — the deferred ribbon swap changes the live ones
+   *  a layout later, and the overlay must not move with them (see settleBarSwipe). */
+  settleInsets: { top: number; side: number; bottom: number } | null;
 };
 
 /** The captured pane at page size — T10's Snapshot renderer, fitted to the pane's true columns
