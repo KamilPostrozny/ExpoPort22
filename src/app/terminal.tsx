@@ -869,10 +869,16 @@ export default function SessionScreen() {
   const fgCommand = tmux.foreground?.command ?? null;
   const fgPid = tmux.foreground?.pid ?? null;
   useEffect(() => {
+    // Not while anything is sliding: after a committed hop the very next display-message answer
+    // carries the NEW window's foreground, and this flipped the ribbon ~100ms into every slide
+    // — the exact refit the settle deferral was built to hold (probe trace, 2026-08-11).
+    // `ribbonForWindow` already set the right ribbon under the settle's cover; when the freeze
+    // lifts this re-applies the latest poll, a no-op whenever the two agree.
+    if (frozen) return;
     setRibbonCore((c) =>
       ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
     );
-  }, [fgCommand, fgPid]);
+  }, [fgCommand, fgPid, frozen]);
   // A new process instance always arrives compact (design 4a: expansion is never sticky).
   useEffect(() => setRbExpanded(false), [ribbonCore.instance]);
 
