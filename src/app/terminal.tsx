@@ -908,8 +908,12 @@ export default function SessionScreen() {
   /** The committed hop's ribbon change, held until the settle overlay covers the terminal: the
    *  swap changes the bar's height and therefore the card's padding, and the webview refit that
    *  follows repainted the very card the slide was moving — the hitch on every ribboned↔bare
-   *  hop, still visible even collapsed to a single refit (probe trace + user, 2026-08-11). */
-  const pendingRibbon = useRef<{ win: TmuxWindow | null } | null>(null);
+   *  hop, still visible even collapsed to a single refit (probe trace + user, 2026-08-11).
+   *
+   *  `chrome` is whether that swap changes the bar's HEIGHT (the same predicate `selectCard`
+   *  gates its refit wait on) — hopping between two plain shells, or between two ribboned ones,
+   *  moves nothing and there is no refit to cover. */
+  const pendingRibbon = useRef<{ win: TmuxWindow | null; chrome: boolean } | null>(null);
   const applyPendingRibbon = () => {
     const pending = pendingRibbon.current;
     if (pending === null) return;
@@ -937,7 +941,7 @@ export default function SessionScreen() {
   };
 
   const settleBarSwipe = () => {
-    const pending = pendingRibbon.current !== null;
+    const pending = pendingRibbon.current?.chrome === true;
     // The redraw already landed while the slide was running: the terminal underneath is the new
     // window, so there is nothing to hold over it — UNLESS a ribbon change is pending, whose
     // refit the overlay exists to cover (a bare clear revealed the terminal mid-reflow — the
@@ -1029,7 +1033,9 @@ export default function SessionScreen() {
         const win = info.windows[target];
         console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
         // Held for the settle overlay — see pendingRibbon.
-        pendingRibbon.current = { win: win ?? null };
+        // A window we are about to create runs an idle shell, so it counts as one here.
+        const idle = win ? IDLE_SHELLS.has(win.command) : true;
+        pendingRibbon.current = { win: win ?? null, chrome: (recipe !== null) === idle };
         // Watch for tmux's redraw from here, not from the settle: it usually beats the slide.
         redrawn.current = false;
         onShellData.current = () => {
