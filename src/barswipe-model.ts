@@ -86,15 +86,6 @@ export function slideMs(distance: number): number {
  *  2026-08-10) — 320ms of slide and then a third of a second of nothing. */
 export const SETTLE_HOLD_MS = 350;
 
-/** The hold for a hop whose ribbon differs — the bar-height refit reaches the webview as a
- *  two-step resize (WKWebView's viewport lags the native box: a stale-height fit first, the
- *  corrected one ~150ms later), and the corrected fit's tmux redraw lands right at the 350ms
- *  cap, painting the "hop" at the reveal (user, 2026-08-11). 650 covers refit two, its redraw
- *  round-trip and a margin.
- *  ponytail: a bigger constant, not quiescence detection — if a slow LAN ever outruns it, gate
- *  the clear on the last size report instead. */
-export const SETTLE_HOLD_RIBBON_MS = 650;
-
 /* --- the name pills replacing the bar keys during the swipe --- */
 
 

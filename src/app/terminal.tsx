@@ -32,7 +32,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   pageRadius,
   SETTLE_HOLD_MS,
-  SETTLE_HOLD_RIBBON_MS,
   pagePitch,
   slideMs,
   rubber,
@@ -747,11 +746,12 @@ export default function SessionScreen() {
     applyPendingRibbon();
     roundSV.value = withTiming(0, { duration: 200 });
     // With a refit in flight its SIGWINCH echo is the first byte back — ending the hold on it
-    // revealed the terminal before tmux's post-resize redraw had painted. The cap is the hold,
-    // and a ribbon hop's cap is longer: the refit is a two-step resize whose correction landed
-    // right at the shorter cap (see SETTLE_HOLD_RIBBON_MS).
+    // revealed the terminal before tmux's post-resize redraw had painted. For those the cap is
+    // the hold; with the first row pinned (rowRemainder) the refit only churns the bottom rows
+    // under the bar, so the plain 350ms covers what the eye can see and a longer ribbon hold
+    // just read as lag (user, 2026-08-11).
     if (!pending) onShellData.current = clearBarSwipe;
-    const cap = setTimeout(clearBarSwipe, pending ? SETTLE_HOLD_RIBBON_MS : SETTLE_HOLD_MS);
+    const cap = setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
     settleCap.current = cap;
   };
 
