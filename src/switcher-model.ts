@@ -257,15 +257,25 @@ export function snapshotType(
   }
   const shrink = Math.min(1, boxW / (cols * fromCell));
   return {
-    fontSize: floorFit((fromCell * shrink) / MONO_ADVANCE),
+    // Matching the pane is exact; fitting a box keeps its hair of slack. Two decimals of type
+    // size looked free on the matching path and is not — it is 0.006pt of advance thrown away per
+    // column, and a pane is 49 of them, so the far end of a line sat a quarter of a device pixel
+    // off the pane's while the near end sat on it: a character visibly stepping sideways at the
+    // settle while its own line's first character did not (user, 2026-08-11, `.claude.json` in
+    // two screenshots either side of the hand-over). Nothing on that path needs the round — the
+    // fold it defends against cannot happen through `Snapshot`'s `numberOfLines={1}`, which clips
+    // exactly as the pane's own viewport does. The shrink path is the other case: there the box,
+    // not the pane, is what the columns have to land inside, and an exact fit overflows it by a
+    // float epsilon (200.00000000000003 for a box of 200), so it keeps `floorFit`.
+    fontSize: shrink === 1 ? fromCell / MONO_ADVANCE : floorFit((fromCell * shrink) / MONO_ADVANCE),
     lineHeight: cell.h * scale * shrink,
   };
 }
 
 /** An exact fit is `cols` advances landing on exactly `cardW`, and a float that rounds the last
- *  one up by a millionth of a point is a line that no longer fits — which RN answers by folding
- *  it, turning one overflowing character into a card that reads nothing like the terminal. Two
- *  decimals of type size is under a tenth of a pixel; the slack is free. */
+ *  one up by a millionth of a point is a line that no longer fits. Only the guess below wants
+ *  this: there, `cardW` is all there is to go on and a hair of slack buys the fit. Where a
+ *  measured cell is in hand the rounding is a drift, not slack — see `snapshotType`. */
 export function floorFit(size: number): number {
   return Math.floor(size * 100) / 100;
 }

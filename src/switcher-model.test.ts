@@ -6,6 +6,7 @@
 import { expect, test } from 'bun:test';
 
 import {
+  MONO_ADVANCE,
   ZOOM_COMMIT,
   gridHeight,
   gridTop,
@@ -205,6 +206,16 @@ test('a snapshot draws the emulator cell through the zoom, not the box divided b
   expect(type.fontSize * 0.6).toBeCloseTo(cell.w * scale, 1); // advance matches the live one
   expect(type.lineHeight).toBeCloseTo(cell.h * scale, 6);
   expect(48 * type.fontSize * 0.6).toBeLessThan(box); // and leaves the same slack the pane does
+});
+
+// A page card rides the swipe at 1:1 beside the live pane, so its advance has to BE the pane's,
+// not two decimals of it: the leftover multiplies by the column and walks one character off the
+// one beside it by the far end of the line.
+test('a page-sized snapshot lands on the emulator advance exactly, with nothing left to drift', () => {
+  const cell = { w: 382 / 49, h: 18 }; // 49 columns in the 382pt screen the emulator reports
+  const type = snapshotType(cell, 1, 49, 393);
+  expect(type.fontSize * MONO_ADVANCE).toBe(cell.w);
+  expect(49 * type.fontSize * MONO_ADVANCE).toBeCloseTo(382, 10); // no drift by the last column
 });
 
 test('a pane too wide for its card is capped by the columns, both metrics together', () => {
