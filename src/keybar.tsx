@@ -405,7 +405,12 @@ export default function KeyBar(props: KeyBarProps) {
         }
       }
     })
-    .onEnd((e) => {
+    // `onFinalize`, not `onEnd`: a pan can leave by being CANCELLED — another handler wins the
+    // race, the view it is on unmounts — and that path never calls `onEnd`. The screen's zoom
+    // phase is only ever left by this callback, so a miss leaves it stuck mid-drag: the terminal
+    // behind a stage that takes no touches, which reads as the whole app freezing (user,
+    // 2026-08-11). Finalize fires for every exit, successful or not.
+    .onFinalize((e) => {
       if (zooming.current) {
         zooming.current = false;
         props.onSwitcherDrag?.('end', e.translationX, e.translationY);

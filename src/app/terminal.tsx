@@ -303,17 +303,12 @@ export default function SessionScreen() {
    *  `searchRef`) — the settings doors both need to know which screen is in front. */
   const swRef = useRef(sw);
   swRef.current = sw;
-  /** Is the surface in the air? Then the shell's bytes wait — see the queue at `attachTerminal`. */
-  const paused = () => swRef.current !== 'closed' && swRef.current !== 'open';
-  const writeQueue = useRef<string[]>([]);
-  // The landing (either end — the grid covers the terminal at `open` exactly as the terminal
-  // covers it at `closed`) is where the held redraw goes in, all of it, on one still frame.
-  useEffect(() => {
-    if (paused() || writeQueue.current.length === 0) return;
-    const held = writeQueue.current;
-    writeQueue.current = [];
-    for (const chunk of held) terminal.current?.write(chunk);
-  }, [sw]);
+  // The shell's bytes used to be HELD while the surface was in the air and flushed at the landing,
+  // so a redraw could not paint into a moving view. It is gone: the hold's release is a phase
+  // change, and a phase that gets stuck — a pan cancelled rather than ended leaves `drag` standing
+  // — turns that into a terminal that never updates again behind a stage that takes no touches,
+  // which is an app that has frozen (user, 2026-08-11). The flight waits for the redraw before it
+  // leaves now, so what it was covering is a tail, not a repaint; a tail is not worth a wedge.
   const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
   const scrollY = useRef(0);
@@ -501,8 +496,13 @@ export default function SessionScreen() {
   const zoomBase = useRef(0);
   const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number) => {
     if (stage === null) return;
+    // The phase comes off the REF, not the render. A pan reports every frame, and `setSw` here is
+    // read back by the very next one — through a closure a render behind, "already dragging" still
+    // looks like "closed", and the open runs again: its capture re-fired, the origin and the base
+    // reset under the finger, every frame it takes React to catch up (user, 2026-08-11, "laggy").
+    const at = swRef.current;
     if (phase === 'move') {
-      if (sw === 'closed') {
+      if (at === 'closed') {
         console.log('[switcher] open (bar drag)');
         setOpen('none');
         // The grab no longer implies a raised keyboard (the swipe ↑ is one gesture whatever the
@@ -533,7 +533,7 @@ export default function SessionScreen() {
           }),
         );
         return;
-      } else if (sw === 'closing') {
+      } else if (at === 'closing') {
         // The flight home is catchable. `closed` only arrives when the timing formally ends, and
         // an out-cubic has spent 99% of its distance at 78% of its duration — so the last ~80ms
         // look exactly like a landed terminal that refuses to swipe (user, 2026-08-11). Nothing
@@ -551,12 +551,12 @@ export default function SessionScreen() {
         zoomReady.current = true;
         setSw('drag');
         return;
-      } else if (sw !== 'drag') return;
+      } else if (at !== 'drag') return;
       if (!zoomReady.current) return;
       if (zoomFrom.current === null) zoomFrom.current = { x: dx, y: dy };
       prog.value = Math.min(1, zoomBase.current + zoomProgress(dy - zoomFrom.current.y, stage.w));
       dragX.value = dx - zoomFrom.current.x;
-    } else if (sw === 'drag') {
+    } else if (at === 'drag') {
       if (zoomCommits(dy, Date.now() - zoomT0.current, prog.value)) commitOpen();
       else springBack();
     }
@@ -1426,15 +1426,8 @@ export default function SessionScreen() {
         onBoot={async () => {
           detach.current?.();
           detach.current = attachTerminal((base64) => {
-            // While the surface is in the air it is not a terminal anyone is reading, it is a
-            // picture being scaled — and every chunk written into it is a bridge marshal and a
-            // repaint of a view that is moving. That was the choppiness on a switch to another
-            // window, where selecting the tab already up (nothing to redraw) was fluid (user,
-            // 2026-08-11). Held here and flushed at the landing, the whole redraw paints once, at
-            // rest; it is also what lets the flight leave without waiting for it at all.
-            dataSeq.current++;
-            if (paused()) writeQueue.current.push(base64);
-            else terminal.current?.write(base64);
+            dataSeq.current++; // the flight's "has the host redrawn yet" — see `selectCard`
+            terminal.current?.write(base64);
             // A settle waiting on tmux's redraw ends here, at the first byte of it.
             const settled = onShellData.current;
             onShellData.current = null;
