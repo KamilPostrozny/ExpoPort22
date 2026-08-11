@@ -96,22 +96,21 @@ test('pillCont slides with the page offset', () => {
   expect(pillCont(1, -100, 0)).toBe(1); // no pitch yet: stay put, no divide-by-zero
 });
 
-test('pill morph: width squeezes to the capsule by 0.7 of a window out', () => {
+test('pill morph: strict handoff — gone by half a window out, no two pills at once', () => {
   expect(pillWidthFrac(pillDist(1, 1))).toBe(1);
   expect(pillOpacity(pillDist(1, 1))).toBe(1);
   expect(pillDist(0, 1.5)).toBe(1); // saturates
   expect(pillWidthFrac(1)).toBeCloseTo(PILL_MIN);
-  expect(pillOpacity(1)).toBeCloseTo(0.25);
-  // 0.35 of a window out (morph half-way): the squeeze is well underway while the pill is still
+  // Fully invisible at the floor: the two pills share one slot, so a floored residue stacks
+  // them (user, 2026-08-11, screenshot).
+  expect(pillOpacity(1)).toBeCloseTo(0);
+  expect(pillOpacity(pillDist(2, 1.5))).toBeCloseTo(0);
+  // A quarter-window out (morph half-way): the squeeze is well underway while the pill is still
   // mostly opaque — the width change happens in plain sight, the fade trails it (quadratic).
-  expect(pillWidthFrac(0.35)).toBeCloseTo(1 - (1 - PILL_MIN) / 2);
-  expect(pillOpacity(0.35)).toBeCloseTo(0.8125);
-  // The arriving pill is already growing 30% into the travel (dist 0.69 < the 0.7 saturation) —
-  // floored until half-way it read as popping in at the end.
-  expect(pillWidthFrac(0.69)).toBeGreaterThan(PILL_MIN);
-  // 0.7 out or more: at the capsule, nothing mid-stretch.
-  expect(pillWidthFrac(0.7)).toBeCloseTo(PILL_MIN);
-  expect(pillOpacity(pillDist(2, 1.5))).toBeCloseTo(0.25);
+  expect(pillWidthFrac(0.25)).toBeCloseTo(1 - (1 - PILL_MIN) / 2);
+  expect(pillOpacity(0.25)).toBeCloseTo(0.75);
+  // Past half a window the pill is dead: only one of the two is ever partially morphed.
+  expect(pillOpacity(0.5)).toBeCloseTo(0);
 });
 
 /* --- neighbour page type size --- */

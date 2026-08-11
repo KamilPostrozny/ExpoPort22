@@ -102,10 +102,11 @@ export function pillDist(i: number, cont: number): number {
  *  device read as no morph at all (user, 2026-08-11). */
 function pillMorph(dist: number): number {
   'worklet';
-  // Saturates at 0.7 of a window, not 0.5: floored until half-way, the arriving pill only
-  // appeared in the back half of the travel, which read as popping in at the end (user,
-  // 2026-08-11). At 0.7 it starts growing ~30% in and rides the rest of the slide.
-  return Math.min(dist / 0.7, 1);
+  // Saturates at half a window: the pills morph in place in ONE shared slot, so their visible
+  // ranges must not overlap — at 0.7 both were part-morphed mid-swipe and stacked on each other
+  // (user, 2026-08-11, screenshot). Halves make the handoff strict: outgoing gone by the middle
+  // of the travel, incoming growing through the whole second half.
+  return Math.min(2 * dist, 1);
 }
 
 /** The collapsed capsule, as a fraction of the pill slot — Safari's morph is the pill
@@ -120,11 +121,12 @@ export function pillWidthFrac(dist: number): number {
   return 1 - (1 - PILL_MIN) * pillMorph(dist);
 }
 
-/** Quadratic: near-full while the pill squeezes, dropping only at the far end — a linear fade
- *  emptied the bar mid-step and hid the very morph it rode on. */
+/** Quadratic to ZERO: near-full while the pill squeezes — the width change happens in plain
+ *  sight, the fade trails it — but fully gone at the floor, because the floored pill shares its
+ *  slot with the other one and a 0.25-opacity residue stacked the two visibly. */
 export function pillOpacity(dist: number): number {
   'worklet';
   const m = pillMorph(dist);
-  return 1 - 0.75 * m * m;
+  return 1 - m * m;
 }
 
