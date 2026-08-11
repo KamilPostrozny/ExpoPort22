@@ -13,7 +13,7 @@
  * `printf`, `>>`. All of it was run through `fish -c` verbatim before landing here.
  */
 
-export const CONF_VERSION = 1;
+export const CONF_VERSION = 2;
 export const CONF_MARKER = `# port22-conf-v${CONF_VERSION}`;
 
 /** Relative on purpose: SFTP resolves paths against `$HOME`, absolute would leave it. */
@@ -24,12 +24,28 @@ export const CONF_PATH = `${CONF_DIRECTORY}/port22.conf`;
 export const CONF_DIRECTORIES = ['.config', CONF_DIRECTORY];
 
 /**
- * The file §4.5 specifies, and nothing the user might have an opinion about (`status`,
- * `base-index` and friends stay theirs). `@port22` is the verify handle: a user option, because a
- * real option like `escape-time` can be masked by the user's own conf setting the same value —
- * which is exactly how a failed push once hid from the reference app's read-back check.
+ * Only what a feature of this app stops working without. The conf is not asked about any more —
+ * choosing a tmux start mode pushes it (§4.1) — and something that arrives without being asked for
+ * has no business having opinions: `status`, `base-index`, `mode-keys` and friends stay the user's.
+ *
+ * Two halves, and `extras` is the seam:
+ *
+ * - Always: the wheel notch, `mouse on`, the two OSC 52 lines. A feature of this app stops working
+ *   without each of them, so a tmux start mode implies them and there is nothing to ask about.
+ * - `extras` (the §4.8 toggle, on by default): what the app looks like when the phone is what it is
+ *   being read on — truecolor through tmux, no status bar, no ESC delay, deep scrollback. All of
+ *   it global, none of it load-bearing: see `EXTRAS` for the line-by-line and where it came from.
+ *
+ * v1's `set-titles` + format string is in neither half: the badge reads the *poll* (see POLL) and
+ * never a title, so the file was rewriting the title of every terminal on the server for a feature
+ * that does not read it. A dead option is a deletion, not a preference.
+ *
+ * `@port22` is the verify handle: a user option, because a real option like `mouse` can be masked
+ * by the user's own conf setting the same value — which is exactly how a failed push once hid from
+ * the reference app's read-back check. Both halves carry the same version: which of the two is on
+ * the host is settled by content equality (see `needsPush`), not by the marker.
  */
-export function generateConf(): string {
+export function generateConf(extras: boolean): string {
   return `${CONF_MARKER}
 # Written by Port22 (the phone). Do not edit — a version bump replaces this file without asking.
 # Your own tmux conf is never rewritten; it only ever gains one source-file line.
@@ -46,30 +62,55 @@ bind -T copy-mode-vi WheelDownPane send -N1 -X scroll-down
 
 # Wheel events reach tmux at all only with mouse reporting on.
 set -g mouse on
-# An Escape on a phone is a key on the bar, not half of a meta sequence worth waiting for.
-set -s escape-time 0
-set -g history-limit 50000
 
 # A copy-mode yank lands on the phone's pasteboard over OSC 52 (§4.7). set-clipboard alone is not
 # enough: tmux only emits OSC 52 when the outer terminal advertises the Ms capability, and
 # xterm-256color's terminfo does not.
 set -g set-clipboard on
 set -as terminal-overrides ',*:Ms=\\E]52;%p1%s;%p2%s\\007'
-
-# The title string the window badge is spec'd to be able to read (§4.5). The badge actually rides
-# the 2s poll — see POLL below for why — but the title stays part of the pushed contract.
-set -g set-titles on
-set -g set-titles-string '#I #{W:#{window_index} ,#{window_index} }'
-`;
+${extras ? EXTRAS : ''}`;
 }
 
 /**
- * Push unless the remote file is byte-for-byte this build's conf. Content equality rather than a
- * marker-version compare: a marker guard can pass stale (same version, edited or truncated file),
- * and equality still gives "a version bump replaces v0" for free.
+ * The opt-out half. Kept whole and appended last so the file reads as what it is: the required
+ * part, then the part the user said yes to.
+ *
+ * This is the hand-written `~/.tmux.conf` this app's own author had been running (2026-08-09),
+ * minus what only the reference Swift app needed — its `M-1`..`M-9` window row and the `set-titles`
+ * string it read to know which windows existed, neither of which this app has ever sent or read —
+ * and minus the two lines that are a person's taste rather than a phone's needs (`base-index`,
+ * `pane-base-index`). Every option here is global, i.e. a desktop client on the same server gets it
+ * too, and that is exactly why the half is a toggle instead of a fact.
  */
-export function needsPush(remote: string | null): boolean {
-  return remote !== generateConf();
+const EXTRAS = `
+# Truecolor and underline styles the whole way through tmux. Without RGB the 24-bit colours a
+# syntax theme or an agent emits are quantised to 256 on the way out — a different-looking screen
+# rather than a broken one, which is what puts it on this side of the toggle. default-terminal is
+# guarded: a TERM with no terminfo entry on the host breaks every pane on the server, and this file
+# arrives on hosts nobody checked.
+set -as terminal-features ',*:RGB,*:usstyle'
+if-shell 'infocmp tmux-256color >/dev/null 2>&1' 'set -g default-terminal tmux-256color'
+
+# A phone is ~40 rows, and the status bar spends one of them saying what the app's own chrome
+# already shows (window index in the badge, session in Settings). Prefix + S puts it back.
+set -g status off
+bind S set -g status
+
+# An Escape on a phone is a key on the bar, not half of a meta sequence worth waiting for. This one
+# is server-wide (set -s) — the widest reach of anything in the file.
+set -s escape-time 0
+# More scrollback for the swipe and for T14's search to find. New panes only.
+set -g history-limit 50000
+`;
+
+/**
+ * Push unless the remote file is byte-for-byte the conf these settings ask for. Content equality
+ * rather than a marker-version compare: a marker guard can pass stale (same version, edited or
+ * truncated file), it cannot tell the two halves apart at all — flipping the toggle changes the
+ * file without changing the version — and equality still gives "a version bump replaces v0" free.
+ */
+export function needsPush(remote: string | null, extras: boolean): boolean {
+  return remote !== generateConf(extras);
 }
 
 /* --- sourcing it from the user's own conf --- */
@@ -133,14 +174,32 @@ export function readFileCommand(path: string): string {
   return `cat ${path} 2>/dev/null; true`;
 }
 
+/* --- sessions (§4.1's attach mode picks one; §4.8 lists them) --- */
+
+/** US (0x1f) as the marker byte in every `-F` format below — JS resolves the escape, so the raw
+ *  byte is what crosses the wire (fish would pass a literal `\x1f` through untouched, measured;
+ *  the raw byte it passes clean inside single quotes). Nothing a shell, a path or a tmux
+ *  diagnostic contains, which is what makes it worth a byte. */
+export const SEP = '\u001f';
+
+/** Names only, in tmux's own order — which is what "the most recent" in §4.1 means. Each line is
+ *  prefixed with the US byte, the same marker `LIST_WINDOWS` separates fields with: a session name
+ *  may contain spaces (`tmux new -s 'work stuff'`, measured) so the name cannot be told from a
+ *  tmux diagnostic by its shape, and a byte no diagnostic carries is the thing that can. */
+export const LIST_SESSIONS = `tmux list-sessions -F '${SEP}#{session_name}' 2>/dev/null; true`;
+
+export function parseSessions(stdout: string): string[] {
+  return stdout
+    .split('\n')
+    .filter((line) => line.startsWith(SEP))
+    .map((line) => line.slice(1).trimEnd());
+}
+
 /* --- windows (§4.5: always exec channels, never the attached PTY) --- */
 
-/** US (0x1f) as field separator — JS resolves the escape, so the raw byte is what crosses the
- *  wire (fish would pass a literal `\x1f` through untouched, measured; the raw byte it passes
- *  clean inside single quotes). Unlikely in a path; a window NAME may contain anything at all,
- *  which is why name is the LAST field: the parser rejoins the tail and a name full of separators
- *  (or tabs, or colons) shifts nothing. */
-export const SEP = '\u001f';
+/** The same marker byte separates the window fields. Unlikely in a path; a window NAME may contain
+ *  anything at all, which is why name is the LAST field: the parser rejoins the tail and a name
+ *  full of separators (or tabs, or colons) shifts nothing. */
 
 export type TmuxWindow = {
   /** tmux's own `@N` — stable across renumbering, which the index is not. T10's reorder wants it. */
@@ -289,12 +348,13 @@ export function foregroundFrom(poll: TmuxPoll | null): { command: string; pid: n
 
 export type ConfigStatus = 'off' | 'applied' | 'not-applied';
 
-/** The three states §4.5 puts in Settings. 'off' is the toggle's, the other two are the push's. */
+/** The three states §4.5 puts in Settings. 'off' is the start mode's — a session that is not a
+ *  tmux one is never configured — and the other two are the push's. */
 export function deriveConfigStatus(
-  configureTmux: boolean,
+  usesTmux: boolean,
   pushed: 'applied' | 'not-applied',
 ): ConfigStatus {
-  return configureTmux ? pushed : 'off';
+  return usesTmux ? pushed : 'off';
 }
 
 /**

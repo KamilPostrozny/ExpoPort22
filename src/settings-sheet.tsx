@@ -2,8 +2,8 @@
  * The Settings quick sheet (§4.8), per the prototype: grabber, swipe-dismiss, no Done button —
  * over the live terminal, so a flavour tap restyles the session behind it while it is still up.
  * Sections: APPEARANCE (Auto + the four flavours with swatch rows and a check, the font-size
- * stepper), TMUX (the Configure toggle with its status and one-line explainer), SESSION
- * (Disconnect in accent, Forget host key in red behind a confirm).
+ * stepper), TMUX (the push's status and the comfort-settings opt-out), SESSION (Disconnect in
+ * accent, Forget host key in red behind a confirm).
  *
  * What is deliberately NOT here: host, port, username, startup command — those live on the Setup
  * screen only, and §4.8 hides them while connected. The prototype's "All settings" row led to a
@@ -34,8 +34,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { sheetShouldDismiss } from '@/input-model';
 import { forgetPinnedHostKey } from '@/session';
-import { clampFontSize, endpoint, getSettings, updateSettings, useSettings } from '@/settings';
-import { applyConfigure, useTmux } from '@/tmux';
+import {
+  clampFontSize,
+  endpoint,
+  getSettings,
+  updateSettings,
+  useSettings,
+  usesTmux,
+} from '@/settings';
+import { useTmux } from '@/tmux';
 import { deriveConfigStatus } from '@/tmux-model';
 import { FLAVOURS, MONO, THEMES, type Theme, type ThemeChoice } from '@/theme';
 
@@ -79,7 +86,6 @@ export default function SettingsSheet({
   const tmux = useTmux();
   const insets = useSafeAreaInsets();
   const ty = useSharedValue(TRAVEL);
-
   useEffect(() => {
     ty.value = withTiming(0, SLIDE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,12 +125,12 @@ export default function SettingsSheet({
     updateSettings({ fontSize: next }); // applied live through the terminal's fontSize prop
   };
 
-  const toggleTmux = (on: boolean) => {
-    console.log('[settings] configureTmux →', on);
-    updateSettings({ configureTmux: on });
-    // On mid-session: push now, so "applied" (and the tabs button) does not wait for a reconnect.
-    // Off pushes nothing — flipping the toggle changes no remote state (T9's decision).
-    if (on) void applyConfigure();
+  const toggleExtras = (on: boolean) => {
+    console.log('[settings] tmuxExtras →', on);
+    updateSettings({ tmuxExtras: on });
+    // No push here: `source-file` can add lines to a running server, never take them back, so a
+    // toggle that acted now would only ever act in one direction. The next connect pushes the
+    // file the toggle asks for, and that one is honest both ways.
   };
 
   const forget = () =>
@@ -145,7 +151,7 @@ export default function SettingsSheet({
       ],
     );
 
-  const status = deriveConfigStatus(settings.configureTmux, tmux.config);
+  const status = deriveConfigStatus(usesTmux(settings), tmux.config);
   const check = (
     <SymbolView
       name="checkmark"
@@ -222,20 +228,27 @@ export default function SettingsSheet({
             </View>
 
             <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>TMUX</Text>
-            <View style={[styles.card, styles.row, { backgroundColor: theme.surface }]}>
-              <Text style={[styles.label, { color: theme.foreground }]}>Configure tmux</Text>
-              {/* the §4.5 status, folded from the toggle and the last push's read-back */}
-              <Text style={[styles.value, { color: theme.muted }]}>
-                {status === 'not-applied' ? 'not applied' : status}
-              </Text>
-              <Switch
-                value={settings.configureTmux}
-                onValueChange={toggleTmux}
-                trackColor={{ true: theme.accent }}
-              />
+            <View style={[styles.card, { backgroundColor: theme.surface }]}>
+              <View style={styles.row}>
+                <Text style={[styles.label, { color: theme.foreground }]}>Configuration</Text>
+                {/* the §4.5 status, folded from the start mode and the last push's read-back */}
+                <Text style={[styles.value, { color: theme.muted }]}>
+                  {status === 'not-applied' ? 'not applied' : status}
+                </Text>
+              </View>
+              <View style={[styles.row, styles.rowLine]}>
+                <Text style={[styles.label, { color: theme.foreground }]}>Comfort settings</Text>
+                <Switch
+                  value={settings.tmuxExtras}
+                  onValueChange={toggleExtras}
+                  trackColor={{ true: theme.accent }}
+                />
+              </View>
             </View>
             <Text style={[styles.note, { color: theme.placeholder }]}>
-              Off removes the tabs button — the switcher needs a configured tmux.
+              {status === 'off'
+                ? 'Not a tmux session.'
+                : 'Colours, no status bar, deeper scrollback. Applies on the next connect.'}
             </Text>
 
             <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>SESSION</Text>

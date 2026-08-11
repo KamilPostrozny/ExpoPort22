@@ -518,6 +518,9 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   the log.
 
 ### T9.3 — Toggle off: tabs affordance gone, no push on next connect
+> Historical: the toggle became the §4.1 start mode. The same state is now reached by choosing
+> `Plain shell` (or a custom line with no tmux in it) on Setup, and the derived state it proves —
+> no push, no tabs circle, poll unaffected — is unchanged.
 - **Setup**: connected with config applied (T9.1); host conf files present.
 - **Steps**: turn "Configure tmux" off (until T12's sheet: flip `configureTmux` in the settings
   blob or a dev build); disconnect; `rm -rf ~/.config/port22` on the host; reconnect.

@@ -16,11 +16,12 @@ import { useSyncExternalStore } from 'react';
 import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
 import { toBase64 } from '@/base64';
 import { parseSearchOutput, searchPaneCommand, type SearchHit } from '@/search-model';
-import { getSettings } from '@/settings';
+import { getSettings, updateSettings, usesTmux } from '@/settings';
 import {
   APPLY_AND_VERIFY,
   CONF_DIRECTORIES,
   CONF_PATH,
+  LIST_SESSIONS,
   LIST_WINDOWS,
   NEW_WINDOW,
   POLL,
@@ -38,6 +39,7 @@ import {
   needsPush,
   parsePoll,
   parseProbe,
+  parseSessions,
   parseVerify,
   parseWindows,
   readFileCommand,
@@ -56,8 +58,9 @@ export type TmuxState = {
   /** `null` until the probe answers; then whether the host has tmux at all. Absent → every tmux
    *  affordance stays invisible, and nothing says so (§7). */
   present: boolean | null;
-  /** What the last push attempt proved with its read-back. 'off' is not a value here — it is the
-   *  toggle's, derived (see `configStatus`), because flipping the toggle changes no remote state. */
+  /** What the last push attempt proved with its read-back. 'off' is not a value here — it belongs
+   *  to the start mode and is derived (see `configStatus`), because a mode change is a Setup-screen
+   *  change and takes effect on the next connect, not on the live server. */
   config: 'applied' | 'not-applied';
   /** A client is attached to the session our exec commands resolve to — for this app's one user,
    *  the phone's own PTY (the ceiling is in tmux-model's POLL comment). */
@@ -117,7 +120,7 @@ export function useTmux(): TmuxState {
 /** The §4.5 Settings row: off / applied / not-applied. Reactive callers pair it with
  *  `useSettings()` + `useTmux()` and derive — this form is for one-shot reads (T12 wires it). */
 export function configStatus(): ConfigStatus {
-  return deriveConfigStatus(getSettings().configureTmux, state.config);
+  return deriveConfigStatus(usesTmux(getSettings()), state.config);
 }
 
 /* --- the exec seam --- */
@@ -151,8 +154,12 @@ export async function startTmux(): Promise<void> {
   if (!up) return; // stopped while the probe was in flight
   set({ present });
   if (!present) return; // §7: no tmux = no tabs, no switcher, no mention anywhere
-  if (getSettings().configureTmux) await configure();
+  // A tmux start mode is the ask (§4.1): the conf is what its features are made of, so there is no
+  // second question about whether to push it. `source-file` reaches a server the startup line has
+  // already started, so the two racing here is harmless.
+  if (usesTmux(getSettings())) await configure();
   if (!up) return;
+  void cacheSessions();
   timer = setInterval(poll, POLL_MS);
   void poll();
 }
@@ -166,14 +173,6 @@ export function stopTmux(): void {
   set(DOWN);
 }
 
-/** T12's Settings toggle flipping ON mid-session: push now rather than on the next connect.
- *  A no-op without a live side-channel or without tmux — the toggle still persisted, and the
- *  next `startTmux` picks it up. */
-export async function applyConfigure(): Promise<void> {
-  if (!up || state.present !== true) return;
-  await configure();
-}
-
 /**
  * The §4.5 push: conf over SFTP (only when it differs), one source-file line into the conf tmux
  * actually reads, then apply-and-verify in a single tmux client command. Every failure lands in
@@ -181,9 +180,10 @@ export async function applyConfigure(): Promise<void> {
  */
 async function configure(): Promise<void> {
   try {
+    const { tmuxExtras } = getSettings();
     const remote = await run(readFileCommand(`~/${CONF_PATH}`));
-    if (needsPush(remote)) {
-      const bytes = new TextEncoder().encode(generateConf());
+    if (needsPush(remote, tmuxExtras)) {
+      const bytes = new TextEncoder().encode(generateConf(tmuxExtras));
       await ExpoSSH.upload(toBase64(bytes), CONF_PATH, CONF_DIRECTORIES);
     }
     // Which conf tmux reads depends on which exists (~/.tmux.conf shadows the XDG path), so the
@@ -223,6 +223,20 @@ async function poll(): Promise<void> {
     // One missed beat; the next tick asks again.
   } finally {
     polling = false;
+  }
+}
+
+/** What the host is running, remembered for Setup's attach picker (§4.1) — that screen has no
+ *  connection to ask over. Silent on failure: the picker just offers what it offered last time. */
+async function cacheSessions(): Promise<void> {
+  try {
+    const names = parseSessions(await run(LIST_SESSIONS));
+    const known = getSettings().knownSessions;
+    if (names.length !== known.length || names.some((name, i) => name !== known[i])) {
+      updateSettings({ knownSessions: names });
+    }
+  } catch {
+    // One list nobody is looking at yet; the next connect asks again.
   }
 }
 

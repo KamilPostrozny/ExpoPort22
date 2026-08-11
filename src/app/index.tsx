@@ -6,9 +6,28 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/use-theme';
 import { loadOrCreateKey, type KeyPair } from '@/keys';
-import { connect } from '@/session';
-import { getSettings, updateSettings, useSettings, validate } from '@/settings';
+import { connect, listHostSessions } from '@/session';
+import {
+  SESSION_NAME,
+  getSettings,
+  updateSettings,
+  useSettings,
+  validate,
+  type StartMode,
+} from '@/settings';
 import { MONO } from '@/theme';
+
+/** §4.1's start section, in the order a user would try them. The tmux pair first: they are the
+ *  ones with the app's features attached. */
+const START_ROWS: { mode: StartMode; label: string; note: string }[] = [
+  { mode: 'session', label: 'tmux session', note: SESSION_NAME },
+  { mode: 'attach', label: 'Existing tmux session', note: 'pick below' },
+  { mode: 'shell', label: 'Plain shell', note: 'no tmux' },
+  { mode: 'custom', label: 'Custom command', note: 'your own line' },
+];
+
+/** The attach mode's "no pick yet", which is a row like any other rather than an empty state. */
+const MOST_RECENT = 'Most recent';
 
 /**
  * Setup (§4.1): the one host, the one key, and the button that starts a session. The fields are the
@@ -30,6 +49,25 @@ export default function Setup() {
   useEffect(() => {
     loadOrCreateKey().then(setKey, (error) => setProblem(`Could not read the key: ${error}`));
   }, []);
+
+  // The attach picker's rows are the host's, so they are re-asked for whenever that mode is on
+  // screen — cached ones show meanwhile, and on a host whose key is not pinned yet there is
+  // nothing to ask with (see `listHostSessions`) and the list simply stays as it was.
+  useEffect(() => {
+    if (settings.startMode !== 'attach') return;
+    let stale = false;
+    listHostSessions().then((names) => {
+      if (!stale && names.length > 0) updateSettings({ knownSessions: names });
+    });
+    return () => {
+      stale = true;
+    };
+  }, [settings.startMode]);
+
+  const pickMode = (mode: StartMode) => {
+    console.log('[settings] startMode →', mode);
+    updateSettings({ startMode: mode });
+  };
 
   const start = () => {
     const invalid = validate(getSettings());
@@ -88,13 +126,51 @@ export default function Setup() {
             'numeric',
           )}
           {field('User', settings.username, (username) => updateSettings({ username }), 'login name')}
-          {field(
-            'Startup',
-            settings.startupCommand ?? '',
-            (text) => updateSettings({ startupCommand: text === '' ? null : text }),
-            'optional command, e.g. tmux attach',
-          )}
         </View>
+
+        <Text style={[styles.caption, { color: theme.muted }]}>Start</Text>
+        <View style={[styles.fields, { backgroundColor: theme.border }]}>
+          {START_ROWS.map(({ mode, label, note }) => (
+            <Pressable
+              key={mode}
+              onPress={() => pickMode(mode)}
+              style={[styles.row, styles.modeRow, { backgroundColor: theme.panel }]}>
+              <View style={styles.modeText}>
+                <Text style={[styles.modeLabel, { color: theme.foreground }]}>{label}</Text>
+                <Text style={[styles.modeNote, { color: theme.muted }]}>{note}</Text>
+              </View>
+              {settings.startMode === mode && (
+                <Text style={[styles.tick, { color: theme.accent }]}>✓</Text>
+              )}
+            </Pressable>
+          ))}
+          {/* The only mode with anything to type. */}
+          {settings.startMode === 'custom' &&
+            field(
+              'Command',
+              settings.startupCommand ?? '',
+              (text) => updateSettings({ startupCommand: text === '' ? null : text }),
+              'e.g. tmux attach',
+            )}
+        </View>
+
+        {settings.startMode === 'attach' && (
+          <View style={[styles.fields, { backgroundColor: theme.border }]}>
+            {[null, ...settings.knownSessions].map((name) => (
+              <Pressable
+                key={name ?? MOST_RECENT}
+                onPress={() => updateSettings({ attachSession: name })}
+                style={[styles.row, styles.modeRow, { backgroundColor: theme.panel }]}>
+                <Text style={[styles.modeLabel, styles.modeText, { color: theme.foreground }]}>
+                  {name ?? MOST_RECENT}
+                </Text>
+                {settings.attachSession === name && (
+                  <Text style={[styles.tick, { color: theme.accent }]}>✓</Text>
+                )}
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         {problem !== null && <Text style={[styles.problem, { color: theme.danger }]}>{problem}</Text>}
 
@@ -133,6 +209,11 @@ const styles = StyleSheet.create({
   // its own share of it, which is one hairline between rows and none against the card's edges.
   fields: { borderRadius: 12, overflow: 'hidden', gap: StyleSheet.hairlineWidth },
   row: { flexDirection: 'row', alignItems: 'center' },
+  modeRow: { paddingLeft: 14, paddingRight: 16, paddingVertical: 9 },
+  modeText: { flex: 1 },
+  modeLabel: { fontSize: 15 },
+  modeNote: { fontSize: 12, lineHeight: 16 },
+  tick: { fontSize: 15, fontWeight: '700' },
   label: { width: 88, paddingLeft: 14, fontSize: 15 },
   input: { flex: 1, paddingVertical: 13, paddingRight: 14, fontSize: 16 },
   problem: { fontSize: 14, lineHeight: 19 },

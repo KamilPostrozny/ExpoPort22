@@ -18,7 +18,8 @@ mock.module('expo-secure-store', () => ({
 }));
 
 const { THEMES, resolveTheme } = await import('@/theme');
-const { DEFAULTS, clampFontSize, decode, endpoint, validate } = await import('@/settings');
+const { DEFAULTS, clampFontSize, decode, endpoint, startupLine, usesTmux, validate } =
+  await import('@/settings');
 const { isHttpLink, parseOsc52 } = await import('@/terminal-protocol');
 const { hostKeyVerdict } = await import('@/host-keys');
 
@@ -60,6 +61,44 @@ test('decode fills gaps, rejects wrong types, and drops unknown keys', () => {
     theme: 'frappe',
     fontSize: 32,
   });
+});
+
+test('a startup command written by an older build still runs, as the custom mode', () => {
+  const migrated = decode({ host: 'box', startupCommand: 'tmux attach' });
+  expect(migrated.startMode).toBe('custom');
+  expect(startupLine(migrated)).toBe('tmux attach');
+  // A stored blob with no line at all takes the new default rather than a silent plain shell.
+  expect(decode({ host: 'box' }).startMode).toBe('session');
+});
+
+test('each start mode is one line the host shells all parse the same way', () => {
+  const s = { ...DEFAULTS };
+  expect(startupLine({ ...s, startMode: 'shell' })).toBeNull();
+  expect(startupLine({ ...s, startMode: 'session' })).toBe('tmux new-session -A -D -s port22');
+  // Nothing picked yet: the most recent, and the same session the other mode makes if there is none.
+  expect(startupLine({ ...s, startMode: 'attach' })).toBe(
+    'tmux attach -d 2>/dev/null || tmux new-session -A -D -s port22',
+  );
+  expect(startupLine({ ...s, startMode: 'attach', attachSession: 'work' })).toBe(
+    "tmux attach -d -t 'work' 2>/dev/null || tmux new-session -A -D -s port22",
+  );
+  // The name came off the host, so it is the host's to be strange: it is quoted, never trusted.
+  expect(startupLine({ ...s, startMode: 'attach', attachSession: "a'; rm -rf ~ #" })).toBe(
+    "tmux attach -d -t 'a'\\''; rm -rf ~ #' 2>/dev/null || tmux new-session -A -D -s port22",
+  );
+  // Custom is the user's line verbatim, and an empty one is not a line.
+  expect(startupLine({ ...s, startMode: 'custom', startupCommand: 'byobu' })).toBe('byobu');
+  expect(startupLine({ ...s, startMode: 'custom', startupCommand: '  ' })).toBeNull();
+});
+
+test('the conf is pushed for a tmux mode, and for a custom line that starts one', () => {
+  const s = { ...DEFAULTS };
+  expect(usesTmux({ ...s, startMode: 'session' })).toBe(true);
+  expect(usesTmux({ ...s, startMode: 'attach' })).toBe(true);
+  expect(usesTmux({ ...s, startMode: 'shell' })).toBe(false);
+  expect(usesTmux({ ...s, startMode: 'custom', startupCommand: 'tmux attach -t work' })).toBe(true);
+  expect(usesTmux({ ...s, startMode: 'custom', startupCommand: 'ssh jump' })).toBe(false);
+  expect(usesTmux({ ...s, startMode: 'custom', startupCommand: 'tmuxinator start x' })).toBe(false);
 });
 
 test('font size clamps to the stepper range', () => {

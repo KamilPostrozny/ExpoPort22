@@ -70,7 +70,7 @@ import {
   useSession,
   type Session,
 } from '@/session';
-import { endpoint, getSettings, updateSettings, useSettings } from '@/settings';
+import { endpoint, getSettings, updateSettings, useSettings, usesTmux } from '@/settings';
 import { normalizeQuery, windowSurvives } from '@/search-model';
 import Switcher, {
   Snapshot,
@@ -111,7 +111,8 @@ import UploadSheet from '@/upload-sheet';
 export default function SessionScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { fontSize, configureTmux, host, lastUploadDir } = useSettings();
+  const settings = useSettings();
+  const { fontSize, host, lastUploadDir } = settings;
   const session = useSession();
   const tmux = useTmux();
   const sending = useUploadBusy();
@@ -333,7 +334,7 @@ export default function SessionScreen() {
   const connected = session.status === 'connected';
   const showTabs = tabsAvailable(
     tmux.present,
-    deriveConfigStatus(configureTmux, tmux.config),
+    deriveConfigStatus(usesTmux(settings), tmux.config),
     tmux.attached,
   );
   // T11's page-slide state lives up here with the switcher's: the snapshot cache has to know

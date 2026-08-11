@@ -11,6 +11,7 @@ import {
   CONF_MARKER,
   CONF_PATH,
   CONF_VERSION,
+  LIST_SESSIONS,
   LIST_WINDOWS,
   NEW_WINDOW,
   POLL,
@@ -29,6 +30,7 @@ import {
   needsPush,
   parsePoll,
   parseProbe,
+  parseSessions,
   parseVerify,
   parseWindows,
   readFileCommand,
@@ -39,31 +41,70 @@ import {
 
 /* --- the conf file --- */
 
-test('the conf opens with the version marker and sets everything §4.5 lists', () => {
-  const conf = generateConf();
-  expect(conf.startsWith(`${CONF_MARKER}\n`)).toBe(true); // the human-readable version stamp
-  expect(conf).toContain(`set -g @port22 ${CONF_VERSION}`); // the verify handle
-  expect(conf).toContain('set -g mouse on');
-  expect(conf).toContain('set -s escape-time 0');
-  expect(conf).toContain('set -g history-limit 50000');
-  expect(conf).toContain('set -g set-clipboard on'); // OSC 52, half one
-  expect(conf).toContain(`Ms=\\E]52;%p1%s;%p2%s\\007`); // OSC 52, half two: the Ms capability
-  expect(conf).toContain('set -g set-titles on');
-  expect(conf).toContain('set-titles-string');
-  // One line per notch, both copy-mode flavours (§4.3): vi and emacs, up and down.
-  for (const table of ['copy-mode ', 'copy-mode-vi']) {
-    for (const wheel of ['WheelUpPane', 'WheelDownPane']) {
-      expect(conf).toMatch(new RegExp(`bind -T ${table.trim()}\\s+${wheel}\\s+send -N1 -X scroll-`));
+test('the required half is in the conf whether or not the comforts are', () => {
+  for (const conf of [generateConf(true), generateConf(false)]) {
+    expect(conf.startsWith(`${CONF_MARKER}\n`)).toBe(true); // the human-readable version stamp
+    expect(conf).toContain(`set -g @port22 ${CONF_VERSION}`); // the verify handle
+    expect(conf).toContain('set -g mouse on');
+    expect(conf).toContain('set -g set-clipboard on'); // OSC 52, half one
+    expect(conf).toContain(`Ms=\\E]52;%p1%s;%p2%s\\007`); // OSC 52, half two: the Ms capability
+    // One line per notch, both copy-mode flavours (§4.3): vi and emacs, up and down.
+    for (const table of ['copy-mode ', 'copy-mode-vi']) {
+      for (const wheel of ['WheelUpPane', 'WheelDownPane']) {
+        expect(conf).toMatch(
+          new RegExp(`bind -T ${table.trim()}\\s+${wheel}\\s+send -N1 -X scroll-`),
+        );
+      }
     }
+    // Never in either half: nothing here reads a title, and it rewrote every terminal's.
+    expect(conf).not.toContain('set-titles');
   }
 });
 
-test('push decision: fresh, stale and current remote content', () => {
-  expect(needsPush(null)).toBe(true); // nothing there yet
-  expect(needsPush('')).toBe(true);
-  expect(needsPush('# port22-conf-v0\nset -g mouse on\n')).toBe(true); // version bump replaces
-  expect(needsPush(generateConf().slice(0, -40))).toBe(true); // truncated file of the same version
-  expect(needsPush(generateConf())).toBe(false); // byte-for-byte current: skip
+test('the comforts are exactly what the toggle adds, and nothing else moves', () => {
+  const on = generateConf(true);
+  const off = generateConf(false);
+  for (const line of [
+    "set -as terminal-features ',*:RGB,*:usstyle'",
+    'set -g status off',
+    'bind S set -g status',
+    'set -s escape-time 0',
+    'set -g history-limit 50000',
+  ]) {
+    expect(on).toContain(line);
+    expect(off).not.toContain(line);
+  }
+  // The one option that can break every pane on the host is the one that asks first.
+  expect(on).toContain(
+    "if-shell 'infocmp tmux-256color >/dev/null 2>&1' 'set -g default-terminal tmux-256color'",
+  );
+  expect(on.startsWith(off)).toBe(true); // off is on minus its tail: one seam, no reshuffling
+});
+
+test('push decision: fresh, stale, the other half, and current remote content', () => {
+  expect(needsPush(null, true)).toBe(true); // nothing there yet
+  expect(needsPush('', true)).toBe(true);
+  expect(needsPush('# port22-conf-v0\nset -g mouse on\n', true)).toBe(true); // bump replaces
+  expect(needsPush(generateConf(true).slice(0, -40), true)).toBe(true); // truncated, same version
+  expect(needsPush(generateConf(true), true)).toBe(false); // byte-for-byte current: skip
+  // The toggle changes the file without changing the version, which is why the compare is content.
+  expect(needsPush(generateConf(true), false)).toBe(true);
+  expect(needsPush(generateConf(false), true)).toBe(true);
+  expect(needsPush(generateConf(false), false)).toBe(false);
+});
+
+test('sessions: names only, tmux’s own chatter dropped', () => {
+  // A name may contain spaces — `tmux new -s 'work stuff'`, measured — so only the marker byte
+  // tells a row from a diagnostic.
+  expect(parseSessions(`${SEP}port22\n${SEP}work stuff\n${SEP}0\n`)).toEqual([
+    'port22',
+    'work stuff',
+    '0',
+  ]);
+  expect(parseSessions('')).toEqual([]);
+  // What a server-less host answers with, on the same stream as the names.
+  expect(parseSessions('no server running on /tmp/tmux-1000/default\n')).toEqual([]);
+  expect(LIST_SESSIONS).toContain(`-F '${SEP}#{session_name}'`);
 });
 
 /* --- the source line in the user's own conf --- */

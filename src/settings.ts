@@ -12,24 +12,58 @@ import { useSyncExternalStore } from 'react';
 
 import type { ThemeChoice } from '@/theme';
 import { THEME_CHOICES } from '@/theme';
+import { shellQuote } from '@/tmux-model';
 
 const STORAGE_KEY = 'port22.settings.v1';
 
 export const FONT_SIZE_MIN = 8;
 export const FONT_SIZE_MAX = 32;
 
+/**
+ * How a session starts (§4.1). The three tmux answers are one command each — `new-session -A` is
+ * already "attach if it exists, create if it does not", so a separate "create" mode would be the
+ * same line with a worse failure. What they differ in is *which* session:
+ *
+ * - `session` — a session of our own, always `port22`. The default: it is the phone's, so its size
+ *   and its background colour are the phone's too. Not a name to type — one name means the second
+ *   connect of the day finds the first one's session without anyone remembering a spelling.
+ * - `attach`  — one the host is already running: `attachSession` if the user has picked one in
+ *   §4.8's list, else the most recent. Falls back to creating `port22` when the pick is gone.
+ * - `custom`  — the user's own line, unread by us (this was the only mode before).
+ * - `shell`   — no tmux at all.
+ *
+ * Both tmux modes detach the other clients (`-D` / `attach -d`), and that is not tidiness: a
+ * second client on the same session pins the pane to the *other* terminal's answers. tmux serves a
+ * pane's `OSC 11` background query from one attached client, so a fish attaching from the phone
+ * keeps the desktop's dark palette — measured, 2026-08-12 — and window size is shared the same way.
+ */
+export const START_MODES = ['shell', 'session', 'attach', 'custom'] as const;
+export type StartMode = (typeof START_MODES)[number];
+
+/** The session the `session` mode attaches to or creates, and the `attach` mode's fallback. */
+export const SESSION_NAME = 'port22';
+
 export type Settings = {
   host: string;
   port: number;
   username: string;
-  /** Sent as a line once the shell is up; `null` means send nothing. */
+  /** How the shell that comes up is turned into a session — see `START_MODES`. */
+  startMode: StartMode;
+  /** `attach` mode's target. `null` = the most recent session, which is what the mode means before
+   *  anyone has chosen. */
+  attachSession: string | null;
+  /** What the host was running at the last connect — the list Setup offers. Cached because Setup
+   *  is where the choice is made and there is no connection there to ask over; refreshed on every
+   *  connect, so it is one session behind at worst, and the line falls back either way. */
+  knownSessions: string[];
+  /** `custom` mode's line, sent once the shell is up. `null` means send nothing. */
   startupCommand: string | null;
   fontSize: number;
   theme: ThemeChoice;
-  /** Push `port22.conf` to the host on connect. On by default — without it the wheel moves five
-   *  lines a notch and a yank never reaches the pasteboard. Off is for a shared tmux server, where
-   *  `set -g` and `bind` would reach a desktop client on the same server too. */
-  configureTmux: boolean;
+  /** The second half of the pushed conf (§4.5): the comforts, as against the options a feature of
+   *  ours stops working without. On by default, and opt-out rather than opt-in because they are
+   *  what the app feels like when it is set up right. What they are is in `generateConf`. */
+  tmuxExtras: boolean;
   /** Where the destination-upload sheet (§4.6) opens next time; `null` = `$HOME`. Written on every
    *  "Save here". Not a secret — it is a directory name on the user's own machine. */
   lastUploadDir: string | null;
@@ -39,10 +73,13 @@ export const DEFAULTS: Settings = {
   host: '',
   port: 22,
   username: '',
+  startMode: 'session',
+  attachSession: null,
+  knownSessions: [],
   startupCommand: null,
   fontSize: 13,
   theme: 'auto',
-  configureTmux: true,
+  tmuxExtras: true,
   lastUploadDir: null,
 };
 
@@ -53,19 +90,65 @@ export function decode(raw: unknown): Settings {
   const str = (v: unknown, fallback: string) => (typeof v === 'string' ? v : fallback);
   const num = (v: unknown, fallback: number) =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  const startupCommand = typeof o.startupCommand === 'string' ? o.startupCommand : null;
   return {
     host: str(o.host, DEFAULTS.host),
     port: num(o.port, DEFAULTS.port),
     username: str(o.username, DEFAULTS.username),
-    startupCommand: typeof o.startupCommand === 'string' ? o.startupCommand : null,
+    // Settings written before the modes existed carry the old free-text line, and that line is
+    // exactly what `custom` means — so it keeps working without the user being asked anything.
+    startMode: START_MODES.includes(o.startMode as StartMode)
+      ? (o.startMode as StartMode)
+      : startupCommand !== null
+        ? 'custom'
+        : DEFAULTS.startMode,
+    attachSession: typeof o.attachSession === 'string' ? o.attachSession : null,
+    knownSessions: Array.isArray(o.knownSessions)
+      ? o.knownSessions.filter((name): name is string => typeof name === 'string')
+      : [],
+    startupCommand,
     fontSize: clampFontSize(num(o.fontSize, DEFAULTS.fontSize)),
     theme: THEME_CHOICES.includes(o.theme as ThemeChoice)
       ? (o.theme as ThemeChoice)
       : DEFAULTS.theme,
-    configureTmux:
-      typeof o.configureTmux === 'boolean' ? o.configureTmux : DEFAULTS.configureTmux,
+    tmuxExtras: typeof o.tmuxExtras === 'boolean' ? o.tmuxExtras : DEFAULTS.tmuxExtras,
     lastUploadDir: typeof o.lastUploadDir === 'string' ? o.lastUploadDir : null,
   };
+}
+
+/* --- what a connect actually sends (§4.1, §4.9) --- */
+
+/** The line the session types into the fresh shell, or `null` for none. One line that fish, bash
+ *  and zsh parse identically — `&&`/`||`, `2>/dev/null` and a bare word are the common ground the
+ *  tmux side-channel's commands already stand on. */
+export function startupLine(s: Settings): string | null {
+  const create = `tmux new-session -A -D -s ${SESSION_NAME}`;
+  switch (s.startMode) {
+    case 'shell':
+      return null;
+    case 'session':
+      return create;
+    // The pick can be gone by morning — the user closed it, or the host rebooted — so the fallback
+    // is the same session the other mode would have made, rather than a failed line and a bare
+    // prompt. `-d` on the attach only: nothing else can be on a session we are creating.
+    case 'attach':
+      return s.attachSession === null
+        ? `tmux attach -d 2>/dev/null || ${create}`
+        : `tmux attach -d -t ${shellQuote(s.attachSession)} 2>/dev/null || ${create}`;
+    case 'custom':
+      return s.startupCommand === null || s.startupCommand.trim() === '' ? null : s.startupCommand;
+  }
+}
+
+/**
+ * Whether this session is a tmux one, and so whether the conf gets pushed (§4.5). Not a toggle any
+ * more: the features the conf buys — a notch of wheel, a yank on the pasteboard, the switcher —
+ * are the tmux modes' own, so choosing tmux is choosing them. `custom` is read rather than asked
+ * about, because a line the user wrote already says whether it starts tmux.
+ */
+export function usesTmux(s: Settings): boolean {
+  if (s.startMode === 'session' || s.startMode === 'attach') return true;
+  return s.startMode === 'custom' && /\btmux\b/.test(s.startupCommand ?? '');
 }
 
 export function clampFontSize(size: number): number {

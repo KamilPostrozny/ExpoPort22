@@ -65,7 +65,8 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 ## 4. Functional spec (condensed; details live in the referenced files)
 
 ### 4.1 Connection & identity
-- One host: address, port (1–65535, default 22), username, optional startup command. Fields locked while connected; Disconnect returns to Setup.
+- One host: address, port (1–65535, default 22), username. Fields locked while connected; Disconnect returns to Setup.
+- **Start**: how the fresh shell becomes a session, one line sent once it is up, replayed on every reconnect. Four modes — `tmux session` (default; `tmux new-session -A -D -s port22`, one fixed name), `tmux, existing session` (`tmux attach -d [-t <pick>] 2>/dev/null || tmux new-session -A -D -s port22`, the pick coming from a list on Setup itself — `list-sessions` over a connection opened and closed for that one command, cached between visits, and skipped entirely until the host key is pinned, since the TOFU prompt is not on this screen; the line falls back to creating `port22` when the pick is gone), `Plain shell` (nothing sent), `Custom command` (the user's own line, the advanced escape hatch). Both tmux modes detach other clients: a second client on the same session decides that session's size and answers its `OSC 11` background query, so a shared session hands the phone the desktop's palette. A tmux mode forces the §4.5 config push — the features are what the config *is*.
 - Generate ed25519 on device; show public key monospaced + Copy. Never writes `authorized_keys`.
 - TOFU: first connect → modal with `ed25519 SHA256:…` fingerprint, Cancel/Trust. Mismatch later → hard refusal; only recovery is confirm-gated "Forget host key" in Settings.
 - Plain-English validation errors.
@@ -105,7 +106,7 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 
 ### 4.5 tmux integration
 - On connect probe `command -v tmux`; absent → no tabs button, no switcher, no mention.
-- "Configure tmux" toggle (default on): push `~/.config/port22/port22.conf` over SFTP, sourced; `# port22-conf-v1` marker, version-bump replaces. Contents: notch wheel bindings both copy-mode flavours, `mouse on`, `escape-time 0`, `history-limit 50000`, OSC 52 lines, `set-titles` string the badge reads. Verify by reading a setting back; surface off/applied/not-applied in Settings. Toggle off also hides tabs button (switcher needs configured tmux).
+- A tmux start mode (§4.1) pushes `~/.config/port22/port22.conf` over SFTP, sourced; `# port22-conf-v2` marker, version-bump replaces. No toggle: choosing tmux is choosing the features the file buys. Two halves: **required** — notch wheel bindings both copy-mode flavours, `mouse on`, the two OSC 52 lines, no toggle because a feature dies without each — and **comforts** behind the §4.8 opt-out toggle (default on), which are the author's own hand-written `~/.tmux.conf` minus what only the reference Swift app used: `terminal-features ',*:RGB,*:usstyle'` + an `if-shell`-guarded `default-terminal tmux-256color` (truecolor through tmux; guarded because a TERM with no terminfo on the host breaks every pane), `status off` + `bind S` to bring it back, `escape-time 0` (a `set -s`, so server-wide) and `history-limit 50000`. All global — which is the reason they are a toggle. v1's `set-titles` + format string is in neither: the badge reads the poll, never a title, and the file was retitling every terminal on the server for nothing. Off takes effect on the next connect — `source-file` adds to a running server, it cannot un-set. Verify by reading `@port22` back; surface off/applied/not-applied in Settings. A non-tmux mode hides the tabs button (switcher needs configured tmux).
 - **Switcher**: full-screen card grid (2 cols) over crust bg; per tmux window a live colour `capture-pane` snapshot card + name + directory sub. Active card accent ring. Tap → select; ✕ or left-swipe-fling → close (rubber-band right); long-press lifts card (scale/rotate/shadow, mauve ring) → drag-to-reorder with dashed target slot → `move-window` on drop; + births a new terminal that zooms out of the button (Safari new-tab); Done ✓ returns. Header "N Tabs". Terminal zooms into/out of its card slot (drag-following zoom on bar-swipe-up, accent ring during transition). Closing last window ends session. The keyboard is remembered, never re-decided: the switcher (and the Settings sheet) gives back the keys it took, so going in with them down comes back with them down — except a card tapped with the search armed, which lands with them down either way.
 - All switcher actions on short-lived exec channels (`list-windows`, `capture-pane`, `select-window`, `kill-window`, `new-window`, `move-window`) — never the attached PTY.
 
@@ -119,11 +120,11 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 - OSC 8 links underlined, tappable, `http(s)` only, others silently refused. Bare URLs stay plain text.
 
 ### 4.8 Settings (bottom sheet over live terminal)
-- Grabber, swipe-dismiss, no Done. Sections: APPEARANCE (Auto + 4 flavours with swatch rows + check; font-size stepper), TMUX (Configure toggle + status + explainer), SESSION (Disconnect accent, Forget host key red + confirm). While connected host/port/user/startup hidden; Setup screen shows the full form. Doors: ⋯ menu, two-finger tap on grid.
+- Grabber, swipe-dismiss, no Done. Sections: APPEARANCE (Auto + 4 flavours with swatch rows + check; font-size stepper), TMUX (config status + comfort-settings toggle + explainer; the mode itself lives on Setup), SESSION (Disconnect accent, Forget host key red + confirm). While connected host/port/user/startup hidden; Setup screen shows the full form. Doors: ⋯ menu, two-finger tap on grid.
 - Theme change restyles live session, no reconnect.
 
 ### 4.9 Lifecycle
-- Background kills socket (expected). Foreground: dead → auto reconnect, re-auth, new PTY plain shell (startup command replays if set; **no auto tmux attach**). Two consecutive failures → stop, show manual Reconnect. Distinct Disconnected vs Cannot-connect states (icon, headline, sentence, Setup/Reconnect buttons) + Connecting spinner.
+- Background kills socket (expected). Foreground: dead → auto reconnect, re-auth, new PTY, and the §4.1 start line again — which on the tmux modes is an *attach*, so the resumed session is the one that was there. Two consecutive failures → stop, show manual Reconnect. Distinct Disconnected vs Cannot-connect states (icon, headline, sentence, Setup/Reconnect buttons) + Connecting spinner.
 
 ### 4.10 Android specifics (design file §2f/2g)
 - Same functionality, Material skin: flush mantle surfaces, no blur; bar rides Gboard (WindowInsets); switcher per design §5c — the same shared-progress transform (the prototypes share the zoom verbatim; "container-transform" is its Material name), grid bottom bar of **Done text button (left) · Roboto count · 56dp FAB (right, births the new tab)** — this file's older "top-left back" was the §2g draft, superseded — and system back walks §5d's ladder — settings sheet dismisses, the destination browser goes up one directory then dismisses from `/`, popovers/⋯ menu close, the grid closes into the pane, and at the bare terminal back is **home** (backgrounds the app; never a pop to Setup, which would skip the disconnect); gesture pill instead of home indicator. Everything else identical.
@@ -445,13 +446,13 @@ path here is one line fish and POSIX sh parse identically, each run through `fis
 landing. Apply and verify are **one tmux client command** (`start-server \; source-file \; show
 -gv @port22`): measured locally, a session-less server exits with its last client, so a separate
 verify exec finds "no server running" on exactly the fresh host that matters. Verify reads a
-`@port22` *user option* back — a real option like `escape-time` can be masked by the user's own
+`@port22` *user option* back — a real option like `mouse` can be masked by the user's own
 conf setting the same value. The push decision is **content equality**, not a marker compare (a
 marker passes stale/truncated files; equality still bump-replaces a v0 for free). The user's own
 tmux conf is **append-only via `printf >>`** — SFTP would be read-modify-write on a capped read,
 which is data loss — and the target respects tmux's first-found order (`~/.tmux.conf` before the
 XDG path, chosen via SFTP existence checks, no shell involved). The window badge rides the ~2s
-**poll**, not the pushed `set-titles` string (which stays in the conf per spec): a title change
+**poll**, and v2 of the conf therefore stopped setting `set-titles` at all: a title change
 would need an xterm `onTitleChange` bridge T4 never built, and the ribbon needs this poll anyway
 — one exec answers attached + window index + foreground at once. "Attached" is
 `#{session_attached} > 0` (ponytail-marked ceiling: a desktop client attached while the phone
@@ -592,7 +593,8 @@ Landed: `src/input-model.ts` (the pure decisions, tested in `src/input-model.tes
 dictation filter's table, the line tracker behind it, the sheet's release rule),
 `src/settings-sheet.tsx` (the sheet), the filter + held-delete + tracked-send seam in
 `src/keybar.tsx`, the flip notification in `src/terminal.tsx`, `applyConfigure` in
-`src/tmux.ts`, sheet wiring replacing the stub alert in `src/app/terminal.tsx`, 120Hz +
+`src/tmux.ts` (gone again with the toggle it existed for — see §4.1's start modes; the sheet's
+TMUX row is now status only), sheet wiring replacing the stub alert in `src/app/terminal.tsx`, 120Hz +
 splash + icon in `app.json` and `assets/images/`.
 Decisions: **the sheet is a transparent RN Modal with its own slide** — reanimated drives the
 translate, one RNGH pan is the swipe-dismiss (release rule tested), scrim and grabber both

@@ -18,10 +18,14 @@ import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
 import { toBase64 } from '@/base64';
 import { forgetHostKey, hostKeyVerdict, pinHostKey, pinnedHostKey } from '@/host-keys';
 import { loadOrCreateKey } from '@/keys';
-import { endpoint, getSettings } from '@/settings';
+import { endpoint, getSettings, startupLine, validate } from '@/settings';
 import { startTmux, stopTmux } from '@/tmux';
+import { LIST_SESSIONS, parseSessions } from '@/tmux-model';
 
 const TERM = 'xterm-256color';
+
+/** A session list is a handful of names; nothing here needs the switcher's budget. */
+const LIMIT = 64 * 1024;
 
 /** Two in a row and we stop trying (§4.9). A third automatic attempt is a loop, not a recovery. */
 const MAX_AUTOMATIC_ATTEMPTS = 2;
@@ -107,10 +111,11 @@ export async function connect(): Promise<void> {
     emit(CLEAR_SCREEN);
     failures = 0;
     set({ status: 'connected' });
-    // A plain shell, never `tmux attach` of our own accord (§4.9) — the startup command is the
-    // user's line and it replays on every reconnect, which is what makes a reconnect feel like a
-    // resume rather than a fresh login.
-    if (settings.startupCommand) await ExpoSSH.send(`${settings.startupCommand}\n`);
+    // The start mode's line (§4.1), replayed on every reconnect — which is what makes a reconnect
+    // feel like a resume rather than a fresh login, and is why the tmux modes attach rather than
+    // create: the second connect of the day finds the first one's session and walks back into it.
+    const line = startupLine(settings);
+    if (line !== null) await ExpoSSH.send(`${line}\n`);
   } catch (error) {
     shellOpen = false;
     // A half-open connection after a failed shell open would make the next `connect` fail for a
@@ -120,6 +125,33 @@ export async function connect(): Promise<void> {
     // a re-prompt on every foreground is how a user gets trained to tap Trust.
     failures = refusal ? MAX_AUTOMATIC_ATTEMPTS : failures + 1;
     set({ status: 'failed', ...(refusal ?? { message: describe(error), mismatch: false }) });
+  }
+}
+
+/**
+ * The host's tmux sessions, for Setup's attach picker (§4.1) — which is a screen with no session
+ * behind it, so this opens one of its own for a single command and closes it again.
+ *
+ * The pinned-key guard is the whole reason this is a few lines rather than a flow: a first-ever
+ * host answers with a key nobody has trusted, and the TOFU prompt lives over the terminal (§4.1),
+ * not here — so before that first connect there is nothing to ask and nothing to show. The mode
+ * still works meanwhile; with no pick it attaches to the most recent session.
+ */
+export async function listHostSessions(): Promise<string[]> {
+  const settings = getSettings();
+  if (validate(settings) !== null) return [];
+  if (state.status === 'connected') return parseSessions(await ExpoSSH.exec(LIST_SESSIONS, LIMIT));
+  if (state.status !== 'idle' && state.status !== 'failed') return [];
+  if ((await pinnedHostKey(endpoint(settings))) === null) return [];
+  try {
+    const key = await loadOrCreateKey();
+    await ExpoSSH.connect(settings.host, settings.port, settings.username, key.seedBase64);
+    return parseSessions(await ExpoSSH.exec(LIST_SESSIONS, LIMIT));
+  } catch {
+    return []; // §7: an unreachable host on the Setup screen says nothing it does not already say
+  } finally {
+    // Unconditional: the live-session case returned above, so this connection is ours alone.
+    await ExpoSSH.disconnect().catch(() => {});
   }
 }
 
