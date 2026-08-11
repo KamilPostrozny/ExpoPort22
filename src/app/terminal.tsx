@@ -32,6 +32,7 @@ import {
   pageRadius,
   SETTLE_HOLD_MS,
   pagePitch,
+  slideMs,
   rubber,
   swipeTarget,
   zoomCommits,
@@ -672,7 +673,17 @@ export default function SessionScreen() {
   const onShellData = useRef<(() => void) | null>(null);
   const redrawn = useRef(false);
   const settleCap = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const SLIDE = { duration: 320, easing: Easing.bezier(0.22, 1, 0.36, 1) };
+  /** Constant velocity for whatever distance is left (see slideMs) — a fixed 320ms ease-out
+   *  sprinted the rest of the way on an early release (user, 2026-08-11). */
+  const slideTo = (to: number, done: () => void) => {
+    swipeX.value = withTiming(
+      to,
+      { duration: slideMs(to - swipeX.value), easing: Easing.linear },
+      (finished) => {
+        if (finished) runOnJS(done)();
+      },
+    );
+  };
 
   const clearBarSwipe = () => {
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
@@ -754,9 +765,7 @@ export default function SessionScreen() {
         console.log('[barswipe] cancel');
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
         // No un-round timer: the slide home takes x to 0 and the travel factor un-rounds with it.
-        swipeX.value = withTiming(0, SLIDE, (done) => {
-          if (done) runOnJS(clearBarSwipe)();
-        });
+        slideTo(0, clearBarSwipe);
       } else {
         // `undefined` at the slot past the last tab — the page sliding in is a window that does
         // not exist yet, and committing onto it is what births it (user, 2026-08-10).
@@ -781,9 +790,7 @@ export default function SessionScreen() {
         }
         else newWindow().catch((error) => console.log('[barswipe] new window failed:', error));
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
-        swipeX.value = withTiming((info.pos - target) * pagePitch(stage.w), SLIDE, (done) => {
-          if (done) runOnJS(settleBarSwipe)();
-        });
+        slideTo((info.pos - target) * pagePitch(stage.w), settleBarSwipe);
       }
     }
   };

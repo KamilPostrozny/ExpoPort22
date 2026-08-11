@@ -68,6 +68,16 @@ export function zoomCommits(dy: number, dtMs: number, prog: number): boolean {
   return prog > ZOOM_COMMIT || (-dy > FLICK_PX && dtMs < FLICK_MS);
 }
 
+/** The release slide's speed, pt per ms — the page keeps CONSTANT velocity for whatever
+ *  distance is left, so an early release does not sprint the rest of the way the fixed-duration
+ *  ease-out did (user, 2026-08-11). A full pitch (~430pt) takes ~480ms. */
+export const SLIDE_SPEED = 0.9;
+
+/** Remaining distance → the release slide's duration, floored so a hair's width never snaps. */
+export function slideMs(distance: number): number {
+  return Math.max(60, Math.abs(distance) / SLIDE_SPEED);
+}
+
 /** The LONGEST the committed snapshot stays over the terminal after the slide lands, waiting for
  *  tmux's redraw so the reveal is the new window and not one stale frame of the old. It is a cap,
  *  not a wait: the redraw itself ends the hold the moment its first byte arrives, which is what
