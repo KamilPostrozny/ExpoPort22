@@ -178,9 +178,15 @@ const CSS = `
        is why a negative one put the rule through the letters. The zero it is measured from is not
        the baseline and not the face's underlinePosition either, so this number is fitted rather
        than derived: -0.05em drew the rule on the letters and 0.13em left six device pixels under
-       them, against the snapshot's three, and the response is linear between the two (device,
-       2026-08-11, both rules in one held-swipe frame). In em so the fit holds at every size. */
-    text-underline-offset: 0.05em;
+       them against the snapshot's three, and the response is linear between the two — 0.08em to
+       the three pixels, so about 0.0267em each (device, 2026-08-11, both rules in one held-swipe
+       frame).
+       ponytail: fitted at 13pt, and em does not carry it across sizes — the zero it is measured
+       from is quantised, so it steps. The same size fitted to 0.05em at 12.78pt and wanted 0.10 at
+       13. If the size setting starts moving the rule again, re-fit the same way (one held swipe,
+       measure both rules, 0.0267em a pixel) or stop asking CSS and draw the rule as a border-bottom
+       on the span, where the geometry is ours. */
+    text-underline-offset: 0.1em;
   }
   /* Long-press has to reach the system edit menu (§4.2), so the rows stay real selectable text —
      xterm turns selection off because it drives its own from mouse events, which a finger is not.
