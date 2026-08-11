@@ -9,8 +9,6 @@ import {
   FLICK_MS,
   FLICK_PX,
   PAGE_GAP,
-  PILL_GAP,
-  PILL_ITEM,
   pagePitch,
   pillCont,
   pillDist,
@@ -83,11 +81,7 @@ test('pagePitch scales the prototype 430-at-402', () => {
   expect(PAGE_GAP).toBeCloseTo(28 / 402);
 });
 
-/* --- name pills (prototype namePills: 228+14 in a 242 window) --- */
-
-test('pill fractions fill the pitch exactly', () => {
-  expect(PILL_ITEM + PILL_GAP).toBeCloseTo(1);
-});
+/* --- name pills --- */
 
 test('pillCont slides with the page offset', () => {
   expect(pillCont(1, 0, 430)).toBe(1);

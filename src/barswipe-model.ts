@@ -77,10 +77,6 @@ export const SETTLE_HOLD_MS = 350;
 
 /* --- the name pills replacing the bar keys during the swipe --- */
 
-/** Pill width and gap as fractions of the bar pill's inner width (the prototype's 228 + 14 in a
- *  242 window — item plus gap exactly fill it, so the pitch IS the measured width). */
-export const PILL_ITEM = 228 / 242;
-export const PILL_GAP = 14 / 242;
 
 /** The continuous position between windows: `pos` at rest, sliding with the page offset. */
 export function pillCont(pos: number, x: number, pitch: number): number {

@@ -44,7 +44,6 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import {
-  PILL_ITEM,
   pillCont,
   pillDist,
   pillOpacity,
@@ -617,7 +616,10 @@ function NamePill({
   const { pos, x, pitch } = pills;
   const style = useAnimatedStyle(() => {
     const d = pillDist(i, pillCont(pos, x.value, pitch));
-    return { width: PILL_ITEM * width * pillWidthFrac(d), opacity: pillOpacity(d) };
+    // Grown = the WHOLE slot, exactly the keys glass it crossfades with at the end — the old
+    // strip's PILL_ITEM (94% of the slot) left a visible size jump at the swap back to the
+    // keys (user, 2026-08-11, screenshots).
+    return { width: width * pillWidthFrac(d), opacity: pillOpacity(d) };
   });
   // Anchored to the travel's edges, not the centre (user, 2026-08-11): a pill on the previous
   // side of the continuous position squeezes toward the LEFT edge of the slot — the side its
