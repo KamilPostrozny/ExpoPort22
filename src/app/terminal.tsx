@@ -1014,9 +1014,18 @@ export default function SessionScreen() {
   const notchPad = search.on ? 0 : insets.top;
   /** The floating bar's ground: home strip + the bar stack itself, all inside the card face. */
   const barPad = barHeight + insets.bottom;
+  /** The row remainder, absorbed into the BOTTOM padding so the first row is pinned to the top
+   *  of the box: the webview used to carry it above the rows (`box % cell`), and any chrome
+   *  change — ribbon, keyboard — re-rolled it, shifting the whole pane by up to a row at the
+   *  hop's reveal (user, 2026-08-11, screenshot pairs: ~13pt, down on bare, up on ribboned).
+   *  Down here it merges into the gap the bar already keeps, where a varying gap is at home. */
+  const searchRowH = search.on ? insets.top + 46 : 0;
+  const innerH =
+    stage === null ? 0 : stage.h - keyboardPad - searchRowH - notchPad - padBottom - barPad;
+  const rowRemainder = cell.h > 0 && innerH > 0 ? innerH % cell.h : 0;
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
    *  the same three numbers, or their text does not line up with the live terminal's. */
-  const paneInsets = { top: notchPad + padTop, side: padH, bottom: padBottom + barPad };
+  const paneInsets = { top: notchPad + padTop, side: padH, bottom: padBottom + barPad + rowRemainder };
   /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, plus the
    *  home strip and the keyboard's overlap, because that layer's bottom is the window's. */
   const popBase = barHeight + 6 + keyboardPad + insets.bottom;
@@ -1211,7 +1220,9 @@ export default function SessionScreen() {
             backgroundColor: theme.background,
             paddingTop: notchPad,
             paddingHorizontal: padH,
-            paddingBottom: padBottom + barPad,
+            // The remainder makes the box an exact multiple of the cell, so the webview's own
+            // top inset stays ~0 and the first row never moves — see rowRemainder.
+            paddingBottom: padBottom + barPad + rowRemainder,
           },
           termSlideStyle,
         ]}>
