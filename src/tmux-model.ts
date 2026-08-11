@@ -192,9 +192,16 @@ function target(index: number): string {
 }
 
 /** `-e` keeps colours as escapes: the card is drawn by a terminal of its own (T10), so what comes
- *  back is fed to one rather than printed. */
+ *  back is fed to one rather than printed.
+ *
+ *  `-N` keeps the trailing spaces, and it is a colour fix rather than a whitespace one: a cell's
+ *  background belongs to the cell whether or not a character sits in it, so a highlighted run that
+ *  reaches past its last letter — a selected line, a status bar, Claude Code's queued-message
+ *  strip — is spaces carrying a background. Trimmed away, the band stops at the last letter in the
+ *  card and runs to its true width in the pane, which is a band that changes length at the swipe's
+ *  hand-over (user, 2026-08-11). Needs tmux 3.1, where the flag arrived. */
 export function capturePaneCommand(index: number): string {
-  return `tmux capture-pane -p -e ${target(index)}`;
+  return `tmux capture-pane -p -e -N ${target(index)}`;
 }
 
 export function selectWindowCommand(index: number): string {

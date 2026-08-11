@@ -144,7 +144,9 @@ test('lines that are not windows (tmux diagnostics, junk) never become cards', (
 test('window commands target by validated integer index only', () => {
   expect(selectWindowCommand(3)).toBe('tmux select-window -t :3');
   expect(killWindowCommand(0)).toBe('tmux kill-window -t :0');
-  expect(capturePaneCommand(2)).toBe('tmux capture-pane -p -e -t :2'); // -e: colours stay escapes
+  // -e: colours stay escapes. -N: trailing spaces stay too, because they carry the background of
+  // a highlighted run that reaches past its last letter.
+  expect(capturePaneCommand(2)).toBe('tmux capture-pane -p -e -N -t :2');
   // Always the end of the list, never tmux's lowest free index; quoted so fish leaves `{end}` be.
   expect(NEW_WINDOW).toBe("tmux new-window -a -t ':{end}'");
   // The injection guard: an index is an integer or it is nothing.
