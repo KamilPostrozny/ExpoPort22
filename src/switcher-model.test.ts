@@ -133,7 +133,7 @@ test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
   expect(rest.height).toBe(874);
   expect(rest.translateX).toBe(0);
   expect(rest.translateY).toBe(0);
-  expect(rest.radius).toBe(0);
+  expect(rest.radius).toBeCloseTo(62); // the screen's own corner, worn at rest too
   expect(rest.ringOpacity).toBe(0);
 
   const S = 173 / 402;
@@ -149,7 +149,7 @@ test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
   expect(zoomed.ringOpacity).toBe(1);
 });
 
-test('zoomFrame leaves rest square and is screen-round the moment it moves', () => {
+test('zoomFrame is screen-round at rest and eases to the card corner', () => {
   const stage = { w: 402, h: 874 };
   const slot = slotFrame(0, 402);
   // On screen the corner is `radius * scale` — that is what the eye compares to the phone's own.
@@ -157,14 +157,10 @@ test('zoomFrame leaves rest square and is screen-round the moment it moves', () 
     const f = zoomFrame(t, 0, slot, stage);
     return f.radius * f.scale;
   };
-  // Square at rest: the wrapper is the live terminal's own clipping box there.
-  expect(onScreen(0)).toBe(0);
-  // Rounded to the display's corner within the first eighth of the flight, and monotonically —
-  // no pop from square on the first moving frame.
-  expect(onScreen(0.06)).toBeCloseTo(29.6, 1);
-  expect(onScreen(0.12)).toBeCloseTo(56, 0);
-  // …then closing on the card's 14pt by the time it lands in the slot.
-  expect(onScreen(0.5)).toBeLessThan(onScreen(0.12));
+  // The display's corner at rest — no animation from square (user, 2026-08-11).
+  expect(onScreen(0)).toBeCloseTo(62);
+  // …shrinking monotonically to the card's 14pt by the time it lands in the slot.
+  expect(onScreen(0.5)).toBeLessThan(onScreen(0));
   expect(onScreen(1)).toBeCloseTo(14);
 });
 

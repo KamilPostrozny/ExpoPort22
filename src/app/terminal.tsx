@@ -662,7 +662,7 @@ export default function SessionScreen() {
   /** A constant zero the pills read during the settle, in place of `swipeX` — see the pills
    *  prop for why the real value is briefly stale there. */
   const pillsSettled = useSharedValue(0);
-  const roundSV = useSharedValue(0); // page corner radius, 0→1 of PAGE_RADIUS
+  const roundSV = useSharedValue(0); // gate for the page's card edge, 0→1 (the corners are constant)
   // `pageSwipe` itself is declared with the switcher state above (the cache freezes on it).
   const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
     null,
@@ -717,7 +717,7 @@ export default function SessionScreen() {
     swipeInfo.current = null;
     setPageSwipe(null);
     swipeX.value = 0;
-    roundSV.value = 0; // x is already 0 here, so the travel factor has un-rounded everything
+    roundSV.value = 0; // x is already 0 here, so the travel factor has faded the edge out too
   };
 
   const settleBarSwipe = () => {
@@ -791,7 +791,7 @@ export default function SessionScreen() {
         settled: null,
         settleInsets: null,
       });
-      roundSV.value = 1; // the rounding itself rides the travel — see termSlideStyle
+      roundSV.value = 1; // the edge itself rides the travel — see pageEdgeStyle
       swipeX.value = rubber(dx, pos, windows.length + 1);
     } else if (phase === 'move') {
       const info = swipeInfo.current;
@@ -805,7 +805,7 @@ export default function SessionScreen() {
       if (target === info.pos) {
         console.log('[barswipe] cancel');
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
-        // No un-round timer: the slide home takes x to 0 and the travel factor un-rounds with it.
+        // No edge-fade timer: the slide home takes x to 0 and the travel factor fades it with it.
         slideTo(0, clearBarSwipe);
       } else {
         // `undefined` at the slot past the last tab — the page sliding in is a window that does
@@ -845,34 +845,23 @@ export default function SessionScreen() {
   const anchor = pageSwipe?.pos ?? activePosIn(cards);
   const neighbour = (side: -1 | 1) => cards[anchor + side]?.snap ?? null;
 
-  // The live terminal is itself a page while a swipe is on: it slides and rounds its corners.
-  // The rounding rides the TRAVEL, not a timer: a 180ms timing raced the start-frame React
-  // commit, dropped its first frames, and landed mid-way — the jump at the beginning of every
-  // swipe (user, 2026-08-11). Distance cannot skip: the corners grow with the first ~10% of a
-  // width of movement and un-round the same way on a cancel. `roundSV` stays as the gate (1
-  // while a swipe owns the page) and as the settle overlay's own un-round timer.
+  // The live terminal is itself a page while a swipe is on: it slides, already wearing the
+  // screen's corner. The radius is a constant, not an animation — the page is round at rest too
+  // (user, 2026-08-11), so there is nothing to round *into*.
   const pageR = pageRadius(stage?.w ?? 390);
   const roundR = 0.1 * (stage?.w ?? 390);
-  const termSlideStyle = useAnimatedStyle(() => {
-    const f = Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value;
-    return { transform: [{ translateX: swipeX.value }], borderRadius: pageR * f };
-  });
-  const settleRoundStyle = useAnimatedStyle(() => ({ borderRadius: pageR * roundSV.value }));
+  const termSlideStyle = useAnimatedStyle(() => ({ transform: [{ translateX: swipeX.value }] }));
   // The card's edge: in the dark flavours base and crust are nearly the same ink, so the gap
   // alone does not separate card from backdrop (user, 2026-08-11, screenshot) — the same
   // hairline the switcher's cards wear does. An overlay, NOT a real border: a border is part of
-  // the box and would resize the terminal mid-swipe. It rides the same travel as the rounding,
-  // so the resting page has no ghost outline.
-  const pageEdgeStyle = useAnimatedStyle(() => {
-    const f = Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value;
-    return { opacity: f, borderRadius: pageR * f };
-  });
-  /** The settle overlay's edge follows its `roundSV` un-round, not the travel — the reset has
-   *  already zeroed `swipeX` under it. */
-  const settleEdgeStyle = useAnimatedStyle(() => ({
-    opacity: roundSV.value,
-    borderRadius: pageR * roundSV.value,
+  // the box and would resize the terminal mid-swipe. This one still fades in with the travel —
+  // the corners are permanent, a hairline round the resting page is not.
+  const pageEdgeStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value,
   }));
+  /** The settle overlay's edge follows `roundSV`'s fade-out, not the travel — the reset has
+   *  already zeroed `swipeX` under it. */
+  const settleEdgeStyle = useAnimatedStyle(() => ({ opacity: roundSV.value }));
 
   /* --- T11: the context ribbon (§4.4) ---
    *
@@ -1293,6 +1282,7 @@ export default function SessionScreen() {
           styles.termSlide,
           {
             backgroundColor: theme.background,
+            borderRadius: pageR,
             paddingTop: notchPad,
             paddingHorizontal: padH,
             // The remainder makes the box an exact multiple of the cell, so the webview's own
@@ -1371,7 +1361,12 @@ export default function SessionScreen() {
       {/* see pageEdgeStyle — the live page's card edge while a swipe is on */}
       <Animated.View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.border }, pageEdgeStyle]}
+        style={[
+          StyleSheet.absoluteFill,
+          styles.pageEdge,
+          { borderColor: theme.border, borderRadius: pageR },
+          pageEdgeStyle,
+        ]}
       />
       </Animated.View>
 
@@ -1397,9 +1392,11 @@ export default function SessionScreen() {
           // an instant drop read as the terminal jumping at the end (user, 2026-08-11,
           // screenshots either side of the settle).
           exiting={FadeOut.duration(150)}
-          // Riding `roundSV` like the live page under it: the settle overlay is the visible
-          // surface for those 200ms, so the un-round to square has to happen on IT.
-          style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }, settleRoundStyle]}>
+          style={[
+            StyleSheet.absoluteFill,
+            styles.page,
+            { backgroundColor: theme.background, borderRadius: pageR },
+          ]}>
           <PageContent
             snap={pageSwipe.settled}
             stageW={stage.w}
@@ -1409,7 +1406,12 @@ export default function SessionScreen() {
           />
           <Animated.View
             pointerEvents="none"
-            style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.border }, settleEdgeStyle]}
+            style={[
+              StyleSheet.absoluteFill,
+              styles.pageEdge,
+              { borderColor: theme.border, borderRadius: pageR },
+              settleEdgeStyle,
+            ]}
           />
         </Animated.View>
       )}

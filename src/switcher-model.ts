@@ -46,13 +46,6 @@ const CARD_R = 14 / DESIGN_W;
  * the fix is that module, or a `Device.modelId` table.
  */
 export const SCREEN_R = 62 / DESIGN_W;
-/**
- * How much of the flight the rounding takes to arrive: rounded within ~40ms of the surface first
- * moving, and exactly square at rest. Not merely square-looking — at rest the wrapper is the
- * terminal's own box, `overflow: hidden`, and a 62pt radius there clips the corner characters of
- * the top line off the live terminal.
- */
-const ROUND_IN = 0.12;
 
 export function gridTop(width: number): number {
   return GRID_TOP * width;
@@ -212,7 +205,9 @@ export function zoomFrame(
     translateY: y - (height * (1 - scale)) / 2,
     // Screen corner → card corner, in what the eye actually measures: the radius ON SCREEN, which
     // is this one times `scale`. Hence the divide — at t=1 it comes back to the card's own 14pt.
-    radius: (((SCREEN_R + (CARD_R - SCREEN_R) * t) * stage.w) / scale) * Math.min(t / ROUND_IN, 1),
+    // No fade-in from square: the resting stage already wears the screen's corner (its safe-area
+    // strips are inside it, so the rounding bites into the notch band, not into the top row).
+    radius: ((SCREEN_R + (CARD_R - SCREEN_R) * t) * stage.w) / scale,
     ringOpacity: Math.min(t * 2, 1),
   };
 }
