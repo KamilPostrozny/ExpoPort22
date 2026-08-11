@@ -1065,13 +1065,13 @@ export default function SessionScreen() {
   // screen's corner. The radius is a constant, not an animation — the page is round at rest too
   // (user, 2026-08-11), so there is nothing to round *into*.
   const pageR = pageRadius(stage?.w ?? 390);
-  /** The page's bottom corners, square while the keyboard is up AND the page is standing still:
-   *  that edge is not the bottom of anything then, it is where the keyboard cuts the page off, and
-   *  a rounded cut sitting on top of the keys reads as a card that ends early (user, 2026-08-11).
-   *  The moment the page moves it is a card again — swiping between windows, or flying to the grid
-   *  — and a card is round all the way round (user, 2026-08-11). */
-  const kbOpen = keyboardPad > 0;
-  const kbSquare = kbOpen && sw === 'closed' && pageSwipe === null;
+  /** The page's bottom corners, square while the keyboard is up: that edge is not the bottom of
+   *  anything, it is where the keyboard cuts the page off, and a rounded cut sitting on top of the
+   *  keys reads as a card that ends early (user, 2026-08-11). It stays square through the flight
+   *  too — there the outer surface is the card and owns the corners, and the page rounding off a
+   *  second time just below the key bar drew a corner in the middle of the flying card (user,
+   *  2026-08-11, screenshot). A bar swipe is the exception: there the page IS the card. */
+  const kbSquare = keyboardPad > 0 && pageSwipe === null;
   const pageRB = kbSquare ? 0 : pageR;
   const roundR = 0.1 * (stage?.w ?? 390);
   const termSlideStyle = useAnimatedStyle(() => ({ transform: [{ translateX: swipeX.value }] }));
@@ -1311,15 +1311,12 @@ export default function SessionScreen() {
   // compensated for RN's centre-origin scale — all from the one tested function.
   const wrapperStyle = useAnimatedStyle(() => {
     const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value);
-    // The keyboard's square cut (see `kbSquare`) rounds off as the surface takes off, rather than
-    // switching at the first frame: at rest the bottom is the keyboard's cut, in the air it is a
-    // card's corner, and the ramp is what joins the two without a pop.
-    const bottom = kbOpen ? f.radius * Math.min(prog.value / 0.15, 1) : f.radius;
     return {
       height: f.height,
+      // All four corners together, the keyboard's cut included: the flying surface is the card,
+      // and a card's bottom rounds in on the same beat as its top (user, 2026-08-11). The square
+      // cut lives on the page inside it — see `kbSquare`.
       borderRadius: f.radius,
-      borderBottomLeftRadius: bottom,
-      borderBottomRightRadius: bottom,
       opacity: alpha.value,
       transform: [{ translateX: f.translateX }, { translateY: f.translateY }, { scale: f.scale }],
     };
@@ -1351,8 +1348,6 @@ export default function SessionScreen() {
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
-      borderBottomLeftRadius: kbOpen ? f.radius * Math.min(prog.value / 0.15, 1) : f.radius,
-      borderBottomRightRadius: kbOpen ? f.radius * Math.min(prog.value / 0.15, 1) : f.radius,
       borderWidth: prog.value > 0 ? 3 / f.scale : 0,
     };
   });
