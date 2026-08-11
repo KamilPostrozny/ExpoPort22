@@ -686,7 +686,7 @@ export default function SessionScreen() {
     swipeInfo.current = null;
     setPageSwipe(null);
     swipeX.value = 0;
-    roundSV.value = withTiming(0, { duration: 150 });
+    roundSV.value = 0; // x is already 0 here, so the travel factor has un-rounded everything
   };
 
   const settleBarSwipe = () => {
@@ -739,7 +739,7 @@ export default function SessionScreen() {
         phase: 'drag',
         settled: null,
       });
-      roundSV.value = withTiming(1, { duration: 180 });
+      roundSV.value = 1; // the rounding itself rides the travel — see termSlideStyle
       swipeX.value = rubber(dx, pos, windows.length + 1);
     } else if (phase === 'move') {
       const info = swipeInfo.current;
@@ -753,7 +753,7 @@ export default function SessionScreen() {
       if (target === info.pos) {
         console.log('[barswipe] cancel');
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
-        roundSV.value = withTiming(0, { duration: 200 });
+        // No un-round timer: the slide home takes x to 0 and the travel factor un-rounds with it.
         swipeX.value = withTiming(0, SLIDE, (done) => {
           if (done) runOnJS(clearBarSwipe)();
         });
@@ -800,18 +800,30 @@ export default function SessionScreen() {
   const neighbour = (side: -1 | 1) => cards[anchor + side]?.snap ?? null;
 
   // The live terminal is itself a page while a swipe is on: it slides and rounds its corners.
+  // The rounding rides the TRAVEL, not a timer: a 180ms timing raced the start-frame React
+  // commit, dropped its first frames, and landed mid-way — the jump at the beginning of every
+  // swipe (user, 2026-08-11). Distance cannot skip: the corners grow with the first ~10% of a
+  // width of movement and un-round the same way on a cancel. `roundSV` stays as the gate (1
+  // while a swipe owns the page) and as the settle overlay's own un-round timer.
   const pageR = pageRadius(stage?.w ?? 390);
-  const termSlideStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: swipeX.value }],
-    borderRadius: pageR * roundSV.value,
-  }));
+  const roundR = 0.1 * (stage?.w ?? 390);
+  const termSlideStyle = useAnimatedStyle(() => {
+    const f = Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value;
+    return { transform: [{ translateX: swipeX.value }], borderRadius: pageR * f };
+  });
   const settleRoundStyle = useAnimatedStyle(() => ({ borderRadius: pageR * roundSV.value }));
   // The card's edge: in the dark flavours base and crust are nearly the same ink, so the gap
   // alone does not separate card from backdrop (user, 2026-08-11, screenshot) — the same
   // hairline the switcher's cards wear does. An overlay, NOT a real border: a border is part of
-  // the box and would resize the terminal mid-swipe. It fades with the rounding, so the resting
-  // page has no ghost outline.
-  const pageEdgeStyle = useAnimatedStyle(() => ({
+  // the box and would resize the terminal mid-swipe. It rides the same travel as the rounding,
+  // so the resting page has no ghost outline.
+  const pageEdgeStyle = useAnimatedStyle(() => {
+    const f = Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value;
+    return { opacity: f, borderRadius: pageR * f };
+  });
+  /** The settle overlay's edge follows its `roundSV` un-round, not the travel — the reset has
+   *  already zeroed `swipeX` under it. */
+  const settleEdgeStyle = useAnimatedStyle(() => ({
     opacity: roundSV.value,
     borderRadius: pageR * roundSV.value,
   }));
@@ -1239,7 +1251,7 @@ export default function SessionScreen() {
           />
           <Animated.View
             pointerEvents="none"
-            style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.border }, pageEdgeStyle]}
+            style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.border }, settleEdgeStyle]}
           />
         </Animated.View>
       )}
