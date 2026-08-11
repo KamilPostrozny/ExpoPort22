@@ -449,6 +449,9 @@ export default function SessionScreen() {
     return { ...f, y: insets.top + SEARCH_BAR_H + gridTop(w) + f.y - scrollY.current };
   };
 
+  /** How long a zoom phase may stand before the watchdog below calls it stuck. The animations are
+   *  340 and 380ms, so this is comfortably past any real one and still inside a lost second. */
+  const PHASE_WATCHDOG_MS = 1500;
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
   /** How many frames a chrome-changing select gives the refit to be reported before flying
@@ -531,6 +534,7 @@ export default function SessionScreen() {
 
   const springBack = () => {
     probe('fly');
+    closeArmed.current = false;
     setSw('closing'); // already `closing` when `closeTo` armed it two frames ago; a drag release sets it here
     // Solid on the first frame, not dissolved in over 120ms. The card and the surface are the
     // same geometry at t=1 — that is what all the crossfade arithmetic buys — so the swap has
@@ -631,6 +635,7 @@ export default function SessionScreen() {
         // already flying under, so the grab is free and immediate. It resumes from where the
         // surface has got to (`zoomBase`) rather than snapping to zero.
         console.log('[switcher] open (caught the close)');
+        closeArmed.current = false; // caught inside the two-frame gap: no flight is owed
         cancelAnimation(prog);
         cancelAnimation(dragX);
         cancelAnimation(alpha);
@@ -662,12 +667,19 @@ export default function SessionScreen() {
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
     setSw('closing');
+    // Armed on a ref, NOT on `swRef`: that one is written during render, and two frames is not a
+    // promise that React has rendered. When it had not, the guard read the old phase, the motion
+    // never started and `closing` stood — with the grid untouchable and the surface invisible,
+    // which is an app that has frozen (user, 2026-08-11). Only a grab clears this.
+    closeArmed.current = true;
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        if (swRef.current === 'closing') springBack();
+        if (closeArmed.current) springBack();
       }),
     );
   };
+  /** Is a `closeTo` waiting out its two frames? Cleared by the flight itself and by a grab. */
+  const closeArmed = useRef(false);
 
   const selectCard = (pos: number, win: TmuxWindow) => {
     if (sw !== 'open') return;
@@ -787,6 +799,30 @@ export default function SessionScreen() {
         setSw('open');
       });
   };
+
+  // A transitional phase makes the grid non-interactive and the stage an animation, so a phase
+  // that never resolves is an app that has frozen — which it has done twice today, from two
+  // different missed callbacks (user, 2026-08-11). Rather than trusting the next one not to,
+  // this puts the screen back into a resting state a beat later whatever the reason. `drag` is
+  // not here: a finger may legitimately hold it for a minute, and the pan's `onFinalize` is what
+  // ends it. If this ever fires, the log line is the bug report.
+  useEffect(() => {
+    if (sw !== 'opening' && sw !== 'closing') return;
+    const stuck = setTimeout(() => {
+      console.log('[switcher] phase stuck in', sw, '— resolving it');
+      if (sw === 'opening') {
+        prog.value = 1;
+        alpha.value = 0;
+        setSw('open');
+      } else {
+        prog.value = 0;
+        alpha.value = 1;
+        finishClose();
+      }
+    }, PHASE_WATCHDOG_MS);
+    return () => clearTimeout(stuck);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sw]);
 
   // The session went away (backgrounded, killed, last window closed): the grid has nothing to
   // stand on. Reset without animation; the §4.9 overlay is already up.
