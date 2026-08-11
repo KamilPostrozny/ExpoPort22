@@ -124,7 +124,9 @@ export default function Ribbon(props: RibbonProps) {
   return (
     <Animated.View
       entering={FadeInDown.duration(180)}
-      exiting={FadeOutDown.duration(140)}
+      // The same 180 as the entry: at 140 the leave read as the ribbon blinking out while the
+      // arrival glided — asymmetric (user, 2026-08-11).
+      exiting={FadeOutDown.duration(180)}
       style={styles.wrap}>
       <GestureDetector gesture={dismiss}>
         <Glass theme={theme} radius={19}>
