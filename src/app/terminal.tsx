@@ -337,7 +337,7 @@ export default function SessionScreen() {
     const held = writeQueue.current;
     if (held.length === 0) return;
     writeQueue.current = [];
-    probe(`flush ${held.length} chunk(s)`);
+    probe(`flush ${held.length} chunk(s), ${held.reduce((n, c) => n + c.length, 0)}b`);
     for (const chunk of held) terminal.current?.write(chunk);
   };
   const writeShell = (base64: string) => {
@@ -488,6 +488,8 @@ export default function SessionScreen() {
    * lands INSIDE the flight window is the suspect; the trace decides between the redraw's tail and
    * the ribbon's reflow instead of another guess. Rip this out once it has answered. */
   const probeT0 = useRef(0);
+  /** The last size the webview reported, so the probe can print what changed, not what was seen. */
+  const lastFit = useRef<{ cols: number; rows: number; top: number } | null>(null);
   const probe = (what: string) => {
     if (probeT0.current === 0) return;
     const dt = Date.now() - probeT0.current;
@@ -1554,7 +1556,17 @@ export default function SessionScreen() {
         // guard is state, read in the same tick, so nothing slips through; the release re-reports
         // unconditionally, which is what makes dropping a report here safe.
         onResize={async (cols, rows, cellW, cellH, topInset) => {
-          probe(`webview measured ${cols}×${rows} padTop ${topInset.toFixed(0)}`);
+          // What MOVED, not what was measured: the pane shifting up a touch a beat after the
+          // landing is either this report changing the top inset (or the row count, which re-rolls
+          // the remainder) or the flushed bytes scrolling a line. The two are a row apart and look
+          // alike; only the trace tells them apart (user, 2026-08-11).
+          const was = lastFit.current;
+          if (was === null || was.cols !== cols || was.rows !== rows || was.top !== topInset)
+            probe(
+              `FIT ${was ? `${was.cols}×${was.rows} padTop ${was.top.toFixed(1)}` : 'first'} → ` +
+                `${cols}×${rows} padTop ${topInset.toFixed(1)}`,
+            );
+          lastFit.current = { cols, rows, top: topInset };
           if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
             console.log('[terminal] size held, not sent:', cols, '×', rows);
             return;
