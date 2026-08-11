@@ -656,6 +656,9 @@ export default function SessionScreen() {
    * a commit `select-window` makes tmux redraw the PTY, and a short settle overlay holds the
    * snapshot until that lands. */
   const swipeX = useSharedValue(0);
+  /** A constant zero the pills read during the settle, in place of `swipeX` — see the pills
+   *  prop for why the real value is briefly stale there. */
+  const pillsSettled = useSharedValue(0);
   const roundSV = useSharedValue(0); // page corner radius, 0→1 of PAGE_RADIUS
   // `pageSwipe` itself is declared with the switcher state above (the cache freezes on it).
   const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
@@ -1274,7 +1277,17 @@ export default function SessionScreen() {
         onBarSwipe={showTabs ? onBarSwipe : undefined}
         pills={
           pageSwipe !== null && stage !== null
-            ? { names: pageSwipe.names, pos: pageSwipe.pos, x: swipeX, pitch: pagePitch(stage.w) }
+            ? {
+                names: pageSwipe.names,
+                pos: pageSwipe.pos,
+                // The settle moves `pos` to the target in the same commit, but `swipeX` keeps
+                // the slide's final offset until the post-paint reset effect — read together
+                // they put the continuous position a full window off, snapping the new pill to
+                // a capsule and back (user, 2026-08-11: "jumps to full size at the end"). The
+                // settle IS the landing: pin the pills to a zero offset the moment it mounts.
+                x: pageSwipe.phase === 'settle' ? pillsSettled : swipeX,
+                pitch: pagePitch(stage.w),
+              }
             : null
         }
         ribbon={ribbonEl}
