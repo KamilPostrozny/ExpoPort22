@@ -1106,6 +1106,17 @@ export default function SessionScreen() {
     };
   });
 
+  /** What the card is NOT a picture of: the chrome above the pane — the notch strip, and the
+   *  search row when it is armed. Safari's cards are the page, cropped past the status bar
+   *  (user, 2026-08-11, screenshots), and ours reserved that band as dead space at the top of
+   *  every card. The crop grows with the flight instead of switching at either end, so the
+   *  surface stays the same picture the whole way: at rest nothing is cropped (identity), and by
+   *  the landing the wrapper's window into the stage is exactly the card's. */
+  const cropTop = notchPad + searchRowH;
+  const cropStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -cropTop * prog.value }],
+  }));
+
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
   // with it; border width divided by scale so it reads ~3pt on screen throughout.
   const ringStyle = useAnimatedStyle(() => {
@@ -1152,9 +1163,9 @@ export default function SessionScreen() {
           cell={cell}
           insetTop={insets.top}
           insetBottom={insets.bottom}
-          // The flying surface's top band is the notch strip now — the card's inset matches, or
-          // the crossfade steps down by exactly the strip.
-          padTop={padTop + insets.top}
+          // The flight crops its top chrome away (`cropTop`), so what is left above the first row
+          // — on both sides of the crossfade — is the webview's own inset and nothing else.
+          padTop={padTop}
           cards={visibleCards}
           total={cards.length}
           query={search.on ? search.q : ''}
@@ -1208,10 +1219,11 @@ export default function SessionScreen() {
           is the jolt at the end of the flight (user, 2026-08-10). Fixed here, the wrapper clips
           instead: the bar slides out of the bottom of the frame, the pane keeps its geometry the
           whole way, and the snapshot it lands on is drawing the same rows at the same size. */}
-      <View
+      <Animated.View
         style={[
           stage === null ? styles.screen : { height: stage.h },
           { paddingBottom: keyboardPad },
+          cropStyle,
         ]}>
       {/* T14: the terminal view's search bar — up exactly while the shared search is armed. The
           same string as the switcher's field; prev/next walk the addon's occurrences; Done
@@ -1473,7 +1485,7 @@ export default function SessionScreen() {
           )}
         </View>
       )}
-      </View>
+      </Animated.View>
 
       {/* the transition's accent ring, clipping and scaling with the wrapper */}
       <Animated.View
