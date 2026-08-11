@@ -18,6 +18,7 @@ import {
   type ScrollView,
 } from 'react-native';
 import Animated, {
+  cancelAnimation,
   Easing,
   FadeOut,
   runOnJS,
@@ -302,6 +303,17 @@ export default function SessionScreen() {
    *  `searchRef`) — the settings doors both need to know which screen is in front. */
   const swRef = useRef(sw);
   swRef.current = sw;
+  /** Is the surface in the air? Then the shell's bytes wait — see the queue at `attachTerminal`. */
+  const paused = () => swRef.current !== 'closed' && swRef.current !== 'open';
+  const writeQueue = useRef<string[]>([]);
+  // The landing (either end — the grid covers the terminal at `open` exactly as the terminal
+  // covers it at `closed`) is where the held redraw goes in, all of it, on one still frame.
+  useEffect(() => {
+    if (paused() || writeQueue.current.length === 0) return;
+    const held = writeQueue.current;
+    writeQueue.current = [];
+    for (const chunk of held) terminal.current?.write(chunk);
+  }, [sw]);
   const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
   const scrollY = useRef(0);
@@ -398,11 +410,10 @@ export default function SessionScreen() {
 
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
-  /** How long a window-switching select waits for tmux's redraw before flying anyway. The LAN
-   *  roundtrip is ~100–150ms in the logs; this is the wedge guard, not the expected path. */
-  const ZOOM_REDRAW_CAP_MS = 400;
-  /** How long the redraw has to be silent before the flight takes it as finished — two frames. */
-  const REDRAW_QUIET_MS = 32;
+  /** How many frames a chrome-changing select gives the refit to be reported before flying
+   *  anyway. That is a layout pass and a bridge hop — a frame or two — not a roundtrip; this is
+   *  the wedge guard for a webview that never answers, not the expected path. */
+  const ZOOM_REFIT_CAP_FRAMES = 8;
 
   const finishClose = () => {
     setSw('closed');
@@ -484,6 +495,8 @@ export default function SessionScreen() {
   const zoomReady = useRef(false);
   /** The pan's translation at the frame the follow armed — the origin the surface grows from. */
   const zoomFrom = useRef<{ x: number; y: number } | null>(null);
+  /** The progress the follow starts from: 0 for a fresh grab, wherever a caught close had got to. */
+  const zoomBase = useRef(0);
   const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number) => {
     if (stage === null) return;
     if (phase === 'move') {
@@ -511,16 +524,35 @@ export default function SessionScreen() {
         // to rather than jumping to the travel it spent waiting.
         zoomReady.current = false;
         zoomFrom.current = null;
+        zoomBase.current = 0;
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {
             zoomReady.current = true;
           }),
         );
         return;
+      } else if (sw === 'closing') {
+        // The flight home is catchable. `closed` only arrives when the timing formally ends, and
+        // an out-cubic has spent 99% of its distance at 78% of its duration — so the last ~80ms
+        // look exactly like a landed terminal that refuses to swipe (user, 2026-08-11). Nothing
+        // needs setting up here: the aim, the cards and the size hold are the ones this close was
+        // already flying under, so the grab is free and immediate. It resumes from where the
+        // surface has got to (`zoomBase`) rather than snapping to zero.
+        console.log('[switcher] open (caught the close)');
+        cancelAnimation(prog);
+        cancelAnimation(dragX);
+        cancelAnimation(alpha);
+        alpha.value = 1;
+        zoomBase.current = prog.value;
+        zoomT0.current = Date.now();
+        zoomFrom.current = { x: dx, y: dy };
+        zoomReady.current = true;
+        setSw('drag');
+        return;
       } else if (sw !== 'drag') return;
       if (!zoomReady.current) return;
       if (zoomFrom.current === null) zoomFrom.current = { x: dx, y: dy };
-      prog.value = zoomProgress(dy - zoomFrom.current.y, stage.w);
+      prog.value = Math.min(1, zoomBase.current + zoomProgress(dy - zoomFrom.current.y, stage.w));
       dragX.value = dx - zoomFrom.current.x;
     } else if (sw === 'drag') {
       if (zoomCommits(dy, Date.now() - zoomT0.current, prog.value)) commitOpen();
@@ -543,48 +575,35 @@ export default function SessionScreen() {
     // optimistically here (as a kill removes its card), or the old tab stays haloed through
     // the flight and a beat past it (user, 2026-08-11).
     setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
-    // A switch changes the chrome, the size and the content of the pane — and the open grid is
-    // the one moment all of that is invisible: it covers the terminal completely. So the refit
-    // (holdSize lets it through while `open`), the resize report and tmux's redraw all happen
-    // under the grid, and the flight leaves only once the redraw's first byte is back (capped —
-    // an unanswered select must not wedge the grid). Doing any of it mid-flight was the hitch,
-    // masking it with an overlay was ~60ms of React at the flight's first frame — both device,
-    // 2026-08-11. Same tab: nothing changes underneath, fly at once.
-    if (win.index !== tmux.windowIndex) {
-      // With a ribbon appearing or leaving, the pane resizes too — and the select's own redraw
-      // races the refit report across the webview bridge and usually wins (49 × 22 held on every
-      // switch onto claude, device). That byte is not the settled pane: hold the flight until the
-      // resize has actually been reported, then take the next byte — tmux's redraw at that size.
-      const chromeChanges = (recipe !== null) === IDLE_SHELLS.has(win.command);
-      sizeReported.current = false;
-      const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
-      const fly = () => {
-        if (selectSeq.current !== mine) return;
-        selectSeq.current++;
-        if (redrawQuiet.current !== null) clearTimeout(redrawQuiet.current);
-        redrawQuiet.current = null;
-        if (onShellData.current === land) onShellData.current = null;
-        if (swRef.current === 'open') closeTo(pos);
-      };
-      const land = () => {
-        // Re-armed on every byte, for two reasons. The watch is one-shot (it is cleared before it
-        // is called), so the early return below only "stays armed for the next byte" if it says
-        // so — without this a redraw that beat the resize report, which is the usual race, left
-        // nothing to wait on and the flight fell through to the cap. And the first byte is only
-        // the redraw STARTING: the rest of it used to paint into a surface that was already
-        // flying, which is why a switch to another window was choppy where a select of the one
-        // already up — nothing to redraw — was fluid (user, 2026-08-11). Two frames of silence is
-        // the stream having finished; the cap below still bounds the whole wait.
-        onShellData.current = land;
-        if (chromeChanges && !sizeReported.current) return;
-        if (redrawQuiet.current !== null) clearTimeout(redrawQuiet.current);
-        redrawQuiet.current = setTimeout(fly, REDRAW_QUIET_MS);
-      };
-      onShellData.current = land;
-      setTimeout(fly, ZOOM_REDRAW_CAP_MS);
-    } else {
+    // The tap moves the screen NOW. Waiting for tmux's redraw before flying put a LAN roundtrip —
+    // 100–150ms in the logs, and the cap's 400 when a byte went missing — between the finger and
+    // any motion at all, which is a delay you can feel and the user asked for it gone (user,
+    // 2026-08-11). What that wait bought is still bought, one layer down: `paused` holds every
+    // byte off the emulator while the surface is moving, so the redraw arrives whenever it likes
+    // and paints once, at rest, instead of into a view mid-flight.
+    //
+    // The one wait that stays is local and costs a frame or two: with a ribbon appearing or
+    // leaving, the pane RESIZES, and a reflow is layout, not pixels — `paused` cannot hold it.
+    // The grid is the only cover it has, so the flight leaves once the refit has been reported
+    // from under it (a bridge hop, guarded rather than trusted). Same tab, or same chrome:
+    // nothing is resizing, fly on this frame.
+    if (win.index === tmux.windowIndex || (recipe !== null) !== IDLE_SHELLS.has(win.command)) {
       closeTo(pos);
+      return;
     }
+    sizeReported.current = false;
+    const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
+    let waited = 0;
+    const flyWhenFitted = () => {
+      if (selectSeq.current !== mine) return;
+      if (!sizeReported.current && ++waited < ZOOM_REFIT_CAP_FRAMES) {
+        requestAnimationFrame(flyWhenFitted);
+        return;
+      }
+      selectSeq.current++;
+      if (swRef.current === 'open') closeTo(pos);
+    };
+    flyWhenFitted();
   };
 
   /** The one select whose redraw-wait may still fly — bumped by every new select (superseding
@@ -593,8 +612,6 @@ export default function SessionScreen() {
   /** Has a size report gone out to the host since the current select? What a chrome-changing
    *  select's redraw-wait gates on — see `selectCard`. */
   const sizeReported = useRef(false);
-  /** The pending "the redraw has gone quiet" timer of the select above. */
-  const redrawQuiet = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const killCard = (win: TmuxWindow) => {
     // The last window is unkillable (user decision, 2026-08-10): killing it ends the tmux
@@ -1234,7 +1251,11 @@ export default function SessionScreen() {
       {/* The stage wrapper the zoom animates: at rest an invisible identity, mid-transition the
           clipped, scaled, ringed terminal surface riding into its card slot. */}
       <Animated.View
-        pointerEvents={sw === 'closed' ? 'auto' : 'none'}
+        // `closing` is touchable too: the bar rides inside this wrapper, so a dead subtree is a
+        // bar that ignores the finger — and the phase outlives the motion by the tail of its
+        // ease-out, which is a terminal that looks landed and will not swipe (user, 2026-08-11).
+        // The gesture picks the flight up from where it is (see `onSwitcherDrag`).
+        pointerEvents={sw === 'closed' || sw === 'closing' ? 'auto' : 'none'}
         style={[
           stage === null
             ? styles.screen
@@ -1373,7 +1394,14 @@ export default function SessionScreen() {
         onBoot={async () => {
           detach.current?.();
           detach.current = attachTerminal((base64) => {
-            terminal.current?.write(base64);
+            // While the surface is in the air it is not a terminal anyone is reading, it is a
+            // picture being scaled — and every chunk written into it is a bridge marshal and a
+            // repaint of a view that is moving. That was the choppiness on a switch to another
+            // window, where selecting the tab already up (nothing to redraw) was fluid (user,
+            // 2026-08-11). Held here and flushed at the landing, the whole redraw paints once, at
+            // rest; it is also what lets the flight leave without waiting for it at all.
+            if (paused()) writeQueue.current.push(base64);
+            else terminal.current?.write(base64);
             // A settle waiting on tmux's redraw ends here, at the first byte of it.
             const settled = onShellData.current;
             onShellData.current = null;
