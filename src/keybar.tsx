@@ -132,6 +132,9 @@ export type KeyBarProps = {
   /** T11's context ribbon, rendered in the slot above the chord strip so its height rides the
    *  same `onHeight` measurement the popovers anchor on. The screen owns its state. */
   ribbon?: React.ReactNode;
+  /** T11: the reachable windows' own ribbons, inert, morphing in with the page they belong to.
+   *  Absolute — see the ribbon slot's comment for why they must not touch the bar's height. */
+  ribbonGhosts?: React.ReactNode;
 };
 
 /* --- §3's glass recipe --- */
@@ -144,7 +147,9 @@ const HAIRLINE = 'rgba(127,132,156,0.25)';
 /* --- the Android skin's metrics (see the header): same sizes, Material corners --- */
 const ANDROID = Platform.OS === 'android';
 /** The 49pt circles and pill: iOS capsules, Android's 16pt Material corners. */
-const BAR_RADIUS = ANDROID ? 16 : 24.5;
+/** The bar's own corner: every glass on the bar row uses it, T11's ribbon included — it is one
+ *  bar, so one radius (user, 2026-08-11). */
+export const BAR_RADIUS = ANDROID ? 16 : 24.5;
 /** The 35pt keys inside the pill (and the arrows button). */
 const KEY_RADIUS = ANDROID ? 12 : 18;
 /** The bar row's side margins — Android's bar docks 8pt from the edges (design §5a). */
@@ -411,8 +416,13 @@ export default function KeyBar(props: KeyBarProps) {
   return (
     <View onLayout={(e) => props.onHeight(e.nativeEvent.layout.height)}>
       {/* T11's context ribbon, above the chord strip — its height feeds the same `onHeight`
-          measurement the popovers anchor on, for free. */}
-      {props.ribbon}
+          measurement the popovers anchor on, for free. The ghosts are the neighbours' ribbons
+          morphing in behind the swipe (see `ribbonGhosts`): absolutely positioned inside this
+          wrapper, so they share the real one's bottom edge and add nothing to the height. */}
+      <View>
+        {props.ribbon}
+        {props.ribbonGhosts}
+      </View>
 
       {ctrl !== 'off' && (
         <Animated.View

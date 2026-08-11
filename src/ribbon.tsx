@@ -23,7 +23,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { PILL_MIN, pillCont, pillDist, pillOpacity, pillWidthFrac } from '@/barswipe-model';
-import { Glass } from '@/keybar';
+import { BAR_RADIUS, Glass } from '@/keybar';
 import { formatElapsed } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
 import { MONO, type Theme } from '@/theme';
@@ -50,8 +50,19 @@ export type RibbonProps = {
   /** T11's bar-swipe morph inputs — the same the name pills read. While `live` the glass
    *  squeezes and fades in LOCKSTEP with the outgoing pill (and regrows on a cancel); its
    *  mount/unmount animations use the same curve, so a ribbon appearing at a hop's settle or on
-   *  a poll beat moves exactly like everything else on the bar (user, 2026-08-11). */
-  swipe?: { pos: number; x: SharedValue<number>; pitch: number; live: boolean } | null;
+   *  a poll beat moves exactly like everything else on the bar (user, 2026-08-11).
+   *
+   *  `pos` is the swipe's BASE — the window it started on — and `index` is which window THIS
+   *  ribbon belongs to; a ghost's differ. They are two arguments in the pill's morph for a
+   *  reason (`pillDist(i, pillCont(pos, …))`), and folding them into one anchored every ghost to
+   *  the wrong side of the bar (user, 2026-08-11, held mid-swipe). */
+  swipe?: {
+    pos: number;
+    index: number;
+    x: SharedValue<number>;
+    pitch: number;
+    live: boolean;
+  } | null;
   onToggle: () => void;
   onDismiss: () => void;
   onCap: (cap: Cap) => void;
@@ -101,30 +112,30 @@ export default function Ribbon(props: RibbonProps) {
   const swipe = props.swipe ?? null;
   const swipeLive = swipe?.live ?? false;
   const swipePos = swipe?.pos ?? 0;
+  const swipeIndex = swipe?.index ?? 0;
   const swipeX = swipe?.x ?? null;
   const swipePitch = swipe?.pitch ?? 0;
   const [glassW, setGlassW] = useState(0);
   const dragStyle = useAnimatedStyle(() => {
     if (!swipeLive || swipeX === null || glassW <= 0)
-      return { width: 'auto' as const, opacity: 1 };
-    const d = pillDist(swipePos, pillCont(swipePos, swipeX.value, swipePitch));
-    return { width: glassW * pillWidthFrac(d), opacity: pillOpacity(d) };
-  }, [swipeLive, swipePos, swipeX, swipePitch, glassW]);
-
-  // …and the pill's ANCHOR, which is the half that was missing: the widths matched frame for
-  // frame while the ribbon squeezed about its own centre and the pill squeezed toward the edge
-  // its page leaves through — same size, wrong place (user, 2026-08-11, held mid-swipe). The box
-  // it anchors inside is the ribbon's own natural width, which is what the pill's slot is to the
-  // pill, so the two hug the same edge at the same moment.
-  const anchorStyle = useAnimatedStyle(() => {
-    if (!swipeLive || swipeX === null || glassW <= 0) return { alignItems: 'center' as const };
+      return { width: 'auto' as const, opacity: 1, transform: [{ translateX: 0 }] };
+    const cont = pillCont(swipePos, swipeX.value, swipePitch);
+    const d = pillDist(swipeIndex, cont);
+    const w = glassW * pillWidthFrac(d);
+    // The pill's ANCHOR, which is the half that was missing: the widths matched frame for frame
+    // while the ribbon squeezed about its own centre and the pill squeezed toward the edge its
+    // page leaves through — same size, wrong place (user, 2026-08-11, held mid-swipe). The pill
+    // gets there with `alignItems` inside its slot; the ribbon has no slot, so it shifts by the
+    // half-width the squeeze freed instead. A numeric transform also survives the UI thread,
+    // which an animated `alignItems` on this view did not — it stuck at the value of the frame
+    // the swipe started on, anchoring the ribbon to the wrong side for the whole drag.
+    const slack = (glassW - w) / 2;
     return {
-      alignItems:
-        swipePos < pillCont(swipePos, swipeX.value, swipePitch)
-          ? ('flex-start' as const)
-          : ('flex-end' as const),
+      width: w,
+      opacity: pillOpacity(d),
+      transform: [{ translateX: swipeIndex < cont ? -slack : slack }],
     };
-  }, [swipeLive, swipePos, swipeX, swipePitch, glassW]);
+  }, [swipeLive, swipePos, swipeIndex, swipeX, swipePitch, glassW]);
 
   // The running timer: re-render once a second while the label carries elapsed time.
   const [, setBeat] = useState(0);
@@ -197,16 +208,18 @@ export default function Ribbon(props: RibbonProps) {
       {/* The animated width lives on the GLASS, exactly like a name pill: the capsule itself
           narrows, corners and all, with the content centred inside and clipped evenly. A clip
           box over a fixed glass read as a left-anchored wipe instead (user, 2026-08-11). */}
-      <Animated.View
-        style={[swipeLive && glassW > 0 ? { width: glassW } : null, anchorStyle]}>
       <GestureDetector gesture={dismiss}>
         <Animated.View
-          entering={ribbonIn}
-          // No exit animation while a swipe owns the glass: the drag morph has already squeezed
-          // it invisible, and the builder's ghost would flash it back at full opacity.
+          // Neither mount nor unmount animates while a swipe owns the glass: the drag morph has
+          // already squeezed the outgoing one invisible (the builder's ghost would flash it back
+          // at full opacity), and the incoming one has been growing in as a ghost since the
+          // finger moved — replaying `ribbonIn` at the settle would restart it from a capsule.
+          entering={swipe?.live ? undefined : ribbonIn}
           exiting={swipe?.live ? undefined : ribbonOut}
           style={dragStyle}>
-          <Glass theme={theme} radius={19} style={styles.glassCentre}>
+          {/* The bar's corner, not a ribbon-specific one: the prototype's 19 read as a different
+              shape sitting right above the name pill's 24.5 (user, 2026-08-11). */}
+          <Glass theme={theme} radius={BAR_RADIUS} style={styles.glassCentre}>
             {/* Natural width, measured for the morph and LOCKED while one is live, so the
                 squeeze clips the row instead of re-laying its caps out. */}
             <View
@@ -230,7 +243,6 @@ export default function Ribbon(props: RibbonProps) {
           </Glass>
         </Animated.View>
       </GestureDetector>
-      </Animated.View>
     </View>
   );
 }

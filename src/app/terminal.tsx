@@ -963,6 +963,8 @@ export default function SessionScreen() {
           x: pageSwipe === null || pageSwipe.phase === 'settle' ? pillsSettled : swipeX,
           pitch: pagePitch(stage.w),
           live: pageSwipe !== null,
+          /** The real ribbon is the current window's; a ghost overrides this with its own. */
+          index: pageSwipe?.pos ?? activePosIn(cards),
         }
       : null;
 
@@ -983,6 +985,54 @@ export default function SessionScreen() {
         onCap={onRibbonCap}
       />
     );
+
+  /**
+   * The ARRIVING ribbon (§4.4). The departing one rides the finger because it is mounted; the
+   * window being swiped TO had none until `pendingRibbon` applied at the settle, so it popped in
+   * a beat after the slide while its name pill had grown in with the finger the whole way (user,
+   * 2026-08-11, proven against `[morph]` frame logs). Every reachable window's ribbon is already
+   * derivable from the list — `pane_current_command` is the only input `ribbonForWindow` has — so
+   * each neighbour renders its own, inert, told its OWN index so the shared morph numbers place
+   * it exactly as that window's name pill.
+   *
+   * The layer is absolute, which is the whole trick: a ghost growing in adds nothing to the bar's
+   * height, so the pane refit still happens once, at the settle, under the overlay that exists to
+   * hide it. And mounted from the moment tabs are reachable rather than at the swipe's first
+   * frame, for the reason the name pills are (KeyBarProps.pills): a BlurView per ghost is not
+   * something to build while a finger is already moving.
+   */
+  const ribbonGhosts =
+    pillsProp === null
+      ? null
+      : cards.map((c, i) => {
+          if (i === pillsProp.pos) return null; // the real ribbon owns this one's slot
+          if (IDLE_SHELLS.has(c.win.command)) return null;
+          // The same selection the settle will run, minus the two things a neighbour cannot
+          // know: its alt-screen flag and its own dismissals. Both only ever REMOVE a ribbon, so
+          // the ghost errs toward showing one that the settle then drops — never the reverse.
+          const ghost = selectRecipe({ ...RIBBON_IDLE, command: c.win.command }, false);
+          if (ghost === null) return null;
+          return (
+            <View
+              key={c.win.id}
+              pointerEvents="none"
+              style={[styles.ribbonGhost, !pillsProp.live && styles.hidden]}>
+              <Ribbon
+                theme={theme}
+                recipe={ghost}
+                swipe={{ ...pillsProp, index: i }}
+                // A hop starts the timer over anyway (`ribbonPoll` calls it a new instance), so
+                // the ghost's zero and the real ribbon's are the same zero.
+                startedAt={swipeInfo.current?.t0 ?? Date.now()}
+                expanded={rbExpanded}
+                busy={false}
+                onToggle={noop}
+                onDismiss={noop}
+                onCap={noop}
+              />
+            </View>
+          );
+        });
 
   /** Outside-tap collapses an expanded TUI recipe (§4.4): one transparent layer over the
    *  terminal area only, so the ribbon's own caps stay tappable. */
@@ -1399,6 +1449,7 @@ export default function SessionScreen() {
         onBarSwipe={showTabs ? onBarSwipe : undefined}
         pills={pillsProp}
         ribbon={ribbonEl}
+        ribbonGhosts={ribbonGhosts}
       />
       </View>
 
@@ -1663,7 +1714,13 @@ function Status({
   );
 }
 
+/** The ghost ribbons are looked at, never touched. */
+const noop = () => {};
+
 const styles = StyleSheet.create({
+  /** Bottom-aligned with the real ribbon inside the bar's ribbon slot, and out of its flow. */
+  ribbonGhost: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+  hidden: { opacity: 0 },
   screen: { flex: 1 },
   // T14's terminal-side search bar (design: 38pt field, 12pt radius; Android 16dp per §5d).
   searchRow: {
