@@ -94,14 +94,22 @@ export default function Ribbon(props: RibbonProps) {
   const running = recipe.id === 'running';
 
   // The drag morph: the same distance→width/opacity the outgoing name pill runs, so the two
-  // move as one — and a cancelled swipe regrows the ribbon for free.
+  // move as one — and a cancelled swipe regrows the ribbon for free. The shared value is
+  // destructured OUT of the prop before the worklet captures it (like the pills do): captured
+  // nested in the object it never registered as a dependency, and the style computed once at
+  // full width instead of riding the finger (user, 2026-08-11, screenshots).
   const swipe = props.swipe ?? null;
+  const swipeLive = swipe?.live ?? false;
+  const swipePos = swipe?.pos ?? 0;
+  const swipeX = swipe?.x ?? null;
+  const swipePitch = swipe?.pitch ?? 0;
   const [glassW, setGlassW] = useState(0);
   const dragStyle = useAnimatedStyle(() => {
-    if (!swipe?.live || glassW <= 0) return { width: 'auto' as const, opacity: 1 };
-    const d = pillDist(swipe.pos, pillCont(swipe.pos, swipe.x.value, swipe.pitch));
+    if (!swipeLive || swipeX === null || glassW <= 0)
+      return { width: 'auto' as const, opacity: 1 };
+    const d = pillDist(swipePos, pillCont(swipePos, swipeX.value, swipePitch));
     return { width: glassW * pillWidthFrac(d), opacity: pillOpacity(d) };
-  }, [swipe, glassW]);
+  }, [swipeLive, swipePos, swipeX, swipePitch, glassW]);
 
   // The running timer: re-render once a second while the label carries elapsed time.
   const [, setBeat] = useState(0);
