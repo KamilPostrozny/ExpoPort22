@@ -244,6 +244,9 @@ export type SwitcherProps = {
   cell: { w: number; h: number };
   /** The live pane's column count. Every card is capped to it — see `liveCols` on the screen. */
   liveCols: number;
+  /** …and its rows: a short capture is padded back out to this, or the card's text sits lower
+   *  than the surface's and steps at the hand-over. */
+  liveRows: number;
   /** The terminal's own top inset, in stage points. Sideways a card's inset is a constant share
    *  of the stage (`SHOT_PAD`), but vertically the terminal's inset absorbs half the row
    *  remainder and so moves with the layout — and the card's has to move with it, or the text
@@ -414,6 +417,7 @@ export default function Switcher(props: SwitcherProps) {
               card={card}
               cell={props.cell}
               liveCols={props.liveCols}
+              liveRows={props.liveRows}
               padTop={props.padTop}
               hit={props.hits[card.win.id]}
               query={nq}
@@ -518,6 +522,7 @@ function WindowCard({
   card,
   cell,
   liveCols,
+  liveRows,
   padTop,
   hit,
   query,
@@ -539,6 +544,7 @@ function WindowCard({
   card: Card;
   cell: { w: number; h: number };
   liveCols: number;
+  liveRows: number;
   /** The terminal's top inset in stage points; through the zoom it is this card's. */
   padTop: number;
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
@@ -747,10 +753,20 @@ function WindowCard({
   // highlight surgery; `highlightLine` returns miss lines untouched, so unmatched cards (a
   // name-only match) re-use every node.
   const shownLines = useMemo(() => {
-    const lines = hit ? parseAnsi(hit.lines.join('\n')) : (card.snap?.lines ?? null);
-    if (lines === null || query === '') return lines;
+    const raw = hit ? parseAnsi(hit.lines.join('\n')) : (card.snap?.lines ?? null);
+    if (raw === null) return null;
+    // A capture ends at the last line with something on it, so the blank rows under a prompt come
+    // back as nothing at all. Hanging that off the bottom edge puts the text lower than the live
+    // pane has it, and the difference shows as a step the moment the flight hands over (user,
+    // 2026-08-11). Padded back to the pane's height, the two are the same picture. A search hit is
+    // a context block, not a pane — it keeps its own length and its top alignment.
+    const lines =
+      !hit && liveRows > raw.length
+        ? [...raw, ...Array.from({ length: liveRows - raw.length }, (): SpanLine => [])]
+        : raw;
+    if (query === '') return lines;
     return lines.map((line) => highlightLine(line, query));
-  }, [hit, card.snap, query]);
+  }, [hit, card.snap, query, liveRows]);
 
   return (
     <GestureDetector gesture={gesture}>

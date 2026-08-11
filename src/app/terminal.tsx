@@ -170,6 +170,13 @@ export default function SessionScreen() {
    *  is a preview of a pane this client is about to size to itself, so this is the width to draw
    *  them all at; anything longer clips, exactly as it will when tmux reflows it. */
   const [liveCols, setLiveCols] = useState(0);
+  /** …and its row count, for the same reason one level down: `capture-pane` returns only the lines
+   *  that have something on them, so a pane with a prompt and blank rows under it comes back
+   *  SHORT. Bottom-aligning that puts the last line of text on the card's bottom edge while the
+   *  live surface has it sitting higher with the blanks below — and the difference is the text
+   *  stepping as the flight hands over to the card (user, 2026-08-11). The card pads back out to
+   *  this. */
+  const [liveRows, setLiveRows] = useState(0);
   /** The inset the terminal took above its first row — the row remainder, which it works out
    *  itself (see TerminalProps.onResize). The cards need it to aim the zoom's crossfade. */
   const [padTop, setPadTop] = useState(0);
@@ -1365,6 +1372,7 @@ export default function SessionScreen() {
           stageW={stage.w}
           cell={cell}
           liveCols={liveCols}
+          liveRows={liveRows}
           insetTop={insets.top}
           insetBottom={insets.bottom}
           // The flight crops its top chrome away (`cropTop`), so what is left above the first row
@@ -1538,6 +1546,7 @@ export default function SessionScreen() {
           }
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
           if (cols > 0) setLiveCols(cols);
+          if (rows > 0) setLiveRows(rows);
           setPadTop(topInset);
           sizeReported.current = true; // a chrome-changing select's redraw-wait gates on this
           setSize(cols, rows);
