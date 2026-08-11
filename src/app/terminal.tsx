@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
+  FadeOut,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -1301,6 +1302,11 @@ export default function SessionScreen() {
       {pageSwipe?.phase === 'settle' && stage !== null && (
         <Animated.View
           pointerEvents="none"
+          // A dissolve, not a cut: the overlay holds the PRE-hop geometry (frozen insets) and
+          // the live pane under it has already refit — the ribbon genuinely trades ~3 rows — so
+          // an instant drop read as the terminal jumping at the end (user, 2026-08-11,
+          // screenshots either side of the settle).
+          exiting={FadeOut.duration(150)}
           // Riding `roundSV` like the live page under it: the settle overlay is the visible
           // surface for those 200ms, so the un-round to square has to happen on IT.
           style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }, settleRoundStyle]}>
