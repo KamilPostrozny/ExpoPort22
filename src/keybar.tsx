@@ -848,7 +848,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pillDivider: { width: 1, height: 27 },
-  namesWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, overflow: 'hidden' },
+  // No overflow clip: a pill mid-slide is partly outside the slot, and the clip sheared its
+  // rounded corner flat at the edge (user, 2026-08-11, screenshot). Unclipped it slides in
+  // whole, passing under the circles either side (they render later, so above).
+  namesWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
   nameStrip: {
     position: 'absolute',
     left: 0,
