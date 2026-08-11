@@ -206,6 +206,13 @@ const CSS = `
   .xterm .xterm-helpers { -webkit-user-select: none; user-select: none; }
   /* The webview must not rubber-band: a pan is a scroll for the session, never for the page. */
   .xterm-viewport { overscroll-behavior: none; }
+  /* And it must not draw a scrollbar. xterm's viewport is 'overflow-y: scroll', so WebKit's overlay
+     bar flashes whenever the element is scrolled programmatically — which is exactly what a session
+     being painted back in after a restart does, thousands of lines in one go, and it can be left
+     sitting there. Scrolling here is §4.3's job and it has its own gesture; nothing is lost by
+     hiding the bar. (The ~15pt of clear space on the right is NOT this bar: it is the gutter the
+     fit addon holds back for it, a constant it never measures — see onResize. */
+  .xterm-viewport::-webkit-scrollbar { display: none; }
 `;
 
 /**
