@@ -678,7 +678,9 @@ export default function SessionScreen() {
   const slideTo = (to: number, done: () => void) => {
     swipeX.value = withTiming(
       to,
-      { duration: slideMs(to - swipeX.value), easing: Easing.linear },
+      // A mild ease-out, not linear: pure constant speed read mechanical; the strong bezier
+      // read as a sprint. Duration still scales with the distance, which is what matters.
+      { duration: slideMs(to - swipeX.value), easing: Easing.out(Easing.quad) },
       (finished) => {
         if (finished) runOnJS(done)();
       },

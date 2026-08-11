@@ -68,10 +68,11 @@ export function zoomCommits(dy: number, dtMs: number, prog: number): boolean {
   return prog > ZOOM_COMMIT || (-dy > FLICK_PX && dtMs < FLICK_MS);
 }
 
-/** The release slide's speed, pt per ms — the page keeps CONSTANT velocity for whatever
- *  distance is left, so an early release does not sprint the rest of the way the fixed-duration
- *  ease-out did (user, 2026-08-11). A full pitch (~430pt) takes ~480ms. */
-export const SLIDE_SPEED = 0.9;
+/** The release slide's speed, pt per ms — the duration scales with the distance left, so an
+ *  early release does not sprint the rest of the way the fixed-duration ease-out did. 0.9
+ *  (~480ms full pitch) then read as too slow (user, 2026-08-11, twice): 1.15 puts a full pitch
+ *  at ~375ms, between the original 320 and the constant-speed 480. */
+export const SLIDE_SPEED = 1.15;
 
 /** Remaining distance → the release slide's duration, floored so a hair's width never snaps. */
 export function slideMs(distance: number): number {
