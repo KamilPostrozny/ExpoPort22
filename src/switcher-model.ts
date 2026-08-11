@@ -168,6 +168,35 @@ export function zoomProgress(travel: number, width: number): number {
 /** Release above this progress commits to the grid; below springs back. */
 export const ZOOM_COMMIT = 0.25;
 
+/**
+ * How far the flying surface's content slides up as it shrinks — 0 at rest, and at the card
+ * whatever puts the pane's LAST row on the card's bottom edge.
+ *
+ * A card is a taller-than-wide crop of a taller-still pane: fit 51 columns to 173pt and ~30 of the
+ * pane's 41 rows are all that will go in the 240. The clip in `zoomFrame` takes that difference
+ * off the BOTTOM, so a card was the top of the pane and everything since — the prompt, the last
+ * command's output, the reason you are looking at the card — fell off the edge (user, 2026-08-11,
+ * screenshot: every card cut mid-row through an `ls`). Sliding the content up by the same amount
+ * turns the crop around: what the clip removes is the top, and the card ends on the pane's last
+ * row.
+ *
+ * `bottomInset` is the terminal's own bottom padding (bar, home strip, row remainder) in stage
+ * points — the pane's content edge is that far up from the stage's, and it is the edge the card
+ * lands on. `minShift` is the top chrome the card must never show whatever the arithmetic says
+ * (the notch strip, an armed search row); normally the anchor is well past it.
+ */
+export function cropShift(
+  t: number,
+  slot: Frame,
+  stage: { w: number; h: number },
+  bottomInset: number,
+  minShift: number,
+): number {
+  'worklet';
+  const window = (slot.h * stage.w) / slot.w; // the card's height in stage points
+  return Math.max(minShift, Math.max(0, stage.h - bottomInset - window)) * t;
+}
+
 export type ZoomFrame = {
   /** Scale about the wrapper's centre. */
   scale: number;

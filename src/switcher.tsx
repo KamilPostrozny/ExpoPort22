@@ -111,7 +111,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
         const caps = await Promise.all(
           wins.map((win) =>
             capturePane(win.index)
-              .then((text) => ({ lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width }))
+              .then((text) => ({ lines: parseAnsi(text).slice(-MAX_LINES), cols: win.width }))
               .catch(() => null), // window died between list and capture: it keeps its last snapshot
           ),
         );
@@ -146,7 +146,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
   const refreshCard = useCallback(async (win: TmuxWindow) => {
     try {
       const text = await capturePane(win.index);
-      const snap = { lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width };
+      const snap = { lines: parseAnsi(text).slice(-MAX_LINES), cols: win.width };
       shown.current.set(win.id, snap);
       setCards((prev) => prev.map((c) => (c.win.id === win.id ? { ...c, snap } : c)));
     } catch (error) {
@@ -759,11 +759,22 @@ function WindowCard({
               borderRadius: 14 * u,
               backgroundColor: theme.background,
               paddingHorizontal: shotPad,
-              paddingTop: shotPadTop,
-              paddingBottom: shotPad,
+              // The pane is taller than the card can hold, so one end of it is lost either way.
+              // The end worth keeping is the LAST row — the prompt and what just ran, which is
+              // what the card is being read for — so the snapshot hangs from the bottom edge and
+              // the overflow falls off the top (user, 2026-08-11). The flight lands on the same
+              // slice: see `cropShift`. A search hit is the exception — its context block is a
+              // few lines placed to be read from the top, not a pane's tail.
+              justifyContent: hit ? 'flex-start' : 'flex-end',
+              paddingTop: hit ? shotPadTop : 0,
             },
           ]}>
-          <Snapshot lines={shownLines} theme={theme} {...type} />
+          {/* The ring is part of the inset (RN lays content out inside a border), so hanging the
+              snapshot off the padding box puts its last row that far above where the terminal's
+              lands — the same constant step `shotPadTop` subtracts on the top edge. */}
+          <View style={{ marginBottom: -ring.borderWidth }}>
+            <Snapshot lines={shownLines} theme={theme} {...type} />
+          </View>
           {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
           {closable && (
             <View style={[styles.close, { backgroundColor: theme.foreground }]}>

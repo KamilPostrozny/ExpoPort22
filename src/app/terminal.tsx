@@ -82,6 +82,7 @@ import Switcher, {
 } from '@/switcher';
 import {
   SEARCH_BAR_H,
+  cropShift,
   gridTop,
   slotFrame,
   snapshotType,
@@ -409,8 +410,9 @@ export default function SessionScreen() {
    *  anyway. That is a layout pass and a bridge hop — a frame or two — not a roundtrip; this is
    *  the wedge guard for a webview that never answers, not the expected path. */
   const ZOOM_REFIT_CAP_FRAMES = 8;
-  /** And the guard for a redraw that never comes at all — see the end of `selectCard`. */
-  const ZOOM_WEDGE_MS = 2000;
+  /** And the guard for a redraw that never comes at all: ~1–2s of frames, an order of magnitude
+   *  past the ~50ms roundtrip the trace measured, so it never shapes how a switch feels. */
+  const ZOOM_WEDGE_FRAMES = 120;
 
   const finishClose = () => {
     probe('landed');
@@ -597,20 +599,20 @@ export default function SessionScreen() {
     // optimistically here (as a kill removes its card), or the old tab stays haloed through
     // the flight and a beat past it (user, 2026-08-11).
     setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
-    // The flight waits for the HOST to have switched, and it knows when that happened rather than
-    // guessing how long it takes: a byte on the PTY that was not there when the finger went down
-    // is tmux's redraw of the window it was just told to select. Nothing else is talking. The two
-    // conditions below are both events — the redraw arriving, and, where a ribbon appears or
-    // leaves, the refit having gone out first so that redraw is at the size the pane lands at —
-    // and neither is a duration anyone tuned.
+    // The flight leaves when the HOST has finished redrawing, and it knows when that happened
+    // rather than guessing how long it takes. Two facts, no tuned durations:
     //
-    // The delay this used to have was mostly a bug rather than the wait: the byte watch is
-    // one-shot, cleared before it is called, so a redraw that beat the resize report (the usual
-    // race) left nothing armed and every chrome-changing switch fell through to a 400ms cap. It
-    // is a counter now, so a byte that arrives early is still an arrival.
+    //   - bytes on the PTY that were not there when the finger went down are tmux's redraw of the
+    //     window it was just told to select; nothing else is talking;
+    //   - the redraw is a BURST, so it is over when a whole display frame passes without one. The
+    //     probe trace (2026-08-11) is the shape of it: 5460 bytes at +53ms, 1916 more at +54, and
+    //     nothing after. Leaving on the first chunk put that second write one frame into the
+    //     flight — the single hitch on every switch to another window. A frame of silence is not
+    //     a number anyone picked; it is the unit the hitch is measured in.
     //
-    // Flying before the redraw is the other end and no better: the surface then carries the pane
-    // of the window being left, in plain sight for the length of a roundtrip (user, 2026-08-11).
+    // Where a ribbon appears or leaves the refit has to go out first, so that redraw arrives at
+    // the size the pane lands at. Flying before any of it is the other end and no better: the
+    // surface then carries the pane of the window being LEFT, for the length of a roundtrip.
     // Same tab: nothing switches, nothing to wait for.
     if (win.index === tmux.windowIndex) {
       closeTo(pos);
@@ -621,37 +623,26 @@ export default function SessionScreen() {
     const bytesAtTap = dataSeq.current;
     const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
     let frames = 0;
-    const tryFly = () => {
+    let lastFrame = bytesAtTap;
+    const step = () => {
       if (selectSeq.current !== mine) return;
-      // The refit is local — a layout pass and a bridge hop — so it is polled by frame rather
-      // than woken by anything; the count is the wedge guard for a webview that never answers,
-      // not a wait anyone sits through.
+      const seen = dataSeq.current;
+      const settled = seen > bytesAtTap && seen === lastFrame; // arrived, and quiet for a frame
+      lastFrame = seen;
+      // Both caps are wedge guards, not waits: the first for a webview that never reports its
+      // refit (that one is local, a layout pass and a bridge hop), the second for a redraw that
+      // never comes at all. If either is what releases a flight, something upstream is broken.
       const fitted = !chromeChanges || sizeReported.current || frames >= ZOOM_REFIT_CAP_FRAMES;
-      if (!fitted) {
+      if (frames >= ZOOM_WEDGE_FRAMES) console.log('[switcher] redraw never arrived — flying anyway');
+      else if (!fitted || !settled) {
         frames++;
-        requestAnimationFrame(tryFly);
-      }
-      if (!fitted || dataSeq.current === bytesAtTap) {
-        onShellData.current = tryFly; // re-armed, because the watch is one-shot
+        requestAnimationFrame(step);
         return;
       }
       selectSeq.current++;
-      if (onShellData.current === tryFly) onShellData.current = null;
       if (swRef.current === 'open') closeTo(pos);
     };
-    tryFly();
-    // The one clock left, and it is a wedge guard: a select whose redraw never comes must not
-    // leave the grid standing. An order of magnitude past the LAN roundtrip, so it never shapes
-    // how the switch feels — if this is what fires the flight, something is wrong upstream.
-    setTimeout(tryFlyAnyway(mine, pos), ZOOM_WEDGE_MS);
-  };
-
-  /** The wedge guard's flight: the same supersession rules, minus every condition. */
-  const tryFlyAnyway = (mine: number, pos: number) => () => {
-    if (selectSeq.current !== mine) return;
-    selectSeq.current++;
-    console.log('[switcher] redraw never arrived — flying anyway');
-    if (swRef.current === 'open') closeTo(pos);
+    requestAnimationFrame(step);
   };
 
   /** The one select whose redraw-wait may still fly — bumped by every new select (superseding
@@ -1215,8 +1206,15 @@ export default function SessionScreen() {
    *  surface stays the same picture the whole way: at rest nothing is cropped (identity), and by
    *  the landing the wrapper's window into the stage is exactly the card's. */
   const cropTop = notchPad + searchRowH;
+  /** …and the card is the pane's LAST rows, not its first — see `cropShift`. The bottom inset is
+   *  the one the pane is already laid out against, so the two edges are the same edge. Both of
+   *  these are plain values the worklet closes over: they change with the chrome, and a re-render
+   *  is exactly when they should. */
+  const cropBottom = paneInsets.bottom;
   const cropStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: -cropTop * prog.value }],
+    transform: [
+      { translateY: -cropShift(prog.value, slotSV.value, stageSV.value, cropBottom, cropTop) },
+    ],
   }));
 
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales

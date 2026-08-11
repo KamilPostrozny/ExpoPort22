@@ -22,6 +22,7 @@ import {
   targetSlot,
   termPad,
   zoomFrame,
+  cropShift,
   zoomProgress,
 } from '@/switcher-model';
 import type { TmuxWindow } from '@/tmux-model';
@@ -122,6 +123,21 @@ test('zoomProgress: saturating 280pt from the arm point, clamped both ends', () 
   expect(zoomProgress(-1000, 402)).toBe(1);
   expect(zoomProgress(50, 402)).toBe(0); // downward drag is not a zoom
   expect(ZOOM_COMMIT).toBe(0.25);
+});
+
+test('cropShift: nothing at rest, the pane’s last row on the card’s edge at 1', () => {
+  const stage = { w: 402, h: 874 };
+  const slot = slotFrame(0, 402);
+  const bottom = 124; // bar + home strip + row remainder
+  expect(cropShift(0, slot, stage, bottom, 59)).toBe(0);
+  // The card's window in stage points, and what is left above the pane's content edge.
+  const window = (slot.h * stage.w) / slot.w;
+  expect(cropShift(1, slot, stage, bottom, 59)).toBeCloseTo(874 - 124 - window);
+  // The clip takes `window` off the bottom, so shifting by this puts the shifted content's end
+  // exactly on the pane's end: shift + window === stage.h - bottom.
+  expect(cropShift(1, slot, stage, bottom, 59) + window).toBeCloseTo(874 - 124);
+  // A card taller than the pane cannot hang off its bottom — it falls back to the chrome floor.
+  expect(cropShift(1, slot, { w: 402, h: 300 }, bottom, 59)).toBe(59);
 });
 
 test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
