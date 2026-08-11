@@ -82,8 +82,6 @@ import Switcher, {
 } from '@/switcher';
 import {
   SEARCH_BAR_H,
-  cropShift,
-  fillsCard,
   gridTop,
   slotFrame,
   snapshotType,
@@ -170,13 +168,6 @@ export default function SessionScreen() {
    *  is a preview of a pane this client is about to size to itself, so this is the width to draw
    *  them all at; anything longer clips, exactly as it will when tmux reflows it. */
   const [liveCols, setLiveCols] = useState(0);
-  /** …and its row count, for the same reason one level down: `capture-pane` returns only the lines
-   *  that have something on them, so a pane with a prompt and blank rows under it comes back
-   *  SHORT. Bottom-aligning that puts the last line of text on the card's bottom edge while the
-   *  live surface has it sitting higher with the blanks below — and the difference is the text
-   *  stepping as the flight hands over to the card (user, 2026-08-11). The card pads back out to
-   *  this. */
-  const [liveRows, setLiveRows] = useState(0);
   /** The inset the terminal took above its first row — the row remainder, which it works out
    *  itself (see TerminalProps.onResize). The cards need it to aim the zoom's crossfade. */
   const [padTop, setPadTop] = useState(0);
@@ -1327,30 +1318,8 @@ export default function SessionScreen() {
    *  surface stays the same picture the whole way: at rest nothing is cropped (identity), and by
    *  the landing the wrapper's window into the stage is exactly the card's. */
   const cropTop = notchPad + searchRowH;
-  /** …and the card is the pane's LAST rows, not its first — see `cropShift`. The bottom inset is
-   *  the one the pane is already laid out against, so the two edges are the same edge. Both of
-   *  these are plain values the worklet closes over: they change with the chrome, and a re-render
-   *  is exactly when they should. */
-  // The keyboard's overlap counts too: the pane sits inside `paddingBottom: keyboardPad` as well,
-  // so with the keys up its last row is that much further from the stage's floor. The pad freezes
-  // at the open, which is exactly the value this wants.
-  const cropBottom = paneInsets.bottom + keyboardPad;
-  /** …and which END of the pane the flight lands on, which is the card's rule and so has to be
-   *  the card's answer: the window it is flying to or from is `zoomId`, and `fillsCard` reads the
-   *  same capture that card draws. A pane with less in it than a card can show has its content at
-   *  the TOP, and both of them keep it there. */
-  const cropFull = fillsCard(
-    cards.find((c) => c.win.id === zoomId)?.snap?.lines.length ?? 0,
-    stage === null ? { x: 0, y: 0, w: 1, h: 1 } : slotFrame(0, stage.w),
-    { w: stage?.w ?? 1, h: 0 },
-    cell.h,
-  );
   const cropStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY: -cropShift(prog.value, slotSV.value, stageSV.value, cropBottom, cropTop, cropFull),
-      },
-    ],
+    transform: [{ translateY: -cropTop * prog.value }],
   }));
 
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
@@ -1398,7 +1367,6 @@ export default function SessionScreen() {
           stageW={stage.w}
           cell={cell}
           liveCols={liveCols}
-          liveRows={liveRows}
           insetTop={insets.top}
           insetBottom={insets.bottom}
           // The flight crops its top chrome away (`cropTop`), so what is left above the first row
@@ -1572,7 +1540,6 @@ export default function SessionScreen() {
           }
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
           if (cols > 0) setLiveCols(cols);
-          if (rows > 0) setLiveRows(rows);
           setPadTop(topInset);
           sizeReported.current = true; // a chrome-changing select's redraw-wait gates on this
           setSize(cols, rows);

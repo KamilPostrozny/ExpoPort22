@@ -42,7 +42,6 @@ import {
   gridHeight,
   gridTop,
   reorder,
-  fillsCard,
   reorderArgs,
   shouldClose,
   slotFrame,
@@ -112,7 +111,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
         const caps = await Promise.all(
           wins.map((win) =>
             capturePane(win.index)
-              .then((text) => ({ lines: parseAnsi(text).slice(-MAX_LINES), cols: win.width }))
+              .then((text) => ({ lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width }))
               .catch(() => null), // window died between list and capture: it keeps its last snapshot
           ),
         );
@@ -147,7 +146,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
   const refreshCard = useCallback(async (win: TmuxWindow) => {
     try {
       const text = await capturePane(win.index);
-      const snap = { lines: parseAnsi(text).slice(-MAX_LINES), cols: win.width };
+      const snap = { lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width };
       shown.current.set(win.id, snap);
       setCards((prev) => prev.map((c) => (c.win.id === win.id ? { ...c, snap } : c)));
     } catch (error) {
@@ -245,9 +244,6 @@ export type SwitcherProps = {
   cell: { w: number; h: number };
   /** The live pane's column count. Every card is capped to it — see `liveCols` on the screen. */
   liveCols: number;
-  /** …and its rows: a short capture is padded back out to this, or the card's text sits lower
-   *  than the surface's and steps at the hand-over. */
-  liveRows: number;
   /** The terminal's own top inset, in stage points. Sideways a card's inset is a constant share
    *  of the stage (`SHOT_PAD`), but vertically the terminal's inset absorbs half the row
    *  remainder and so moves with the layout — and the card's has to move with it, or the text
@@ -418,7 +414,6 @@ export default function Switcher(props: SwitcherProps) {
               card={card}
               cell={props.cell}
               liveCols={props.liveCols}
-              liveRows={props.liveRows}
               padTop={props.padTop}
               hit={props.hits[card.win.id]}
               query={nq}
@@ -523,7 +518,6 @@ function WindowCard({
   card,
   cell,
   liveCols,
-  liveRows,
   padTop,
   hit,
   query,
@@ -545,7 +539,6 @@ function WindowCard({
   card: Card;
   cell: { w: number; h: number };
   liveCols: number;
-  liveRows: number;
   /** The terminal's top inset in stage points; through the zoom it is this card's. */
   padTop: number;
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
@@ -740,8 +733,6 @@ function WindowCard({
   // are all drawn at the width they are about to have; a line longer than that clips, exactly as
   // it will when tmux reflows it.
   const cols = card.snap?.cols ?? card.win.width;
-  /** Does this pane have more than a card can show? Then the card is its tail. */
-  const full = !hit && fillsCard(card.snap?.lines.length ?? 0, slot, { w: stageW, h: 0 }, cell.h);
   const type = snapshotType(
     cell,
     slot.w / stageW,
@@ -756,20 +747,10 @@ function WindowCard({
   // highlight surgery; `highlightLine` returns miss lines untouched, so unmatched cards (a
   // name-only match) re-use every node.
   const shownLines = useMemo(() => {
-    const raw = hit ? parseAnsi(hit.lines.join('\n')) : (card.snap?.lines ?? null);
-    if (raw === null) return null;
-    // A capture ends at the last line with something on it, so the blank rows under a prompt come
-    // back as nothing at all. Hanging that off the bottom edge puts the text lower than the live
-    // pane has it, and the difference shows as a step the moment the flight hands over (user,
-    // 2026-08-11). Padded back to the pane's height, the two are the same picture. A search hit is
-    // a context block, not a pane — it keeps its own length and its top alignment.
-    const lines =
-      !hit && liveRows > raw.length
-        ? [...raw, ...Array.from({ length: liveRows - raw.length }, (): SpanLine => [])]
-        : raw;
-    if (query === '') return lines;
+    const lines = hit ? parseAnsi(hit.lines.join('\n')) : (card.snap?.lines ?? null);
+    if (lines === null || query === '') return lines;
     return lines.map((line) => highlightLine(line, query));
-  }, [hit, card.snap, query, liveRows]);
+  }, [hit, card.snap, query]);
 
   return (
     <GestureDetector gesture={gesture}>
@@ -790,18 +771,8 @@ function WindowCard({
               borderRadius: 14 * u,
               backgroundColor: theme.background,
               paddingHorizontal: shotPad,
-              // The pane is taller than the card can hold, so one end of it is lost either way.
-              // The end worth keeping is the LAST row — the prompt and what just ran, which is
-              // what the card is being read for — so the snapshot hangs from the bottom edge and
-              // the overflow falls off the top (user, 2026-08-11). The flight lands on the same
-              // slice: see `cropShift`. A search hit is the exception — its context block is a
-              // few lines placed to be read from the top, not a pane's tail.
-              // Full pane → its end, where the prompt and the last output are. Not full → its
-              // start, where the content already is, with the pane's own blank rows below it
-              // exactly as the window has them (user's rule, 2026-08-11). `fillsCard` decides
-              // from the capture's own length, and the flight asks it the same question.
-              justifyContent: full ? 'flex-end' : 'flex-start',
-              paddingTop: full ? 0 : shotPadTop,
+              paddingTop: shotPadTop,
+              paddingBottom: shotPad,
             },
           ]}>
           {/* The ring is part of the inset (RN lays content out inside a border), so hanging the
