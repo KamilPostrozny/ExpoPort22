@@ -312,49 +312,14 @@ export default function SessionScreen() {
    *  `searchRef`) — the settings doors both need to know which screen is in front. */
   const swRef = useRef(sw);
   swRef.current = sw;
-  /* --- the shell's bytes wait while the surface is in the air ---
-   *
-   * The flight leaves on a settled redraw, so the burst is in before it starts — but a pane is
-   * never truly quiet. The probe trace shows a 24-byte drip every few hundred ms (a cursor report,
-   * a status tick), and one landing inside a 380ms flight is a repaint of a view being scaled:
-   * the hitch that came back "from time to time" (user, 2026-08-11). Held here, the flight is
-   * never interrupted by one.
-   *
-   * The first version of this wedged the whole app, and the lesson is in the release rather than
-   * the hold: it flushed on a phase change, and a phase can stick (a pan CANCELLED rather than
-   * ended used to leave `drag` standing), so the terminal went deaf for good. The release is its
-   * own rAF loop now, running only while something is held, and it gives up after a budget of
-   * frames whatever the phase claims. Worst case the terminal is a second behind; it is never
-   * silent.
-   */
-  const writeQueue = useRef<string[]>([]);
-  const draining = useRef(false);
-  const moving = () => swRef.current !== 'closed' && swRef.current !== 'open';
-  /** Frames the hold may last before it lets go regardless — the flight is ~25 of them. */
-  const WRITE_HOLD_CAP_FRAMES = 90;
-  const flushWrites = () => {
-    draining.current = false;
-    const held = writeQueue.current;
-    if (held.length === 0) return;
-    writeQueue.current = [];
-    probe(`flush ${held.length} chunk(s), ${held.reduce((n, c) => n + c.length, 0)}b`);
-    for (const chunk of held) terminal.current?.write(chunk);
-  };
-  const writeShell = (base64: string) => {
-    if (!moving()) {
-      terminal.current?.write(base64);
-      return;
-    }
-    writeQueue.current.push(base64);
-    if (draining.current) return;
-    draining.current = true;
-    let frames = 0;
-    const tick = () => {
-      if (moving() && ++frames <= WRITE_HOLD_CAP_FRAMES) requestAnimationFrame(tick);
-      else flushWrites();
-    };
-    requestAnimationFrame(tick);
-  };
+  // The shell's bytes used to be HELD while the surface was in the air and flushed at the landing.
+  // Both halves of that turned out to be wrong. It bought nothing: the frame probe finds the same
+  // dropped frames mid-flight with the hold in place, so writes were never what dropped them — and
+  // the flight already waits for the redraw burst, so all it ever held was the drip. And it cost
+  // something real: up to 400ms of a LIVE pane parked and then painted in one go the instant the
+  // motion stopped, which is the picture changing and the lines stepping up a beat after the tab
+  // lands (user, 2026-08-11, and the trace agrees — no refit within a second of any landing, just
+  // a flush).
   const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
   const scrollY = useRef(0);
@@ -1596,8 +1561,8 @@ export default function SessionScreen() {
           detach.current?.();
           detach.current = attachTerminal((base64) => {
             dataSeq.current++; // the flight's "has the host redrawn yet" — see `selectCard`
-            probe(`byte ${base64.length}b${moving() ? ' (held)' : ''}`);
-            writeShell(base64);
+            probe(`byte ${base64.length}b`);
+            terminal.current?.write(base64);
             // A settle waiting on tmux's redraw ends here, at the first byte of it.
             const settled = onShellData.current;
             onShellData.current = null;
