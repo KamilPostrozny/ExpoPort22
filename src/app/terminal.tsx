@@ -413,6 +413,7 @@ export default function SessionScreen() {
   const ZOOM_WEDGE_MS = 2000;
 
   const finishClose = () => {
+    probe('landed');
     setSw('closed');
     // The keys come back exactly as they were left (`keysWereUp`) — except onto an armed search
     // hit, where you came to read, not type (T14). The size hold outlives the zoom by exactly
@@ -429,6 +430,22 @@ export default function SessionScreen() {
       // "down" (pad 0), but a search-hit select can land with the grid's keyboard still up.
       syncPad();
     }
+  };
+
+  /* --- probe: the one-hitch-per-flight on a switch to another window (T10, temporary) ---
+   * Everything that could stall a frame, stamped against the tap: the flight leaving, each chunk
+   * off the shell, every size the webview measures, the bar's height changing, the landing. What
+   * lands INSIDE the flight window is the suspect; the trace decides between the redraw's tail and
+   * the ribbon's reflow instead of another guess. Rip this out once it has answered. */
+  const probeT0 = useRef(0);
+  const probe = (what: string) => {
+    if (probeT0.current === 0) return;
+    const dt = Date.now() - probeT0.current;
+    if (dt > 2000) {
+      probeT0.current = 0;
+      return;
+    }
+    console.log(`[probe] +${dt}ms ${what}`);
   };
 
   const commitOpen = () => {
@@ -563,6 +580,7 @@ export default function SessionScreen() {
   };
 
   const closeTo = (pos: number) => {
+    probe('fly');
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
     springBack();
@@ -571,6 +589,8 @@ export default function SessionScreen() {
   const selectCard = (pos: number, win: TmuxWindow) => {
     if (sw !== 'open') return;
     console.log('[switcher] select', win.id);
+    probeT0.current = Date.now();
+    probe(`tap ${win.id} (${win.index === tmux.windowIndex ? 'same' : 'switch'})`);
     ribbonForWindow(win); // as with the bar swipe: under the zoom, not a beat after it
     void selectWindow(win.index); // §7: no haptic on tab select
     // The accent outline is `win.active`, which only the ~2s list beat refreshes — flipped
@@ -1399,6 +1419,7 @@ export default function SessionScreen() {
         // guard is state, read in the same tick, so nothing slips through; the release re-reports
         // unconditionally, which is what makes dropping a report here safe.
         onResize={async (cols, rows, cellW, cellH, topInset) => {
+          probe(`webview measured ${cols}×${rows} padTop ${topInset.toFixed(0)}`);
           if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
             console.log('[terminal] size held, not sent:', cols, '×', rows);
             return;
@@ -1427,6 +1448,7 @@ export default function SessionScreen() {
           detach.current?.();
           detach.current = attachTerminal((base64) => {
             dataSeq.current++; // the flight's "has the host redrawn yet" — see `selectCard`
+            probe(`byte ${base64.length}b`);
             terminal.current?.write(base64);
             // A settle waiting on tmux's redraw ends here, at the first byte of it.
             const settled = onShellData.current;
@@ -1532,7 +1554,10 @@ export default function SessionScreen() {
         sendBytes={sendKeys}
         open={open}
         onOpenChange={setOpen}
-        onHeight={setBarHeight}
+        onHeight={(h) => {
+          if (h !== barHeight) probe(`barHeight ${barHeight.toFixed(0)} → ${h.toFixed(0)}`);
+          setBarHeight(h);
+        }}
         focusSignal={focusSignal}
         sending={sending}
         // §4.5: the tabs button exists only with tmux present AND the config applied — so the
