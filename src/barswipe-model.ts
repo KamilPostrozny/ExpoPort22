@@ -102,7 +102,10 @@ export function pillDist(i: number, cont: number): number {
  *  device read as no morph at all (user, 2026-08-11). */
 function pillMorph(dist: number): number {
   'worklet';
-  return Math.min(2 * dist, 1);
+  // Saturates at 0.7 of a window, not 0.5: floored until half-way, the arriving pill only
+  // appeared in the back half of the travel, which read as popping in at the end (user,
+  // 2026-08-11). At 0.7 it starts growing ~30% in and rides the rest of the slide.
+  return Math.min(dist / 0.7, 1);
 }
 
 /** The collapsed capsule, as a fraction of the pill slot — Safari's morph is the pill
