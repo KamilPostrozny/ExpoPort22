@@ -44,7 +44,6 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import {
-  PILL_GAP,
   PILL_ITEM,
   pillCont,
   pillDist,
@@ -589,21 +588,16 @@ function NameStrip({
   pills: NonNullable<KeyBarProps['pills']>;
   width: number;
 }) {
-  const { names, pos, x, pitch } = pills;
-  const stripStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: -pillCont(pos, x.value, pitch) * width }],
-  }));
+  // No translating strip: pills riding the page pitch crossed under the circles either side,
+  // and the morph has to start and end BETWEEN the buttons (user, 2026-08-11, screenshot). All
+  // pills stack in the one centred slot and morph in place — the sliding cards carry the
+  // direction, the pill carries the name.
   return (
-    <Animated.View
-      style={[
-        styles.nameStrip,
-        { gap: PILL_GAP * width, paddingLeft: ((1 - PILL_ITEM) * width) / 2 },
-        stripStyle,
-      ]}>
-      {names.map((name, i) => (
+    <>
+      {pills.names.map((name, i) => (
         <NamePill key={i} theme={theme} name={name} i={i} pills={pills} width={width} />
       ))}
-    </Animated.View>
+    </>
   );
 }
 
@@ -626,10 +620,11 @@ function NamePill({
     return { width: PILL_ITEM * width * pillWidthFrac(d), opacity: pillOpacity(d) };
   });
   // A whole glass pill per name, morphing Safari's way: the capsule SQUEEZES sideways — animated
-  // width, height untouched, text clipped by the glass — and grows back out at its window. No
-  // ‹ › hints, the morph is the indicator (user, 2026-08-11).
+  // width, height untouched, text clipped by the glass — and grows back out at its window. In
+  // place, centred: the departing pill collapses and the arriving one grows in the same slot.
+  // No ‹ › hints, the morph is the indicator (user, 2026-08-11).
   return (
-    <View style={[styles.namePillSlot, { width: PILL_ITEM * width }]}>
+    <View style={[StyleSheet.absoluteFill, styles.namePillSlot]} pointerEvents="none">
       <Animated.View style={[styles.namePillClip, style]}>
         <Glass theme={theme} radius={BAR_RADIUS} style={styles.namePill}>
           <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
@@ -852,15 +847,7 @@ const styles = StyleSheet.create({
   // rounded corner flat at the edge (user, 2026-08-11, screenshot). Unclipped it slides in
   // whole, passing under the circles either side (they render later, so above).
   namesWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
-  nameStrip: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  namePillSlot: { height: '100%', alignItems: 'center', justifyContent: 'center' },
+  namePillSlot: { alignItems: 'center', justifyContent: 'center' },
   namePillClip: { height: '100%' },
   namePill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
   namePillText: { fontFamily: MONO, fontSize: 14, fontWeight: '500', flexShrink: 1 },
