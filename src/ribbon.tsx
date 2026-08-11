@@ -23,7 +23,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { PILL_MIN, pillCont, pillDist, pillOpacity, pillWidthFrac } from '@/barswipe-model';
-import { BAR_RADIUS, Glass } from '@/keybar';
+import { BAR_RADIUS, GLASS_BORDER_W, Glass } from '@/keybar';
 import { formatElapsed } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
 import { MONO, type Theme } from '@/theme';
@@ -117,11 +117,32 @@ export default function Ribbon(props: RibbonProps) {
   const swipePitch = swipe?.pitch ?? 0;
   const [glassW, setGlassW] = useState(0);
   const dragStyle = useAnimatedStyle(() => {
-    if (!swipeLive || swipeX === null || glassW <= 0)
-      return { width: 'auto' as const, opacity: 1, transform: [{ translateX: 0 }] };
+    if (!swipeLive || swipeX === null)
+      // A ghost — one whose window is not the current one — is never visible at rest, and it has
+      // to say so HERE and not only in the wrapper that hides it: the wrapper is a React style
+      // and this is a UI-thread one, so on the frame the swipe begins the wrapper can uncover a
+      // ghost this worklet has not dimmed yet (user, 2026-08-11: a flash on the fish window at
+      // the start of the move).
+      return {
+        width: 'auto' as const,
+        opacity: swipeIndex === swipePos ? 1 : 0,
+        transform: [{ translateX: 0 }],
+      };
     const cont = pillCont(swipePos, swipeX.value, swipePitch);
     const d = pillDist(swipeIndex, cont);
-    const w = glassW * pillWidthFrac(d);
+    // Mid-swipe and not measured yet — a ribbon mounts unmeasured on both sides of a hop: the
+    // ghost of the window being left (until then it was the real ribbon, and excluded), and the
+    // real ribbon of the window being entered. Distance does not need the measurement, only the
+    // squeeze does, so the fade still knows what to do: the one a window away stays gone instead
+    // of flashing back over the bar it just left, and the one that has ARRIVED (d = 0) shows at
+    // its natural width instead of blinking out until its layout lands (user, 2026-08-11, both
+    // directions of the hop).
+    if (glassW <= 0)
+      return { width: 'auto' as const, opacity: pillOpacity(d), transform: [{ translateX: 0 }] };
+    // `glassW` is the CONTENT box; the capsule is that plus its hairline either side, which is
+    // what `width: 'auto'` renders and therefore what the morph has to start and end on.
+    const natural = glassW + GLASS_BORDER_W * 2;
+    const w = natural * pillWidthFrac(d);
     // The pill's ANCHOR, which is the half that was missing: the widths matched frame for frame
     // while the ribbon squeezed about its own centre and the pill squeezed toward the edge its
     // page leaves through — same size, wrong place (user, 2026-08-11, held mid-swipe). The pill
@@ -129,7 +150,7 @@ export default function Ribbon(props: RibbonProps) {
     // half-width the squeeze freed instead. A numeric transform also survives the UI thread,
     // which an animated `alignItems` on this view did not — it stuck at the value of the frame
     // the swipe started on, anchoring the ribbon to the wrong side for the whole drag.
-    const slack = (glassW - w) / 2;
+    const slack = (natural - w) / 2;
     return {
       width: w,
       opacity: pillOpacity(d),

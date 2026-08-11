@@ -140,6 +140,12 @@ export type KeyBarProps = {
 /* --- §3's glass recipe --- */
 
 const GLASS_BORDER = 'rgba(255,255,255,0.12)';
+/** The glass's hairline, exported because it is the difference between a glass sized by its
+ *  content and one sized by a measurement of that content: `onLayout` reports the content box,
+ *  and a width set from it renders the capsule a border narrower on each side. T11's ribbon adds
+ *  it back, or the morph lands 1pt short of the natural width and snaps at the settle (user,
+ *  2026-08-11). */
+export const GLASS_BORDER_W = Platform.OS === 'android' ? 0 : 0.5;
 /** The prototype's neutral key tint (overlay-grey at low alpha, same literal on all flavours). */
 const KEY_TINT = 'rgba(127,132,156,0.16)';
 const HAIRLINE = 'rgba(127,132,156,0.25)';
@@ -194,7 +200,12 @@ export function Glass({
   return (
     <View
       style={[
-        { borderRadius: radius, overflow: 'hidden', borderWidth: 0.5, borderColor: GLASS_BORDER },
+        {
+          borderRadius: radius,
+          overflow: 'hidden',
+          borderWidth: GLASS_BORDER_W,
+          borderColor: GLASS_BORDER,
+        },
         style,
       ]}>
       <BlurView
@@ -352,6 +363,13 @@ export default function KeyBar(props: KeyBarProps) {
   // Keys never fire during a swipe: the pan activating cancels the childrens' touches.
   /** The swipe became T10's switcher drag: every further move is forwarded as zoom progress. */
   const zooming = useRef(false);
+  /** The pan's translation at the instant the axis was chosen. Choosing costs `BAR_AXIS_SLOP` of
+   *  travel, and the pan reports it from TOUCH-DOWN — so handing the page `e.translationX` made
+   *  it open 10pt along instead of at zero: the card detached from the edge with a jump in the
+   *  direction of the finger rather than growing out of it (user, 2026-08-11). The hop measures
+   *  from here on, which also makes the commit and flick distances in `barswipe-model` mean the
+   *  travel they say they do, the way the vertical gesture's already budget for this. */
+  const originX = useRef(0);
   const pan = Gesture.Pan()
     .runOnJS(true)
     .maxPointers(1)
@@ -365,14 +383,17 @@ export default function KeyBar(props: KeyBarProps) {
         return;
       }
       if (swipe.current === 'horizontal') {
-        props.onBarSwipe?.('move', e.translationX);
+        props.onBarSwipe?.('move', e.translationX - originX.current);
         return;
       }
       if (swipe.current !== null) return;
       const s = classifyBarSwipe(e.translationX, e.translationY);
       if (s === null) return;
       swipe.current = s;
-      if (s === 'horizontal') props.onBarSwipe?.('start', e.translationX);
+      if (s === 'horizontal') {
+        originX.current = e.translationX;
+        props.onBarSwipe?.('start', 0);
+      }
       else if (s === 'down') Keyboard.dismiss();
       else if (s === 'up') {
         if (input.current?.isFocused()) {
@@ -392,7 +413,8 @@ export default function KeyBar(props: KeyBarProps) {
         props.onSwitcherDrag?.('end', e.translationX, e.translationY);
         return;
       }
-      if (swipe.current === 'horizontal') props.onBarSwipe?.('end', e.translationX);
+      if (swipe.current === 'horizontal')
+        props.onBarSwipe?.('end', e.translationX - originX.current);
     });
 
   const keyLabel = { color: theme.foreground, fontFamily: MONO, fontSize: 14 };

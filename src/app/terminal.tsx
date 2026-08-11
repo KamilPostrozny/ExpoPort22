@@ -1038,22 +1038,6 @@ export default function SessionScreen() {
    *  terminal area only, so the ribbon's own caps stay tappable. */
   const rbScrim = recipe !== null && RECIPES[recipe.id].collapsible && rbExpanded;
 
-  // [probe] temporary instrumentation for the ribboned↔bare hop hitch (user, 2026-08-11:
-  // "prove the resizes") — every suspect stamped with ms-of-minute. Remove once diagnosed.
-  const hasRibbon = ribbonEl !== null;
-  useEffect(() => {
-    console.log('[probe] ribbon', hasRibbon, 't', Date.now() % 60000);
-  }, [hasRibbon]);
-  useEffect(() => {
-    console.log('[probe] barHeight', barHeight, 't', Date.now() % 60000);
-  }, [barHeight]);
-  useEffect(() => {
-    console.log('[probe] padTop', padTop, 't', Date.now() % 60000);
-  }, [padTop]);
-  useEffect(() => {
-    console.log('[probe] pageSwipe phase', pageSwipe?.phase ?? 'none', 't', Date.now() % 60000);
-  }, [pageSwipe?.phase]);
-
   /* --- the pane's insets ---
    *
    * Sideways it is the plain gap. Vertically it is the gap PLUS half of whatever the rows could
@@ -1322,7 +1306,6 @@ export default function SessionScreen() {
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
           setPadTop(topInset);
           sizeReported.current = true; // a chrome-changing select's redraw-wait gates on this
-          console.log('[probe] size sent', cols, '×', rows, 't', Date.now() % 60000);
           setSize(cols, rows);
         }}
         // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:
