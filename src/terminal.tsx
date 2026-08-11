@@ -164,6 +164,21 @@ const CSS = `
      renderers round differently. Nothing is lost by dropping it: it corrects a rounding this file
      has already removed. Marked important because xterm writes it inline, and inline loses to it. */
   .xterm .xterm-rows { letter-spacing: 0 !important; }
+  /* An underline the font's own thickness, which is what the snapshot's <Text> draws: CoreText
+     takes it from the face (0.05em, so two device pixels here) while WebKit's 'auto' will not go
+     below one CSS pixel, which is three. Same link, same colour, a third thicker in the pane than
+     in the card beside it (user, 2026-08-11; measured 3 rows against 2 in one swipe frame). Not
+     inherited, so it goes on the spans that carry the decoration. */
+  .xterm .xterm-rows span {
+    text-decoration-thickness: from-font;
+    /* And where it sits. 'from-font' is accepted here and then ignored — the rule stayed on
+       WebKit's own 'auto' placement, two device pixels below the snapshot's. A length is honoured,
+       but it is measured from the alphabetic baseline rather than added to that placement, which
+       is why a negative one put the rule through the letters. So: the face's own underlinePosition
+       outright, 0.155em below the baseline, which is the number CoreText draws the snapshot from.
+       In em, so it holds at every size. */
+    text-underline-offset: 0.155em;
+  }
   /* Long-press has to reach the system edit menu (§4.2), so the rows stay real selectable text —
      xterm turns selection off because it drives its own from mouse events, which a finger is not.
      The whole chain down to the rows has to allow it: WebKit starts the gesture from the container
