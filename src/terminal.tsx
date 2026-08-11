@@ -109,6 +109,22 @@ export type TerminalProps = {
   dom?: DOMProps;
 };
 
+/**
+ * The gutter the fit addon holds back for a scrollbar, hung off the right edge instead of taken out
+ * of the grid.
+ *
+ * `proposeDimensions` subtracts `overviewRuler.width || DEFAULT_SCROLL_BAR_WIDTH` from the box
+ * before it divides by the cell — a constant it never measures, and one no option can zero: 0 is
+ * falsy, so it falls straight back to the 14. With the bar hidden (see CSS) those 14 points were
+ * simply dead background down the right of every session, at every size — about two columns of it.
+ *
+ * So the box is made 14pt wider than the space it sits in, and the fit's subtraction lands on the
+ * overhang: `cols` then fills the visible width, and the sliver the flooring leaves over is off the
+ * edge of the screen rather than inside it. Cheaper than the alternative, which is doing the
+ * arithmetic here off xterm's private cell dimensions.
+ */
+const GUTTER = 14;
+
 /** tmux's appearance query (`CSI ? 996 n`), which every other `CSI ? … n` has to fall through. */
 const COLOR_SCHEME_QUERY = 996;
 
@@ -206,13 +222,13 @@ const CSS = `
   .xterm .xterm-helpers { -webkit-user-select: none; user-select: none; }
   /* The webview must not rubber-band: a pan is a scroll for the session, never for the page. */
   .xterm-viewport { overscroll-behavior: none; }
-  /* And it must not draw a scrollbar. xterm's viewport is 'overflow-y: scroll', so WebKit's overlay
-     bar flashes whenever the element is scrolled programmatically — which is exactly what a session
-     being painted back in after a restart does, thousands of lines in one go, and it can be left
-     sitting there. Scrolling here is §4.3's job and it has its own gesture; nothing is lost by
-     hiding the bar. (The ~15pt of clear space on the right is NOT this bar: it is the gutter the
-     fit addon holds back for it, a constant it never measures — see onResize. */
-  .xterm-viewport::-webkit-scrollbar { display: none; }
+  /* And it must not draw a scrollbar. Not '::-webkit-scrollbar': xterm 6 does not use the browser's
+     bar at all — the viewport is VS Code's SmoothScrollableElement, and the thing that fades in on
+     the right is a div it fades between .visible and .invisible whenever the buffer scrolls. Which
+     is why it turned up "sometimes on entering a terminal": a session being painted back in scrolls
+     thousands of lines in one go. Scrolling here is §4.3's job and it has its own gesture, so the
+     bar is nobody's affordance — and while shown it eats touches down the right edge of the grid. */
+  .xterm .xterm-scrollable-element > .scrollbar { display: none; }
 `;
 
 /**
@@ -828,7 +844,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
   return (
     <>
       <style>{CSS}</style>
-      <div ref={host} style={{ position: 'absolute', inset: 0 }} />
+      <div ref={host} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: -GUTTER }} />
     </>
   );
 }
