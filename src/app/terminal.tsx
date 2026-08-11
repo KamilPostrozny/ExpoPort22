@@ -1610,12 +1610,12 @@ export default function SessionScreen() {
       {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' && (
         <>
           {anchor > 0 && (
-            <NeighborPage side={-1} snap={neighbour(-1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
+            <NeighborPage side={-1} snap={neighbour(-1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} x={swipeX} />
           )}
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <NeighborPage side={1} snap={neighbour(1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} x={swipeX} />
+            <NeighborPage side={1} snap={neighbour(1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} x={swipeX} />
           )}
         </>
       )}
@@ -1638,6 +1638,7 @@ export default function SessionScreen() {
             theme={theme}
             cell={cell}
             insets={pageSwipe.settleInsets ?? paneInsets}
+            liveCols={liveCols}
           />
           <Animated.View
             pointerEvents="none"
@@ -1804,14 +1805,23 @@ function PageContent({
   theme,
   cell,
   insets,
+  liveCols,
 }: {
   snap: PageSnap;
   stageW: number;
   theme: Theme;
   cell: { w: number; h: number };
   insets: { top: number; side: number; bottom: number };
+  /** The live pane's columns — the cap, exactly as on the switcher's cards. */
+  liveCols: number;
 }) {
   if (snap === null) return null;
+  // Capped at the live pane's width for the same reason the grid's cards are: `window-size
+  // latest` leaves a window at the size of the last client that DISPLAYED it, so a tab not
+  // opened from this phone is still 80-odd columns wide, and fitting those into the page's ~49
+  // drew the whole page at half type — the swipe landing on a shrunken pane (user, 2026-08-11,
+  // screenshot). This page is a preview of a pane tmux is about to reflow to this client.
+  const cols = liveCols > 0 ? Math.min(snap.cols, liveCols) : snap.cols;
   // Scale 1: a page card rides beside the live terminal, not shrunk into anything.
   return (
     <View
@@ -1824,7 +1834,7 @@ function PageContent({
       <Snapshot
         lines={snap.lines}
         theme={theme}
-        {...snapshotType(cell, 1, snap.cols, stageW - 2 * insets.side)}
+        {...snapshotType(cell, 1, cols, stageW - 2 * insets.side)}
       />
     </View>
   );
@@ -1839,6 +1849,7 @@ function NeighborPage({
   theme,
   cell,
   insets,
+  liveCols,
   x,
 }: {
   side: -1 | 1;
@@ -1848,6 +1859,7 @@ function NeighborPage({
   theme: Theme;
   cell: { w: number; h: number };
   insets: { top: number; side: number; bottom: number };
+  liveCols: number;
   x: SharedValue<number>;
 }) {
   const style = useAnimatedStyle(() => ({
@@ -1862,7 +1874,14 @@ function NeighborPage({
         { backgroundColor: theme.background, borderRadius: pageRadius(stageW) },
         style,
       ]}>
-      <PageContent snap={snap} stageW={stageW} theme={theme} cell={cell} insets={insets} />
+      <PageContent
+        snap={snap}
+        stageW={stageW}
+        theme={theme}
+        cell={cell}
+        insets={insets}
+        liveCols={liveCols}
+      />
       <View
         pointerEvents="none"
         style={[
