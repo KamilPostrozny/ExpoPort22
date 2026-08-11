@@ -1102,8 +1102,11 @@ export default function SessionScreen() {
       )}
       {/* The terminal area: the flex region above the bar. During a bar swipe the live terminal
           slides inside it as a rounded page card, with the neighbour snapshots as its siblings —
-          the bar itself stays put, showing the name pills. */}
-      <View style={styles.termArea}>
+          the bar itself stays put, showing the name pills. Crust behind it, as behind the
+          switcher's cards: it is what shows in the page gap and behind the rounded corners —
+          on `background` the cards were indistinguishable from the backdrop (user, 2026-08-11).
+          At rest the live page (square, flex:1) covers it entirely. */}
+      <View style={[styles.termArea, { backgroundColor: theme.scrim }]}>
       {/* The pane's own breathing room. It is also what makes the zoom's crossfade seamless: a
           card's snapshot is inset by exactly this much seen through the zoom (switcher-model
           derives one from the other), so the text does not move when the surface hands over. */}
