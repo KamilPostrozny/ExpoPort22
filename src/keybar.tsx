@@ -35,9 +35,7 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  FadeIn,
   FadeInDown,
-  FadeOut,
   FadeOutDown,
   useAnimatedStyle,
   type SharedValue,
@@ -119,9 +117,18 @@ export type KeyBarProps = {
    *  The screen owns the model: rubber band, thresholds, commit, and the shared `x` the pages
    *  and the pills both ride (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
   onBarSwipe?: (phase: 'start' | 'move' | 'end', dx: number) => void;
-  /** While a page swipe is live: the tab-name pills that replace the bar keys (§4.4). `x` is the
-   *  screen's page offset, `pitch` its page step — the strip derives the continuous position. */
-  pills?: { names: string[]; pos: number; x: SharedValue<number>; pitch: number } | null;
+  /** The tab-name pills that replace the bar keys during a page swipe (§4.4). `x` is the
+   *  screen's page offset, `pitch` its page step — the pills derive the continuous position.
+   *  Passed whenever tabs are reachable, NOT just mid-swipe: each pill is a BlurView, and
+   *  mounting the set on the swipe's first frame was the hitch at the start of every swipe
+   *  (user, 2026-08-11) — pre-mounted and hidden, `live` merely flips opacities. */
+  pills?: {
+    names: string[];
+    pos: number;
+    x: SharedValue<number>;
+    pitch: number;
+    live: boolean;
+  } | null;
   /** T11's context ribbon, rendered in the slot above the chord strip so its height rides the
    *  same `onHeight` measurement the popovers anchor on. The screen owns its state. */
   ribbon?: React.ReactNode;
@@ -206,7 +213,10 @@ export function Glass({
  *  and it has to come to the same number as the gap at the sides (user, 2026-08-10). */
 export const BAR_PAD_TOP = 5;
 
-/** Every pressable on the bar: dim + shrink while touched, light haptic on touch (not on echo). */
+/** Every pressable on the bar: dim + shrink while touched, light haptic on the completed tap —
+ *  NOT on touch-down, where a bar swipe starting over a key buzzed on every hop and broke the
+ *  slide's fluidity; Safari's has none (user, 2026-08-11). A pan that wins the race never
+ *  completes the press, so swipes are silent. */
 function Key({
   onPress,
   onLongPress,
@@ -222,10 +232,13 @@ function Key({
 }) {
   return (
     <Pressable
-      onPressIn={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      }}
-      onPress={onPress}
+      onPress={
+        onPress &&
+        (() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onPress();
+        })
+      }
       onLongPress={onLongPress}
       delayLongPress={delayLongPress}
       style={({ pressed }) => [
@@ -469,8 +482,8 @@ export default function KeyBar(props: KeyBarProps) {
               static glass read as no morph at all (user, 2026-08-11). */}
           <View style={styles.pill} onLayout={(e) => setPillW(e.nativeEvent.layout.width)}>
             <View
-              style={[StyleSheet.absoluteFill, props.pills != null && { opacity: 0 }]}
-              pointerEvents={props.pills != null ? 'none' : 'auto'}>
+              style={[StyleSheet.absoluteFill, props.pills?.live && { opacity: 0 }]}
+              pointerEvents={props.pills?.live ? 'none' : 'auto'}>
             <Glass theme={theme} radius={BAR_RADIUS} style={styles.pillGlass}>
             <View style={styles.keysRow}>
               <View style={styles.keysGroup}>
@@ -512,15 +525,14 @@ export default function KeyBar(props: KeyBarProps) {
             </View>
             </Glass>
             </View>
-            {/* §4.4: during a bar swipe the tab-name glass pills replace the keys. */}
+            {/* §4.4: during a bar swipe the tab-name glass pills replace the keys. Mounted from
+                the moment tabs are reachable — see the pills prop — visible only while live. */}
             {props.pills != null && pillW > 0 && (
-              <Animated.View
-                entering={FadeIn.duration(150)}
-                exiting={FadeOut.duration(150)}
+              <View
                 pointerEvents="none"
-                style={styles.namesWrap}>
+                style={[styles.namesWrap, !props.pills.live && { opacity: 0 }]}>
                 <NameStrip theme={theme} pills={props.pills} width={pillW} />
-              </Animated.View>
+              </View>
             )}
           </View>
 

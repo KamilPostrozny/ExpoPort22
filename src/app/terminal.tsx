@@ -1276,17 +1276,20 @@ export default function SessionScreen() {
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? onBarSwipe : undefined}
         pills={
-          pageSwipe !== null && stage !== null
+          showTabs && connected && stage !== null
             ? {
-                names: pageSwipe.names,
-                pos: pageSwipe.pos,
+                // Passed at rest too, not just mid-swipe (see the prop's note on the mount
+                // hitch). At rest the names come from the same cards a swipe would snapshot.
+                names: pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME],
+                pos: pageSwipe?.pos ?? activePosIn(cards),
                 // The settle moves `pos` to the target in the same commit, but `swipeX` keeps
                 // the slide's final offset until the post-paint reset effect — read together
                 // they put the continuous position a full window off, snapping the new pill to
                 // a capsule and back (user, 2026-08-11: "jumps to full size at the end"). The
                 // settle IS the landing: pin the pills to a zero offset the moment it mounts.
-                x: pageSwipe.phase === 'settle' ? pillsSettled : swipeX,
+                x: pageSwipe === null || pageSwipe.phase === 'settle' ? pillsSettled : swipeX,
                 pitch: pagePitch(stage.w),
+                live: pageSwipe !== null,
               }
             : null
         }
