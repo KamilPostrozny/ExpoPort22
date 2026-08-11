@@ -675,6 +675,17 @@ export default function SessionScreen() {
     sizeReported.current = false;
     const bytesAtTap = dataSeq.current;
     const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
+    // The flight home does not begin on the terminal: it begins on THIS CARD, which the surface
+    // cross-dissolves up from over `springBack`'s 120ms. So the card has to be the pane the
+    // surface is about to show, and its snapshot is the ~2s poll's — as stale as the window is
+    // busy. Two different pictures dissolving into each other is the hitch seen on almost every
+    // switch and on no re-select of the tab already up (user, 2026-08-11): that one is recaptured
+    // by `openSwitcher` on the way in. Same recapture, same reason, and it costs nothing — it
+    // runs inside the wait for the redraw that is happening anyway.
+    let captured = false;
+    void refreshCard(win).finally(() => {
+      captured = true;
+    });
     let frames = 0;
     let lastFrame = bytesAtTap;
     const step = () => {
@@ -687,7 +698,7 @@ export default function SessionScreen() {
       // never comes at all. If either is what releases a flight, something upstream is broken.
       const fitted = !chromeChanges || sizeReported.current || frames >= ZOOM_REFIT_CAP_FRAMES;
       if (frames >= ZOOM_WEDGE_FRAMES) console.log('[switcher] redraw never arrived — flying anyway');
-      else if (!fitted || !settled) {
+      else if (!fitted || !settled || !captured) {
         frames++;
         requestAnimationFrame(step);
         return;
