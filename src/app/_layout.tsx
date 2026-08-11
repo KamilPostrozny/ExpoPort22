@@ -15,8 +15,8 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    [MONO]: require('../../assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf'),
-    [MONO_BOLD]: require('../../assets/fonts/JetBrainsMonoNerdFontMono-Bold.ttf'),
+    [MONO]: require('../../assets/fonts/JetBrainsMonoNLNerdFontMono-Regular.ttf'),
+    [MONO_BOLD]: require('../../assets/fonts/JetBrainsMonoNLNerdFontMono-Bold.ttf'),
   });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 

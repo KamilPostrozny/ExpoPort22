@@ -126,12 +126,21 @@ function xtermTheme(theme: Theme): ITheme {
 }
 
 /** The font the webview cannot get from the native side: same two files as `useFonts` loads for
- *  chrome, copied into `public/` because that is the one directory that reaches this bundle. */
+ *  chrome, copied into `public/` because that is the one directory that reaches this bundle.
+ *
+ *  NL = Nerd Fonts' no-ligature cut, and it is the swipe that needs it rather than taste. The two
+ *  renderers disagree about `calt`: RN's <Text> goes through CoreText, which applies a font's
+ *  default features, so `->` in a captured pane comes out as an arrow; xterm cannot, because the
+ *  letter-spacing it sets to land glyphs on the cell is non-zero and WebKit drops shaping when it
+ *  is. Same file, same text, two different glyphs at the hand-over (device, 2026-08-11, mid-swipe
+ *  screenshot of an `eza` symlink line). Dropping the feature from the file settles it for both,
+ *  and a terminal has no cell to put a two-column ligature in anyway. Metrics are the plain cut's
+ *  exactly — 1000upm, 0.6em advance, 1020/-300 — and every Nerd glyph is still there. */
 const FONT_FACES = ['Regular', 'Bold']
   .map(
     (weight, i) => `@font-face {
       font-family: '${MONO}';
-      src: url('${process.env.EXPO_BASE_URL ?? ''}fonts/JetBrainsMonoNerdFontMono-${weight}.ttf');
+      src: url('${process.env.EXPO_BASE_URL ?? ''}fonts/JetBrainsMonoNLNerdFontMono-${weight}.ttf');
       font-weight: ${i === 0 ? 400 : 700};
     }`,
   )
