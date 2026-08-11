@@ -588,15 +588,21 @@ export default function SessionScreen() {
   const zoomFrom = useRef<{ x: number; y: number } | null>(null);
   /** The progress the follow starts from: 0 for a fresh grab, wherever a caught close had got to. */
   const zoomBase = useRef(0);
+  /** Is a zoom drag live? The gesture's own truth, and the only thing its lifecycle turns on.
+   *  `sw` cannot be: `setSw('drag')` is read back by the very next pan report, and a flick that
+   *  ends in the same frame gets its release judged against a phase React has not written yet —
+   *  the release is dropped, the render lands on `drag`, and nothing is left to end it. That is a
+   *  frozen app (user, 2026-08-11), and it is the same shape as the two before it. */
+  const dragging = useRef(false);
   const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number) => {
     if (stage === null) return;
-    // The phase comes off the REF, not the render. A pan reports every frame, and `setSw` here is
-    // read back by the very next one — through a closure a render behind, "already dragging" still
-    // looks like "closed", and the open runs again: its capture re-fired, the origin and the base
-    // reset under the finger, every frame it takes React to catch up (user, 2026-08-11, "laggy").
+    // Where the phase IS consulted it comes off the ref, not the render: a pan reports every frame,
+    // and through a closure a render behind, "already dragging" still looks like "closed" — the
+    // open ran again every frame until React caught up, re-firing its capture and resetting the
+    // origin under the finger (user, 2026-08-11, "laggy").
     const at = swRef.current;
     if (phase === 'move') {
-      if (at === 'closed') {
+      if (!dragging.current && at === 'closed') {
         console.log('[switcher] open (bar drag)');
         setOpen('none');
         // The grab no longer implies a raised keyboard (the swipe ↑ is one gesture whatever the
@@ -618,6 +624,7 @@ export default function SessionScreen() {
         // 2026-08-11). It waits the same two frames; where the tap can simply delay, the drag
         // re-origins at the frame it arms, so the surface grows from zero where the finger has got
         // to rather than jumping to the travel it spent waiting.
+        dragging.current = true;
         zoomReady.current = false;
         zoomFrom.current = null;
         zoomBase.current = 0;
@@ -627,7 +634,7 @@ export default function SessionScreen() {
           }),
         );
         return;
-      } else if (at === 'closing') {
+      } else if (!dragging.current && at === 'closing') {
         // The flight home is catchable. `closed` only arrives when the timing formally ends, and
         // an out-cubic has spent 99% of its distance at 78% of its duration — so the last ~80ms
         // look exactly like a landed terminal that refuses to swipe (user, 2026-08-11). Nothing
@@ -636,6 +643,7 @@ export default function SessionScreen() {
         // surface has got to (`zoomBase`) rather than snapping to zero.
         console.log('[switcher] open (caught the close)');
         closeArmed.current = false; // caught inside the two-frame gap: no flight is owed
+        dragging.current = true;
         cancelAnimation(prog);
         cancelAnimation(dragX);
         cancelAnimation(alpha);
@@ -646,12 +654,13 @@ export default function SessionScreen() {
         zoomReady.current = true;
         setSw('drag');
         return;
-      } else if (at !== 'drag') return;
+      } else if (!dragging.current) return;
       if (!zoomReady.current) return;
       if (zoomFrom.current === null) zoomFrom.current = { x: dx, y: dy };
       prog.value = Math.min(1, zoomBase.current + zoomProgress(dy - zoomFrom.current.y, stage.w));
       dragX.value = dx - zoomFrom.current.x;
-    } else if (at === 'drag') {
+    } else if (dragging.current) {
+      dragging.current = false;
       if (zoomCommits(dy, Date.now() - zoomT0.current, prog.value)) commitOpen();
       else springBack();
     }
@@ -807,14 +816,18 @@ export default function SessionScreen() {
   // not here: a finger may legitimately hold it for a minute, and the pan's `onFinalize` is what
   // ends it. If this ever fires, the log line is the bug report.
   useEffect(() => {
-    if (sw !== 'opening' && sw !== 'closing') return;
+    // `drag` counts too, but only with no finger on it: a real one may hold still for a minute,
+    // and `dragging` is what says whether the gesture is still there to end it.
+    if (sw !== 'opening' && sw !== 'closing' && sw !== 'drag') return;
     const stuck = setTimeout(() => {
+      if (sw === 'drag' && dragging.current) return;
       console.log('[switcher] phase stuck in', sw, '— resolving it');
       if (sw === 'opening') {
         prog.value = 1;
         alpha.value = 0;
         setSw('open');
       } else {
+        dragging.current = false;
         prog.value = 0;
         alpha.value = 1;
         finishClose();
@@ -828,6 +841,7 @@ export default function SessionScreen() {
   // stand on. Reset without animation; the §4.9 overlay is already up.
   useEffect(() => {
     if (!connected && sw !== 'closed') {
+      dragging.current = false;
       prog.value = 0;
       dragX.value = 0;
       alpha.value = 1;
@@ -1428,7 +1442,7 @@ export default function SessionScreen() {
         // bar that ignores the finger — and the phase outlives the motion by the tail of its
         // ease-out, which is a terminal that looks landed and will not swipe (user, 2026-08-11).
         // The gesture picks the flight up from where it is (see `onSwitcherDrag`).
-        pointerEvents={sw === 'closed' || sw === 'closing' ? 'auto' : 'none'}
+        pointerEvents={sw === 'closed' || sw === 'closing' || sw === 'drag' ? 'auto' : 'none'}
         style={[
           stage === null
             ? styles.screen
