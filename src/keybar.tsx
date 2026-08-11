@@ -619,12 +619,20 @@ function NamePill({
     const d = pillDist(i, pillCont(pos, x.value, pitch));
     return { width: PILL_ITEM * width * pillWidthFrac(d), opacity: pillOpacity(d) };
   });
+  // Anchored to the travel's edges, not the centre (user, 2026-08-11): a pill on the previous
+  // side of the continuous position squeezes toward the LEFT edge of the slot — the side its
+  // card exits through — and one on the next side grows in from the RIGHT. At its own window the
+  // width is full and the anchor is moot, so the sign flip as `cont` crosses `i` never jumps.
+  const anchor = useAnimatedStyle(() => ({
+    alignItems: i < pillCont(pos, x.value, pitch) ? ('flex-start' as const) : ('flex-end' as const),
+  }));
   // A whole glass pill per name, morphing Safari's way: the capsule SQUEEZES sideways — animated
-  // width, height untouched, text clipped by the glass — and grows back out at its window. In
-  // place, centred: the departing pill collapses and the arriving one grows in the same slot.
+  // width, height untouched, text clipped by the glass — and grows back out at its window.
   // No ‹ › hints, the morph is the indicator (user, 2026-08-11).
   return (
-    <View style={[StyleSheet.absoluteFill, styles.namePillSlot]} pointerEvents="none">
+    <Animated.View
+      style={[StyleSheet.absoluteFill, styles.namePillSlot, anchor]}
+      pointerEvents="none">
       <Animated.View style={[styles.namePillClip, style]}>
         <Glass theme={theme} radius={BAR_RADIUS} style={styles.namePill}>
           <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
@@ -632,7 +640,7 @@ function NamePill({
           </Text>
         </Glass>
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -847,7 +855,7 @@ const styles = StyleSheet.create({
   // rounded corner flat at the edge (user, 2026-08-11, screenshot). Unclipped it slides in
   // whole, passing under the circles either side (they render later, so above).
   namesWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
-  namePillSlot: { alignItems: 'center', justifyContent: 'center' },
+  namePillSlot: { justifyContent: 'center' },
   namePillClip: { height: '100%' },
   namePill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
   namePillText: { fontFamily: MONO, fontSize: 14, fontWeight: '500', flexShrink: 1 },
