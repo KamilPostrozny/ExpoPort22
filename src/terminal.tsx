@@ -174,10 +174,12 @@ const CSS = `
     /* And where it sits. 'from-font' is accepted here and then ignored — the rule stayed on
        WebKit's own 'auto' placement, two device pixels below the snapshot's. A length is honoured,
        but it is measured from the alphabetic baseline rather than added to that placement, which
-       is why a negative one put the rule through the letters. So: the face's own underlinePosition
-       outright, 0.155em below the baseline, which is the number CoreText draws the snapshot from.
-       In em, so it holds at every size. */
-    text-underline-offset: 0.155em;
+       is why a negative one put the rule through the letters. The zero it is measured from is not
+       the baseline and not the face's underlinePosition either, so this number is fitted rather
+       than derived: -0.05em drew the rule on the letters and 0.13em left six device pixels under
+       them, against the snapshot's three, and the response is linear between the two (device,
+       2026-08-11, both rules in one held-swipe frame). In em so the fit holds at every size. */
+    text-underline-offset: 0.05em;
   }
   /* Long-press has to reach the system edit menu (§4.2), so the rows stay real selectable text —
      xterm turns selection off because it drives its own from mouse events, which a finger is not.
