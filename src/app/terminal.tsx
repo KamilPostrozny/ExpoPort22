@@ -1189,7 +1189,13 @@ export default function SessionScreen() {
           // (user, 2026-08-11). The settle IS the landing: pinned to a zero offset there.
           x: pageSwipe === null || pageSwipe.phase === 'settle' ? pillsSettled : swipeX,
           pitch: pagePitch(stage.w),
-          live: pageSwipe !== null,
+          // The settle is the BAR's landing, not the terminal's. The overlay still waits for the
+          // host to finish redrawing, because it is a picture of a pane and a stale one would
+          // show — but the keys are not a picture of anything, and holding them behind that wait
+          // is what read as the bar taking forever to settle (user, 2026-08-11; the probe trace
+          // put tmux's redraw at +35ms and the keys at +550). Pills and keys are both mounted, so
+          // this flips two opacities.
+          live: pageSwipe !== null && pageSwipe.phase !== 'settle',
           /** The real ribbon is the current window's; a ghost overrides this with its own. */
           index: pageSwipe?.pos ?? activePosIn(cards),
         }
