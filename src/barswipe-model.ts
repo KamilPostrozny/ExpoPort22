@@ -79,12 +79,9 @@ export function slideMs(distance: number): number {
   return Math.max(60, Math.abs(distance) / SLIDE_SPEED);
 }
 
-/** The LONGEST the committed snapshot stays over the terminal after the slide lands, waiting for
- *  tmux's redraw so the reveal is the new window and not one stale frame of the old. It is a cap,
- *  not a wait: the redraw itself ends the hold the moment its first byte arrives, which is what
- *  the eye is actually waiting for. Held flat it was long enough to photograph twice (user,
- *  2026-08-10) — 320ms of slide and then a third of a second of nothing. */
-export const SETTLE_HOLD_MS = 350;
+/* The committed snapshot's hold over the terminal has no duration here on purpose: it ends when
+ * the host says it has finished redrawing (`afterHostRedraw` in the screen), not after a number
+ * anyone picked. A flat 350ms cap was long enough to photograph twice (user, 2026-08-10). */
 
 /* --- the name pills replacing the bar keys during the swipe --- */
 

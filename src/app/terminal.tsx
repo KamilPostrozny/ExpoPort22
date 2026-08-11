@@ -32,7 +32,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   pageRadius,
-  SETTLE_HOLD_MS,
   pagePitch,
   slideMs,
   rubber,
@@ -677,53 +676,79 @@ export default function SessionScreen() {
     // optimistically here (as a kill removes its card), or the old tab stays haloed through
     // the flight and a beat past it (user, 2026-08-11).
     setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
-    // The flight leaves when the HOST has finished redrawing, and it knows when that happened
-    // rather than guessing how long it takes. Two facts, no tuned durations:
-    //
-    //   - bytes on the PTY that were not there when the finger went down are tmux's redraw of the
-    //     window it was just told to select; nothing else is talking;
-    //   - the redraw is a BURST, so it is over when a whole display frame passes without one. The
-    //     probe trace (2026-08-11) is the shape of it: 5460 bytes at +53ms, 1916 more at +54, and
-    //     nothing after. Leaving on the first chunk put that second write one frame into the
-    //     flight — the single hitch on every switch to another window. A frame of silence is not
-    //     a number anyone picked; it is the unit the hitch is measured in.
-    //
-    // Where a ribbon appears or leaves the refit has to go out first, so that redraw arrives at
-    // the size the pane lands at. Flying before any of it is the other end and no better: the
+    // The flight leaves when the HOST has finished redrawing (`afterHostRedraw`), not after a
+    // duration someone picked. Flying before any of it is the other end and no better: the
     // surface then carries the pane of the window being LEFT, for the length of a roundtrip.
     // Same tab: nothing switches, nothing to wait for.
     if (win.index === tmux.windowIndex) {
       closeTo(pos);
       return;
     }
-    const chromeChanges = (recipe !== null) === IDLE_SHELLS.has(win.command);
-    sizeReported.current = false;
-    const bytesAtTap = dataSeq.current;
-    const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
     // No second roundtrip here. Recapturing this card so the dissolve had a matching picture did
     // fix the hitch, which is what proved the diagnosis — but it put a whole capture between the
     // finger and the motion (~250ms, against the redraw's ~50). `springBack` goes solid on its
     // first frame instead, so there is no dissolve to match and nothing to wait for; the card is
     // one frame of cut behind the live pane rather than a tenth of a second of double exposure.
+    afterHostRedraw(dataSeq.current, (recipe !== null) === IDLE_SHELLS.has(win.command), () => {
+      if (swRef.current === 'open') closeTo(pos);
+    });
+  };
+
+  /**
+   * The host has finished with a window switch, told rather than timed. Two facts, no tuned
+   * durations — the same two the zoom's flight and the bar swipe's settle both need, which is why
+   * this is one function and not two copies drifting apart:
+   *
+   *   - bytes on the PTY that were not there at `bytesAtStart` are tmux's redraw of the window it
+   *     was just told to select; nothing else is talking;
+   *   - the redraw is a BURST, so it is over when a whole display frame passes without one. The
+   *     probe trace (2026-08-11) is the shape of it: 5460 bytes at +53ms, 1916 more at +54, and
+   *     nothing after. Leaving on the first chunk put that second write one frame into the motion.
+   *
+   * `bytesAtStart` is the caller's baseline, not `dataSeq` read here: a bar swipe arms this after
+   * its slide, by which time the redraw has usually already landed, and a watch that started
+   * counting now would wait for a byte an idle shell never sends.
+   *
+   * Where a ribbon appears or leaves, the refit has to go out first so that redraw arrives at the
+   * size the pane lands at — that is what `chromeChanges` adds. Both caps are wedge guards, not
+   * waits: the first for a webview that never reports its refit (a layout pass and a bridge hop,
+   * not a roundtrip), the second for a redraw that never comes at all. If either is what releases
+   * a caller, something upstream is broken.
+   */
+  const afterHostRedraw = (bytesAtStart: number, chromeChanges: boolean, done: () => void) => {
+    sizeReported.current = false;
+    const mine = ++selectSeq.current; // a second switch mid-wait supersedes this one
     let frames = 0;
-    let lastFrame = bytesAtTap;
+    let base = bytesAtStart;
+    let lastFrame = base;
+    let fitted = !chromeChanges;
     const step = () => {
       if (selectSeq.current !== mine) return;
+      // Until the refit's size report has gone out, the bytes arriving are the redraw at the OLD
+      // size. The baseline moves to the report, so the wait below is for the RESIZED redraw —
+      // releasing on the pre-resize burst is how the terminal came back mid-reflow.
+      if (!fitted) {
+        if (sizeReported.current || frames >= ZOOM_REFIT_CAP_FRAMES) {
+          fitted = true;
+          base = dataSeq.current;
+          lastFrame = base;
+        } else {
+          frames++;
+          requestAnimationFrame(step);
+          return;
+        }
+      }
       const seen = dataSeq.current;
-      const settled = seen > bytesAtTap && seen === lastFrame; // arrived, and quiet for a frame
+      const settled = seen > base && seen === lastFrame; // arrived, and quiet for a frame
       lastFrame = seen;
-      // Both caps are wedge guards, not waits: the first for a webview that never reports its
-      // refit (that one is local, a layout pass and a bridge hop), the second for a redraw that
-      // never comes at all. If either is what releases a flight, something upstream is broken.
-      const fitted = !chromeChanges || sizeReported.current || frames >= ZOOM_REFIT_CAP_FRAMES;
-      if (frames >= ZOOM_WEDGE_FRAMES) console.log('[switcher] redraw never arrived — flying anyway');
-      else if (!fitted || !settled) {
+      if (frames >= ZOOM_WEDGE_FRAMES) console.log('[terminal] redraw never arrived — going anyway');
+      else if (!settled) {
         frames++;
         requestAnimationFrame(step);
         return;
       }
       selectSeq.current++;
-      if (swRef.current === 'open') closeTo(pos);
+      done();
     };
     requestAnimationFrame(step);
   };
@@ -879,18 +904,14 @@ export default function SessionScreen() {
   const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
     null,
   );
-  /** The next byte off the shell, while anyone is waiting for one. A committed swipe is: the
-   *  redraw is what the settle is waiting for, and it is watched for from the moment
-   *  `select-window` goes out — not from the moment the slide lands, because on a LAN it beats
-   *  the 320ms slide home, and a watch armed after it has already arrived waits for a byte an
-   *  idle shell never sends, i.e. the whole cap (user, 2026-08-10: "small delay still there"). */
-  const onShellData = useRef<(() => void) | null>(null);
   /** Bytes off the shell, counted. A one-shot watch cannot answer "has anything arrived since the
-   *  tap?" — it only answers "did something arrive while I happened to be armed", and the two
-   *  differ exactly when the answer matters (see `selectCard`). */
+   *  commit?" — it only answers "did something arrive while I happened to be armed", and the two
+   *  differ exactly when the answer matters (see `afterHostRedraw`). */
   const dataSeq = useRef(0);
-  const redrawn = useRef(false);
-  const settleCap = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** `dataSeq` at the moment `select-window` went out, the baseline the settle's redraw-wait
+   *  measures from. Read at the commit, not at the settle: on a LAN the redraw beats the slide
+   *  home (user, 2026-08-10: "small delay still there"). */
+  const bytesAtCommit = useRef(0);
   /** Constant velocity for whatever distance is left (see slideMs) — a fixed 320ms ease-out
    *  sprinted the rest of the way on an early release (user, 2026-08-11). */
   const slideTo = (to: number, done: () => void) => {
@@ -931,9 +952,7 @@ export default function SessionScreen() {
     // clear IS a swipe's first frame (the settle yielding to an impatient re-swipe) — exactly
     // that stutter; the cache stays one hop stale and the next clear refreshes it.
     if (!skipRefresh) void refresh(true);
-    onShellData.current = null;
-    if (settleCap.current !== null) clearTimeout(settleCap.current);
-    settleCap.current = null;
+    selectSeq.current++; // supersedes a settle's redraw-wait, so it cannot clear a later swipe
     swipeInfo.current = null;
     setPageSwipe(null);
     swipeX.value = 0;
@@ -941,19 +960,11 @@ export default function SessionScreen() {
   };
 
   const settleBarSwipe = () => {
-    const pending = pendingRibbon.current?.chrome === true;
-    // The redraw already landed while the slide was running: the terminal underneath is the new
-    // window, so there is nothing to hold over it — UNLESS a ribbon change is pending, whose
-    // refit the overlay exists to cover (a bare clear revealed the terminal mid-reflow — the
-    // "even worse" of the first deferral attempt, user, 2026-08-11).
-    if (redrawn.current && !pending) {
-      clearBarSwipe();
-      return;
-    }
-    // The overlay covers the terminal until the redraw arrives; the cap is only for a redraw
-    // that never does. Its insets FREEZE at this commit's values: the ribbon applied below
-    // changes barHeight a layout later, and an overlay tracking the live insets reflowed in
-    // plain view (same first attempt).
+    const chromeChanges = pendingRibbon.current?.chrome === true;
+    // The overlay covers the terminal until the host has finished redrawing at the size the pane
+    // lands at. Its insets FREEZE at this commit's values: the ribbon applied below changes
+    // barHeight a layout later, and an overlay tracking the live insets reflowed in plain view
+    // (the "even worse" of the first deferral attempt, user, 2026-08-11).
     setPageSwipe((s) =>
       s === null
         ? s
@@ -968,14 +979,9 @@ export default function SessionScreen() {
     // Same commit as the overlay's mount: the refit this triggers runs entirely under it.
     applyPendingRibbon();
     roundSV.value = withTiming(0, { duration: 200 });
-    // With a refit in flight its SIGWINCH echo is the first byte back — ending the hold on it
-    // revealed the terminal before tmux's post-resize redraw had painted. For those the cap is
-    // the hold; with the first row pinned (rowRemainder) the refit only churns the bottom rows
-    // under the bar, so the plain 350ms covers what the eye can see and a longer ribbon hold
-    // just read as lag (user, 2026-08-11).
-    if (!pending) onShellData.current = clearBarSwipe;
-    const cap = setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
-    settleCap.current = cap;
+    // The same wait the zoom's flight uses — usually already satisfied by the time the slide has
+    // landed, which is the whole point of taking the baseline back at the commit.
+    afterHostRedraw(bytesAtCommit.current, chromeChanges, clearBarSwipe);
   };
 
   // The settle overlay (a static copy of the committed page) is mounted: reset the slide offset
@@ -1036,11 +1042,9 @@ export default function SessionScreen() {
         // A window we are about to create runs an idle shell, so it counts as one here.
         const idle = win ? IDLE_SHELLS.has(win.command) : true;
         pendingRibbon.current = { win: win ?? null, chrome: (recipe !== null) === idle };
-        // Watch for tmux's redraw from here, not from the settle: it usually beats the slide.
-        redrawn.current = false;
-        onShellData.current = () => {
-          redrawn.current = true;
-        };
+        // The settle's redraw-wait counts from here, not from the settle: on a LAN tmux's redraw
+        // beats the slide home.
+        bytesAtCommit.current = dataSeq.current;
         // Either way tmux redraws the PTY, which replaces the snapshot: `new-window` makes the
         // window it creates the active one, exactly as `select-window` does.
         if (win) {
@@ -1589,13 +1593,9 @@ export default function SessionScreen() {
         onBoot={async () => {
           detach.current?.();
           detach.current = attachTerminal((base64) => {
-            dataSeq.current++; // the flight's "has the host redrawn yet" — see `selectCard`
+            dataSeq.current++; // "has the host redrawn yet" — see `afterHostRedraw`
             probe(`byte ${base64.length}b`);
             terminal.current?.write(base64);
-            // A settle waiting on tmux's redraw ends here, at the first byte of it.
-            const settled = onShellData.current;
-            onShellData.current = null;
-            settled?.();
           });
         }}
         onBell={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
