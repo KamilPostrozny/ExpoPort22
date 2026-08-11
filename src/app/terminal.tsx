@@ -507,7 +507,10 @@ export default function SessionScreen() {
     const t = prog.value;
     if (t <= 0 || t >= 1) return; // nothing is flying
     const dt = frame.timeSincePreviousFrame ?? 0;
-    if (dt > 26) runOnJS(dropped)(dt, t);
+    // 12, not 26: on a 120Hz panel a frame is 8.3ms, so a single missed frame is ~16.6 — under the
+    // old threshold, which is why the probe only ever caught the 3-and-4-frame stalls at the ends
+    // and stayed silent through the one being reported in the middle (user, 2026-08-11).
+    if (dt > 12) runOnJS(dropped)(dt, t);
   });
 
   const commitOpen = () => {
