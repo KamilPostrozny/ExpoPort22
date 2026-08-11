@@ -157,12 +157,13 @@ const CSS = `
      side's rendering, asked for on the side that can be told. Inherited, so body carries it. */
   body { -webkit-font-smoothing: antialiased; }
   /* xterm seats glyphs on its cell by setting a letter-spacing of the difference between that cell
-     and the font's own advance, and its cell is the row width divided by the columns — a rounded
-     number, so the spacing is a fraction of a pixel and the advance stops being a whole one. With
-     'pixelExactSize' above choosing a size whose natural advance IS a whole device pixel, that
-     correction is the only thing left putting a fraction back, and a fraction is what the two
-     renderers round differently. Nothing is lost by dropping it: it corrects a rounding this file
-     has already removed. Marked important because xterm writes it inline, and inline loses to it. */
+     and the font's own advance, and the cell is the row width over the columns — rounded, so the
+     spacing is a hundredth of a pixel that WebKit then quantises to 1/64 of one, landing the row on
+     a pitch nobody asked for (7.7848pt where the fit meant 7.7959). Zero instead: the glyphs go on
+     the font's own advance, which is a number both sides can name, and the 0.2px the row then
+     overhangs its screen is behind an overflow:hidden. Marked important because xterm writes the
+     value inline, and inline loses to it. Only the row container — a span with a spacing of its
+     own keeps it, which is how a substituted glyph still gets squeezed into its cell. */
   .xterm .xterm-rows { letter-spacing: 0 !important; }
   /* An underline the font's own thickness, which is what the snapshot's <Text> draws: CoreText
      takes it from the face (0.05em, so two device pixels here) while WebKit's 'auto' will not go
@@ -203,6 +204,21 @@ const CSS = `
  * cell wide, including the private-use ones; a fallback gives a different width for the glyph it
  * does not have. Logging is deliberate here (PLAN.md §7): this file has no other way to speak.
  */
+/** Five tries then boot regardless: a terminal on the wrong font still runs a shell, and one that
+ *  never opens does not. The waits between them add up to 1.5s in the worst case. */
+const FONT_TRIES = 5;
+
+/** Whether the bundled face is the one being drawn, asked the only way that matters: in a mono
+ *  font every glyph is one advance wide, so if 'M' does not measure `size * 0.6` the answer came
+ *  from somewhere else. A tenth of a point of slack for the renderer's own rounding — a fallback
+ *  is out by whole points (11.36 against 7.67, device). */
+function monoArrived(fontSize: number): boolean {
+  const context = document.createElement('canvas').getContext('2d');
+  if (context === null) return true; // no way to tell; do not spin on it
+  context.font = `${fontSize}px ${MONO}`;
+  return Math.abs(context.measureText('M').width - fontSize * MONO_ADVANCE) < 0.1;
+}
+
 function fontReport(fontSize: number): string {
   const loaded = document.fonts.check(`${fontSize}px ${MONO}`);
   const bold = document.fonts.check(`bold ${fontSize}px ${MONO}`);
@@ -223,29 +239,20 @@ function fontReport(fontSize: number): string {
   );
 }
 
-/**
- * The requested size, nudged until one cell is a whole number of device pixels.
+/*
+ * Once nudged, the size was: a cell of 23.4 device pixels starts on a different fraction of a pixel
+ * in every column, the two renderers do not round that fraction the same way — one seats a glyph on
+ * a whole pixel, the other draws it where the arithmetic put it — and the disagreement peaks about
+ * every third column, so a few letters a line come out crisper in the pane than in the card beside
+ * it. Rounding the size until `size * 0.6 * dpr` was whole removed it exactly.
  *
- * A cell of 23.353 device pixels is a cell whose left edge lands on a different fraction of a
- * pixel in every column, and the two renderers do not round that fraction the same way: one seats
- * each glyph on a whole pixel, the other draws it where the arithmetic put it. Neither is wrong
- * and neither is configurable. The disagreement peaks wherever the running fraction crosses a
- * half — about every third column at that pitch — so a handful of letters per line came out
- * crisper in the pane than in the snapshot beside it, which reads as bolder (user, 2026-08-11;
- * the residual between the two renderings of one line is flat everywhere except `e`, `3`, `2` and
- * a full stop, spaced three columns apart).
- *
- * A whole-pixel cell has no fraction to disagree about. At 3x the advance is `size * 0.6 * 3`, so
- * the sizes that qualify are 5/9pt apart and the nudge is never more than 2/9 of a point — under
- * a fiftieth of the size, which is not a size the eye can see, unlike the letters it fixes.
+ * It is not done, because it is not the terminal's job to be a nice multiple: the sizes that
+ * qualify at 3x are 5/9pt apart, so the pane the user asked 13pt for drew at 12.78 and gained a
+ * column. A sub-pixel difference during a swipe does not buy that (user's call, 2026-08-11). The
+ * advance is still MATCHED — `advance()` measures whatever the pane ends up on — so what is left
+ * is where inside a pixel each glyph sits, and neither engine offers a say in that.
  */
-function pixelExactSize(size: number, dpr: number): number {
-  const perPixel = MONO_ADVANCE * dpr;
-  return Math.max(1, Math.round(size * perPixel)) / perPixel;
-}
-
-export default function TerminalView({ theme, fontSize: asked, holdSize, ref, ...handlers }: TerminalProps) {
-  const fontSize = pixelExactSize(asked, window.devicePixelRatio || 1);
+export default function TerminalView({ theme, fontSize, holdSize, ref, ...handlers }: TerminalProps) {
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -308,16 +315,37 @@ export default function TerminalView({ theme, fontSize: asked, holdSize, ref, ..
     // terminal second. The file is local, so the wait is a frame, not a network round trip.
     // Both faces, not just the regular one: bold is a separate file, and a bold run rendered from
     // the system fallback is wider than the cell it was measured for.
-    Promise.all([
-      document.fonts.load(`${fontSize}px ${MONO}`),
-      document.fonts.load(`bold ${fontSize}px ${MONO}`),
-    ])
-      .catch((error) => console.log('[terminal] font failed to load:', String(error)))
-      .then(() => {
-        if (disposed) return;
-        console.log('[terminal]', fontReport(fontSize));
-        cleanup = boot();
-      });
+    //
+    // And a failed load is retried rather than shrugged at. `fonts.load` rejected once with a bare
+    // NetworkError and the terminal booted anyway, on a fallback measuring 11.36pt to the cell's
+    // 7.67 — a whole session of wrong metrics that looks like a rendering bug and is not (device,
+    // 2026-08-11). Nothing about the file changed between that boot and the next, so a retry is
+    // the whole fix.
+    (async () => {
+      for (let attempt = 1; !disposed; attempt++) {
+        try {
+          await Promise.all([
+            document.fonts.load(`${fontSize}px ${MONO}`),
+            document.fonts.load(`bold ${fontSize}px ${MONO}`),
+          ]);
+        } catch (error) {
+          console.log(`[terminal] font load attempt ${attempt} failed:`, String(error));
+        }
+        // Measured, not asked. `fonts.check` says false on boots whose glyphs are demonstrably the
+        // bundled ones, so it cannot be the gate; the advance can, because the advance IS what
+        // goes wrong — a fallback answers this question with somebody else's number.
+        if (monoArrived(fontSize) || attempt >= FONT_TRIES) {
+          if (disposed) return;
+          console.log('[terminal]', fontReport(fontSize));
+          cleanup = boot();
+          return;
+        }
+        // Backing off rather than hammering: the one failure seen was a reload racing the bundler,
+        // which is over in a frame or two, and a phone that never gets the file is better off at
+        // the fallback than in a loop.
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      }
+    })();
 
     return () => {
       disposed = true;
