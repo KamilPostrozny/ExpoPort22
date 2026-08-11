@@ -154,11 +154,15 @@ export function swipeOpacity(offset: number, width: number): number {
 
 /* --- the zoom (prototype zoomFollow / zoomSty) --- */
 
-/** Bar-swipe-up drag travel → zoom progress: dead for the first 24pt (the classify threshold),
- *  saturating 280pt later. Design-width points, scaled. */
-export function zoomProgress(dy: number, width: number): number {
-  const u = width / DESIGN_W;
-  return Math.min(Math.max((-dy - 24 * u) / (280 * u), 0), 1);
+/** Bar-swipe-up drag travel → zoom progress, saturating 280pt later. Design-width points, scaled.
+ *
+ *  The travel is measured from where the drag-follow ARMS, not from touch-down: the 24pt the
+ *  gesture spends being classified and the two frames it spends paying the open's one-off costs
+ *  are both dropped by the screen's re-origin, so the 24pt dead zone that used to live here would
+ *  now be a second one — the surface sitting still for 24pt after the finger had already earned
+ *  its motion. */
+export function zoomProgress(travel: number, width: number): number {
+  return Math.min(Math.max(-travel / (280 * (width / DESIGN_W)), 0), 1);
 }
 
 /** Release above this progress commits to the grid; below springs back. */

@@ -401,6 +401,8 @@ export default function SessionScreen() {
   /** How long a window-switching select waits for tmux's redraw before flying anyway. The LAN
    *  roundtrip is ~100–150ms in the logs; this is the wedge guard, not the expected path. */
   const ZOOM_REDRAW_CAP_MS = 400;
+  /** How long the redraw has to be silent before the flight takes it as finished — two frames. */
+  const REDRAW_QUIET_MS = 32;
 
   const finishClose = () => {
     setSw('closed');
@@ -477,6 +479,11 @@ export default function SessionScreen() {
   /** Touch-down of the current zoom drag, for `zoomCommits`' flick window. The horizontal hop
    *  keeps its own in `swipeInfo.t0` for the same reason: the pan reports travel, not time. */
   const zoomT0 = useRef(0);
+  /** Has the open's one-off cost landed (two frames, as in `openSwitcher`)? Until it has, the
+   *  drag is set-up only and nothing moves. */
+  const zoomReady = useRef(false);
+  /** The pan's translation at the frame the follow armed — the origin the surface grows from. */
+  const zoomFrom = useRef<{ x: number; y: number } | null>(null);
   const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number) => {
     if (stage === null) return;
     if (phase === 'move') {
@@ -495,9 +502,26 @@ export default function SessionScreen() {
         const aimed = visibleCards[pos]?.win; // same staleness as the tap door — see openSwitcher
         if (aimed) void refreshCard(aimed);
         setSw('drag');
+        // The tap defers its flight two frames so the open's one-off costs — the phase render, the
+        // holdSize marshal into the webview, the keyboard starting down — are paid before anything
+        // moves (see `openSwitcher`). This gesture used to pay them on the frame its motion
+        // started, which is the same hitch, under a finger instead of an animation (user,
+        // 2026-08-11). It waits the same two frames; where the tap can simply delay, the drag
+        // re-origins at the frame it arms, so the surface grows from zero where the finger has got
+        // to rather than jumping to the travel it spent waiting.
+        zoomReady.current = false;
+        zoomFrom.current = null;
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            zoomReady.current = true;
+          }),
+        );
+        return;
       } else if (sw !== 'drag') return;
-      prog.value = zoomProgress(dy, stage.w);
-      dragX.value = dx;
+      if (!zoomReady.current) return;
+      if (zoomFrom.current === null) zoomFrom.current = { x: dx, y: dy };
+      prog.value = zoomProgress(dy - zoomFrom.current.y, stage.w);
+      dragX.value = dx - zoomFrom.current.x;
     } else if (sw === 'drag') {
       if (zoomCommits(dy, Date.now() - zoomT0.current, prog.value)) commitOpen();
       else springBack();
@@ -537,12 +561,24 @@ export default function SessionScreen() {
       const fly = () => {
         if (selectSeq.current !== mine) return;
         selectSeq.current++;
+        if (redrawQuiet.current !== null) clearTimeout(redrawQuiet.current);
+        redrawQuiet.current = null;
         if (onShellData.current === land) onShellData.current = null;
         if (swRef.current === 'open') closeTo(pos);
       };
       const land = () => {
-        if (chromeChanges && !sizeReported.current) return; // stays armed for the next byte
-        requestAnimationFrame(fly);
+        // Re-armed on every byte, for two reasons. The watch is one-shot (it is cleared before it
+        // is called), so the early return below only "stays armed for the next byte" if it says
+        // so — without this a redraw that beat the resize report, which is the usual race, left
+        // nothing to wait on and the flight fell through to the cap. And the first byte is only
+        // the redraw STARTING: the rest of it used to paint into a surface that was already
+        // flying, which is why a switch to another window was choppy where a select of the one
+        // already up — nothing to redraw — was fluid (user, 2026-08-11). Two frames of silence is
+        // the stream having finished; the cap below still bounds the whole wait.
+        onShellData.current = land;
+        if (chromeChanges && !sizeReported.current) return;
+        if (redrawQuiet.current !== null) clearTimeout(redrawQuiet.current);
+        redrawQuiet.current = setTimeout(fly, REDRAW_QUIET_MS);
       };
       onShellData.current = land;
       setTimeout(fly, ZOOM_REDRAW_CAP_MS);
@@ -557,6 +593,8 @@ export default function SessionScreen() {
   /** Has a size report gone out to the host since the current select? What a chrome-changing
    *  select's redraw-wait gates on — see `selectCard`. */
   const sizeReported = useRef(false);
+  /** The pending "the redraw has gone quiet" timer of the select above. */
+  const redrawQuiet = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const killCard = (win: TmuxWindow) => {
     // The last window is unkillable (user decision, 2026-08-10): killing it ends the tmux

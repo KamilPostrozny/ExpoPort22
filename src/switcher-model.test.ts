@@ -115,11 +115,10 @@ test('swipe opacity fades to zero one card-width out', () => {
   expect(swipeOpacity(40, 402)).toBe(1); // rightward never fades
 });
 
-test('zoomProgress: dead for 24pt, saturating 280pt later, clamped both ends', () => {
+test('zoomProgress: saturating 280pt from the arm point, clamped both ends', () => {
   expect(zoomProgress(0, 402)).toBe(0);
-  expect(zoomProgress(-24, 402)).toBe(0);
-  expect(zoomProgress(-164, 402)).toBeCloseTo(0.5);
-  expect(zoomProgress(-304, 402)).toBe(1);
+  expect(zoomProgress(-140, 402)).toBeCloseTo(0.5);
+  expect(zoomProgress(-280, 402)).toBe(1);
   expect(zoomProgress(-1000, 402)).toBe(1);
   expect(zoomProgress(50, 402)).toBe(0); // downward drag is not a zoom
   expect(ZOOM_COMMIT).toBe(0.25);
