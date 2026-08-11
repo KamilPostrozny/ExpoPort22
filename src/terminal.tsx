@@ -588,7 +588,19 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // the screen's own guard) — so what the host last heard is not knowable from here.
     const resize = (force?: boolean) => {
       if (force) reported = { cols: 0, rows: 0, padTop: -1 };
+      // probe (T10, temporary): the pane steps up a beat after a zoom lands and nothing on the
+      // React side moves — no refit reported, no bytes held back. Text moving up by rows is the
+      // BUFFER scrolling, so this watches what only this side can see: where the viewport sits in
+      // the scrollback, and the row count and inset that would make it move.
+      const b = term.buffer.active;
+      const was = { y: b.viewportY, base: b.baseY, rows: term.rows, pad: padTop };
       fitRows();
+      const now = term.buffer.active;
+      if (now.viewportY !== was.y || now.baseY !== was.base || term.rows !== was.rows || padTop !== was.pad)
+        console.log(
+          `[probe] FITMOVED viewportY ${was.y}→${now.viewportY} baseY ${was.base}→${now.baseY} ` +
+            `rows ${was.rows}→${term.rows} padTop ${was.pad.toFixed(1)}→${padTop.toFixed(1)}`,
+        );
       report();
     };
     resizer.current = resize;
