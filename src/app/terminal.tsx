@@ -966,7 +966,14 @@ export default function SessionScreen() {
   // pass (see TerminalProps.onResize). Worked out here it needed a measured height, which only
   // arrives after a layout — so every keyboard open laid out once wrong and once right, which is
   // the bounce (user, 2026-08-10).
-  const chromePad = ribbonEl === null ? BAR_PAD_TOP : RIBBON_PAD_TOP;
+  // Off the MEASURED bar height, not `ribbonEl`: the ribbon mounting flipped this 3pt in one
+  // commit and the 57pt of bar height landed a layout later — two back-to-back webview refits
+  // on every ribboned↔bare hop, the second in plain view at the slide's landing (probe trace,
+  // 2026-08-11: size at commit+36ms and again at +200ms). One source, one refit.
+  // ponytail: 80 sits between the bare bar (60) and any ribboned stack (~102+); the chord strip
+  // can cross it too, costing 3pt of gap while armed — invisible next to the resize the strip
+  // itself causes.
+  const chromePad = barHeight > 80 ? RIBBON_PAD_TOP : BAR_PAD_TOP;
   const padBottom = Math.max(0, padH - chromePad);
   /** The card face runs the full window now, so its content clears the notch itself — except
    *  under an armed search, whose row (padded past the notch on its own) already pushed the
