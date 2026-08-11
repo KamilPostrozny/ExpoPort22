@@ -521,7 +521,14 @@ export default function SessionScreen() {
 
   const springBack = () => {
     setSw('closing');
-    alpha.value = withTiming(1, { duration: 120 });
+    // Solid on the first frame, not dissolved in over 120ms. The card and the surface are the
+    // same geometry at t=1 — that is what all the crossfade arithmetic buys — so the swap has
+    // nothing to hide, and a dissolve between two pictures that differ AT ALL is ghosting in plain
+    // sight for a tenth of a second: the "one hitch during the flight" on every switch (user,
+    // 2026-08-11). Where the pictures agree this is invisible; where they cannot (the card holds
+    // the last poll's capture, the surface holds the pane tmux just redrew) one frame of cut beats
+    // 120ms of double exposure. It also means the flight owes the host nothing but its redraw.
+    alpha.value = 1;
     dragX.value = withTiming(0, { duration: 200 });
     prog.value = withTiming(0, ZOOM_IN, (done) => {
       if (done) runOnJS(finishClose)();
@@ -675,17 +682,11 @@ export default function SessionScreen() {
     sizeReported.current = false;
     const bytesAtTap = dataSeq.current;
     const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
-    // The flight home does not begin on the terminal: it begins on THIS CARD, which the surface
-    // cross-dissolves up from over `springBack`'s 120ms. So the card has to be the pane the
-    // surface is about to show, and its snapshot is the ~2s poll's — as stale as the window is
-    // busy. Two different pictures dissolving into each other is the hitch seen on almost every
-    // switch and on no re-select of the tab already up (user, 2026-08-11): that one is recaptured
-    // by `openSwitcher` on the way in. Same recapture, same reason, and it costs nothing — it
-    // runs inside the wait for the redraw that is happening anyway.
-    let captured = false;
-    void refreshCard(win).finally(() => {
-      captured = true;
-    });
+    // No second roundtrip here. Recapturing this card so the dissolve had a matching picture did
+    // fix the hitch, which is what proved the diagnosis — but it put a whole capture between the
+    // finger and the motion (~250ms, against the redraw's ~50). `springBack` goes solid on its
+    // first frame instead, so there is no dissolve to match and nothing to wait for; the card is
+    // one frame of cut behind the live pane rather than a tenth of a second of double exposure.
     let frames = 0;
     let lastFrame = bytesAtTap;
     const step = () => {
@@ -698,7 +699,7 @@ export default function SessionScreen() {
       // never comes at all. If either is what releases a flight, something upstream is broken.
       const fitted = !chromeChanges || sizeReported.current || frames >= ZOOM_REFIT_CAP_FRAMES;
       if (frames >= ZOOM_WEDGE_FRAMES) console.log('[switcher] redraw never arrived — flying anyway');
-      else if (!fitted || !settled || !captured) {
+      else if (!fitted || !settled) {
         frames++;
         requestAnimationFrame(step);
         return;
