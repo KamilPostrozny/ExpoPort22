@@ -948,11 +948,30 @@ export default function SessionScreen() {
     }
   };
 
+  /** The bar-swipe morph inputs, shared verbatim by the name pills AND the ribbon — one set of
+   *  numbers is what keeps the two moving as one (user, 2026-08-11). See KeyBarProps.pills for
+   *  why it exists at rest too. */
+  const pillsProp =
+    showTabs && connected && stage !== null
+      ? {
+          names: pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME],
+          pos: pageSwipe?.pos ?? activePosIn(cards),
+          // The settle moves `pos` to the target in the same commit, but `swipeX` keeps the
+          // slide's final offset until the post-paint reset effect — read together they put the
+          // continuous position a full window off, snapping the new pill to a capsule and back
+          // (user, 2026-08-11). The settle IS the landing: pinned to a zero offset there.
+          x: pageSwipe === null || pageSwipe.phase === 'settle' ? pillsSettled : swipeX,
+          pitch: pagePitch(stage.w),
+          live: pageSwipe !== null,
+        }
+      : null;
+
   const ribbonEl =
     recipe === null ? null : (
       <Ribbon
         theme={theme}
         recipe={recipe}
+        swipe={pillsProp}
         startedAt={ribbonCore.startedAt}
         expanded={rbExpanded}
         busy={sending}
@@ -1378,24 +1397,7 @@ export default function SessionScreen() {
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? onBarSwipe : undefined}
-        pills={
-          showTabs && connected && stage !== null
-            ? {
-                // Passed at rest too, not just mid-swipe (see the prop's note on the mount
-                // hitch). At rest the names come from the same cards a swipe would snapshot.
-                names: pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME],
-                pos: pageSwipe?.pos ?? activePosIn(cards),
-                // The settle moves `pos` to the target in the same commit, but `swipeX` keeps
-                // the slide's final offset until the post-paint reset effect — read together
-                // they put the continuous position a full window off, snapping the new pill to
-                // a capsule and back (user, 2026-08-11: "jumps to full size at the end"). The
-                // settle IS the landing: pin the pills to a zero offset the moment it mounts.
-                x: pageSwipe === null || pageSwipe.phase === 'settle' ? pillsSettled : swipeX,
-                pitch: pagePitch(stage.w),
-                live: pageSwipe !== null,
-              }
-            : null
-        }
+        pills={pillsProp}
         ribbon={ribbonEl}
       />
       </View>

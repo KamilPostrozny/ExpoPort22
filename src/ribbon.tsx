@@ -11,15 +11,18 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  FadeInDown,
-  FadeOutDown,
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withSequence,
   withTiming,
+  type EntryAnimationsValues,
+  type ExitAnimationsValues,
+  type SharedValue,
 } from 'react-native-reanimated';
 
+import { PILL_MIN, pillCont, pillDist, pillOpacity, pillWidthFrac } from '@/barswipe-model';
 import { Glass } from '@/keybar';
 import { formatElapsed } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
@@ -44,9 +47,44 @@ export type RibbonProps = {
   expanded: boolean;
   /** §4.6: an upload in flight — the attach cap tints accent and goes inert. */
   busy: boolean;
+  /** T11's bar-swipe morph inputs — the same the name pills read. While `live` the glass
+   *  squeezes and fades in LOCKSTEP with the outgoing pill (and regrows on a cancel); its
+   *  mount/unmount animations use the same curve, so a ribbon appearing at a hop's settle or on
+   *  a poll beat moves exactly like everything else on the bar (user, 2026-08-11). */
+  swipe?: { pos: number; x: SharedValue<number>; pitch: number; live: boolean } | null;
   onToggle: () => void;
   onDismiss: () => void;
   onCap: (cap: Cap) => void;
+};
+
+/** The pill morph's span in time: it plays out over 0.7 of a page pitch (`pillMorph`'s
+ *  saturation) at the release slide's ~1.15pt/ms — ≈260ms on a 402pt stage. The ribbon's
+ *  mount/unmount play the same curve over the same time. */
+const MORPH_MS = 260;
+
+const ribbonIn = (values: EntryAnimationsValues) => {
+  'worklet';
+  return {
+    initialValues: { width: values.targetWidth * PILL_MIN, opacity: 0 },
+    animations: {
+      width: withTiming(values.targetWidth, { duration: MORPH_MS, easing: Easing.out(Easing.quad) }),
+      opacity: withTiming(1, { duration: MORPH_MS }),
+    },
+  };
+};
+
+const ribbonOut = (values: ExitAnimationsValues) => {
+  'worklet';
+  return {
+    initialValues: { width: values.currentWidth, opacity: 1 },
+    animations: {
+      width: withTiming(values.currentWidth * PILL_MIN, {
+        duration: MORPH_MS,
+        easing: Easing.out(Easing.quad),
+      }),
+      opacity: withTiming(0, { duration: MORPH_MS }),
+    },
+  };
 };
 
 export default function Ribbon(props: RibbonProps) {
@@ -54,6 +92,16 @@ export default function Ribbon(props: RibbonProps) {
   const data = RECIPES[recipe.id];
   const open = props.expanded || !data.collapsible;
   const running = recipe.id === 'running';
+
+  // The drag morph: the same distance→width/opacity the outgoing name pill runs, so the two
+  // move as one — and a cancelled swipe regrows the ribbon for free.
+  const swipe = props.swipe ?? null;
+  const [glassW, setGlassW] = useState(0);
+  const dragStyle = useAnimatedStyle(() => {
+    if (!swipe?.live || glassW <= 0) return { width: 'auto' as const, opacity: 1 };
+    const d = pillDist(swipe.pos, pillCont(swipe.pos, swipe.x.value, swipe.pitch));
+    return { width: glassW * pillWidthFrac(d), opacity: pillOpacity(d) };
+  }, [swipe, glassW]);
 
   // The running timer: re-render once a second while the label carries elapsed time.
   const [, setBeat] = useState(0);
@@ -122,31 +170,39 @@ export default function Ribbon(props: RibbonProps) {
   };
 
   return (
-    <Animated.View
-      entering={FadeInDown.duration(180)}
-      // The same 180 as the entry: at 140 the leave read as the ribbon blinking out while the
-      // arrival glided — asymmetric (user, 2026-08-11).
-      exiting={FadeOutDown.duration(180)}
-      style={styles.wrap}>
-      <GestureDetector gesture={dismiss}>
-        <Glass theme={theme} radius={19}>
-          <Pressable
-            disabled={!data.collapsible}
-            onPress={props.onToggle}
-            style={[styles.pill, open ? styles.pillOpen : styles.pillClosed]}>
-            <Animated.View
-              style={[styles.dot, { backgroundColor: theme.palette[data.dot] }, dotStyle]}
-            />
-            <Text style={[styles.label, { color: theme.muted }]}>{label}</Text>
-            {open ? (
-              data.caps.map(cap)
-            ) : (
-              <Text style={[styles.chevron, { color: theme.placeholder }]}>⌃</Text>
-            )}
-          </Pressable>
-        </Glass>
-      </GestureDetector>
-    </Animated.View>
+    <View style={styles.wrap}>
+      <Animated.View
+        entering={ribbonIn}
+        // No exit animation while a swipe owns the glass: the drag morph has already squeezed
+        // it invisible, and the builder's ghost would flash it back at full opacity.
+        exiting={swipe?.live ? undefined : ribbonOut}
+        style={[styles.morph, dragStyle]}>
+        {/* Natural width, measured for the drag morph and LOCKED while one is live, so the
+            squeeze clips the glass instead of re-laying its caps out. */}
+        <View
+          style={swipe?.live && glassW > 0 ? { width: glassW } : undefined}
+          onLayout={(e) => setGlassW(e.nativeEvent.layout.width)}>
+          <GestureDetector gesture={dismiss}>
+            <Glass theme={theme} radius={19}>
+              <Pressable
+                disabled={!data.collapsible}
+                onPress={props.onToggle}
+                style={[styles.pill, open ? styles.pillOpen : styles.pillClosed]}>
+                <Animated.View
+                  style={[styles.dot, { backgroundColor: theme.palette[data.dot] }, dotStyle]}
+                />
+                <Text style={[styles.label, { color: theme.muted }]}>{label}</Text>
+                {open ? (
+                  data.caps.map(cap)
+                ) : (
+                  <Text style={[styles.chevron, { color: theme.placeholder }]}>⌃</Text>
+                )}
+              </Pressable>
+            </Glass>
+          </GestureDetector>
+        </View>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -157,6 +213,8 @@ export const RIBBON_PAD_TOP = 2;
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', paddingTop: RIBBON_PAD_TOP, paddingBottom: 8, paddingHorizontal: 20 },
+  /** The morphing box: clips the fixed-width glass as it squeezes, both sides evenly. */
+  morph: { overflow: 'hidden', borderRadius: 19, alignItems: 'center' },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   pillClosed: { paddingVertical: 8, paddingHorizontal: 13 },
   pillOpen: { paddingVertical: 5, paddingLeft: 13, paddingRight: 7 },
