@@ -22,6 +22,7 @@ import {
   targetSlot,
   termPad,
   zoomFrame,
+  cardFit,
   cropShift,
   zoomProgress,
 } from '@/switcher-model';
@@ -125,25 +126,36 @@ test('zoomProgress: saturating 280pt from the arm point, clamped both ends', () 
   expect(ZOOM_COMMIT).toBe(0.25);
 });
 
-test('cropShift: nothing at rest, the pane’s last row on the card’s edge at 1', () => {
+test('cardFit: the whole pane, scaled to the card, centred in it', () => {
   const stage = { w: 402, h: 874 };
   const slot = slotFrame(0, 402);
-  const bottom = 124; // bar + home strip + row remainder
-  expect(cropShift(0, slot, stage, bottom, 59)).toBe(0);
-  // The card's window in stage points, and what is left above the pane's content edge.
-  const window = (slot.h * stage.w) / slot.w;
-  expect(cropShift(1, slot, stage, bottom, 59)).toBeCloseTo(874 - 124 - window);
-  // The clip takes `window` off the bottom, so shifting by this puts the shifted content's end
-  // exactly on the pane's end: shift + window === stage.h - bottom.
-  expect(cropShift(1, slot, stage, bottom, 59) + window).toBeCloseTo(874 - 124);
-  // A card taller than the pane cannot hang off its bottom — it falls back to the chrome floor.
-  expect(cropShift(1, slot, { w: 402, h: 300 }, bottom, 59)).toBe(59);
+  const pane = { top: 76, bottom: 750, side: 8 };
+  const fit = cardFit(slot, stage, pane);
+  // Height binds for a phone-shaped pane: the pane's 674pt become the card's 240.
+  expect(fit.scale).toBeCloseTo(240 / 674);
+  expect((pane.bottom - pane.top) * fit.scale).toBeCloseTo(slot.h);
+  // …and at that scale the stage is narrower than the card, so it is centred with the card's own
+  // background either side.
+  expect(stage.w * fit.scale).toBeLessThan(slot.w);
+  expect(fit.x - slot.x).toBeCloseTo((slot.w - stage.w * fit.scale) / 2);
+  expect(fit.y - slot.y).toBeCloseTo(0, 6); // no vertical slack: height is what bound
+  // A squat pane cannot be scaled past the card's edges — there the width binds instead.
+  const squat = cardFit(slot, stage, { top: 0, bottom: 100, side: 8 });
+  expect(squat.scale).toBeCloseTo(slot.w / stage.w);
 });
 
-test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
+test('cropShift: nothing at rest, the pane’s first row at the top by the card', () => {
+  const pane = { top: 76, bottom: 750, side: 8 };
+  expect(cropShift(0, pane)).toBe(0);
+  expect(cropShift(1, pane)).toBe(76);
+  expect(cropShift(0.5, pane)).toBe(38);
+});
+
+test('zoomFrame endpoints: identity at rest, the whole pane in the card at 1', () => {
   const stage = { w: 402, h: 874 };
-  const slot = { ...slotFrame(0, 402), y: slotFrame(0, 402).y + 66 }; // stage coords incl. headroom
-  const rest = zoomFrame(0, 0, slot, stage);
+  const slot = slotFrame(0, 402);
+  const pane = { top: 76, bottom: 750, side: 8 };
+  const rest = zoomFrame(0, 0, slot, stage, pane);
   expect(rest.scale).toBe(1);
   expect(rest.height).toBe(874);
   expect(rest.translateX).toBe(0);
@@ -151,25 +163,26 @@ test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
   expect(rest.radius).toBeCloseTo(62); // the screen's own corner, worn at rest too
   expect(rest.ringOpacity).toBe(0);
 
-  const S = 173 / 402;
-  const zoomed = zoomFrame(1, 0, slot, stage);
-  expect(zoomed.scale).toBeCloseTo(S);
-  // clip: the visible height scaled down is exactly the card height
-  expect(zoomed.height * S).toBeCloseTo(240);
-  // centre-origin compensation lands the scaled top-left on the slot
-  expect(zoomed.translateX + (stage.w * (1 - S)) / 2).toBeCloseTo(slot.x);
-  expect(zoomed.translateY + (zoomed.height * (1 - S)) / 2).toBeCloseTo(slot.y);
-  // radius scaled down is the card's 14pt corner
-  expect(zoomed.radius * S).toBeCloseTo(14);
+  const fit = cardFit(slot, stage, pane);
+  const zoomed = zoomFrame(1, 0, slot, stage, pane);
+  expect(zoomed.scale).toBeCloseTo(fit.scale);
+  // The window is exactly the pane's box, and scaled it is exactly the card's height.
+  expect(zoomed.height).toBeCloseTo(pane.bottom - pane.top);
+  expect(zoomed.height * zoomed.scale).toBeCloseTo(slot.h);
+  // Centre-origin compensation lands the scaled top-left where `cardFit` says.
+  expect(zoomed.translateX + (stage.w * (1 - zoomed.scale)) / 2).toBeCloseTo(fit.x);
+  expect(zoomed.translateY + (zoomed.height * (1 - zoomed.scale)) / 2).toBeCloseTo(fit.y);
+  expect(zoomed.radius * zoomed.scale).toBeCloseTo(14); // the card's own corner
   expect(zoomed.ringOpacity).toBe(1);
 });
 
 test('zoomFrame is screen-round at rest and eases to the card corner', () => {
   const stage = { w: 402, h: 874 };
   const slot = slotFrame(0, 402);
+  const pane = { top: 76, bottom: 750, side: 8 };
   // On screen the corner is `radius * scale` — that is what the eye compares to the phone's own.
   const onScreen = (t: number) => {
-    const f = zoomFrame(t, 0, slot, stage);
+    const f = zoomFrame(t, 0, slot, stage, pane);
     return f.radius * f.scale;
   };
   // The display's corner at rest — no animation from square (user, 2026-08-11).
@@ -182,8 +195,9 @@ test('zoomFrame is screen-round at rest and eases to the card corner', () => {
 test('zoomFrame rides the finger drift at 0.6 like the prototype', () => {
   const stage = { w: 402, h: 874 };
   const slot = slotFrame(0, 402);
-  const still = zoomFrame(0.5, 0, slot, stage);
-  const drifted = zoomFrame(0.5, 100, slot, stage);
+  const pane = { top: 76, bottom: 750, side: 8 };
+  const still = zoomFrame(0.5, 0, slot, stage, pane);
+  const drifted = zoomFrame(0.5, 100, slot, stage, pane);
   expect(drifted.translateX - still.translateX).toBeCloseTo(60);
 });
 

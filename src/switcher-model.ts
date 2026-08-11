@@ -168,33 +168,44 @@ export function zoomProgress(travel: number, width: number): number {
 /** Release above this progress commits to the grid; below springs back. */
 export const ZOOM_COMMIT = 0.25;
 
+/** The pane's own box inside the stage, in stage points: where the rows actually live, with the
+ *  notch strip and the search row above them and the bar, the home strip and the keyboard below. */
+export type Pane = { top: number; bottom: number; side: number };
+
 /**
- * How far the flying surface's content slides up as it shrinks — 0 at rest, and at the card
- * whatever puts the pane's LAST row on the card's bottom edge.
+ * The scale that puts the WHOLE pane inside a card, and where it lands there.
  *
- * A card is a taller-than-wide crop of a taller-still pane: fit 51 columns to 173pt and ~30 of the
- * pane's 41 rows are all that will go in the 240. The clip in `zoomFrame` takes that difference
- * off the BOTTOM, so a card was the top of the pane and everything since — the prompt, the last
- * command's output, the reason you are looking at the card — fell off the edge (user, 2026-08-11,
- * screenshot: every card cut mid-row through an `ls`). Sliding the content up by the same amount
- * turns the crop around: what the clip removes is the top, and the card ends on the pane's last
- * row.
- *
- * `bottomInset` is the terminal's own bottom padding (bar, home strip, row remainder) in stage
- * points — the pane's content edge is that far up from the stage's, and it is the edge the card
- * lands on. `minShift` is the top chrome the card must never show whatever the arithmetic says
- * (the notch strip, an armed search row); normally the anchor is well past it.
+ * A card used to fit the pane's COLUMNS to its width and crop whatever rows would not fit. Both
+ * ends of that are wrong and the user saw both: keeping the head cuts a long listing off mid-line
+ * and never shows the prompt, keeping the tail turns a banner or a fresh shell into an almost
+ * empty card (2026-08-11, screenshot of a window against its own card). A tab's picture should be
+ * the tab. So the fit is by height, nothing is cropped, and the pane — taller in proportion than
+ * the card — ends up narrower than it with the card's own background either side, which is the
+ * same colour and so is not there to look at.
  */
-export function cropShift(
-  t: number,
+export function cardFit(
   slot: Frame,
   stage: { w: number; h: number },
-  bottomInset: number,
-  minShift: number,
-): number {
+  pane: Pane,
+): { scale: number; x: number; y: number } {
   'worklet';
-  const window = (slot.h * stage.w) / slot.w; // the card's height in stage points
-  return Math.max(minShift, Math.max(0, stage.h - bottomInset - window)) * t;
+  const paneH = Math.max(1, pane.bottom - pane.top);
+  // The width term never binds for a phone-shaped pane in a card-shaped slot; it is there so a
+  // squat pane (a short window, a landscape phone) is not scaled past the card's edges.
+  const scale = Math.min(slot.h / paneH, slot.w / stage.w);
+  return {
+    scale,
+    x: slot.x + (slot.w - stage.w * scale) / 2,
+    y: slot.y + (slot.h - paneH * scale) / 2,
+  };
+}
+
+/** How far the surface's content slides up as it shrinks: at rest nothing, at the card exactly
+ *  enough to put the pane's FIRST row at the top of what the card shows. The chrome above it —
+ *  the notch strip, an armed search row — slides out of frame with it. */
+export function cropShift(t: number, pane: Pane): number {
+  'worklet';
+  return pane.top * t;
 }
 
 export type ZoomFrame = {
@@ -213,7 +224,7 @@ export type ZoomFrame = {
 
 /**
  * Interpolate the whole terminal surface between rest (t=0: identity over the stage) and the
- * card slot (t=1: scaled to the slot frame, bottom clipped away). `slot` is in stage
+ * card slot (t=1: the whole pane, scaled by `cardFit`, sitting in the slot). `slot` is in stage
  * coordinates. `dx` is the finger's horizontal drift during a drag-follow (prototype rides it
  * at 0.6), zero for committed animations. RN scales about the view centre, so the translation
  * compensates to keep the interpolation anchored at the top-left like the prototype's
@@ -224,13 +235,16 @@ export function zoomFrame(
   dx: number,
   slot: Frame,
   stage: { w: number; h: number },
+  pane: Pane,
 ): ZoomFrame {
   'worklet';
-  const S = slot.w / stage.w;
-  const scale = 1 + (S - 1) * t;
-  const height = stage.h - (stage.h - slot.h / S) * t;
-  const x = slot.x * t + dx * 0.6;
-  const y = slot.y * t;
+  const fit = cardFit(slot, stage, pane);
+  const scale = 1 + (fit.scale - 1) * t;
+  // The window into the stage closes down to the pane's own box: everything above it has already
+  // slid out through `cropShift`, and this takes the bar and the home strip off the bottom.
+  const height = stage.h - (stage.h - (pane.bottom - pane.top)) * t;
+  const x = fit.x * t + dx * 0.6;
+  const y = fit.y * t;
   return {
     scale,
     height,
