@@ -550,15 +550,22 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // React side it took a second layout pass to settle, which is a visible bounce every time
     // the keyboard opens. Nothing is lost to it — the rows are counted before the inset is
     // applied, so the inset is exactly what they could not fill.
+    //
+    // ONE fit, and the padding is never taken off to take a measurement. This used to zero the
+    // inset, fit at the taller box, work the remainder out and fit again — and that first pass is
+    // a real reflow at a size the pane never keeps. The host's height comes from the layout above
+    // it, not from its content, so its `clientHeight` does not move with its own padding: the
+    // measurement the first pass went to get is the same number the second one already has.
+    // Nothing was buying the churn, and it was on every fit — including the one 150ms after a
+    // zoom lands, which is the pane visibly stepping up a beat after the tab does (user,
+    // 2026-08-11). With the rows unchanged xterm's own resize is a no-op, so a fit that changes
+    // nothing now costs nothing.
     let padTop = 0;
     const fitRows = () => {
       const el = host.current;
       if (el === null) return fitAddon.fit();
-      el.style.paddingTop = '0px';
-      const box = el.clientHeight;
-      fitAddon.fit();
       const { h } = cell();
-      padTop = h > 0 ? box % h : 0;
+      padTop = h > 0 ? el.clientHeight % h : 0;
       el.style.paddingTop = `${padTop}px`;
       fitAddon.fit();
     };
