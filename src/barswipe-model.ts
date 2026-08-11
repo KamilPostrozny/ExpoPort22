@@ -105,13 +105,18 @@ function pillMorph(dist: number): number {
   return Math.min(2 * dist, 1);
 }
 
+/** Scale-dominant, like Safari's: the shrink is the morph, so it has to happen in plain sight —
+ *  a linear fade to zero emptied the bar for the middle of every step and the shrink went with
+ *  it, unseen (user, 2026-08-11, screenshot). Opacity is quadratic: near-full while the pill
+ *  shrinks, dropping only at the far end. */
 export function pillScale(dist: number): number {
   'worklet';
-  return 1 - 0.6 * pillMorph(dist);
+  return 1 - 0.7 * pillMorph(dist);
 }
 
 export function pillOpacity(dist: number): number {
   'worklet';
-  return 1 - pillMorph(dist);
+  const m = pillMorph(dist);
+  return 1 - 0.75 * m * m;
 }
 

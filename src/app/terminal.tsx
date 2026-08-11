@@ -803,6 +803,15 @@ export default function SessionScreen() {
     borderRadius: pageR * roundSV.value,
   }));
   const settleRoundStyle = useAnimatedStyle(() => ({ borderRadius: pageR * roundSV.value }));
+  // The card's edge: in the dark flavours base and crust are nearly the same ink, so the gap
+  // alone does not separate card from backdrop (user, 2026-08-11, screenshot) — the same
+  // hairline the switcher's cards wear does. An overlay, NOT a real border: a border is part of
+  // the box and would resize the terminal mid-swipe. It fades with the rounding, so the resting
+  // page has no ghost outline.
+  const pageEdgeStyle = useAnimatedStyle(() => ({
+    opacity: roundSV.value,
+    borderRadius: pageR * roundSV.value,
+  }));
 
   /* --- T11: the context ribbon (§4.4) ---
    *
@@ -1191,6 +1200,11 @@ export default function SessionScreen() {
         onSearchResults={async (i, n) => setOcc({ i, n })}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
+      {/* see pageEdgeStyle — the live page's card edge while a swipe is on */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.border }, pageEdgeStyle]}
+      />
       </Animated.View>
 
       {/* The neighbour pages while a swipe is live, and the settle overlay after a commit —
@@ -1219,6 +1233,10 @@ export default function SessionScreen() {
             theme={theme}
             cell={cell}
             insets={paneInsets}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.border }, pageEdgeStyle]}
           />
         </Animated.View>
       )}
@@ -1433,6 +1451,14 @@ function NeighborPage({
         style,
       ]}>
       <PageContent snap={snap} stageW={stageW} theme={theme} cell={cell} insets={insets} />
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          styles.pageEdge,
+          { borderColor: theme.border, borderRadius: pageRadius(stageW) },
+        ]}
+      />
     </Animated.View>
   );
 }
@@ -1547,6 +1573,7 @@ const styles = StyleSheet.create({
   termArea: { flex: 1 },
   termSlide: { flex: 1, overflow: 'hidden' },
   page: { overflow: 'hidden' },
+  pageEdge: { borderWidth: 1 },
   status: {
     position: 'absolute',
     top: 0,

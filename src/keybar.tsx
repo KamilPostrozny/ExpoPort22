@@ -465,11 +465,16 @@ export default function KeyBar(props: KeyBarProps) {
             </Glass>
           </Key>
 
-          <Glass theme={theme} radius={BAR_RADIUS} style={styles.pill}>
+          {/* The middle slot. The keys live in one glass pill; during a bar swipe that WHOLE
+              glass hides and each tab name is its own glass pill riding the strip — Safari's
+              morph is the pill itself shrinking and growing, and scaling only the text inside a
+              static glass read as no morph at all (user, 2026-08-11). */}
+          <View style={styles.pill} onLayout={(e) => setPillW(e.nativeEvent.layout.width)}>
             <View
-              style={[styles.keysRow, props.pills != null && { opacity: 0 }]}
-              pointerEvents={props.pills != null ? 'none' : 'auto'}
-              onLayout={(e) => setPillW(e.nativeEvent.layout.width)}>
+              style={[StyleSheet.absoluteFill, props.pills != null && { opacity: 0 }]}
+              pointerEvents={props.pills != null ? 'none' : 'auto'}>
+            <Glass theme={theme} radius={BAR_RADIUS} style={styles.pillGlass}>
+            <View style={styles.keysRow}>
               <View style={styles.keysGroup}>
                 <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
                   <Text style={keyLabel}>Ctrl</Text>
@@ -507,7 +512,9 @@ export default function KeyBar(props: KeyBarProps) {
                 />
               </Key>
             </View>
-            {/* §4.4: during a bar swipe the tab-name pills replace the keys. */}
+            </Glass>
+            </View>
+            {/* §4.4: during a bar swipe the tab-name glass pills replace the keys. */}
             {props.pills != null && pillW > 0 && (
               <Animated.View
                 entering={FadeIn.duration(150)}
@@ -517,7 +524,7 @@ export default function KeyBar(props: KeyBarProps) {
                 <NameStrip theme={theme} pills={props.pills} width={pillW} />
               </Animated.View>
             )}
-          </Glass>
+          </View>
 
           {props.showTabs && (
             <Key onPress={props.onTabsTap /* TODO(T10): opens the switcher */} style={styles.circleSlot}>
@@ -618,13 +625,15 @@ function NamePill({
     const d = pillDist(i, pillCont(pos, x.value, pitch));
     return { transform: [{ scale: pillScale(d) }], opacity: pillOpacity(d) };
   });
+  // A whole glass pill per name — the pill itself is what morphs (scale + fade with distance);
+  // no ‹ › hints, the morph is the indicator (user, 2026-08-11).
   return (
-    <Animated.View style={[styles.namePill, { width: PILL_ITEM * width }, style]}>
-      <Text style={[styles.namePillArrow, { color: theme.placeholder }]}>‹</Text>
-      <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
-        {name}
-      </Text>
-      <Text style={[styles.namePillArrow, { color: theme.placeholder }]}>›</Text>
+    <Animated.View style={[styles.namePillSlot, { width: PILL_ITEM * width }, style]}>
+      <Glass theme={theme} radius={BAR_RADIUS} style={styles.namePill}>
+        <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
+          {name}
+        </Text>
+      </Glass>
     </Animated.View>
   );
 }
@@ -819,6 +828,7 @@ const styles = StyleSheet.create({
   circleSlot: { width: 49, height: 49 },
   circle: { width: 49, height: 49, alignItems: 'center', justifyContent: 'center' },
   pill: { flex: 1, height: 49 },
+  pillGlass: { flex: 1 },
   keysRow: {
     flex: 1,
     flexDirection: 'row',
@@ -844,14 +854,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  namePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
+  namePillSlot: { height: '100%', paddingVertical: 0 },
+  namePill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
   namePillText: { fontFamily: MONO, fontSize: 14, fontWeight: '500', flexShrink: 1 },
-  namePillArrow: { fontSize: 14 },
   arrowsButton: {
     width: 35,
     height: 35,

@@ -95,18 +95,19 @@ test('pillCont slides with the page offset', () => {
   expect(pillCont(1, -100, 0)).toBe(1); // no pitch yet: stay put, no divide-by-zero
 });
 
-test('pill scale and opacity: full at centre, gone by half a window out (Safari sequencing)', () => {
+test('pill morph: scale-dominant, floored by half a window out (Safari sequencing)', () => {
   expect(pillScale(pillDist(1, 1))).toBe(1);
   expect(pillOpacity(pillDist(1, 1))).toBe(1);
   expect(pillDist(0, 1.5)).toBe(1); // saturates
-  expect(pillScale(1)).toBeCloseTo(0.4);
-  expect(pillOpacity(1)).toBeCloseTo(0);
-  // A quarter-window out: half-way through the morph — the departing pill spends its whole
-  // vanish in the first half of the step, so the arriving one starts growing only after.
-  expect(pillScale(0.25)).toBeCloseTo(0.7);
-  expect(pillOpacity(0.25)).toBeCloseTo(0.5);
-  // Half a window out (both pills equidistant): both fully gone, nothing mid-stretch.
-  expect(pillOpacity(pillDist(2, 1.5))).toBeCloseTo(0);
+  expect(pillScale(1)).toBeCloseTo(0.3);
+  expect(pillOpacity(1)).toBeCloseTo(0.25);
+  // A quarter-window out (morph half-way): the shrink is well underway while the pill is still
+  // mostly opaque — the shrink happens in plain sight, the fade trails it (quadratic).
+  expect(pillScale(0.25)).toBeCloseTo(0.65);
+  expect(pillOpacity(0.25)).toBeCloseTo(0.8125);
+  // Half a window out (both pills equidistant): both at the floor, nothing mid-stretch.
+  expect(pillScale(pillDist(2, 1.5))).toBeCloseTo(0.3);
+  expect(pillOpacity(pillDist(2, 1.5))).toBeCloseTo(0.25);
 });
 
 /* --- neighbour page type size --- */
