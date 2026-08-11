@@ -45,13 +45,12 @@ import {
   reorderArgs,
   shouldClose,
   slotFrame,
-  cardFit,
   snapshotType,
+  SHOT_PAD,
   swipeOffset,
   swipeOpacity,
   targetSlot,
   type Frame,
-  type Pane,
 } from '@/switcher-model';
 import { capturePane, listWindows, searchPane } from '@/tmux';
 import { POLL_MS, type TmuxWindow } from '@/tmux-model';
@@ -248,8 +247,6 @@ export type SwitcherProps = {
   /** …and its rows: a short capture is padded back out to this, or the card's text sits lower
    *  than the surface's and steps at the hand-over. */
   liveRows: number;
-  /** The pane's box in stage points — every card draws the whole of it, at `cardFit`'s scale. */
-  pane: Pane;
   /** The terminal's own top inset, in stage points. Sideways a card's inset is a constant share
    *  of the stage (`SHOT_PAD`), but vertically the terminal's inset absorbs half the row
    *  remainder and so moves with the layout — and the card's has to move with it, or the text
@@ -421,7 +418,6 @@ export default function Switcher(props: SwitcherProps) {
               cell={props.cell}
               liveCols={props.liveCols}
               liveRows={props.liveRows}
-              pane={props.pane}
               padTop={props.padTop}
               hit={props.hits[card.win.id]}
               query={nq}
@@ -527,7 +523,6 @@ function WindowCard({
   cell,
   liveCols,
   liveRows,
-  pane,
   padTop,
   hit,
   query,
@@ -550,7 +545,6 @@ function WindowCard({
   cell: { w: number; h: number };
   liveCols: number;
   liveRows: number;
-  pane: Pane;
   /** The terminal's top inset in stage points; through the zoom it is this card's. */
   padTop: number;
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
@@ -726,24 +720,28 @@ function WindowCard({
       ? { borderWidth: 2, borderColor: theme.accent }
       : { borderWidth: 1, borderColor: theme.border };
 
-  // The card is the whole pane, at the scale that makes it fit — the same `cardFit` the flight
-  // lands on, so the two are the same picture by construction rather than by two sets of numbers
-  // kept in step by hand. The inset either side is the pane's OWN inset seen at that scale, and
-  // the block sits where the flying surface leaves it: `cardFit`'s x and y, less the slot's own
-  // origin, and less the ring, which RN lays content out inside.
-  const fit = cardFit({ ...slot, x: 0, y: 0 }, { w: stageW, h: pane.bottom }, pane);
-  const shotPad = Math.max(0, fit.x + pane.side * fit.scale - ring.borderWidth);
-  const shotPadTop = Math.max(0, fit.y - ring.borderWidth);
+  // The border is part of the inset, not extra: RN lays a view's content out inside it, so a 2pt
+  // ring plus the full padding put the snapshot 2pt further in than the terminal's own inset lands
+  // — a constant down-and-right step at the crossfade, in both axes, and the last one (device).
+  const shotPad = Math.max(0, SHOT_PAD * u - ring.borderWidth);
+  // Vertically the terminal's inset is not a constant (it swallows half the row remainder), so
+  // the card's is that one seen through the zoom rather than a number of its own.
+  const shotPadTop = Math.max(0, padTop * (slot.w / stageW) - ring.borderWidth);
 
-  // The emulator's cell at that scale — not a fit of the columns, which is what drew a card at
-  // half the type of its neighbours when tmux had left its window 80 columns wide (user,
-  // 2026-08-11, "some tabs render zoomed out"). The width is still capped at the live pane's: a
-  // card is a preview of a pane this client is about to size to itself, and a longer line clips
-  // exactly as it will when tmux reflows it.
+  // The emulator's cell, shrunk by exactly what the zoom shrinks the stage by — so the card draws
+  // the pane the size the flying surface hands over at.
+  //
+  // Capped at the live pane's width, and that cap is the point. tmux's `window-size latest` leaves
+  // a window at the size of the last client that DISPLAYED it, so a tab not opened from this phone
+  // since the session began is still 80-odd columns wide — and fitting 80 columns into 173pt drew
+  // that one card at half the type of its neighbours, the "zoomed out" card (user, 2026-08-11,
+  // screenshot). Every card is a preview of a pane this client is about to size to itself, so they
+  // are all drawn at the width they are about to have; a line longer than that clips, exactly as
+  // it will when tmux reflows it.
   const cols = card.snap?.cols ?? card.win.width;
   const type = snapshotType(
     cell,
-    fit.scale,
+    slot.w / stageW,
     liveCols > 0 ? Math.min(cols, liveCols) : cols,
     slot.w - 2 * (shotPad + ring.borderWidth),
   );
@@ -789,13 +787,22 @@ function WindowCard({
               borderRadius: 14 * u,
               backgroundColor: theme.background,
               paddingHorizontal: shotPad,
-              // Top-aligned, because the whole pane is here: nothing is cropped from either end,
-              // so the first row goes at the top exactly as the pane has it and the blank rows
-              // under a short one are the pane's own blank rows.
-              paddingTop: shotPadTop,
+              // The pane is taller than the card can hold, so one end of it is lost either way.
+              // The end worth keeping is the LAST row — the prompt and what just ran, which is
+              // what the card is being read for — so the snapshot hangs from the bottom edge and
+              // the overflow falls off the top (user, 2026-08-11). The flight lands on the same
+              // slice: see `cropShift`. A search hit is the exception — its context block is a
+              // few lines placed to be read from the top, not a pane's tail.
+              justifyContent: hit ? 'flex-start' : 'flex-end',
+              paddingTop: hit ? shotPadTop : 0,
             },
           ]}>
-          <Snapshot lines={shownLines} theme={theme} {...type} />
+          {/* The ring is part of the inset (RN lays content out inside a border), so hanging the
+              snapshot off the padding box puts its last row that far above where the terminal's
+              lands — the same constant step `shotPadTop` subtracts on the top edge. */}
+          <View style={{ marginBottom: -ring.borderWidth }}>
+            <Snapshot lines={shownLines} theme={theme} {...type} />
+          </View>
           {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
           {closable && (
             <View style={[styles.close, { backgroundColor: theme.foreground }]}>

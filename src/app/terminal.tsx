@@ -82,7 +82,6 @@ import Switcher, {
 } from '@/switcher';
 import {
   SEARCH_BAR_H,
-  cardFit,
   cropShift,
   gridTop,
   slotFrame,
@@ -339,9 +338,6 @@ export default function SessionScreen() {
    *  in the air (see `zoomId` in switcher.tsx). Set wherever the aim is: the two are one decision. */
   const [zoomId, setZoomId] = useState<string | null>(null);
   const stageSV = useSharedValue({ w: 390, h: 800 });
-  /** `pane`, for the worklets. Written from an effect: a shared value must not be assigned during
-   *  render, and the chrome that moves these edges settles a layout after it changes anyway. */
-  const paneSV = useSharedValue({ top: 0, bottom: 0, side: 0 });
 
   const connected = session.status === 'connected';
   const showTabs = tabsAvailable(
@@ -516,26 +512,10 @@ export default function SessionScreen() {
       if (done) {
         alpha.value = 0;
         runOnJS(setSw)('open');
-        runOnJS(probeGeometry)();
       }
     });
   };
 
-  /* probe (T10, temporary): what the two pictures ACTUALLY are at the hand-over. The card and the
-   * surface agree on paper and the text still steps, so this prints the numbers that place it:
-   * the window the surface ends up showing, in rows of the pane, and where its last row sits. The
-   * card's half is logged from `switcher.tsx`. */
-  const probeGeometry = () => {
-    const st = stageSV.value;
-    const sl = slotSV.value;
-    const pn = paneSV.value;
-    const fit = cardFit(sl, st, pn);
-    console.log(
-      `[probe] FIT scale ${fit.scale.toFixed(4)} at (${fit.x.toFixed(1)}, ${fit.y.toFixed(1)}) ` +
-        `| pane ${pn.top.toFixed(1)}..${pn.bottom.toFixed(1)} side ${pn.side.toFixed(1)} ` +
-        `| rows ${((pn.bottom - pn.top) / (cell.h || 1)).toFixed(2)} | slot ${sl.w.toFixed(1)}×${sl.h.toFixed(1)}`,
-    );
-  };
   const springBack = () => {
     probe('fly');
     closeArmed.current = false;
@@ -1330,7 +1310,7 @@ export default function SessionScreen() {
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
   // compensated for RN's centre-origin scale — all from the one tested function.
   const wrapperStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value, paneSV.value);
+    const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value);
     return {
       height: f.height,
       borderRadius: f.radius,
@@ -1354,27 +1334,16 @@ export default function SessionScreen() {
   // so with the keys up its last row is that much further from the stage's floor. The pad freezes
   // at the open, which is exactly the value this wants.
   const cropBottom = paneInsets.bottom + keyboardPad;
-  /** The pane's own box in stage points — the rows and nothing else. Both the flight and the
-   *  cards are laid out from this one description, which is what keeps them the same picture. */
-  const pane = {
-    top: cropTop + padTop,
-    bottom: stage === null ? 0 : stage.h - keyboardPad - paneInsets.bottom,
-    side: padH,
-  };
-  useEffect(() => {
-    paneSV.value = pane;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane.top, pane.bottom, pane.side]);
   const cropStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: -cropShift(prog.value, paneSV.value) },
+      { translateY: -cropShift(prog.value, slotSV.value, stageSV.value, cropBottom, cropTop) },
     ],
   }));
 
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
   // with it; border width divided by scale so it reads ~3pt on screen throughout.
   const ringStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value, paneSV.value);
+    const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value);
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
@@ -1417,7 +1386,6 @@ export default function SessionScreen() {
           cell={cell}
           liveCols={liveCols}
           liveRows={liveRows}
-          pane={pane}
           insetTop={insets.top}
           insetBottom={insets.bottom}
           // The flight crops its top chrome away (`cropTop`), so what is left above the first row
