@@ -86,7 +86,7 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 - Momentum on release: exponential decay, frame-rate independent; touch stops coast and does nothing else.
 
 ### 4.4 Key bar (design supersedes old app here)
-- Docked above keyboard, stays when keyboard hidden. Swipe bar ↓ hides keyboard, ↑ shows it (or, if already shown, drags into the tab switcher — §4.5). Bar swipe ↔ switches tmux window with sliding page cards, rubber-band at ends, tab-name pills replacing the keys during the swipe.
+- Docked above keyboard, stays when keyboard hidden. Swipe bar ↓ hides keyboard, ↑ always drags into the tab switcher (§4.5) whether the keys are up or down; the keyboard's own door is a tap on the terminal (§4.3), and connecting does not raise it. Bar swipe ↔ switches tmux window with sliding page cards, rubber-band at ends, tab-name pills replacing the keys during the swipe.
 - Layout: ⋯ plus circle | pill: Ctrl · Esc · Tab · Paste ‖ arrows button | tabs circle with window-index badge.
 - **Ctrl**: tap arms (accent tint), next key chords then disarms; double-tap locks (accentA tint + halo); armed shows the **chord strip** above the bar: C interrupt · Z suspend · R history · L clear · D EOF, each cap with caption.
 - **Tab key**: sends Tab (completion). **Esc** sends ESC.

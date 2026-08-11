@@ -477,10 +477,11 @@ export default function SessionScreen() {
       if (sw === 'closed') {
         console.log('[switcher] open (bar drag)');
         setOpen('none');
-        // This drag exists only as the grab out of a raised keyboard (KeyBar checks `isFocused`
-        // before it forwards one), so the keys were up by construction — and KeyBar has already
-        // dropped them, which makes `keyboardPad` the wrong thing to ask by now.
-        keysWereUp.current = true;
+        // The grab no longer implies a raised keyboard (the swipe ↑ is one gesture whatever the
+        // keys are doing), so read the pad as the tap door does. KeyBar's dismiss is one call old
+        // at this point and iOS reports the frame a beat later, so this is still the pre-drag
+        // truth — and it is what decides whether the keys come back on the way out.
+        keysWereUp.current = keyboardPad > 0;
         zoomT0.current = Date.now();
         const pos = activePos();
         setZoomId(idAt(pos));
@@ -1350,6 +1351,8 @@ export default function SessionScreen() {
           setModes(next);
         }}
         onTwoFingerTap={async () => openSettings()}
+        // §4.4: a tap on the terminal is the keyboard's door — the bar no longer raises it.
+        onTap={async () => setFocusSignal((n) => n + 1)}
         onSearchResults={async (i, n) => setOcc({ i, n })}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
@@ -1418,7 +1421,6 @@ export default function SessionScreen() {
         open={open}
         onOpenChange={setOpen}
         onHeight={setBarHeight}
-        active={connected}
         focusSignal={focusSignal}
         sending={sending}
         // §4.5: the tabs button exists only with tmux present AND the config applied — so the

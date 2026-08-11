@@ -26,6 +26,7 @@ import {
   COAST_MIN_VELOCITY,
   FLICK_MIN_VELOCITY,
   PAN_SLOP_PX,
+  TAP_MS,
   VelocityTracker,
   arrowKey,
   coastDistance,
@@ -97,6 +98,10 @@ export type TerminalProps = {
   /** A two-finger tap on the grid — §4.8's second door to Settings. Detected here because the
    *  touch layer below already owns the two-finger *pan*, and only it can tell the two apart. */
   onTwoFingerTap: () => Promise<void>;
+  /** A plain one-finger tap on the terminal — §4.4's door to the keyboard, now that the bar's
+   *  swipe ↑ always goes to the switcher. Detected here for the same reason as the two-finger
+   *  tap: only this layer knows the touch was neither a scroll nor a long-press selection. */
+  onTap: () => Promise<void>;
   /** T14: the search addon's live occurrence count — `index` is 0-based, −1 past the highlight
    *  limit; `count` 0 = no hits. Feeds the "i/N" label beside the terminal's search field. */
   onSearchResults: (index: number, count: number) => Promise<void>;
@@ -757,6 +762,12 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       // that path is gone and without this the selection and its edit menu simply stay (T13/T6.7).
       if (pan === 'pending' && fingers === 1 && document.getSelection()?.isCollapsed === false) {
         document.getSelection()?.removeAllRanges();
+      }
+      // Otherwise a quick one-finger tap asks for the keyboard (§4.4). A tap that dismissed a
+      // selection is that dismissal and nothing more; a slow press is WebKit's long-press.
+      else if (pan === 'pending' && fingers === 1 && ev.timeStamp - downAt < TAP_MS) {
+        console.log('[terminal] tap');
+        latest.current.onTap();
       }
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
       // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.

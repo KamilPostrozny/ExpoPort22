@@ -7,7 +7,8 @@
  *
  * The native `TextInput` here owns the keyboard (T4's device-proven decision): the webview never
  * takes focus, typing reaches the PTY through `sendBytes`, and touching the terminal blurs the
- * input natively — which is what lets a long-press selection proceed with the keyboard up.
+ * input natively — which is what lets a long-press selection proceed with the keyboard up. A plain
+ * tap on the terminal asks for it back through `focusSignal`; the bar itself never raises it.
  *
  * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
  * lives in `src/keybar-model.ts`, tested; this file renders and executes.
@@ -94,9 +95,8 @@ export type KeyBarProps = {
   /** The bar stack's height (chord strip included, T11's ribbon later too), remeasured on every
    *  change — the `popBase` the screen anchors popovers on. One number, one place. */
   onHeight: (height: number) => void;
-  /** Raise the keyboard when this flips true — the session just connected. */
-  active: boolean;
-  /** Bump to raise the keyboard again — the switcher closing back onto the terminal (T10), the
+  /** Bump to raise the keyboard — a tap on the terminal (§4.4's door to it), or the switcher
+   *  closing back onto a terminal whose keys were up when it left (T10), the
    *  prototype's `kbShown: true` on return. A counter, not a boolean: every close counts. */
   focusSignal?: number;
   /** T9's derived "tabs available": tmux present AND conf applied (§4.5). False renders no tabs
@@ -107,10 +107,11 @@ export type KeyBarProps = {
   sending?: boolean;
   /** T10: tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
-  /** T10: bar swipe ↑ with the keyboard already up becomes the drag into the switcher — the
-   *  prototype's `zoomFollow`. Fired per move with the pan's translation once the swipe has
-   *  classified as up-with-keyboard-shown, then once with 'end' on release; the screen turns
-   *  dy into zoom progress and decides commit-or-spring-back. Only wired while `showTabs`. */
+  /** T10: bar swipe ↑ is the drag into the switcher — the prototype's `zoomFollow` — whatever the
+   *  keyboard is doing (user, 2026-08-11: the gesture is one thing, always). Fired per move with
+   *  the pan's translation once the swipe has classified as up, then once with 'end' on release;
+   *  the screen turns dy into zoom progress and decides commit-or-spring-back. Only wired while
+   *  `showTabs`. */
   onSwitcherDrag?: (phase: 'move' | 'end', dx: number, dy: number) => void;
   /** T11: bar swipe ↔ is the page-slide window hop. Raw gesture only — 'start' once when the pan
    *  claims the horizontal axis, 'move' per frame with the pan's translation, 'end' on release.
@@ -278,12 +279,10 @@ export default function KeyBar(props: KeyBarProps) {
   /** The pill's measured width — the name-pill pitch (prototype: item + gap exactly fill it). */
   const [pillW, setPillW] = useState(0);
 
-  // The session just connected: raise the keyboard, typing is what comes next.
-  useEffect(() => {
-    if (props.active) input.current?.focus();
-  }, [props.active]);
-
-  // The switcher closed back onto the terminal: same move (0 = never signalled, skip mount).
+  // Something asked for the keyboard — a tap on the terminal, the switcher closing back onto keys
+  // that were up (0 = never signalled, skip mount). Connecting is NOT one of them: the session
+  // arrives with the terminal in full view, and the keys come up when they are asked for
+  // (user, 2026-08-11).
   useEffect(() => {
     if (props.focusSignal) input.current?.focus();
   }, [props.focusSignal]);
@@ -358,8 +357,8 @@ export default function KeyBar(props: KeyBarProps) {
   // pasteboard as it opens (the accepted moment for the iOS paste banner).
   const onPasteLongPress = () => onOpenChange('clipboard');
 
-  // The bar swipe (§4.4): ↓ hides the keyboard, ↑ shows it — or hands over to T10's switcher
-  // drag when it is already up. Horizontal is T11's window switch; the hook fires on release.
+  // The bar swipe (§4.4): ↓ hides the keyboard, ↑ is always T10's switcher drag (the keys come
+  // back with a tap on the terminal). Horizontal is T11's window switch; the hook fires on release.
   // Keys never fire during a swipe: the pan activating cancels the childrens' touches.
   /** The swipe became T10's switcher drag: every further move is forwarded as zoom progress. */
   const zooming = useRef(false);
@@ -396,15 +395,14 @@ export default function KeyBar(props: KeyBarProps) {
       }
       else if (s === 'down') Keyboard.dismiss();
       else if (s === 'up') {
-        if (input.current?.isFocused()) {
-          // Keyboard already up: this swipe is the drag into the switcher (§4.4) — where there
-          // is a switcher to drag into. Without tmux the gesture is silence, like the button.
-          if (props.showTabs && props.onSwitcherDrag) {
-            zooming.current = true;
-            Keyboard.dismiss(); // the prototype drops the keyboard the moment the grab starts
-            props.onSwitcherDrag('move', e.translationX, e.translationY);
-          }
-        } else input.current?.focus();
+        // Always the drag into the switcher (§4.4), keyboard up or down — the keys have their own
+        // door now, a tap on the terminal (user, 2026-08-11). Where there is no switcher to drag
+        // into (no tmux) the gesture is silence, like the button.
+        if (props.showTabs && props.onSwitcherDrag) {
+          zooming.current = true;
+          Keyboard.dismiss(); // the prototype drops the keyboard the moment the grab starts
+          props.onSwitcherDrag('move', e.translationX, e.translationY);
+        }
       }
     })
     .onEnd((e) => {

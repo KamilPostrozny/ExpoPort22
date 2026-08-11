@@ -18,7 +18,7 @@ import {
   navKey,
   pasteBytes,
 } from '@/keybar-model';
-import { TWO_FINGER_TAP_MS, arrowKey, isTwoFingerTap } from '@/scroll-model';
+import { TAP_MS, arrowKey, isTwoFingerTap } from '@/scroll-model';
 
 /* --- Ctrl state machine --- */
 
@@ -162,10 +162,10 @@ test('dominant horizontal travel is the window swipe (T11)', () => {
 /* --- two-finger tap (lives with the touch layer's brain in scroll-model) --- */
 
 test('two fingers, no movement, quick — and nothing else', () => {
-  expect(isTwoFingerTap(2, false, TWO_FINGER_TAP_MS - 1)).toBe(true);
+  expect(isTwoFingerTap(2, false, TAP_MS - 1)).toBe(true);
   expect(isTwoFingerTap(1, false, 100)).toBe(false);
   expect(isTwoFingerTap(2, true, 100)).toBe(false);
-  expect(isTwoFingerTap(2, false, TWO_FINGER_TAP_MS + 1)).toBe(false);
+  expect(isTwoFingerTap(2, false, TAP_MS + 1)).toBe(false);
 });
 
 test('paste is bracketed while the far end asks for it, bare otherwise', () => {
