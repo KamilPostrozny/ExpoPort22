@@ -23,6 +23,7 @@ import Animated, {
   FadeOut,
   runOnJS,
   useAnimatedStyle,
+  useFrameCallback,
   useSharedValue,
   withDelay,
   withTiming,
@@ -486,6 +487,21 @@ export default function SessionScreen() {
     }
     console.log(`[probe] +${dt}ms ${what}`);
   };
+
+  /* The events all land outside the flight and it still hitches, so the next question is not WHAT
+   * happened but WHEN a frame was missed. This runs on the UI thread — the one actually drawing
+   * the zoom — and reports any frame that took longer than two, with the progress it happened at.
+   * Early means the flight's own first frames, late means the crossfade and the landing; the
+   * number says how many frames went. Temporary, with the rest of the probe. */
+  const dropped = (ms: number, at: number) =>
+    console.log(`[probe] FRAME ${ms.toFixed(0)}ms at prog ${at.toFixed(2)}`);
+  useFrameCallback((frame) => {
+    'worklet';
+    const t = prog.value;
+    if (t <= 0 || t >= 1) return; // nothing is flying
+    const dt = frame.timeSincePreviousFrame ?? 0;
+    if (dt > 26) runOnJS(dropped)(dt, t);
+  });
 
   const commitOpen = () => {
     setSw('opening');
