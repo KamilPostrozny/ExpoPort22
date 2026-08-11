@@ -1443,14 +1443,6 @@ export default function SessionScreen() {
         // ease-out, which is a terminal that looks landed and will not swipe (user, 2026-08-11).
         // The gesture picks the flight up from where it is (see `onSwitcherDrag`).
         pointerEvents={sw === 'closed' || sw === 'closing' || sw === 'drag' ? 'auto' : 'none'}
-        // The single dropped frames mid-flight have no JS event anywhere near them (probe: FRAME
-        // 17ms at prog 0.45, nothing logged within 200ms either side), which leaves the thing
-        // doing the drawing: a live WKWebView re-rendering its tiles as the transform crosses a
-        // new scale. Rasterized, the layer is drawn once and the scale is applied to that bitmap,
-        // so there is nothing to re-render mid-zoom. It goes on with the PHASE, which the aim now
-        // flips two frames before any motion — so the one-off cost of taking the bitmap lands in
-        // that gap, not on the first moving frame. Off at rest, where the terminal has to be live.
-        shouldRasterizeIOS={sw !== 'closed' && sw !== 'open'}
         style={[
           stage === null
             ? styles.screen
