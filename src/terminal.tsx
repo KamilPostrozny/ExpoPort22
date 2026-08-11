@@ -401,12 +401,36 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // Only a size the host has not been told about is worth a round trip. Without this the same
     // `cols × rows` goes back on every fit, and since the answer re-renders the native side — which
     // re-marshals the props, which re-runs the effect below — it never stops.
-    // The cell the emulator settled on, read off the rendered screen rather than computed: no
-    // private renderer API, and it accounts for whatever rounding the fit did.
+    // The advance a row's glyphs actually land on — measured with a probe inside the row container,
+    // so it inherits the font, the size and the letter-spacing the renderer set. NOT the screen
+    // width over the columns: that is the fit's INTENT, and the glyphs miss it. xterm seats them by
+    // setting `letter-spacing` to the difference between its cell and the font's own advance
+    // (-0.004px here), and WebKit quantises that to 1/64px, so the drawn pitch comes out at
+    // 7.7848pt where the fit meant 7.7959. Eleven thousandths of a point is nothing until it is
+    // multiplied by the column: a snapshot drawn on the intent sits a pixel and a half off the pane
+    // by the far end of a line, so a character mid-line stepped sideways at the swipe's settle
+    // while its own line's first character did not (user, 2026-08-11; pitch then measured off a
+    // device screenshot, 23.3516px at 3x against 23.3878 for the intent).
+    const advance = () => {
+      const rows = host.current?.querySelector('.xterm-rows') as HTMLElement | null;
+      if (rows === null) return 0;
+      const probe = document.createElement('span');
+      // A thousand of them, not ten: the probe's own box is rounded before it is handed back, and
+      // that rounding lands on the answer divided by the count. At 100 it was a hundredth of a
+      // point — the same order as the error being measured.
+      probe.textContent = 'M'.repeat(1000);
+      probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+      rows.appendChild(probe);
+      const width = probe.getBoundingClientRect().width;
+      probe.remove();
+      return width / 1000;
+    };
+    // The row pitch stays the screen's own: xterm lays rows out as boxes at that height, so unlike
+    // the advance it is what is drawn.
     const cell = () => {
       const screen = host.current?.querySelector('.xterm-screen') as HTMLElement | null;
       if (screen === null || term.cols === 0 || term.rows === 0) return { w: 0, h: 0 };
-      return { w: screen.clientWidth / term.cols, h: screen.clientHeight / term.rows };
+      return { w: advance(), h: screen.clientHeight / term.rows };
     };
     // Whole rows, and the remainder above the first one rather than below the last — the gap
     // under the last line is the key bar's to fill, and it already has one (user, 2026-08-10).
@@ -433,7 +457,9 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const { w, h } = cell();
       console.log(
         '[terminal] size', term.cols, '×', term.rows,
-        'cell', w.toFixed(2), '×', h.toFixed(2),
+        // Four places on the advance, not two: the thing that goes wrong with it is thousandths of
+        // a point multiplied by fifty columns, and two places cannot show it.
+        'cell', w.toFixed(4), '×', h.toFixed(2),
         'padTop', padTop.toFixed(2),
       );
       latest.current.onResize(term.cols, term.rows, w, h, padTop);
