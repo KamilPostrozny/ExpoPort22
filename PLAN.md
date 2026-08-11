@@ -120,7 +120,7 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 - OSC 8 links underlined, tappable, `http(s)` only, others silently refused. Bare URLs stay plain text.
 
 ### 4.8 Settings (bottom sheet over live terminal)
-- Grabber, swipe-dismiss, no Done. Sections: APPEARANCE (Auto + 4 flavours with swatch rows + check; font-size stepper), TMUX (config status + comfort-settings toggle + explainer; the mode itself lives on Setup), SESSION (Disconnect accent, Forget host key red + confirm). While connected host/port/user/startup hidden; Setup screen shows the full form. Doors: ⋯ menu, two-finger tap on grid.
+- Grabber, swipe-dismiss, no Done. Sections: APPEARANCE (Auto + 4 flavours with swatch rows + check; font-size stepper), TMUX (the comfort-settings toggle and one line saying what it is, shown only on a tmux session; the mode itself lives on Setup, and the push's applied/not-applied is state the user is never told — the tabs button either appears or does not), SESSION (Disconnect accent, Forget host key red + confirm). While connected host/port/user/startup hidden; Setup screen shows the full form. Doors: ⋯ menu, two-finger tap on grid.
 - Theme change restyles live session, no reconnect.
 
 ### 4.9 Lifecycle

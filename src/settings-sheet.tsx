@@ -2,7 +2,7 @@
  * The Settings quick sheet (§4.8), per the prototype: grabber, swipe-dismiss, no Done button —
  * over the live terminal, so a flavour tap restyles the session behind it while it is still up.
  * Sections: APPEARANCE (Auto + the four flavours with swatch rows and a check, the font-size
- * stepper), TMUX (the push's status and the comfort-settings opt-out), SESSION (Disconnect in
+ * stepper), TMUX (the comfort-settings opt-out, on a tmux session only), SESSION (Disconnect in
  * accent, Forget host key in red behind a confirm).
  *
  * What is deliberately NOT here: host, port, username, startup command — those live on the Setup
@@ -42,8 +42,6 @@ import {
   useSettings,
   usesTmux,
 } from '@/settings';
-import { useTmux } from '@/tmux';
-import { deriveConfigStatus } from '@/tmux-model';
 import { FLAVOURS, MONO, THEMES, type Theme, type ThemeChoice } from '@/theme';
 
 /** How far offscreen the sheet starts and returns to — comfortably past its own height. */
@@ -83,7 +81,6 @@ export default function SettingsSheet({
   onDisconnect: () => void;
 }) {
   const settings = useSettings();
-  const tmux = useTmux();
   const insets = useSafeAreaInsets();
   const ty = useSharedValue(TRAVEL);
   useEffect(() => {
@@ -151,7 +148,6 @@ export default function SettingsSheet({
       ],
     );
 
-  const status = deriveConfigStatus(usesTmux(settings), tmux.config);
   const check = (
     <SymbolView
       name="checkmark"
@@ -227,29 +223,24 @@ export default function SettingsSheet({
               </View>
             </View>
 
-            <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>TMUX</Text>
-            <View style={[styles.card, { backgroundColor: theme.surface }]}>
-              <View style={styles.row}>
-                <Text style={[styles.label, { color: theme.foreground }]}>Configuration</Text>
-                {/* the §4.5 status, folded from the start mode and the last push's read-back */}
-                <Text style={[styles.value, { color: theme.muted }]}>
-                  {status === 'not-applied' ? 'not applied' : status}
+            {/* Only on a tmux session: on any other the toggle governs nothing, and a row that
+                explains why it is inert is worse than no row. */}
+            {usesTmux(settings) && (
+              <>
+                <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>TMUX</Text>
+                <View style={[styles.card, styles.row, { backgroundColor: theme.surface }]}>
+                  <Text style={[styles.label, { color: theme.foreground }]}>Comfort settings</Text>
+                  <Switch
+                    value={settings.tmuxExtras}
+                    onValueChange={toggleExtras}
+                    trackColor={{ true: theme.accent }}
+                  />
+                </View>
+                <Text style={[styles.note, { color: theme.placeholder }]}>
+                  Colours, no status bar, deeper scrollback. Applies on the next connect.
                 </Text>
-              </View>
-              <View style={[styles.row, styles.rowLine]}>
-                <Text style={[styles.label, { color: theme.foreground }]}>Comfort settings</Text>
-                <Switch
-                  value={settings.tmuxExtras}
-                  onValueChange={toggleExtras}
-                  trackColor={{ true: theme.accent }}
-                />
-              </View>
-            </View>
-            <Text style={[styles.note, { color: theme.placeholder }]}>
-              {status === 'off'
-                ? 'Not a tmux session.'
-                : 'Colours, no status bar, deeper scrollback. Applies on the next connect.'}
-            </Text>
+              </>
+            )}
 
             <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>SESSION</Text>
             <View style={[styles.card, { backgroundColor: theme.surface }]}>
