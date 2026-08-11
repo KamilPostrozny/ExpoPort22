@@ -140,6 +140,12 @@ const FONT_FACES = ['Regular', 'Bold']
 const CSS = `
   ${FONT_FACES}
   html, body { margin: 0; height: 100%; overflow: hidden; }
+  /* The webview and the snapshot draw the same font at the same size on the same pitch, and the
+     glyphs still do not weigh the same: WebKit's default is subpixel-antialiased, which dilates
+     stems, while RN's <Text> goes through UIKit's plain grayscale AA. So the swipe's snapshot
+     looks lighter than the terminal it hands over to. 'antialiased' is grayscale AA — the native
+     side's rendering, asked for on the side that can be told. Inherited, so body carries it. */
+  body { -webkit-font-smoothing: antialiased; }
   /* Long-press has to reach the system edit menu (§4.2), so the rows stay real selectable text —
      xterm turns selection off because it drives its own from mouse events, which a finger is not.
      The whole chain down to the rows has to allow it: WebKit starts the gesture from the container
