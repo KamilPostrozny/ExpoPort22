@@ -414,6 +414,8 @@ export default function SessionScreen() {
    *  anyway. That is a layout pass and a bridge hop — a frame or two — not a roundtrip; this is
    *  the wedge guard for a webview that never answers, not the expected path. */
   const ZOOM_REFIT_CAP_FRAMES = 8;
+  /** And the guard for a redraw that never comes at all — see the end of `selectCard`. */
+  const ZOOM_WEDGE_MS = 2000;
 
   const finishClose = () => {
     setSw('closed');
@@ -575,35 +577,61 @@ export default function SessionScreen() {
     // optimistically here (as a kill removes its card), or the old tab stays haloed through
     // the flight and a beat past it (user, 2026-08-11).
     setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
-    // The tap moves the screen NOW. Waiting for tmux's redraw before flying put a LAN roundtrip —
-    // 100–150ms in the logs, and the cap's 400 when a byte went missing — between the finger and
-    // any motion at all, which is a delay you can feel and the user asked for it gone (user,
-    // 2026-08-11). What that wait bought is still bought, one layer down: `paused` holds every
-    // byte off the emulator while the surface is moving, so the redraw arrives whenever it likes
-    // and paints once, at rest, instead of into a view mid-flight.
+    // The flight waits for the HOST to have switched, and it knows when that happened rather than
+    // guessing how long it takes: a byte on the PTY that was not there when the finger went down
+    // is tmux's redraw of the window it was just told to select. Nothing else is talking. The two
+    // conditions below are both events — the redraw arriving, and, where a ribbon appears or
+    // leaves, the refit having gone out first so that redraw is at the size the pane lands at —
+    // and neither is a duration anyone tuned.
     //
-    // The one wait that stays is local and costs a frame or two: with a ribbon appearing or
-    // leaving, the pane RESIZES, and a reflow is layout, not pixels — `paused` cannot hold it.
-    // The grid is the only cover it has, so the flight leaves once the refit has been reported
-    // from under it (a bridge hop, guarded rather than trusted). Same tab, or same chrome:
-    // nothing is resizing, fly on this frame.
-    if (win.index === tmux.windowIndex || (recipe !== null) !== IDLE_SHELLS.has(win.command)) {
+    // The delay this used to have was mostly a bug rather than the wait: the byte watch is
+    // one-shot, cleared before it is called, so a redraw that beat the resize report (the usual
+    // race) left nothing armed and every chrome-changing switch fell through to a 400ms cap. It
+    // is a counter now, so a byte that arrives early is still an arrival.
+    //
+    // Flying before the redraw is the other end and no better: the surface then carries the pane
+    // of the window being left, in plain sight for the length of a roundtrip (user, 2026-08-11).
+    // Same tab: nothing switches, nothing to wait for.
+    if (win.index === tmux.windowIndex) {
       closeTo(pos);
       return;
     }
+    const chromeChanges = (recipe !== null) === IDLE_SHELLS.has(win.command);
     sizeReported.current = false;
+    const bytesAtTap = dataSeq.current;
     const mine = ++selectSeq.current; // a second tap mid-wait supersedes this one's flight
-    let waited = 0;
-    const flyWhenFitted = () => {
+    let frames = 0;
+    const tryFly = () => {
       if (selectSeq.current !== mine) return;
-      if (!sizeReported.current && ++waited < ZOOM_REFIT_CAP_FRAMES) {
-        requestAnimationFrame(flyWhenFitted);
+      // The refit is local — a layout pass and a bridge hop — so it is polled by frame rather
+      // than woken by anything; the count is the wedge guard for a webview that never answers,
+      // not a wait anyone sits through.
+      const fitted = !chromeChanges || sizeReported.current || frames >= ZOOM_REFIT_CAP_FRAMES;
+      if (!fitted) {
+        frames++;
+        requestAnimationFrame(tryFly);
+      }
+      if (!fitted || dataSeq.current === bytesAtTap) {
+        onShellData.current = tryFly; // re-armed, because the watch is one-shot
         return;
       }
       selectSeq.current++;
+      if (onShellData.current === tryFly) onShellData.current = null;
       if (swRef.current === 'open') closeTo(pos);
     };
-    flyWhenFitted();
+    tryFly();
+    // The one clock left, and it is a wedge guard: a select whose redraw never comes must not
+    // leave the grid standing. An order of magnitude past the LAN roundtrip, so it never shapes
+    // how the switch feels — if this is what fires the flight, something is wrong upstream.
+    setTimeout(tryFlyAnyway(mine, pos), ZOOM_WEDGE_MS);
+  };
+
+  /** The wedge guard's flight: the same supersession rules, minus every condition. */
+  const tryFlyAnyway = (mine: number, pos: number) => () => {
+    if (selectSeq.current !== mine) return;
+    selectSeq.current++;
+    console.log('[switcher] redraw never arrived — flying anyway');
+    if (swRef.current === 'open') closeTo(pos);
   };
 
   /** The one select whose redraw-wait may still fly — bumped by every new select (superseding
@@ -734,6 +762,10 @@ export default function SessionScreen() {
    *  the 320ms slide home, and a watch armed after it has already arrived waits for a byte an
    *  idle shell never sends, i.e. the whole cap (user, 2026-08-10: "small delay still there"). */
   const onShellData = useRef<(() => void) | null>(null);
+  /** Bytes off the shell, counted. A one-shot watch cannot answer "has anything arrived since the
+   *  tap?" — it only answers "did something arrive while I happened to be armed", and the two
+   *  differ exactly when the answer matters (see `selectCard`). */
+  const dataSeq = useRef(0);
   const redrawn = useRef(false);
   const settleCap = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Constant velocity for whatever distance is left (see slideMs) — a fixed 320ms ease-out
@@ -1400,6 +1432,7 @@ export default function SessionScreen() {
             // window, where selecting the tab already up (nothing to redraw) was fluid (user,
             // 2026-08-11). Held here and flushed at the landing, the whole redraw paints once, at
             // rest; it is also what lets the flight leave without waiting for it at all.
+            dataSeq.current++;
             if (paused()) writeQueue.current.push(base64);
             else terminal.current?.write(base64);
             // A settle waiting on tmux's redraw ends here, at the first byte of it.
