@@ -26,7 +26,7 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   PAGE_RADIUS,
@@ -389,7 +389,9 @@ export default function SessionScreen() {
   const zoomSlot = (pos: number): Frame => {
     const w = stage?.w ?? 390;
     const f = slotFrame(pos, w);
-    return { ...f, y: SEARCH_BAR_H + gridTop(w) + f.y - scrollY.current };
+    // The stage is the full window now, so the grid's content — pushed below the notch by the
+    // switcher's own inset padding — sits `insets.top` lower in stage coordinates.
+    return { ...f, y: insets.top + SEARCH_BAR_H + gridTop(w) + f.y - scrollY.current };
   };
 
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
@@ -915,12 +917,18 @@ export default function SessionScreen() {
   // the bounce (user, 2026-08-10).
   const chromePad = ribbonEl === null ? BAR_PAD_TOP : RIBBON_PAD_TOP;
   const padBottom = Math.max(0, padH - chromePad);
+  /** The card face runs the full window now, so its content clears the notch itself — except
+   *  under an armed search, whose row (padded past the notch on its own) already pushed the
+   *  terminal area below it. */
+  const notchPad = search.on ? 0 : insets.top;
+  /** The floating bar's ground: home strip + the bar stack itself, all inside the card face. */
+  const barPad = barHeight + insets.bottom;
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
    *  the same three numbers, or their text does not line up with the live terminal's. */
-  const paneInsets = { top: padTop, side: padH, bottom: padBottom };
-  /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, and the
-   *  keyboard's own overlap on top, because that layer's bottom is the screen's (see there). */
-  const popBase = barHeight + 6 + keyboardPad;
+  const paneInsets = { top: notchPad + padTop, side: padH, bottom: padBottom + barPad };
+  /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, plus the
+   *  home strip and the keyboard's overlap, because that layer's bottom is the window's. */
+  const popBase = barHeight + 6 + keyboardPad + insets.bottom;
 
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
@@ -946,25 +954,14 @@ export default function SessionScreen() {
     };
   });
 
-  // The safe-area strips' ground rides the zoom: painted by an animated scrim layer whose
-  // opacity IS the zoom's progress, so the notch and home-bar strips fade crust↔background with
-  // the flight instead of flipping when the phase state lands — flipped at `finishClose` they
-  // held the grid's crust through the whole zoom-in and flashed to background on settle (user,
-  // 2026-08-10). Progress drives every door: open, close, drag-follow, birth.
-  const stripStyle = useAnimatedStyle(() => ({ opacity: prog.value }));
-
   return (
-    // The root stays `background`; the strip scrim above fades in the switcher's crust ground —
-    // the prototype paints the grid `inset: 0` in crust, and leaving the strips at `background`
-    // left a lighter bar above and below the grid (seen on device in Latte, where base and crust
-    // are far apart — T13/T10.3).
-    <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
-      {/* Yoga positions absolute children off the border box, not the padding box (see the
-          popover layer's note) — so this covers the safe-area strips SafeAreaView pads. */}
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, stripStyle]}
-      />
+    // Full-bleed root: the safe-area strips are INSIDE the stage now, so the notch and home-bar
+    // bands are part of the flying surface and of every page card — they used to sit outside
+    // (SafeAreaView padding, a separate scrim fading them with the zoom), which is why they
+    // changed colour on their own schedule at each end of the flight and the bar-swipe cards
+    // read as bare text (user, 2026-08-11: the strips are integral to the card). Content clears
+    // the strips by its own padding below.
+    <View style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* No iOS edge-swipe-back on this screen: it pops to the connect screen WITHOUT running
           `leave()`'s disconnect, and a rightward card drag near the left edge triggers it by
           accident (T13). Leaving is `leave()`'s job. */}
@@ -990,7 +987,11 @@ export default function SessionScreen() {
           theme={theme}
           stageW={stage.w}
           cell={cell}
-          padTop={padTop}
+          insetTop={insets.top}
+          insetBottom={insets.bottom}
+          // The flying surface's top band is the notch strip now — the card's inset matches, or
+          // the crossfade steps down by exactly the strip.
+          padTop={padTop + insets.top}
           cards={visibleCards}
           total={cards.length}
           query={search.on ? search.q : ''}
@@ -1053,7 +1054,7 @@ export default function SessionScreen() {
           same string as the switcher's field; prev/next walk the addon's occurrences; Done
           disarms both views. */}
       {search.on && (
-        <View style={styles.searchRow}>
+        <View style={[styles.searchRow, { paddingTop: insets.top }]}>
           <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
             <TextInput
               value={search.q}
@@ -1100,23 +1101,26 @@ export default function SessionScreen() {
           </Pressable>
         </View>
       )}
-      {/* The terminal area: the flex region above the bar. During a bar swipe the live terminal
-          slides inside it as a rounded page card, with the neighbour snapshots as its siblings —
-          the bar itself stays put, showing the name pills. Crust behind it, as behind the
-          switcher's cards: it is what shows in the page gap and behind the rounded corners —
-          on `background` the cards were indistinguishable from the backdrop (user, 2026-08-11).
-          At rest the live page (square, flex:1) covers it entirely. */}
+      {/* The terminal area: the full window face. During a bar swipe the live terminal slides
+          inside it as a rounded page card — notch strip to home strip, the whole screen as one
+          card (user, 2026-08-11, Safari screenshots) — with the neighbour snapshots as its
+          siblings and the bar floating on top. Crust behind it, as behind the switcher's cards:
+          it is what shows in the page gap and behind the rounded corners. At rest the live page
+          (square, flex:1) covers it entirely. */}
       <View style={[styles.termArea, { backgroundColor: theme.scrim }]}>
       {/* The pane's own breathing room. It is also what makes the zoom's crossfade seamless: a
           card's snapshot is inset by exactly this much seen through the zoom (switcher-model
-          derives one from the other), so the text does not move when the surface hands over. */}
+          derives one from the other), so the text does not move when the surface hands over.
+          The top and bottom insets carry the safe-area strips and the floating bar's ground —
+          the card face owns those bands now. */}
       <Animated.View
         style={[
           styles.termSlide,
           {
             backgroundColor: theme.background,
+            paddingTop: notchPad,
             paddingHorizontal: padH,
-            paddingBottom: padBottom,
+            paddingBottom: padBottom + barPad,
           },
           termSlideStyle,
         ]}>
@@ -1221,6 +1225,11 @@ export default function SessionScreen() {
       )}
       </View>
 
+      {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
+          full window height under it. Its own glass pills carry no full-width ground, so the
+          card's background (or the crust gap, mid-swipe) shows through around them. */}
+      <View
+        style={{ position: 'absolute', left: 0, right: 0, bottom: keyboardPad + insets.bottom }}>
       <KeyBar
         theme={theme}
         decckm={modes.decckm}
@@ -1248,6 +1257,7 @@ export default function SessionScreen() {
         }
         ribbon={ribbonEl}
       />
+      </View>
 
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the
           prototype), popovers anchored `popBase` up. That base carries the keyboard itself:
@@ -1319,7 +1329,7 @@ export default function SessionScreen() {
       {session.status !== 'connected' && (
         <Status session={session} theme={theme} onSetup={leave} />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

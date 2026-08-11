@@ -89,13 +89,22 @@ export function pillDist(i: number, cont: number): number {
   return Math.min(Math.abs(i - cont), 1);
 }
 
+/** Safari's sequencing (user, 2026-08-11, screenshots): the departing pill finishes shrinking in
+ *  the FIRST half of the step and the arriving one only starts growing in the second — morphing
+ *  both at once reads as one pill stretching into the next. Distance saturates at half a window
+ *  instead of a whole one; the far half is flat at the floor. */
+function pillMorph(dist: number): number {
+  'worklet';
+  return Math.min(2 * dist, 1);
+}
+
 export function pillScale(dist: number): number {
   'worklet';
-  return 1 - 0.15 * dist;
+  return 1 - 0.15 * pillMorph(dist);
 }
 
 export function pillOpacity(dist: number): number {
   'worklet';
-  return 1 - 0.4 * dist;
+  return 1 - 0.4 * pillMorph(dist);
 }
 

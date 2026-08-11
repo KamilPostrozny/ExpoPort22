@@ -95,13 +95,18 @@ test('pillCont slides with the page offset', () => {
   expect(pillCont(1, -100, 0)).toBe(1); // no pitch yet: stay put, no divide-by-zero
 });
 
-test('pill scale and opacity: full at centre, saturating one window out', () => {
+test('pill scale and opacity: full at centre, floor by half a window out (Safari sequencing)', () => {
   expect(pillScale(pillDist(1, 1))).toBe(1);
   expect(pillOpacity(pillDist(1, 1))).toBe(1);
   expect(pillDist(0, 1.5)).toBe(1); // saturates
   expect(pillScale(1)).toBeCloseTo(0.85);
   expect(pillOpacity(1)).toBeCloseTo(0.6);
-  expect(pillScale(pillDist(2, 1.5))).toBeCloseTo(0.925);
+  // A quarter-window out: half-way through the morph — the departing pill spends its whole
+  // shrink in the first half of the step, so the arriving one starts growing only after.
+  expect(pillScale(0.25)).toBeCloseTo(0.925);
+  // Half a window out (both pills equidistant): both sit at the floor, nothing mid-stretch.
+  expect(pillScale(pillDist(2, 1.5))).toBeCloseTo(0.85);
+  expect(pillOpacity(pillDist(2, 1.5))).toBeCloseTo(0.6);
 });
 
 /* --- neighbour page type size --- */

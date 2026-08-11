@@ -236,6 +236,10 @@ export function useScrollbackSearch(query: string, cards: Card[], active: boolea
 export type SwitcherProps = {
   theme: Theme;
   stageW: number;
+  /** The safe-area strips: the grid fills the whole window (its scrim IS the strips' ground),
+   *  so its own chrome pads past the notch and the home bar. */
+  insetTop: number;
+  insetBottom: number;
   /** The emulator's measured cell — what every snapshot's type is derived from (`snapshotType`). */
   cell: { w: number; h: number };
   /** The terminal's own top inset, in stage points. Sideways a card's inset is a constant share
@@ -340,7 +344,7 @@ export default function Switcher(props: SwitcherProps) {
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }]}>
       {/* T14: the search field. Same string as the terminal view's bar; the ✕ disarms both. */}
-      <View style={styles.searchWrap}>
+      <View style={[styles.searchWrap, { paddingTop: props.insetTop }]}>
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
           <SymbolView
             name="magnifyingglass"
@@ -432,7 +436,7 @@ export default function Switcher(props: SwitcherProps) {
       {/* The bottom bar. iOS (§4.5): + circle | "N Tabs" | Done ✓. Android (§4.10, design §5c):
           Done as a text button | Roboto count | the 56dp FAB the container transform births
           from — same handlers, Material chrome. */}
-      <View style={styles.bar}>
+      <View style={[styles.bar, { marginBottom: props.insetBottom }]}>
         {Platform.OS === 'android' ? (
           <>
             <Pressable
