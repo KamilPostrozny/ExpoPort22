@@ -45,7 +45,7 @@ const CARD_R = 14 / DESIGN_W;
  * within a few points on every phone that has round corners at all. If a device ever reads wrong,
  * the fix is that module, or a `Device.modelId` table.
  */
-const SCREEN_R = 62 / DESIGN_W;
+export const SCREEN_R = 62 / DESIGN_W;
 /**
  * How much of the flight the rounding takes to arrive: rounded within ~40ms of the surface first
  * moving, and exactly square at rest. Not merely square-looking — at rest the wrapper is the

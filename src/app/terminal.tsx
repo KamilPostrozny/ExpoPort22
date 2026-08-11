@@ -29,7 +29,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  PAGE_RADIUS,
+  pageRadius,
   SETTLE_HOLD_MS,
   pagePitch,
   rubber,
@@ -797,10 +797,12 @@ export default function SessionScreen() {
   const neighbour = (side: -1 | 1) => cards[anchor + side]?.snap ?? null;
 
   // The live terminal is itself a page while a swipe is on: it slides and rounds its corners.
+  const pageR = pageRadius(stage?.w ?? 390);
   const termSlideStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: swipeX.value }],
-    borderRadius: PAGE_RADIUS * roundSV.value,
+    borderRadius: pageR * roundSV.value,
   }));
+  const settleRoundStyle = useAnimatedStyle(() => ({ borderRadius: pageR * roundSV.value }));
 
   /* --- T11: the context ribbon (§4.4) ---
    *
@@ -1206,9 +1208,11 @@ export default function SessionScreen() {
         </>
       )}
       {pageSwipe?.phase === 'settle' && stage !== null && (
-        <View
+        <Animated.View
           pointerEvents="none"
-          style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }]}>
+          // Riding `roundSV` like the live page under it: the settle overlay is the visible
+          // surface for those 200ms, so the un-round to square has to happen on IT.
+          style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }, settleRoundStyle]}>
           <PageContent
             snap={pageSwipe.settled}
             stageW={stage.w}
@@ -1216,7 +1220,7 @@ export default function SessionScreen() {
             cell={cell}
             insets={paneInsets}
           />
-        </View>
+        </Animated.View>
       )}
 
       {/* Outside-tap collapses an expanded TUI ribbon; only the terminal area eats the tap. */}
@@ -1422,7 +1426,12 @@ function NeighborPage({
   return (
     <Animated.View
       pointerEvents="none"
-      style={[StyleSheet.absoluteFill, styles.page, { backgroundColor: theme.background }, style]}>
+      style={[
+        StyleSheet.absoluteFill,
+        styles.page,
+        { backgroundColor: theme.background, borderRadius: pageRadius(stageW) },
+        style,
+      ]}>
       <PageContent snap={snap} stageW={stageW} theme={theme} cell={cell} insets={insets} />
     </Animated.View>
   );
@@ -1537,7 +1546,7 @@ const styles = StyleSheet.create({
   terminal: { flex: 1 },
   termArea: { flex: 1 },
   termSlide: { flex: 1, overflow: 'hidden' },
-  page: { borderRadius: PAGE_RADIUS, overflow: 'hidden' },
+  page: { overflow: 'hidden' },
   status: {
     position: 'absolute',
     top: 0,

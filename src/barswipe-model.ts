@@ -8,7 +8,7 @@
  * `src/barswipe-model.test.ts`; the screen and the bar render and execute.
  */
 
-import { DESIGN_W, ZOOM_COMMIT } from '@/switcher-model';
+import { DESIGN_W, SCREEN_R, ZOOM_COMMIT } from '@/switcher-model';
 
 /* --- page geometry --- */
 
@@ -20,8 +20,13 @@ export function pagePitch(stageW: number): number {
   return stageW + PAGE_GAP * stageW;
 }
 
-/** Page corner radius while a swipe is live (the prototype's `pageR: 16`); 0 at rest. */
-export const PAGE_RADIUS = 16;
+/** Page corner radius while a swipe is live; 0 at rest. The display's own radius, not the
+ *  prototype's 16: the cards run the full window now, so their corners ARE the screen's — the
+ *  same `SCREEN_R` the zoom starts its rounding from. 16pt on a full-screen card read as barely
+ *  rounded at all (user, 2026-08-11). */
+export function pageRadius(stageW: number): number {
+  return SCREEN_R * stageW;
+}
 
 /* --- the drag --- */
 
@@ -92,7 +97,9 @@ export function pillDist(i: number, cont: number): number {
 /** Safari's sequencing (user, 2026-08-11, screenshots): the departing pill finishes shrinking in
  *  the FIRST half of the step and the arriving one only starts growing in the second — morphing
  *  both at once reads as one pill stretching into the next. Distance saturates at half a window
- *  instead of a whole one; the far half is flat at the floor. */
+ *  instead of a whole one; the far half is flat at the floor. And Safari's magnitude: the pill
+ *  vanishes — opacity to zero, scale well down — not the prototype's 0.85/0.6 nudge, which on
+ *  device read as no morph at all (user, 2026-08-11). */
 function pillMorph(dist: number): number {
   'worklet';
   return Math.min(2 * dist, 1);
@@ -100,11 +107,11 @@ function pillMorph(dist: number): number {
 
 export function pillScale(dist: number): number {
   'worklet';
-  return 1 - 0.15 * pillMorph(dist);
+  return 1 - 0.6 * pillMorph(dist);
 }
 
 export function pillOpacity(dist: number): number {
   'worklet';
-  return 1 - 0.4 * pillMorph(dist);
+  return 1 - pillMorph(dist);
 }
 
