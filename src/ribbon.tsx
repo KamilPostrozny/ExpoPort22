@@ -111,6 +111,21 @@ export default function Ribbon(props: RibbonProps) {
     return { width: glassW * pillWidthFrac(d), opacity: pillOpacity(d) };
   }, [swipeLive, swipePos, swipeX, swipePitch, glassW]);
 
+  // …and the pill's ANCHOR, which is the half that was missing: the widths matched frame for
+  // frame while the ribbon squeezed about its own centre and the pill squeezed toward the edge
+  // its page leaves through — same size, wrong place (user, 2026-08-11, held mid-swipe). The box
+  // it anchors inside is the ribbon's own natural width, which is what the pill's slot is to the
+  // pill, so the two hug the same edge at the same moment.
+  const anchorStyle = useAnimatedStyle(() => {
+    if (!swipeLive || swipeX === null || glassW <= 0) return { alignItems: 'center' as const };
+    return {
+      alignItems:
+        swipePos < pillCont(swipePos, swipeX.value, swipePitch)
+          ? ('flex-start' as const)
+          : ('flex-end' as const),
+    };
+  }, [swipeLive, swipePos, swipeX, swipePitch, glassW]);
+
   // The running timer: re-render once a second while the label carries elapsed time.
   const [, setBeat] = useState(0);
   useEffect(() => {
@@ -182,6 +197,8 @@ export default function Ribbon(props: RibbonProps) {
       {/* The animated width lives on the GLASS, exactly like a name pill: the capsule itself
           narrows, corners and all, with the content centred inside and clipped evenly. A clip
           box over a fixed glass read as a left-anchored wipe instead (user, 2026-08-11). */}
+      <Animated.View
+        style={[swipeLive && glassW > 0 ? { width: glassW } : null, anchorStyle]}>
       <GestureDetector gesture={dismiss}>
         <Animated.View
           entering={ribbonIn}
@@ -213,6 +230,7 @@ export default function Ribbon(props: RibbonProps) {
           </Glass>
         </Animated.View>
       </GestureDetector>
+      </Animated.View>
     </View>
   );
 }

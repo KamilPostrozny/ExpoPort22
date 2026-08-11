@@ -97,7 +97,8 @@ test('pill morph: squeezed out by 0.7 of a window, growing from 30% in', () => {
   expect(pillWidthFrac(1)).toBeCloseTo(PILL_MIN);
   // Fully invisible at the floor — a floored residue is a phantom capsule parked at the edge.
   expect(pillOpacity(1)).toBeCloseTo(0);
-  expect(pillOpacity(pillDist(2, 1.5))).toBeCloseTo(0);
+  expect(pillOpacity(pillDist(3, 1.5))).toBeCloseTo(0); // a whole window out, either side
+  expect(pillOpacity(pillDist(0, 1.5))).toBeCloseTo(0);
   // 0.35 out (morph half-way): squeezing in plain sight, the quadratic fade trailing.
   expect(pillWidthFrac(0.35)).toBeCloseTo(1 - (1 - PILL_MIN) / 2);
   expect(pillOpacity(0.35)).toBeCloseTo(0.75);
