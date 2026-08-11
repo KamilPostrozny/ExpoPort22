@@ -25,7 +25,6 @@ import Animated, {
   useAnimatedStyle,
   useFrameCallback,
   useSharedValue,
-  withDelay,
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
@@ -500,9 +499,20 @@ export default function SessionScreen() {
     // ghost hanging above and outside the solid card: 15pt for a row-1 slot, 45pt and 22pt too
     // wide for row 2 — which reads as the surface flying to the wrong place and popping into it
     // (user, 2026-08-11). 270ms is where out-cubic has spent 99% of the distance.
-    alpha.value = withDelay(270, withTiming(0, { duration: 70 }));
+    // …and "99% of the distance" stopped being good enough once the content PANS as well as
+    // scales. A card is the pane's tail now (`cropShift`), which slides the content 205pt over the
+    // flight instead of the 59 it used to — so the last 1% is ~2pt of travel, and handing over
+    // there shows the card's text sitting that much higher than the surface's still is. That is
+    // the jump as a tab lands in the grid (user, 2026-08-11).
+    //
+    // So the hand-over waits for the arrival: the surface goes at the animation's own callback, at
+    // t=1 exactly, where the two pictures are the same picture — which is the whole point of the
+    // geometry. A cut, not a fade, for the reason `springBack` snaps its own (see there).
     prog.value = withTiming(1, ZOOM_OUT, (done) => {
-      if (done) runOnJS(setSw)('open');
+      if (done) {
+        alpha.value = 0;
+        runOnJS(setSw)('open');
+      }
     });
   };
 
@@ -1320,7 +1330,10 @@ export default function SessionScreen() {
    *  the one the pane is already laid out against, so the two edges are the same edge. Both of
    *  these are plain values the worklet closes over: they change with the chrome, and a re-render
    *  is exactly when they should. */
-  const cropBottom = paneInsets.bottom;
+  // The keyboard's overlap counts too: the pane sits inside `paddingBottom: keyboardPad` as well,
+  // so with the keys up its last row is that much further from the stage's floor. The pad freezes
+  // at the open, which is exactly the value this wants.
+  const cropBottom = paneInsets.bottom + keyboardPad;
   const cropStyle = useAnimatedStyle(() => ({
     transform: [
       { translateY: -cropShift(prog.value, slotSV.value, stageSV.value, cropBottom, cropTop) },
