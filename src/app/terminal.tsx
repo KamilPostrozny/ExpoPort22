@@ -687,18 +687,7 @@ export default function SessionScreen() {
     );
   };
 
-  /** The committed hop's ribbon change, held until nothing is sliding — see the commit branch. */
-  const pendingRibbon = useRef<{ win: TmuxWindow | null } | null>(null);
-  const applyPendingRibbon = () => {
-    const pending = pendingRibbon.current;
-    if (pending === null) return;
-    pendingRibbon.current = null;
-    if (pending.win) ribbonForWindow(pending.win);
-    else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
-  };
-
   const clearBarSwipe = () => {
-    applyPendingRibbon();
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
     // start of this one: a capture per window is an exec burst and a parse of every answer, and
     // on the JS thread at the instant the finger goes down that is a stutter in the slide it is
@@ -732,8 +721,6 @@ export default function SessionScreen() {
             settled: cards[s.target]?.snap ?? null,
           },
     );
-    // Same commit as the overlay's mount: the bar-height resize this triggers runs under it.
-    applyPendingRibbon();
     roundSV.value = withTiming(0, { duration: 200 });
     onShellData.current = clearBarSwipe;
     const cap = setTimeout(clearBarSwipe, SETTLE_HOLD_MS);
@@ -786,12 +773,10 @@ export default function SessionScreen() {
         // not exist yet, and committing onto it is what births it (user, 2026-08-10).
         const win = info.windows[target];
         console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
-        // The ribbon swap waits for the landing: it changes the bar's height, which changes the
-        // sliding card's own padding and resizes the webview — a React commit and a tmux reflow
-        // against the running slide, which is the hitch on every hop between a ribboned window
-        // and a bare one (user, 2026-08-11). Applied at the settle it runs under the static
-        // overlay; on the fast path it lands with the reveal.
-        pendingRibbon.current = { win: win ?? null };
+        // Its height is the terminal's: change it now, under the slide. A shell that is about to
+        // be born is an idle one.
+        if (win) ribbonForWindow(win);
+        else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
         // Watch for tmux's redraw from here, not from the settle: it usually beats the slide.
         redrawn.current = false;
         onShellData.current = () => {
