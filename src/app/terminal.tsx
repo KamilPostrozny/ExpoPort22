@@ -947,7 +947,6 @@ export default function SessionScreen() {
   };
 
   const clearBarSwipe = (skipRefresh = false) => {
-    probe('keys back');
     applyPendingRibbon();
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
     // start of this one: a capture per window is an exec burst and a parse of every answer, and
@@ -964,7 +963,6 @@ export default function SessionScreen() {
   };
 
   const settleBarSwipe = () => {
-    probe('slide landed');
     const chromeChanges = pendingRibbon.current?.chrome === true;
     // Nothing to cover. The overlay hides two things — a refit, and a redraw that has not landed
     // yet — and on a same-chrome hop over a LAN neither is outstanding by the time the slide is
@@ -1059,7 +1057,6 @@ export default function SessionScreen() {
         // The settle's redraw-wait counts from here, not from the settle: on a LAN tmux's redraw
         // beats the slide home.
         bytesAtCommit.current = dataSeq.current;
-        probeT0.current = Date.now(); // T11: what the hop spends after the finger leaves
         // Either way tmux redraws the PTY, which replaces the snapshot: `new-window` makes the
         // window it creates the active one, exactly as `select-window` does.
         if (win) {
