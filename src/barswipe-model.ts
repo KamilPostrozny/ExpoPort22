@@ -102,11 +102,12 @@ export function pillDist(i: number, cont: number): number {
  *  device read as no morph at all (user, 2026-08-11). */
 function pillMorph(dist: number): number {
   'worklet';
-  // Saturates at half a window: the pills morph in place in ONE shared slot, so their visible
-  // ranges must not overlap — at 0.7 both were part-morphed mid-swipe and stacked on each other
-  // (user, 2026-08-11, screenshot). Halves make the handoff strict: outgoing gone by the middle
-  // of the travel, incoming growing through the whole second half.
-  return Math.min(2 * dist, 1);
+  // Saturates at 0.7 of a window, so the arriving pill starts growing ~30% into the travel —
+  // floored until half-way it read as popping in at the end (user, 2026-08-11). The overlap
+  // this opens is safe NOW: the pills anchor to opposite edges of the slot, so two part-morphed
+  // capsules sit apart like Safari's — centre-anchored they stacked, which is why this was
+  // briefly halved.
+  return Math.min(dist / 0.7, 1);
 }
 
 /** The collapsed capsule, as a fraction of the pill slot — Safari's morph is the pill
