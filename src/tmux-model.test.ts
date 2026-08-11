@@ -31,6 +31,7 @@ import {
   parsePoll,
   parseProbe,
   parseSessions,
+  parseUserConfProbe,
   parseVerify,
   parseWindows,
   readFileCommand,
@@ -124,6 +125,16 @@ test('the conf tmux actually reads wins: home first, XDG next, create home last'
   // An XDG user must get the line there — creating ~/.tmux.conf would shadow their whole config.
   expect(chooseUserConf(false, true)).toEqual({ path: '~/.config/tmux/tmux.conf', exists: true });
   expect(chooseUserConf(false, false)).toEqual({ path: '~/.tmux.conf', exists: false });
+});
+
+test('one ls answers both existence questions, and neither path matches the other', () => {
+  expect(parseUserConfProbe('/home/k/.tmux.conf\n')).toEqual({ home: true, xdg: false });
+  expect(parseUserConfProbe('/home/k/.config/tmux/tmux.conf\n')).toEqual({ home: false, xdg: true });
+  expect(parseUserConfProbe('/home/k/.tmux.conf\n/home/k/.config/tmux/tmux.conf\n')).toEqual({
+    home: true,
+    xdg: true,
+  });
+  expect(parseUserConfProbe('')).toEqual({ home: false, xdg: false });
 });
 
 test('append command is fish-and-sh common ground and creates a missing file', () => {

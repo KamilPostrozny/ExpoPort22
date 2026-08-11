@@ -27,6 +27,7 @@ import {
   POLL,
   POLL_MS,
   PROBE,
+  USER_CONF_PROBE,
   appendSourceLineCommand,
   capturePaneCommand,
   chooseUserConf,
@@ -40,6 +41,7 @@ import {
   parsePoll,
   parseProbe,
   parseSessions,
+  parseUserConfProbe,
   parseVerify,
   parseWindows,
   readFileCommand,
@@ -157,11 +159,13 @@ export async function startTmux(): Promise<void> {
   // A tmux start mode is the ask (§4.1): the conf is what its features are made of, so there is no
   // second question about whether to push it. `source-file` reaches a server the startup line has
   // already started, so the two racing here is harmless.
-  if (usesTmux(getSettings())) await configure();
-  if (!up) return;
-  void cacheSessions();
+  // The poll starts BEFORE the conf push, not after it: `attached` is what T9's tabs button also
+  // waits on, and making it wait out a handful of conf round trips is the delay before the button
+  // appears (user, 2026-08-12). Nothing in the poll depends on the conf.
   timer = setInterval(poll, POLL_MS);
   void poll();
+  void cacheSessions();
+  if (usesTmux(getSettings())) await configure();
 }
 
 /** The session went away, whichever way. Everything resets: the next connect re-probes, and a
@@ -181,19 +185,19 @@ export function stopTmux(): void {
 async function configure(): Promise<void> {
   try {
     const { tmuxExtras } = getSettings();
-    const remote = await run(readFileCommand(`~/${CONF_PATH}`));
+    // Both reads at once — they answer different questions, and a serial chain of them is the wait
+    // the user sees (2026-08-12). Concurrent execs are separate channels on the one connection.
+    const [remote, probed] = await Promise.all([
+      run(readFileCommand(`~/${CONF_PATH}`)),
+      run(USER_CONF_PROBE),
+    ]);
     if (needsPush(remote, tmuxExtras)) {
       const bytes = new TextEncoder().encode(generateConf(tmuxExtras));
       await ExpoSSH.upload(toBase64(bytes), CONF_PATH, CONF_DIRECTORIES);
     }
-    // Which conf tmux reads depends on which exists (~/.tmux.conf shadows the XDG path), so the
-    // existence checks go over SFTP — no shell, no fish-vs-sh question to even ask.
-    const names = async (path: string) =>
-      (await ExpoSSH.listDirectory(path).catch(() => [])).map((entry) => entry.name);
-    const target = chooseUserConf(
-      (await names('.')).includes('.tmux.conf'),
-      (await names('.config/tmux')).includes('tmux.conf'),
-    );
+    // Which conf tmux reads depends on which exists (~/.tmux.conf shadows the XDG path).
+    const { home, xdg } = parseUserConfProbe(probed);
+    const target = chooseUserConf(home, xdg);
     const existing = target.exists ? await run(readFileCommand(target.path)) : '';
     if (!hasSourceLine(existing)) await run(appendSourceLineCommand(target.path));
     const verified = parseVerify(await run(APPLY_AND_VERIFY));

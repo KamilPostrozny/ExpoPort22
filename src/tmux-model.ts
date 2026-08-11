@@ -138,6 +138,21 @@ export function chooseUserConf(
   return { path: '~/.tmux.conf', exists: false };
 }
 
+/** Both candidates' existence in one exec. It used to be two `listDirectory` calls, and each of
+ *  those opens a whole SFTP subsystem for an answer that is one boolean — most of the wait before
+ *  the tabs button appeared (user, 2026-08-12). No new shell question either: `2>/dev/null; true`
+ *  is the same idiom `readFileCommand` already relies on, fish included. */
+export const USER_CONF_PROBE = 'ls -d ~/.tmux.conf ~/.config/tmux/tmux.conf 2>/dev/null; true';
+
+/** `ls -d` prints the paths it found, expanded; anything else it printed is not one of ours. */
+export function parseUserConfProbe(stdout: string): { home: boolean; xdg: boolean } {
+  const lines = stdout.split('\n').map((line) => line.trim());
+  return {
+    home: lines.some((line) => line.endsWith('/.tmux.conf')),
+    xdg: lines.some((line) => line.endsWith('/tmux/tmux.conf')),
+  };
+}
+
 /** Append-only, via the shell: SFTP would be read-modify-write on a file the user owns, and a
  *  truncated read (exec output is capped) rewritten back is data loss. `>>` creates the file when
  *  it is missing, which is the fresh-host case. */

@@ -469,7 +469,7 @@ export default function KeyBar(props: KeyBarProps) {
       )}
 
       <GestureDetector gesture={pan}>
-        <View style={styles.row}>
+        <View style={[styles.row, !props.showTabs && styles.rowNoTabs]}>
           {/* §4.6: during an upload the circle tints accent and goes inert — the whole progress
               UI. The Pressable disables, so a tap during a send does nothing at all. */}
           <Key onPress={props.sending ? undefined : () => toggle('menu')} style={styles.circleSlot}>
@@ -880,6 +880,10 @@ const styles = StyleSheet.create({
     paddingTop: BAR_PAD_TOP,
     paddingBottom: 6,
   },
+  // No tabs circle (no tmux) leaves the keys pill stretching into its place, and a bar that wide
+  // reads as a different bar (user, 2026-08-12). Give the missing slot back as padding: the pill
+  // keeps the width it has everywhere else.
+  rowNoTabs: { paddingRight: SIDE_MARGIN + 49 + 7 },
   circleSlot: { width: 49, height: 49 },
   circle: { width: 49, height: 49, alignItems: 'center', justifyContent: 'center' },
   pill: { flex: 1, height: 49 },
