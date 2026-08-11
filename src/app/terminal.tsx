@@ -163,6 +163,13 @@ export default function SessionScreen() {
    *  cell is what every snapshot's type comes from, so a card draws the pane at the size the
    *  flying surface hands over at; the rows are what the vertical inset is worked out from. */
   const [cell, setCell] = useState({ w: 0, h: 0 });
+  /** The live pane's column count, as the webview last measured it. tmux's `window-size latest`
+   *  leaves a window at the size of the last client that DISPLAYED it, so a tab not yet opened
+   *  from this phone is still 80-odd columns wide and its capture with it — and a card drawn to
+   *  fit 80 columns into 173pt is the "zoomed out" one (user, 2026-08-11, screenshot). Every card
+   *  is a preview of a pane this client is about to size to itself, so this is the width to draw
+   *  them all at; anything longer clips, exactly as it will when tmux reflows it. */
+  const [liveCols, setLiveCols] = useState(0);
   /** The inset the terminal took above its first row — the row remainder, which it works out
    *  itself (see TerminalProps.onResize). The cards need it to aim the zoom's crossfade. */
   const [padTop, setPadTop] = useState(0);
@@ -520,7 +527,8 @@ export default function SessionScreen() {
   };
 
   const springBack = () => {
-    setSw('closing');
+    probe('fly');
+    setSw('closing'); // already `closing` when `closeTo` armed it two frames ago; a drag release sets it here
     // Solid on the first frame, not dissolved in over 120ms. The card and the surface are the
     // same geometry at t=1 — that is what all the crossfade arithmetic buys — so the swap has
     // nothing to hide, and a dissolve between two pictures that differ AT ALL is ghosting in plain
@@ -642,10 +650,20 @@ export default function SessionScreen() {
   };
 
   const closeTo = (pos: number) => {
-    probe('fly');
+    // The phase flip and the aim first, the motion two frames later — the same gap `openSwitcher`
+    // takes for the same reason. `setZoomId` re-renders the grid and `setSw('closing')` flips the
+    // size hold, the freeze and the wrapper's pointer events, and paying all of that on the frame
+    // the surface starts moving is a long frame right at the start of the flight (probe: FRAME
+    // 33ms at prog 0.92). Progress does not move in the gap, so nothing on screen is waiting.
+    probe('aim');
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
-    springBack();
+    setSw('closing');
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (swRef.current === 'closing') springBack();
+      }),
+    );
   };
 
   const selectCard = (pos: number, win: TmuxWindow) => {
@@ -1326,6 +1344,7 @@ export default function SessionScreen() {
           theme={theme}
           stageW={stage.w}
           cell={cell}
+          liveCols={liveCols}
           insetTop={insets.top}
           insetBottom={insets.bottom}
           // The flight crops its top chrome away (`cropTop`), so what is left above the first row
@@ -1488,6 +1507,7 @@ export default function SessionScreen() {
             return;
           }
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
+          if (cols > 0) setLiveCols(cols);
           setPadTop(topInset);
           sizeReported.current = true; // a chrome-changing select's redraw-wait gates on this
           setSize(cols, rows);

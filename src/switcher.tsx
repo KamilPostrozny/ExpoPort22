@@ -242,6 +242,8 @@ export type SwitcherProps = {
   insetBottom: number;
   /** The emulator's measured cell — what every snapshot's type is derived from (`snapshotType`). */
   cell: { w: number; h: number };
+  /** The live pane's column count. Every card is capped to it — see `liveCols` on the screen. */
+  liveCols: number;
   /** The terminal's own top inset, in stage points. Sideways a card's inset is a constant share
    *  of the stage (`SHOT_PAD`), but vertically the terminal's inset absorbs half the row
    *  remainder and so moves with the layout — and the card's has to move with it, or the text
@@ -411,6 +413,7 @@ export default function Switcher(props: SwitcherProps) {
               theme={theme}
               card={card}
               cell={props.cell}
+              liveCols={props.liveCols}
               padTop={props.padTop}
               hit={props.hits[card.win.id]}
               query={nq}
@@ -514,6 +517,7 @@ function WindowCard({
   theme,
   card,
   cell,
+  liveCols,
   padTop,
   hit,
   query,
@@ -534,6 +538,7 @@ function WindowCard({
   theme: Theme;
   card: Card;
   cell: { w: number; h: number };
+  liveCols: number;
   /** The terminal's top inset in stage points; through the zoom it is this card's. */
   padTop: number;
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
@@ -718,13 +723,20 @@ function WindowCard({
   const shotPadTop = Math.max(0, padTop * (slot.w / stageW) - ring.borderWidth);
 
   // The emulator's cell, shrunk by exactly what the zoom shrinks the stage by — so the card draws
-  // the pane the size the flying surface hands over at. The columns are the capture's own, not the
-  // window's current width: the two agree except across a resize, and there the live width would
-  // cap type that belongs to the older capture.
+  // the pane the size the flying surface hands over at.
+  //
+  // Capped at the live pane's width, and that cap is the point. tmux's `window-size latest` leaves
+  // a window at the size of the last client that DISPLAYED it, so a tab not opened from this phone
+  // since the session began is still 80-odd columns wide — and fitting 80 columns into 173pt drew
+  // that one card at half the type of its neighbours, the "zoomed out" card (user, 2026-08-11,
+  // screenshot). Every card is a preview of a pane this client is about to size to itself, so they
+  // are all drawn at the width they are about to have; a line longer than that clips, exactly as
+  // it will when tmux reflows it.
+  const cols = card.snap?.cols ?? card.win.width;
   const type = snapshotType(
     cell,
     slot.w / stageW,
-    card.snap?.cols ?? card.win.width,
+    liveCols > 0 ? Math.min(cols, liveCols) : cols,
     slot.w - 2 * (shotPad + ring.borderWidth),
   );
   const directory = card.win.path.split('/').filter(Boolean).pop() ?? '/';
