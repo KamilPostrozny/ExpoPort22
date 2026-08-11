@@ -701,13 +701,15 @@ export default function SessionScreen() {
     else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
   };
 
-  const clearBarSwipe = () => {
+  const clearBarSwipe = (skipRefresh = false) => {
     applyPendingRibbon();
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
     // start of this one: a capture per window is an exec burst and a parse of every answer, and
     // on the JS thread at the instant the finger goes down that is a stutter in the slide it is
-    // meant to serve (user, 2026-08-10). Nothing on screen is waiting for it.
-    void refresh(true);
+    // meant to serve (user, 2026-08-10). Nothing on screen is waiting for it. Skipped when this
+    // clear IS a swipe's first frame (the settle yielding to an impatient re-swipe) — exactly
+    // that stutter; the cache stays one hop stale and the next clear refreshes it.
+    if (!skipRefresh) void refresh(true);
     onShellData.current = null;
     if (settleCap.current !== null) clearTimeout(settleCap.current);
     settleCap.current = null;
@@ -766,7 +768,14 @@ export default function SessionScreen() {
   const onBarSwipe = (phase: 'start' | 'move' | 'end', dx: number) => {
     if (stage === null) return;
     if (phase === 'start') {
-      if (swipeInfo.current !== null || sw !== 'closed' || !connected) return;
+      if (sw !== 'closed' || !connected) return;
+      if (swipeInfo.current !== null) {
+        // Mid-settle re-swipe: the hold exists to hide a refit, but making the finger WAIT for
+        // it read as lag — rapid back-and-forth hopping used to be instant (user, 2026-08-11).
+        // The settle yields: everything it was holding applies now, under the new drag's motion.
+        if (pageSwipe?.phase !== 'settle') return; // a slide is still flying — too early
+        clearBarSwipe(true);
+      }
       const windows = cards.map((c) => c.win);
       if (windows.length === 0) return;
       const pos = activePosIn(cards);
