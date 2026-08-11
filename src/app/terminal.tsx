@@ -1065,6 +1065,13 @@ export default function SessionScreen() {
   // screen's corner. The radius is a constant, not an animation — the page is round at rest too
   // (user, 2026-08-11), so there is nothing to round *into*.
   const pageR = pageRadius(stage?.w ?? 390);
+  /** The page's bottom corners, square while the keyboard is up: that edge is not the bottom of
+   *  anything, it is where the keyboard cuts the page off, and a rounded cut floating on top of
+   *  the keys reads as a card that ends early (user, 2026-08-11). The tabs flight inherits it —
+   *  the pad is frozen for the length of the flight, so a keyboard-open zoom carried the same
+   *  rounded cut into the air. */
+  const kbSquare = keyboardPad > 0;
+  const pageRB = kbSquare ? 0 : pageR;
   const roundR = 0.1 * (stage?.w ?? 390);
   const termSlideStyle = useAnimatedStyle(() => ({ transform: [{ translateX: swipeX.value }] }));
   // The card's edge: in the dark flavours base and crust are nearly the same ink, so the gap
@@ -1306,6 +1313,11 @@ export default function SessionScreen() {
     return {
       height: f.height,
       borderRadius: f.radius,
+      // Same cut as the page's — and the flight keeps it, because the pad is frozen the whole way
+      // (see the keyboardWillChangeFrame guard): a zoom started with the keyboard up flew a
+      // rounded, empty band where the keys had been (user, 2026-08-11, screenshot).
+      borderBottomLeftRadius: kbSquare ? 0 : f.radius,
+      borderBottomRightRadius: kbSquare ? 0 : f.radius,
       opacity: alpha.value,
       transform: [{ translateX: f.translateX }, { translateY: f.translateY }, { scale: f.scale }],
     };
@@ -1317,6 +1329,14 @@ export default function SessionScreen() {
    *  every card. The crop grows with the flight instead of switching at either end, so the
    *  surface stays the same picture the whole way: at rest nothing is cropped (identity), and by
    *  the landing the wrapper's window into the stage is exactly the card's. */
+  /** The key bar leaves at the START of the flight, not at the end of it. It used to ride the
+   *  whole way into the card and then blink out with the stage's fade at the landing, which is a
+   *  bar sitting on a tab card for a beat and then not (user, 2026-08-11). Gone by a quarter of
+   *  the way in — and back only in the last quarter of the return, on the same curve. */
+  const barFadeStyle = useAnimatedStyle(() => ({
+    opacity: 1 - Math.min(prog.value / 0.25, 1),
+  }));
+
   const cropTop = notchPad + searchRowH;
   const cropStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: -cropTop * prog.value }],
@@ -1329,6 +1349,8 @@ export default function SessionScreen() {
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
+      borderBottomLeftRadius: kbSquare ? 0 : f.radius,
+      borderBottomRightRadius: kbSquare ? 0 : f.radius,
       borderWidth: prog.value > 0 ? 3 / f.scale : 0,
     };
   });
@@ -1504,6 +1526,8 @@ export default function SessionScreen() {
           {
             backgroundColor: theme.background,
             borderRadius: pageR,
+            borderBottomLeftRadius: pageRB,
+            borderBottomRightRadius: pageRB,
             paddingTop: notchPad,
             paddingHorizontal: padH,
             // The remainder makes the box an exact multiple of the cell, so the webview's own
@@ -1599,7 +1623,7 @@ export default function SessionScreen() {
         style={[
           StyleSheet.absoluteFill,
           styles.pageEdge,
-          { borderColor: theme.border, borderRadius: pageR },
+          { borderColor: theme.border, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
           pageEdgeStyle,
         ]}
       />
@@ -1610,12 +1634,12 @@ export default function SessionScreen() {
       {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' && (
         <>
           {anchor > 0 && (
-            <NeighborPage side={-1} snap={neighbour(-1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} x={swipeX} />
+            <NeighborPage side={-1} snap={neighbour(-1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} x={swipeX} />
           )}
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <NeighborPage side={1} snap={neighbour(1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} x={swipeX} />
+            <NeighborPage side={1} snap={neighbour(1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} x={swipeX} />
           )}
         </>
       )}
@@ -1630,7 +1654,7 @@ export default function SessionScreen() {
           style={[
             StyleSheet.absoluteFill,
             styles.page,
-            { backgroundColor: theme.background, borderRadius: pageR },
+            { backgroundColor: theme.background, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
           ]}>
           <PageContent
             snap={pageSwipe.settled}
@@ -1645,7 +1669,7 @@ export default function SessionScreen() {
             style={[
               StyleSheet.absoluteFill,
               styles.pageEdge,
-              { borderColor: theme.border, borderRadius: pageR },
+              { borderColor: theme.border, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
               settleEdgeStyle,
             ]}
           />
@@ -1661,8 +1685,11 @@ export default function SessionScreen() {
       {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
           full window height under it. Its own glass pills carry no full-width ground, so the
           card's background (or the crust gap, mid-swipe) shows through around them. */}
-      <View
-        style={{ position: 'absolute', left: 0, right: 0, bottom: keyboardPad + insets.bottom }}>
+      <Animated.View
+        style={[
+          { position: 'absolute', left: 0, right: 0, bottom: keyboardPad + insets.bottom },
+          barFadeStyle,
+        ]}>
       <KeyBar
         theme={theme}
         decckm={modes.decckm}
@@ -1689,7 +1716,7 @@ export default function SessionScreen() {
         ribbon={ribbonEl}
         ribbonGhosts={ribbonGhosts}
       />
-      </View>
+      </Animated.View>
 
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the
           prototype), popovers anchored `popBase` up. That base carries the keyboard itself:
@@ -1850,12 +1877,15 @@ function NeighborPage({
   cell,
   insets,
   liveCols,
+  bottomR,
   x,
 }: {
   side: -1 | 1;
   snap: PageSnap;
   pitch: number;
   stageW: number;
+  /** see `pageRB` — square while the keyboard cuts the page off */
+  bottomR: number;
   theme: Theme;
   cell: { w: number; h: number };
   insets: { top: number; side: number; bottom: number };
@@ -1871,7 +1901,7 @@ function NeighborPage({
       style={[
         StyleSheet.absoluteFill,
         styles.page,
-        { backgroundColor: theme.background, borderRadius: pageRadius(stageW) },
+        { backgroundColor: theme.background, borderRadius: pageRadius(stageW), borderBottomLeftRadius: bottomR, borderBottomRightRadius: bottomR },
         style,
       ]}>
       <PageContent
@@ -1887,7 +1917,7 @@ function NeighborPage({
         style={[
           StyleSheet.absoluteFill,
           styles.pageEdge,
-          { borderColor: theme.border, borderRadius: pageRadius(stageW) },
+          { borderColor: theme.border, borderRadius: pageRadius(stageW), borderBottomLeftRadius: bottomR, borderBottomRightRadius: bottomR },
         ]}
       />
     </Animated.View>
