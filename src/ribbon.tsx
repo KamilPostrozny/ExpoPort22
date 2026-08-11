@@ -179,19 +179,22 @@ export default function Ribbon(props: RibbonProps) {
 
   return (
     <View style={styles.wrap}>
-      <Animated.View
-        entering={ribbonIn}
-        // No exit animation while a swipe owns the glass: the drag morph has already squeezed
-        // it invisible, and the builder's ghost would flash it back at full opacity.
-        exiting={swipe?.live ? undefined : ribbonOut}
-        style={[styles.morph, dragStyle]}>
-        {/* Natural width, measured for the drag morph and LOCKED while one is live, so the
-            squeeze clips the glass instead of re-laying its caps out. */}
-        <View
-          style={swipe?.live && glassW > 0 ? { width: glassW } : undefined}
-          onLayout={(e) => setGlassW(e.nativeEvent.layout.width)}>
-          <GestureDetector gesture={dismiss}>
-            <Glass theme={theme} radius={19}>
+      {/* The animated width lives on the GLASS, exactly like a name pill: the capsule itself
+          narrows, corners and all, with the content centred inside and clipped evenly. A clip
+          box over a fixed glass read as a left-anchored wipe instead (user, 2026-08-11). */}
+      <GestureDetector gesture={dismiss}>
+        <Animated.View
+          entering={ribbonIn}
+          // No exit animation while a swipe owns the glass: the drag morph has already squeezed
+          // it invisible, and the builder's ghost would flash it back at full opacity.
+          exiting={swipe?.live ? undefined : ribbonOut}
+          style={dragStyle}>
+          <Glass theme={theme} radius={19} style={styles.glassCentre}>
+            {/* Natural width, measured for the morph and LOCKED while one is live, so the
+                squeeze clips the row instead of re-laying its caps out. */}
+            <View
+              style={swipe?.live && glassW > 0 ? { width: glassW, alignItems: 'center' } : undefined}
+              onLayout={(e) => setGlassW(e.nativeEvent.layout.width)}>
               <Pressable
                 disabled={!data.collapsible}
                 onPress={props.onToggle}
@@ -206,10 +209,10 @@ export default function Ribbon(props: RibbonProps) {
                   <Text style={[styles.chevron, { color: theme.placeholder }]}>⌃</Text>
                 )}
               </Pressable>
-            </Glass>
-          </GestureDetector>
-        </View>
-      </Animated.View>
+            </View>
+          </Glass>
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -221,8 +224,8 @@ export const RIBBON_PAD_TOP = 2;
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', paddingTop: RIBBON_PAD_TOP, paddingBottom: 8, paddingHorizontal: 20 },
-  /** The morphing box: clips the fixed-width glass as it squeezes, both sides evenly. */
-  morph: { overflow: 'hidden', borderRadius: 19, alignItems: 'center' },
+  /** Centres the width-locked content row inside the narrowing glass, so the clip is even. */
+  glassCentre: { alignItems: 'center' },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   pillClosed: { paddingVertical: 8, paddingHorizontal: 13 },
   pillOpen: { paddingVertical: 5, paddingLeft: 13, paddingRight: 7 },
