@@ -191,10 +191,33 @@ export function cropShift(
   stage: { w: number; h: number },
   bottomInset: number,
   minShift: number,
+  full: boolean,
 ): number {
   'worklet';
+  if (!full) return minShift * t;
   const window = (slot.h * stage.w) / slot.w; // the card's height in stage points
   return Math.max(minShift, Math.max(0, stage.h - bottomInset - window)) * t;
+}
+
+/**
+ * Does the pane have more content than a card can show? Then the card is its END — the prompt and
+ * what just ran. Otherwise its start, where the content already is, with the pane's own blank rows
+ * below it exactly as the window has them.
+ *
+ * Anchoring every card the same way is wrong either way round and both were seen on device: keep
+ * the head and a full listing loses its tail, keep the tail and a banner or a fresh shell shows an
+ * almost empty card (user, 2026-08-11). Nothing has to be guessed to tell them apart — a capture
+ * ends at the last line with something on it, so its line count IS the content's height.
+ */
+export function fillsCard(
+  contentRows: number,
+  slot: Frame,
+  stage: { w: number; h: number },
+  cellH: number,
+): boolean {
+  'worklet';
+  if (cellH <= 0) return false;
+  return contentRows > (slot.h * stage.w) / slot.w / cellH;
 }
 
 export type ZoomFrame = {

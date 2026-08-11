@@ -42,6 +42,7 @@ import {
   gridHeight,
   gridTop,
   reorder,
+  fillsCard,
   reorderArgs,
   shouldClose,
   slotFrame,
@@ -739,6 +740,8 @@ function WindowCard({
   // are all drawn at the width they are about to have; a line longer than that clips, exactly as
   // it will when tmux reflows it.
   const cols = card.snap?.cols ?? card.win.width;
+  /** Does this pane have more than a card can show? Then the card is its tail. */
+  const full = !hit && fillsCard(card.snap?.lines.length ?? 0, slot, { w: stageW, h: 0 }, cell.h);
   const type = snapshotType(
     cell,
     slot.w / stageW,
@@ -793,8 +796,12 @@ function WindowCard({
               // the overflow falls off the top (user, 2026-08-11). The flight lands on the same
               // slice: see `cropShift`. A search hit is the exception — its context block is a
               // few lines placed to be read from the top, not a pane's tail.
-              justifyContent: hit ? 'flex-start' : 'flex-end',
-              paddingTop: hit ? shotPadTop : 0,
+              // Full pane → its end, where the prompt and the last output are. Not full → its
+              // start, where the content already is, with the pane's own blank rows below it
+              // exactly as the window has them (user's rule, 2026-08-11). `fillsCard` decides
+              // from the capture's own length, and the flight asks it the same question.
+              justifyContent: full ? 'flex-end' : 'flex-start',
+              paddingTop: full ? 0 : shotPadTop,
             },
           ]}>
           {/* The ring is part of the inset (RN lays content out inside a border), so hanging the

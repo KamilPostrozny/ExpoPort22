@@ -83,6 +83,7 @@ import Switcher, {
 import {
   SEARCH_BAR_H,
   cropShift,
+  fillsCard,
   gridTop,
   slotFrame,
   snapshotType,
@@ -1334,9 +1335,21 @@ export default function SessionScreen() {
   // so with the keys up its last row is that much further from the stage's floor. The pad freezes
   // at the open, which is exactly the value this wants.
   const cropBottom = paneInsets.bottom + keyboardPad;
+  /** …and which END of the pane the flight lands on, which is the card's rule and so has to be
+   *  the card's answer: the window it is flying to or from is `zoomId`, and `fillsCard` reads the
+   *  same capture that card draws. A pane with less in it than a card can show has its content at
+   *  the TOP, and both of them keep it there. */
+  const cropFull = fillsCard(
+    cards.find((c) => c.win.id === zoomId)?.snap?.lines.length ?? 0,
+    stage === null ? { x: 0, y: 0, w: 1, h: 1 } : slotFrame(0, stage.w),
+    { w: stage?.w ?? 1, h: 0 },
+    cell.h,
+  );
   const cropStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: -cropShift(prog.value, slotSV.value, stageSV.value, cropBottom, cropTop) },
+      {
+        translateY: -cropShift(prog.value, slotSV.value, stageSV.value, cropBottom, cropTop, cropFull),
+      },
     ],
   }));
 

@@ -23,6 +23,7 @@ import {
   termPad,
   zoomFrame,
   cropShift,
+  fillsCard,
   zoomProgress,
 } from '@/switcher-model';
 import type { TmuxWindow } from '@/tmux-model';
@@ -125,19 +126,31 @@ test('zoomProgress: saturating 280pt from the arm point, clamped both ends', () 
   expect(ZOOM_COMMIT).toBe(0.25);
 });
 
-test('cropShift: nothing at rest, the pane’s last row on the card’s edge at 1', () => {
+test('cropShift: a full pane hangs off the bottom, a short one keeps its top', () => {
   const stage = { w: 402, h: 874 };
   const slot = slotFrame(0, 402);
   const bottom = 124; // bar + home strip + row remainder
-  expect(cropShift(0, slot, stage, bottom, 59)).toBe(0);
-  // The card's window in stage points, and what is left above the pane's content edge.
   const window = (slot.h * stage.w) / slot.w;
-  expect(cropShift(1, slot, stage, bottom, 59)).toBeCloseTo(874 - 124 - window);
-  // The clip takes `window` off the bottom, so shifting by this puts the shifted content's end
-  // exactly on the pane's end: shift + window === stage.h - bottom.
-  expect(cropShift(1, slot, stage, bottom, 59) + window).toBeCloseTo(874 - 124);
-  // A card taller than the pane cannot hang off its bottom — it falls back to the chrome floor.
-  expect(cropShift(1, slot, { w: 402, h: 300 }, bottom, 59)).toBe(59);
+  // Full: nothing at rest, and by the card the pane's last row is on the card's bottom edge.
+  expect(cropShift(0, slot, stage, bottom, 59, true)).toBe(0);
+  expect(cropShift(1, slot, stage, bottom, 59, true)).toBeCloseTo(874 - 124 - window);
+  expect(cropShift(1, slot, stage, bottom, 59, true) + window).toBeCloseTo(874 - 124);
+  // Not full: the content is at the TOP of the pane, so the card keeps the top — the shift is the
+  // chrome floor and nothing more, which is what it was before any of this.
+  expect(cropShift(1, slot, stage, bottom, 59, false)).toBe(59);
+  expect(cropShift(0.5, slot, stage, bottom, 59, false)).toBe(29.5);
+  // A card taller than the pane cannot hang off its bottom — it falls back to the same floor.
+  expect(cropShift(1, slot, { w: 402, h: 300 }, bottom, 59, true)).toBe(59);
+});
+
+test('fillsCard: more rows than the card shows, and the card is the tail', () => {
+  const stage = { w: 402, h: 874 };
+  const slot = slotFrame(0, 402);
+  const rows = (slot.h * stage.w) / slot.w / 18; // ~31 rows of an 18pt cell
+  expect(fillsCard(Math.ceil(rows) + 1, slot, stage, 18)).toBe(true);
+  expect(fillsCard(Math.floor(rows) - 1, slot, stage, 18)).toBe(false);
+  expect(fillsCard(0, slot, stage, 18)).toBe(false); // no capture yet: nothing to hang
+  expect(fillsCard(999, slot, stage, 0)).toBe(false); // no cell measured yet
 });
 
 test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
