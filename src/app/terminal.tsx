@@ -424,8 +424,14 @@ export default function SessionScreen() {
   const commitOpen = () => {
     setSw('opening');
     dragX.value = withTiming(0, { duration: 250 });
-    // The prototype fades the surface out only near the end, once it covers its card.
-    alpha.value = withDelay(180, withTiming(0, { duration: 140 }));
+    // The prototype fades the surface out only near the end, once it covers its card — and "near
+    // the end" is measured in TRAVEL, not in milliseconds. ZOOM_OUT is out-cubic, so at 180ms
+    // (53% of 340) the surface is only ~90% of the way there, while the card underneath goes fully
+    // solid the instant this fade starts (`fade.value >= 1` in switcher.tsx). That last 10% is a
+    // ghost hanging above and outside the solid card: 15pt for a row-1 slot, 45pt and 22pt too
+    // wide for row 2 — which reads as the surface flying to the wrong place and popping into it
+    // (user, 2026-08-11). 270ms is where out-cubic has spent 99% of the distance.
+    alpha.value = withDelay(270, withTiming(0, { duration: 70 }));
     prog.value = withTiming(1, ZOOM_OUT, (done) => {
       if (done) runOnJS(setSw)('open');
     });
