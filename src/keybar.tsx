@@ -49,7 +49,7 @@ import {
   pillCont,
   pillDist,
   pillOpacity,
-  pillScale,
+  pillWidthFrac,
 } from '@/barswipe-model';
 import {
   pinPasteboard,
@@ -623,18 +623,21 @@ function NamePill({
   const { pos, x, pitch } = pills;
   const style = useAnimatedStyle(() => {
     const d = pillDist(i, pillCont(pos, x.value, pitch));
-    return { transform: [{ scale: pillScale(d) }], opacity: pillOpacity(d) };
+    return { width: PILL_ITEM * width * pillWidthFrac(d), opacity: pillOpacity(d) };
   });
-  // A whole glass pill per name — the pill itself is what morphs (scale + fade with distance);
-  // no ‹ › hints, the morph is the indicator (user, 2026-08-11).
+  // A whole glass pill per name, morphing Safari's way: the capsule SQUEEZES sideways — animated
+  // width, height untouched, text clipped by the glass — and grows back out at its window. No
+  // ‹ › hints, the morph is the indicator (user, 2026-08-11).
   return (
-    <Animated.View style={[styles.namePillSlot, { width: PILL_ITEM * width }, style]}>
-      <Glass theme={theme} radius={BAR_RADIUS} style={styles.namePill}>
-        <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
-          {name}
-        </Text>
-      </Glass>
-    </Animated.View>
+    <View style={[styles.namePillSlot, { width: PILL_ITEM * width }]}>
+      <Animated.View style={[styles.namePillClip, style]}>
+        <Glass theme={theme} radius={BAR_RADIUS} style={styles.namePill}>
+          <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
+            {name}
+          </Text>
+        </Glass>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -854,7 +857,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  namePillSlot: { height: '100%', paddingVertical: 0 },
+  namePillSlot: { height: '100%', alignItems: 'center', justifyContent: 'center' },
+  namePillClip: { height: '100%' },
   namePill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
   namePillText: { fontFamily: MONO, fontSize: 14, fontWeight: '500', flexShrink: 1 },
   arrowsButton: {

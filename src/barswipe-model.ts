@@ -105,15 +105,20 @@ function pillMorph(dist: number): number {
   return Math.min(2 * dist, 1);
 }
 
-/** Scale-dominant, like Safari's: the shrink is the morph, so it has to happen in plain sight —
- *  a linear fade to zero emptied the bar for the middle of every step and the shrink went with
- *  it, unseen (user, 2026-08-11, screenshot). Opacity is quadratic: near-full while the pill
- *  shrinks, dropping only at the far end. */
-export function pillScale(dist: number): number {
+/** The collapsed capsule, as a fraction of the pill slot — Safari's morph is the pill
+ *  SQUEEZING sideways to a small capsule and growing back out, height untouched, not a uniform
+ *  scale-down (user, 2026-08-11, Safari screenshots side by side with ours). */
+export const PILL_MIN = 50 / 228;
+
+/** The glass pill's width through the morph: full slot at its window, the bare capsule half a
+ *  window out. Width, not scale — the text inside keeps its size and clips. */
+export function pillWidthFrac(dist: number): number {
   'worklet';
-  return 1 - 0.7 * pillMorph(dist);
+  return 1 - (1 - PILL_MIN) * pillMorph(dist);
 }
 
+/** Quadratic: near-full while the pill squeezes, dropping only at the far end — a linear fade
+ *  emptied the bar mid-step and hid the very morph it rode on. */
 export function pillOpacity(dist: number): number {
   'worklet';
   const m = pillMorph(dist);

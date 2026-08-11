@@ -15,7 +15,8 @@ import {
   pillCont,
   pillDist,
   pillOpacity,
-  pillScale,
+  PILL_MIN,
+  pillWidthFrac,
   rubber,
   swipeTarget,
   zoomCommits,
@@ -95,18 +96,18 @@ test('pillCont slides with the page offset', () => {
   expect(pillCont(1, -100, 0)).toBe(1); // no pitch yet: stay put, no divide-by-zero
 });
 
-test('pill morph: scale-dominant, floored by half a window out (Safari sequencing)', () => {
-  expect(pillScale(pillDist(1, 1))).toBe(1);
+test('pill morph: width squeezes to the capsule by half a window out (Safari sequencing)', () => {
+  expect(pillWidthFrac(pillDist(1, 1))).toBe(1);
   expect(pillOpacity(pillDist(1, 1))).toBe(1);
   expect(pillDist(0, 1.5)).toBe(1); // saturates
-  expect(pillScale(1)).toBeCloseTo(0.3);
+  expect(pillWidthFrac(1)).toBeCloseTo(PILL_MIN);
   expect(pillOpacity(1)).toBeCloseTo(0.25);
-  // A quarter-window out (morph half-way): the shrink is well underway while the pill is still
-  // mostly opaque — the shrink happens in plain sight, the fade trails it (quadratic).
-  expect(pillScale(0.25)).toBeCloseTo(0.65);
+  // A quarter-window out (morph half-way): the squeeze is well underway while the pill is still
+  // mostly opaque — the width change happens in plain sight, the fade trails it (quadratic).
+  expect(pillWidthFrac(0.25)).toBeCloseTo(1 - (1 - PILL_MIN) / 2);
   expect(pillOpacity(0.25)).toBeCloseTo(0.8125);
-  // Half a window out (both pills equidistant): both at the floor, nothing mid-stretch.
-  expect(pillScale(pillDist(2, 1.5))).toBeCloseTo(0.3);
+  // Half a window out (both pills equidistant): both at the capsule, nothing mid-stretch.
+  expect(pillWidthFrac(pillDist(2, 1.5))).toBeCloseTo(PILL_MIN);
   expect(pillOpacity(pillDist(2, 1.5))).toBeCloseTo(0.25);
 });
 
