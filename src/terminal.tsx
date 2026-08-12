@@ -750,23 +750,26 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     };
 
     const touchStart = (ev: TouchEvent) => {
-      if (coast !== null) {
-        // §4.3: a touch during the coast stops it and does nothing else — not a tap, not a
-        // long-press, not a new pan. preventDefault is what makes WebKit agree about the rest.
+      // §4.3 said a touch during the coast stops it and does nothing else. On device that reads as
+      // dead: the finger that caught the scroll cannot then drag it, so it takes a *third* touch to
+      // move again. iOS hands the drag over inside the same gesture, so a catch goes straight to
+      // 'panning' — no slop to spend, since a finger landing on moving text has already committed
+      // to scrolling — and stays a scroll, never a tap or a long-press. preventDefault is what
+      // makes WebKit agree about that last part.
+      const caught = coast !== null;
+      if (caught) {
         stopCoast();
-        pan = 'idle';
         ev.preventDefault();
-        return;
       }
       const t = ev.touches[0];
-      if (pan !== 'idle') {
+      if (!caught && pan !== 'idle') {
         // A second finger joining a pan: same scroll, rebased so the handover does not jump.
         panX = t.clientX;
         panY = t.clientY;
         fingers = Math.max(fingers, ev.touches.length);
         return;
       }
-      pan = 'pending';
+      pan = caught ? 'panning' : 'pending';
       panX = t.clientX;
       panY = t.clientY;
       carry = 0;
