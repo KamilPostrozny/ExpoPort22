@@ -1596,6 +1596,20 @@ export default function SessionScreen() {
               `FIT ${was ? `${was.cols}×${was.rows} padTop ${was.top.toFixed(1)}` : 'first'} → ` +
                 `${cols}×${rows} padTop ${topInset.toFixed(1)}`,
             );
+          // The box this side computed, checked against the box the webview actually got. The two
+          // are worked out on opposite sides of a bridge that rounds — fractional points here,
+          // integer `clientHeight` there — so `rowRemainder` leaves a point of slack and this inset
+          // is what is left of it. More than that means the sides disagree, and the disagreement is
+          // paid in whole rows: 17pt of an 18pt cell was a lost row and the pane sitting one row
+          // low, on every keyboard close, for a day (2026-08-12). Any chrome change can re-open it,
+          // and the webview is the only witness — so it says so rather than being read off a probe
+          // that has to be there at the time. The first report is the boot fit, whose cell is not
+          // measured yet.
+          if (__DEV__ && was !== null && topInset >= 2 && cellH > 0)
+            console.warn(
+              `[terminal] box off by ${topInset.toFixed(1)}pt of a ${cellH.toFixed(1)}pt cell — ` +
+                'the stage and the webview disagree; see `rowRemainder`',
+            );
           lastFit.current = { cols, rows, top: topInset };
           if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
             console.log('[terminal] size held, not sent:', cols, '×', rows);
