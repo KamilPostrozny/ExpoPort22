@@ -1,8 +1,8 @@
 /**
- * The context ribbon's brain (§4.4): which recipe the active pane's state selects, the locally
- * tracked suspended-job machine, the per-process-instance identity that dismissal and the running
- * timer key on, and the kill-force command. Pure — tested in `src/ribbon-model.test.ts`; the
- * recipes themselves are data in `src/ribbon-recipes.ts`, and `src/ribbon.tsx` renders.
+ * The edge handle's brain (§4.4): which recipe the active pane's state selects, the locally
+ * tracked suspended-job machine, the per-process-instance identity the running timer keys on,
+ * and the kill-force command. Pure — tested in `src/ribbon-model.test.ts`; the recipes
+ * themselves are data in `src/ribbon-recipes.ts`, and `src/ribbon.tsx` renders.
  *
  * Signals in: T9's ~2s foreground poll (`{command, pid} | null`, shell = null) and T6's instant
  * `altScreen` flag. Signals cross in the reducer, never in the component.
@@ -13,10 +13,11 @@ import { RECIPES, REPL_NAMES, type RecipeId } from '@/ribbon-recipes';
 /* --- instance identity --- */
 
 /**
- * "That process instance" (§4.4's dismissal unit, and the design's rule: "a dismissed ribbon
- * returns when the foreground process changes"): a counter bumped on every foreground
- * transition — null→X, X→Y, and X→suspended all count. `#{pane_pid}` is the pane's shell, not
- * the process, so the pid alone cannot tell two runs of `vim` apart; the transition can.
+ * "That process instance": a counter bumped on every foreground transition — null→X, X→Y, and
+ * X→suspended all count. The running timer starts over on it, and the screen closes the panel
+ * on it (a new process means the caps under the finger changed). `#{pane_pid}` is the pane's
+ * shell, not the process, so the pid alone cannot tell two runs of `vim` apart; the
+ * transition can.
  *
  * ponytail: X→shell→X inside one 2s poll beat reads as the same instance — the poll cannot see
  * a process that came and went between beats, and neither can we.
@@ -35,8 +36,6 @@ export type RibbonCore = {
    *  the job is suspended rather than exited. */
   candidate: string | null;
   candidateAt: number | null;
-  /** The instance the user swiped away; a new instance clears it by not being this one. */
-  dismissed: number | null;
 };
 
 export const RIBBON_IDLE: RibbonCore = {
@@ -47,7 +46,6 @@ export const RIBBON_IDLE: RibbonCore = {
   suspended: null,
   candidate: null,
   candidateAt: null,
-  dismissed: null,
 };
 
 /** How long a sent ^Z stays a suspension candidate — a bit over two poll beats, so one missed
@@ -121,15 +119,10 @@ export function ribbonSent(core: RibbonCore, bytes: string, now: number): Ribbon
   return { ...core, candidate: core.command, candidateAt: now };
 }
 
-/** The fg / bg / kill cap resolved a suspended job: the pill leaves now, the poll confirms. */
+/** The fg / bg / kill cap resolved a suspended job: the handle leaves now, the poll confirms. */
 export function ribbonResumed(core: RibbonCore): RibbonCore {
   if (core.suspended === null) return core;
   return { ...core, instance: core.instance + 1, suspended: null };
-}
-
-/** The swipe-down: this instance stays gone; the next process brings the ribbon back. */
-export function ribbonDismiss(core: RibbonCore): RibbonCore {
-  return { ...core, dismissed: core.instance };
 }
 
 /* --- recipe selection --- */
@@ -143,16 +136,15 @@ export function matchRecipe(command: string): RecipeId | null {
 }
 
 /**
- * The §4.4 table: dismissal wins, then the tracked suspension, then a name match (vim on the alt
- * screen is vim, not "unknown TUI"), then the silences — REPLs sitting at their prompt, and
- * unmatched alt-screen apps we have no caps for. What remains is a non-shell, non-TUI foreground:
+ * The §4.4 table: the tracked suspension wins, then a name match (vim on the alt screen is vim,
+ * not "unknown TUI"), then the silences — REPLs sitting at their prompt, and unmatched
+ * alt-screen apps we have no caps for. What remains is a non-shell, non-TUI foreground:
  * `running`.
  */
 export function selectRecipe(
   core: RibbonCore,
   altScreen: boolean,
 ): { id: RecipeId; proc: string } | null {
-  if (core.dismissed === core.instance) return null;
   if (core.suspended !== null) return { id: 'suspended', proc: core.suspended };
   if (core.command === null) return null;
   const named = matchRecipe(core.command);

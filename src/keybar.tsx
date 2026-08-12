@@ -96,8 +96,8 @@ export type KeyBarProps = {
    *  parent's bounds, so a popover cannot float above the bar *from inside* the bar. */
   open: BarPopover;
   onOpenChange: (open: BarPopover) => void;
-  /** The bar stack's height (chord strip included, T11's ribbon later too), remeasured on every
-   *  change — the `popBase` the screen anchors popovers on. One number, one place. */
+  /** The bar stack's height (chord strip included), remeasured on every change — the `popBase`
+   *  the screen anchors popovers (and the edge handle) on. One number, one place. */
   onHeight: (height: number) => void;
   /** Bump to raise the keyboard — a tap on the terminal (§4.4's door to it), or the switcher
    *  closing back onto a terminal whose keys were up when it left (T10), the
@@ -134,23 +134,13 @@ export type KeyBarProps = {
     pitch: number;
     live: boolean;
   } | null;
-  /** T11's context ribbon, rendered in the slot above the chord strip so its height rides the
-   *  same `onHeight` measurement the popovers anchor on. The screen owns its state. */
-  ribbon?: React.ReactNode;
-  /** T11: the reachable windows' own ribbons, inert, morphing in with the page they belong to.
-   *  Absolute — see the ribbon slot's comment for why they must not touch the bar's height. */
-  ribbonGhosts?: React.ReactNode;
 };
 
 /* --- §3's glass recipe --- */
 
 const GLASS_BORDER = 'rgba(255,255,255,0.12)';
-/** The glass's hairline, exported because it is the difference between a glass sized by its
- *  content and one sized by a measurement of that content: `onLayout` reports the content box,
- *  and a width set from it renders the capsule a border narrower on each side. T11's ribbon adds
- *  it back, or the morph lands 1pt short of the natural width and snaps at the settle (user,
- *  2026-08-11). */
-export const GLASS_BORDER_W = Platform.OS === 'android' ? 0 : 0.5;
+/** The glass's hairline. */
+const GLASS_BORDER_W = Platform.OS === 'android' ? 0 : 0.5;
 /** The prototype's neutral key tint (overlay-grey at low alpha, same literal on all flavours). */
 const KEY_TINT = 'rgba(127,132,156,0.16)';
 const HAIRLINE = 'rgba(127,132,156,0.25)';
@@ -158,9 +148,7 @@ const HAIRLINE = 'rgba(127,132,156,0.25)';
 /* --- the Android skin's metrics (see the header): same sizes, Material corners --- */
 const ANDROID = Platform.OS === 'android';
 /** The 49pt circles and pill: iOS capsules, Android's 16pt Material corners. */
-/** The bar's own corner: every glass on the bar row uses it, T11's ribbon included — it is one
- *  bar, so one radius (user, 2026-08-11). */
-export const BAR_RADIUS = ANDROID ? 16 : 24.5;
+const BAR_RADIUS = ANDROID ? 16 : 24.5;
 /** The 35pt keys inside the pill (and the arrows button). */
 const KEY_RADIUS = ANDROID ? 12 : 18;
 /** The bar row's side margins — Android's bar docks 8pt from the edges (design §5a). */
@@ -173,7 +161,7 @@ function rgba(hex: string, alpha: number): string {
 
 /** One glass surface: blur, tint, border — §3's recipe. `blur(14px) saturate(160%)` maps onto
  *  BlurView's 0–100 intensity scale (≈40); the inset specular highlight has no RN equivalent, so
- *  the border carries the edge alone. Exported for T11's ribbon, which is the same glass. */
+ *  the border carries the edge alone. Exported for the edge handle's caps — the same glass. */
 export function Glass({
   theme,
   radius,
@@ -537,15 +525,6 @@ export default function KeyBar(props: KeyBarProps) {
 
   return (
     <View onLayout={(e) => props.onHeight(e.nativeEvent.layout.height)}>
-      {/* T11's context ribbon, above the chord strip — its height feeds the same `onHeight`
-          measurement the popovers anchor on, for free. The ghosts are the neighbours' ribbons
-          morphing in behind the swipe (see `ribbonGhosts`): absolutely positioned inside this
-          wrapper, so they share the real one's bottom edge and add nothing to the height. */}
-      <View>
-        {props.ribbon}
-        {props.ribbonGhosts}
-      </View>
-
       {ctrl !== 'off' && (
         <Animated.View
           entering={FadeInDown.duration(180)}

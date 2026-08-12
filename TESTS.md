@@ -88,7 +88,7 @@ cases can be rooted in its upstream:
 - **T7 (key bar)** implements the **native `TextInput` decision from T4** — keyboard input
   leaves the webview. Dictation filter and held-delete (T12 polish) sit on this input. T7's
   bar is the mount point for T8 (Paste popover, ⋯ menu), T10 (tabs circle, swipe-up), and
-  T11 (bar swipe ↔, ribbon above bar).
+  T11 (bar swipe ↔; the ribbon's edge handle floats over the terminal, not in the bar).
 - **T9 (tmux side-channel)** provides exec-channel helpers (`list-windows`, `capture-pane`,
   `select/kill/new/move-window`), the window badge feed (T7's tabs circle reads it), and the
   foreground-process poll (T11's ribbon reads it). T10 and T11 issue every tmux action
@@ -1000,6 +1000,11 @@ lines show `capture-pane`, `select-window` and the kill-force command going out 
 channels, never through the PTY. Ribbon foreground reactions ride the ~2s poll — allow a beat
 wherever a process starts or stops; alt-screen reactions (`[session] modes`) are instant.
 
+*(2026-08-12: T11.7–T11.15 rewritten for the edge-handle redesign — the recipe now lives in a
+5pt colour tab on the terminal's right edge just above the bar; tap or swipe it left and the
+caps open as a right-aligned vertical panel over the output. The old in-bar pill, its
+expand/collapse and its swipe-down dismissal are gone. The handle never resizes the terminal.)*
+
 ### T11.1 — Bar swipe hops a window: slide, pills, live redraw
 - **Setup**: attached, three windows, window 1 active, keyboard up.
 - **Steps**: touch the bar and drag slowly left ~100pt; release.
@@ -1051,84 +1056,96 @@ wherever a process starts or stops; alt-screen reactions (`[session] modes`) are
   gesture never becomes the other mid-drag.
 - [ ]
 
-### T11.7 — `sleep 100` → running ribbon with timer; ^C cap kills it
-- **Steps**: type `sleep 100⏎`; wait a beat; watch; tap the `^C` cap.
-- **Expect**: within ~2s a glass pill appears above the bar, expanded: pulsing green dot,
-  `sleep · 0:0x` counting up in seconds, caps `^C stop` · `^Z bg background` · red
-  `kill force`. The `^C` tap prints `^C` in the terminal, the shell prompt returns, and the
-  ribbon leaves on the next poll beat. Log: `[ribbon] cap ^C`.
+### T11.7 — `sleep 100` → green handle with timer; ^C cap kills it
+- **Steps**: type `sleep 100⏎`; wait a beat; watch the right edge; tap the tab; read the
+  panel; tap the `^C stop` cap.
+- **Expect**: within ~2s a 5pt green tab appears on the right edge just above the bar,
+  breathing (opacity + height together) — and the terminal does NOT resize or rewrap when it
+  arrives. The tap opens a right-aligned panel over the output: pulsing green dot +
+  `sleep · 0:0x` counting up, then caps top-to-bottom red `kill force` · `^Z bg background` ·
+  `^C stop`, then a green stub at the foot. The `^C` tap closes the panel, prints `^C`, the
+  prompt returns, and the handle leaves on the next poll beat — again with no terminal
+  reflow. Log: `[ribbon] open sleep`, `[ribbon] cap ^C`.
 - [ ]
 
-### T11.8 — ^Z from the chord strip → suspended pill; fg resumes
-- **Steps**: `sleep 100⏎`; arm Ctrl, tap the chord strip's `Z`; wait a beat; tap the ribbon's
-  `fg` cap.
-- **Expect**: the shell shows `[1]+ Stopped`; within ~2s the ribbon swaps to the suspended
-  form — grey dot, `sleep · stopped`, caps `fg resume` · `bg run behind` · red `kill` — the
-  pill leaves immediately on the `fg` tap, `fg` is typed and run, and the running ribbon
-  (fresh timer) is back on the next beat. The ^Z watch works identically for Ctrl+Z typed on
-  the keyboard.
+### T11.8 — ^Z from the chord strip → grey handle; fg resumes
+- **Steps**: `sleep 100⏎`; arm Ctrl, tap the chord strip's `Z`; wait a beat; open the handle;
+  tap `fg resume`.
+- **Expect**: the shell shows `[1]+ Stopped`; within ~2s the handle swaps to grey (still, no
+  breath). The panel reads `sleep · stopped` with caps red `kill force` · `bg run behind` ·
+  `fg resume`. The `fg` tap closes the panel, types and runs `fg`, and the green running
+  handle (fresh timer) is back on the next beat. The ^Z watch works identically for Ctrl+Z
+  typed on the keyboard.
 - [ ]
 
-### T11.9 — vim: collapsed pill → expand → caps work from insert mode
-- **Steps**: `vim /tmp/t11.txt⏎`; press `i` and type a line (stay in insert mode); look at
-  the ribbon; tap the pill; tap `:w`; type more; tap the pill, tap `ZZ`. Re-open, dirty the
-  buffer, expand, tap the red `:q!`.
-- **Expect**: the ribbon arrives as a *collapsed* dot+label pill (mauve dot, `vim`, chevron)
-  — vim keeps its screen. Tap expands to `:w save` · `:q quit` · `ZZ save+quit` · red
-  `:q! force quit`. `:w` saves *from insert mode* (the Esc prefix does it — vim shows the
-  write message, and the file has the text). `ZZ` saves and quits back to the prompt; `:q!`
-  discards. Tapping the terminal with the ribbon expanded collapses it back to the pill.
+### T11.9 — Open and close are gestures too; vim caps work from insert mode
+- **Steps**: `vim /tmp/t11.txt⏎`; press `i` and type a line (stay in insert mode). Swipe the
+  mauve tab left; tap the terminal (panel closes); swipe the tab left again and swipe the
+  panel right; open once more and tap the stub at the panel's foot. Then open and tap `:w`;
+  type more; open, tap `ZZ`. Re-open vim, dirty the buffer, tap the red `:q!`.
+- **Expect**: vim keeps its full screen — the mauve tab floats over it, still (no breath).
+  All three closes work: terminal tap, panel swipe right, stub tap — and closing never
+  moves the terminal. Caps: `:q! discard` (red, top) · `:q quit` · `/ search` ·
+  `ZZ save+quit` · `:w save`. `:w` saves *from insert mode* (the Esc prefix does it); `ZZ`
+  saves and quits; `:q!` discards. Every cap tap closes the panel on its way out.
 - [ ]
 
 ### T11.10 — less: q, / raises the keyboard, g/G jump
-- **Steps**: `man ls⏎`; expand the ribbon; tap `G`, then `g`, then `/` (type `SYNOPSIS⏎`),
-  then `q`.
-- **Expect**: blue-dot pill collapsed on arrival; expanded caps `q quit` · `/ search` ·
-  `g top` · `G end`. `G` jumps to the end, `g` back to the top; `/` puts less's search prompt
-  up **and raises the keyboard** so the term can be typed; `q` exits and the ribbon leaves.
+- **Steps**: `man ls⏎`; open the blue handle; tap `G`, reopen and tap `g`, reopen and tap `/`
+  (type `SYNOPSIS⏎`), reopen and tap `q`.
+- **Expect**: caps `q quit` · `G end` · `g top` · `n next hit` · `/ search`. `G` jumps to the
+  end, `g` back to the top; `/` puts less's search prompt up **and raises the keyboard** so
+  the term can be typed; `q` exits and the handle leaves.
 - [ ]
 
-### T11.11 — htop: q, / filter, F9 kill
-- **Steps**: `htop⏎`; expand; tap `/`, type a name, Esc; tap `F9`; Esc; tap `q`.
-- **Expect**: yellow-dot pill collapsed on arrival; `/` opens htop's filter with the keyboard
-  raised; the red `F9` cap opens htop's SendSignal column (the `CSI 20~` byte string — this
-  is the cap that proves function keys); `q` exits.
+### T11.11 — htop: q, / filter, F6 sort, F9 kill
+- **Steps**: `htop⏎`; open the yellow handle; tap `/`, type a name, Esc; reopen, tap `F9`;
+  Esc; reopen, tap `F6`; Esc; reopen, tap `q`.
+- **Expect**: `/` opens htop's filter with the keyboard raised; the red `F9` cap opens htop's
+  SendSignal column and `F6` its sort column (`CSI 20~` / `CSI 17~` — the caps that prove
+  function keys); `q` exits.
 - [ ]
 
-### T11.12 — Agent ribbon: 📎 attaches, ⎋ interrupts
+### T11.12 — Agent panel: sections, slash commands, ⇧⇥, 📎, and the two-tap quit
 - **Setup**: `claude` (or any process whose `pane_current_command` is on the agent list)
   running in the pane.
-- **Steps**: tap 📎 attach; pick a photo; watch the cap and the ⋯ circle; when the path
-  appears, tap ⎋.
-- **Expect**: peach-dot ribbon, expanded on arrival (agents never collapse), caps
-  `📎 attach` · `⎋ interrupt`. The picker opens; during the send both the attach cap and the
-  ⋯ circle tint accent and go inert; then the remote path + one trailing space is typed at
-  the prompt — no Return (T8.16's flow, now driven from the cap). ⎋ sends a bare ESC and the
-  agent shows its interrupt. Log: `[ribbon] cap 📎`, `[upload] quick-attach typed …`.
+- **Steps**: open the peach handle (it breathes — agents are live); read the panel; tap
+  `/context`; reopen and tap `⇧⇥ plan mode`; reopen, tap `📎 attach`, pick a photo, watch;
+  reopen and tap the red `^C ^C quit` once, read it, tap it again.
+- **Expect**: the panel is sectioned SESSION / COMMANDS / NOW (small right-aligned headers).
+  `/context` types the command and presses Return — claude shows its context panel — and the
+  panel closes. `⇧⇥` cycles claude's plan mode. `📎` opens the picker; during the send the
+  ⋯ circle tints accent and goes inert; then the remote path + one trailing space is typed —
+  no Return (T8.16's flow). The first `^C ^C` tap sends one interrupt, keeps the panel open
+  and re-labels the cap `tap again` (stronger red ring; it disarms itself after ~3s); the
+  second tap sends the second interrupt, claude exits, the panel closes. Log:
+  `[ribbon] cap /context`, `[ribbon] cap ^C ^C`, `[upload] quick-attach typed …`.
 - [ ]
 
 ### T11.13 — The silences: idle shell, REPL, unknown TUI
 - **Steps**: sit at the prompt 5s; run `python3` and sit at `>>>` 5s; `exit()`; run an
   alt-screen app not on any list (e.g. `nano` or `nethack`) 5s.
-- **Expect**: no ribbon in any of the three — shell is idle, a REPL at its prompt is not a
+- **Expect**: no handle in any of the three — shell is idle, a REPL at its prompt is not a
   job, an unknown TUI gets no caps (§4.4). The `[tmux]` log shows the foreground changing,
   so the silence is a decision, not a missed poll.
 - [ ]
 
-### T11.14 — Swipe-down dismisses until the process changes
-- **Steps**: `sleep 100⏎`; when the ribbon appears, swipe down on the pill; wait 5s; ^C from
-  the chord strip; run `sleep 100⏎` again.
-- **Expect**: the pill leaves on the swipe (`[ribbon] dismissed sleep`) and stays gone while
-  *this* sleep runs — polls do not resurrect it. The second `sleep` is a new process
-  instance: the ribbon returns.
+### T11.14 — The handle rides the chrome and never touches the terminal
+- **Steps**: `sleep 100⏎`; raise and dismiss the keyboard; arm Ctrl (chord strip up);
+  disarm; open the panel with the keyboard up and pick `/` in a `man ls` window if handy.
+- **Expect**: the tab always sits just above the bar stack — it rides up with the keyboard
+  and the chord strip and back down, and the panel opens above whatever the chrome height is.
+  Through all of it the terminal's rows never rewrap (`[terminal] size` stays quiet except
+  for the keyboard's own refit — the handle itself contributes nothing).
 - [ ]
 
 ### T11.15 — Kill force: pgrep + kill -9, observable in the log
-- **Steps**: `sleep 100⏎`; tap the red `kill` cap; read the log and the terminal.
+- **Steps**: `sleep 100⏎`; open the handle; tap the red `kill force` cap; read the log and
+  the terminal.
 - **Expect**: the log shows `[ribbon] kill-force: pgrep -P <pane_pid> | xargs kill -9 …` and
   the `[ssh] exec` line for it — an exec channel, nothing typed into the PTY. The shell
-  prints `Killed`, the prompt returns, the ribbon leaves on the next beat. Same cap from the
-  suspended ribbon (T11.8's setup) kills the stopped job.
+  prints `Killed`, the prompt returns, the handle leaves on the next beat. Same cap from the
+  suspended handle (T11.8's setup) kills the stopped job.
 - [ ]
 
 ## T12 — Settings sheet + polish pass

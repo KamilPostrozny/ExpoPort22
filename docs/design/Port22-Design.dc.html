@@ -24,6 +24,9 @@ a{color:#1e66f5}a:hover{color:#0b57d0}
 .dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55);max-width:402px}
 .dv-opt:target .dv-oid{background:#2a78d6;color:#fff}
 .dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}
+@keyframes p22pulse{0%,100%{opacity:1}50%{opacity:.32}}
+@keyframes p22halo{0%{box-shadow:0 0 0 0 rgba(166,227,161,.5)}70%{box-shadow:0 0 0 10px rgba(166,227,161,0)}100%{box-shadow:0 0 0 0 rgba(166,227,161,0)}}
+@keyframes p22edge{0%,100%{opacity:.95;transform:scaleY(1)}50%{opacity:.4;transform:scaleY(.82)}}
 </style>
 </helmet>
 <section class="dv-turn" id="brief" style="background:#fff;">
@@ -32,9 +35,288 @@ a{color:#1e66f5}a:hover{color:#0b57d0}
     <div style="font:12px/1.65 system-ui;color:rgba(0,0,0,0.65);">
       <strong>Context read from the codebase:</strong> SPEC.md, KeyBarView.swift, TabsView.swift, ContentView.swift, Theme.swift. The app already has a precise system: Catppuccin four-flavour theming through semantic roles (accent=blue, panel=mantle, scrim=crust…), JetBrains&nbsp;Mono Nerd Font everywhere, iOS&nbsp;26 Liquid Glass bars whose geometry is measured off Safari (49pt circles, 35pt keys, 34pt edge margins), and a Safari-style zoom-into-card tab switcher over tmux windows.
       <br><strong>Assumptions:</strong> Catppuccin-first on both platforms — Android keeps the brand and swaps only nav/gesture patterns (gesture pill, predictive back, container-transform, flush surfaces per Material&nbsp;3 Expressive). Terminal screens shown in Mocha, setup in Latte (matching the repo screenshot); every colour is a theme role, never a one-off. Tabs are tmux windows driven over exec channels — nothing here invents client-side tabs.
-      <br><strong>Latest:</strong> <a class="dv-oid" href="#t6">6</a> adds the settings surface that was missing entirely — the ⋯ sheet keeps the mid-session controls and pushes a full view for host, identity, terminal, input, transfer and security, with drill-ins for keys, ribbon recipes and the key bar (<a class="dv-oid" href="#6d">6d</a> holds the rules, <a class="dv-oid" href="#6c">6c</a> the Material list). <a class="dv-oid" href="#t5">5</a> brings Android up to parity — Port22 keeps its own geometry and gives Material only the system layer (elevated containers instead of glass, docking bar, bottom-sheet clipboard, FAB switcher, predictive back, snackbar), with a full divergence list in <a class="dv-oid" href="#5d">5d</a> and a working Android prototype alongside the iOS one. <a class="dv-oid" href="#t4">4</a> makes the context ribbon recipe-driven — a per-process cap set (running, suspended, vim, pagers, htop, coding agents), TUI recipes arriving collapsed as a process pill — and splits upload into a silent SFTP destination browser (⋯ menu) versus the agent ribbon's Attach cap, the only path that still types into the terminal. <a class="dv-oid" href="#t3">3</a> refines the bar — Liquid Glass overflow menu, four keys (Ctrl · Esc · Tab · Paste), and the arrows cluster. <a class="dv-oid" href="#t2">2</a> explores your picks — chord builder, clipboard slots, context ribbon, switcher upgrades, bar-swipe tab switching, and the Android pair. An interactive prototype with the live animations is the next deliverable.
+      <br><strong>Latest:</strong> <a class="dv-oid" href="#t8">8</a> builds the edge handle into both prototypes and writes the Claude Code recipe — ⎋, plan mode, attach, six one-tap slash commands, and an arming double-^C quit — plus the ten-app catalogue in <a class="dv-oid" href="#8b">8b</a> and the rule for what earns a cap. <a class="dv-oid" href="#t7">7</a> rebuilds the context ribbon around the complaint that it eats a row and never earns it: three ways to get to zero vertical cost — a pulsing puck in the key bar (<a class="dv-oid" href="#7a">7a</a>), a breathing edge handle (<a class="dv-oid" href="#7b">7b</a>), and the key strip becoming the ribbon outright (<a class="dv-oid" href="#7c">7c</a>) — plus one cap shape for every action and the cost table in <a class="dv-oid" href="#7d">7d</a>. The collapsed state is deleted. <a class="dv-oid" href="#t6">6</a> adds the settings surface that was missing entirely — the ⋯ sheet keeps the mid-session controls and pushes a full view for host, identity, terminal, input, transfer and security, with drill-ins for keys, ribbon recipes and the key bar (<a class="dv-oid" href="#6d">6d</a> holds the rules, <a class="dv-oid" href="#6c">6c</a> the Material list). <a class="dv-oid" href="#t5">5</a> brings Android up to parity — Port22 keeps its own geometry and gives Material only the system layer (elevated containers instead of glass, docking bar, bottom-sheet clipboard, FAB switcher, predictive back, snackbar), with a full divergence list in <a class="dv-oid" href="#5d">5d</a> and a working Android prototype alongside the iOS one. <a class="dv-oid" href="#t4">4</a> makes the context ribbon recipe-driven — a per-process cap set (running, suspended, vim, pagers, htop, coding agents), TUI recipes arriving collapsed as a process pill — and splits upload into a silent SFTP destination browser (⋯ menu) versus the agent ribbon's Attach cap, the only path that still types into the terminal. <a class="dv-oid" href="#t3">3</a> refines the bar — Liquid Glass overflow menu, four keys (Ctrl · Esc · Tab · Paste), and the arrows cluster. <a class="dv-oid" href="#t2">2</a> explores your picks — chord builder, clipboard slots, context ribbon, switcher upgrades, bar-swipe tab switching, and the Android pair. An interactive prototype with the live animations is the next deliverable.
     </div>
   </div>
+</section>
+<section class="dv-turn" id="t8">
+<div class="dv-thd"><a class="dv-tid" href="#t8">8</a><span class="dv-tname">Edge handle, built — Claude Code first</span></div>
+<div class="dv-opts">
+
+  <div class="dv-opt" id="8a">
+    <div class="dv-olabel"><a class="dv-oid" href="#8a">8a</a><strong>Live in both prototypes.</strong> <a class="dv-oid" href="#7b">7b</a> won, so the ribbon row is gone from iOS and Android: no collapsed state, no swipe-to-dismiss setting, no reserved height. A 5px handle in the process colour breathes on the right edge at thumb height; tap or swipe it left to open, and the panel floats over output — the terminal never reflows. It closes on a cap tap, a terminal tap, a swipe right, or leaving the window. Open the <strong>claude</strong> window in the iOS prototype to try it; the slash caps print real command output into the scrollback.</div>
+    <div style="width:402px;border-radius:14px;background:#1e1e2e;padding:18px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box;">
+      <div style="font:600 10px system-ui;color:#6c7086;letter-spacing:0.6px;">CLAUDE CODE — THE STACK, BOTTOM UP</div>
+      <div style="font:11.5px/1.55 system-ui;color:#a6adc8;">No panel container: the caps float as individual pills in a right-aligned vertical column, exactly as <a class="dv-oid" href="#7b">7b</a> drew them, with the handle sliver still at the foot of the stack. Because proximity to the thumb is the ranking, the column reads <strong>bottom-up</strong> — the most urgent action sits lowest, destructive caps sit highest, and every recipe follows the same rule.</div>
+      <div style="display:flex;flex-direction:column;gap:9px;font:11.5px/1.55 system-ui;color:#a6adc8;">
+        <div><span style="font:500 12px 'JBMono';color:#cdd6f4;">NOW</span> (bottom) — <span style="color:#cdd6f4;">⎋ stop</span> interrupts the current turn, <span style="color:#cdd6f4;">⇧⇥ plan mode</span> cycles the accept-edits modes, <span style="color:#cdd6f4;">attach</span> uploads from the phone and inserts the path. The three things you reach for mid-turn, first because they're time-critical.</div>
+        <div><span style="font:500 12px 'JBMono';color:#cdd6f4;">COMMANDS</span> — <span style="color:#cdd6f4;">/plugins · /config · /usage · /model · /context · /clear</span>. Each types the command and presses return in one tap; these are the ones that are pure navigation, where typing a slash on a phone keyboard is the whole cost. No label under them — the command IS the label.</div>
+        <div><span style="font:500 12px 'JBMono';color:#cdd6f4;">SESSION</span> (top) — <span style="color:#f38ba8;">^C ^C quit</span>, the one destructive cap, so it sits farthest from the thumb and alone. First tap prints <span style="font:11px 'JBMono';">(^C again to exit)</span> and the cap re-reads <span style="color:#f38ba8;">tap again</span>; it disarms itself after ~3s. Double-^C is the app's own contract, so the cap mirrors it rather than hiding it.</div>
+        <div>Group headers are 9.5px, right-aligned, unpilled, and carry a shadow so they stay legible straight over output; they only appear when a recipe has more than about five caps — vim and htop stay a flat stack. Caps grew to 40px (44 on Android) now that they're free-floating targets rather than items inside a padded box, and the column scrolls if a recipe outgrows the space above the keyboard.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dv-opt" id="8b">
+    <div class="dv-olabel"><a class="dv-oid" href="#8b">8b</a><strong>Which apps get a handle.</strong> The test for a cap: a keystroke that is <em>hard to type on a phone</em> (modifier chords, slashes, backslashes, function keys) and <em>consequential</em> — not a shortcut you already have a key for. Ten recipes ship in Settings → Input → Edge handle, each toggleable; unknown processes get no handle at all rather than a guessed one.</div>
+    <div style="width:402px;border-radius:14px;background:#1e1e2e;padding:18px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;height:7px;"></span><span style="font:600 9.5px system-ui;color:#6c7086;letter-spacing:0.6px;">CAPS</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#a6e3a1;">run</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">^C stop · ^Z bg · kill</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#6c7086;">susp</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">fg · bg · kill</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#fab387;">claude</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">⎋ · ⇧⇥ · attach · /plugins /config /usage /model /context /clear · ^C ^C</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#cba6f7;">vim</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">:w · ZZ · / · :q · :q!</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#89b4fa;">pager</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">/ · n · g · G · q</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#94e2d5;">htop</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">/ filter · F6 sort · q · F9 kill</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#f9e2af;">vite</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">r restart · o open · c clear · q quit</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#f5c2e7;">psql</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">\dt · \d+ · \x expanded · \q</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#89dceb;">repl</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">^L clear · ^D EOF · exit()</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline;"><span style="width:64px;flex:none;font:500 11.5px 'JBMono';color:#f38ba8;">git</span><span style="font:11.5px/1.45 'JBMono';color:#a6adc8;flex:1;">rebase --continue · --abort · :wq</span></div>
+      </div>
+      <div style="height:0.5px;background:rgba(205,214,244,0.12);margin:2px 0;"></div>
+      <div style="font:11.5px/1.55 system-ui;color:#6c7086;">Deliberately excluded: fzf and tmux copy-mode (arrow cluster already covers them), ssh prompts (nothing consequential to tap), and anything needing more than eight caps — a recipe that long is a menu, not a handle. <span style="color:#a6adc8;">git ships off by default</span>: it only appears during a rebase or a commit message, where vim's recipe usually applies anyway.</div>
+    </div>
+  </div>
+
+</div>
+<p class="dv-next">Handle side is a Settings row but still fixed to the right — say the word and I'll make left-handed mode real. Also open: whether <span style="font:11px 'JBMono';">/usage</span> and <span style="font:11px 'JBMono';">/context</span> should render as native sheets instead of scrollback text.</p>
+</section>
+<section class="dv-turn" id="t7">
+<div class="dv-thd"><a class="dv-tid" href="#t7">7</a><span class="dv-tname">Ribbon, reconsidered — the row goes away</span></div>
+<div class="dv-opts">
+
+  <div class="dv-opt" id="7a">
+    <div class="dv-olabel"><a class="dv-oid" href="#7a">7a</a><strong>Signal puck.</strong> The ribbon stops being a row. A pulsing process dot is pinned to the leading edge of the key bar — inside the same glass, 28px, never scrolls away, costs zero vertical pixels. Tap it and the caps rise <em>over</em> the terminal as a floating panel; the terminal never resizes, so nothing reflows mid-run. Tap anywhere, or ✕, to put it away.</div>
+    <div style="display:flex;gap:20px;align-items:flex-start;">
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" keyboard="{{ true }}" hint-size="402,874">
+        <div style="height:100%;display:flex;flex-direction:column;background:#1e1e2e;">
+          <div style="height:58px;flex:none;"></div>
+          <div style="flex:1;overflow:hidden;padding:4px 16px;font:13px/17px 'JBMono',monospace;color:#cdd6f4;display:flex;flex-direction:column;justify-content:flex-end;">
+            <div><span style="color:#a6e3a1;">❯</span> cargo build --release</div>
+            <div style="color:#a6adc8;">   Compiling tokio v1.47.0</div>
+            <div style="color:#a6adc8;">   Compiling citadel-ssh v0.9.2</div>
+            <div style="color:#a6adc8;">   Compiling port22-agent v0.3.1</div>
+            <div><span style="color:#f9e2af;">   Building</span> [=========&gt;                    ] 214/612</div>
+          </div>
+          <div style="flex:none;display:flex;align-items:center;gap:7px;padding:5px 24px 6px;">
+            <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <svg width="22" height="6" viewBox="0 0 22 6"><circle cx="3" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="11" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="19" cy="3" r="2.4" fill="#cdd6f4"></circle></svg>
+            </div>
+            <div style="flex:1;height:49px;border-radius:25px;display:flex;align-items:center;gap:5px;padding:0 7px 0 5px;overflow:hidden;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <div style="width:28px;height:28px;border-radius:15px;flex:none;display:flex;align-items:center;justify-content:center;background:rgba(166,227,161,0.14);animation:p22halo 2s ease-out infinite;">
+                <span style="width:8px;height:8px;border-radius:5px;background:#a6e3a1;animation:p22pulse 1.6s ease-in-out infinite;"></span>
+              </div>
+              <div style="flex:1;min-width:0;display:flex;align-items:center;gap:3px;overflow:hidden;">
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Ctrl</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Esc</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Tab</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Paste</div>
+              </div>
+              <div style="width:1px;height:27px;background:#6c7086;flex:none;"></div>
+              <div style="height:35px;width:35px;flex:none;border-radius:18px;display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 3a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 13 3v4h4a1.5 1.5 0 0 1 1.5 1.5v3A1.5 1.5 0 0 1 17 13h-4v4a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 7 17v-4H3a1.5 1.5 0 0 1-1.5-1.5v-3A1.5 1.5 0 0 1 3 7h4V3z" fill="none" stroke="#cdd6f4" stroke-width="1.4" stroke-linejoin="round"></path></svg></div>
+            </div>
+            <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;position:relative;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <svg width="22" height="22" viewBox="0 0 22 22"><rect x="1.5" y="1.5" width="13" height="13" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="none"></rect><rect x="7" y="7" width="13.5" height="13.5" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="#2a2b3c"></rect></svg>
+              <span style="position:absolute;font:600 10px system-ui;color:#cdd6f4;transform:translate(3px,3px);">1</span>
+            </div>
+          </div>
+        </div>
+      </x-import>
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" keyboard="{{ true }}" hint-size="402,874">
+        <div style="height:100%;display:flex;flex-direction:column;background:#1e1e2e;position:relative;">
+          <div style="height:58px;flex:none;"></div>
+          <div style="flex:1;overflow:hidden;padding:4px 16px;font:13px/17px 'JBMono',monospace;color:#cdd6f4;display:flex;flex-direction:column;justify-content:flex-end;">
+            <div><span style="color:#a6e3a1;">❯</span> cargo build --release</div>
+            <div style="color:#a6adc8;">   Compiling tokio v1.47.0</div>
+            <div style="color:#a6adc8;">   Compiling citadel-ssh v0.9.2</div>
+            <div style="color:#a6adc8;">   Compiling port22-agent v0.3.1</div>
+            <div><span style="color:#f9e2af;">   Building</span> [=========&gt;                    ] 214/612</div>
+          </div>
+          <div style="position:absolute;left:24px;right:24px;bottom:66px;display:flex;flex-direction:column;gap:9px;border-radius:22px;padding:11px 12px 12px;box-sizing:border-box;backdrop-filter:blur(20px) saturate(170%);background:rgba(205,214,244,0.1);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.14),0 14px 34px rgba(0,0,0,0.45);border:0.5px solid rgba(255,255,255,0.14);">
+            <div style="display:flex;align-items:center;gap:7px;padding:0 3px;">
+              <span style="width:8px;height:8px;border-radius:5px;background:#a6e3a1;flex:none;"></span>
+              <span style="font:11px 'JBMono';color:#a6adc8;flex:1;">cargo&nbsp;·&nbsp;2:14</span>
+              <svg width="12" height="12" viewBox="0 0 13 13"><path d="M2 2l9 9M11 2l-9 9" stroke="#6c7086" stroke-width="1.6" stroke-linecap="round"></path></svg>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <div style="height:35px;border-radius:18px;padding:0 12px;display:flex;align-items:center;gap:7px;background:rgba(205,214,244,0.1);"><span style="font:500 14px 'JBMono';color:#cdd6f4;">^C</span><span style="font:12px system-ui;color:#a6adc8;">stop</span></div>
+              <div style="height:35px;border-radius:18px;padding:0 12px;display:flex;align-items:center;gap:7px;background:rgba(205,214,244,0.1);"><span style="font:500 14px 'JBMono';color:#cdd6f4;">^Z bg</span><span style="font:12px system-ui;color:#a6adc8;">background</span></div>
+              <div style="height:35px;border-radius:18px;padding:0 12px;display:flex;align-items:center;gap:7px;background:rgba(243,139,168,0.12);"><span style="font:500 14px 'JBMono';color:#f38ba8;">kill</span><span style="font:12px system-ui;color:#f38ba8;">force</span></div>
+            </div>
+          </div>
+          <div style="flex:none;display:flex;align-items:center;gap:7px;padding:5px 24px 6px;">
+            <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <svg width="22" height="6" viewBox="0 0 22 6"><circle cx="3" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="11" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="19" cy="3" r="2.4" fill="#cdd6f4"></circle></svg>
+            </div>
+            <div style="flex:1;height:49px;border-radius:25px;display:flex;align-items:center;gap:5px;padding:0 7px 0 5px;overflow:hidden;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <div style="width:28px;height:28px;border-radius:15px;flex:none;display:flex;align-items:center;justify-content:center;background:rgba(166,227,161,0.22);border:0.5px solid rgba(166,227,161,0.45);">
+                <span style="width:8px;height:8px;border-radius:5px;background:#a6e3a1;"></span>
+              </div>
+              <div style="flex:1;min-width:0;display:flex;align-items:center;gap:3px;overflow:hidden;">
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Ctrl</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Esc</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Tab</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Paste</div>
+              </div>
+              <div style="width:1px;height:27px;background:#6c7086;flex:none;"></div>
+              <div style="height:35px;width:35px;flex:none;border-radius:18px;display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 3a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 13 3v4h4a1.5 1.5 0 0 1 1.5 1.5v3A1.5 1.5 0 0 1 17 13h-4v4a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 7 17v-4H3a1.5 1.5 0 0 1-1.5-1.5v-3A1.5 1.5 0 0 1 3 7h4V3z" fill="none" stroke="#cdd6f4" stroke-width="1.4" stroke-linejoin="round"></path></svg></div>
+            </div>
+            <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;position:relative;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <svg width="22" height="22" viewBox="0 0 22 22"><rect x="1.5" y="1.5" width="13" height="13" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="none"></rect><rect x="7" y="7" width="13.5" height="13.5" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="#2a2b3c"></rect></svg>
+              <span style="position:absolute;font:600 10px system-ui;color:#cdd6f4;transform:translate(3px,3px);">1</span>
+            </div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+  </div>
+
+  <div class="dv-opt" id="7b">
+    <div class="dv-olabel"><a class="dv-oid" href="#7b">7b</a><strong>Edge handle.</strong> Nothing enters the chrome at all — a 5px process-coloured tab breathes on the right edge at thumb height, over the terminal's dead margin. Tap or swipe it left and the caps fan out as a right-anchored column: the largest targets of the three approaches, reachable without crossing the screen. Swipe right, or tap the terminal, and it goes back to a sliver.</div>
+    <div style="display:flex;gap:20px;align-items:flex-start;">
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" keyboard="{{ true }}" hint-size="402,874">
+        <div style="height:100%;display:flex;flex-direction:column;background:#1e1e2e;position:relative;">
+          <div style="height:58px;flex:none;"></div>
+          <div style="flex:1;overflow:hidden;padding:4px 16px;font:13px/17px 'JBMono',monospace;color:#cdd6f4;display:flex;flex-direction:column;justify-content:flex-end;">
+            <div><span style="color:#a6e3a1;">❯</span> cargo build --release</div>
+            <div style="color:#a6adc8;">   Compiling tokio v1.47.0</div>
+            <div style="color:#a6adc8;">   Compiling citadel-ssh v0.9.2</div>
+            <div style="color:#a6adc8;">   Compiling port22-agent v0.3.1</div>
+            <div><span style="color:#f9e2af;">   Building</span> [=========&gt;                    ] 214/612</div>
+          </div>
+          <div style="position:absolute;right:0;bottom:150px;width:5px;height:46px;border-radius:4px 0 0 4px;background:#a6e3a1;animation:p22edge 1.9s ease-in-out infinite;"></div>
+          <div style="flex:none;display:flex;align-items:center;gap:7px;padding:5px 24px 6px;">
+            <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <svg width="22" height="6" viewBox="0 0 22 6"><circle cx="3" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="11" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="19" cy="3" r="2.4" fill="#cdd6f4"></circle></svg>
+            </div>
+            <div style="flex:1;height:49px;border-radius:25px;display:flex;align-items:center;gap:4px;padding:0 7px;overflow:hidden;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <div style="flex:1;min-width:0;display:flex;align-items:center;gap:3px;overflow:hidden;">
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Ctrl</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Esc</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Tab</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Paste</div>
+              </div>
+              <div style="width:1px;height:27px;background:#6c7086;flex:none;"></div>
+              <div style="height:35px;width:35px;flex:none;border-radius:18px;display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 3a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 13 3v4h4a1.5 1.5 0 0 1 1.5 1.5v3A1.5 1.5 0 0 1 17 13h-4v4a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 7 17v-4H3a1.5 1.5 0 0 1-1.5-1.5v-3A1.5 1.5 0 0 1 3 7h4V3z" fill="none" stroke="#cdd6f4" stroke-width="1.4" stroke-linejoin="round"></path></svg></div>
+            </div>
+            <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;position:relative;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <svg width="22" height="22" viewBox="0 0 22 22"><rect x="1.5" y="1.5" width="13" height="13" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="none"></rect><rect x="7" y="7" width="13.5" height="13.5" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="#2a2b3c"></rect></svg>
+              <span style="position:absolute;font:600 10px system-ui;color:#cdd6f4;transform:translate(3px,3px);">1</span>
+            </div>
+          </div>
+        </div>
+      </x-import>
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" keyboard="{{ true }}" hint-size="402,874">
+        <div style="height:100%;display:flex;flex-direction:column;background:#1e1e2e;position:relative;">
+          <div style="height:58px;flex:none;"></div>
+          <div style="flex:1;overflow:hidden;padding:4px 16px;font:13px/17px 'JBMono',monospace;color:#cdd6f4;display:flex;flex-direction:column;justify-content:flex-end;">
+            <div><span style="color:#a6e3a1;">❯</span> cargo build --release</div>
+            <div style="color:#a6adc8;">   Compiling tokio v1.47.0</div>
+            <div style="color:#a6adc8;">   Compiling citadel-ssh v0.9.2</div>
+            <div style="color:#a6adc8;">   Compiling port22-agent v0.3.1</div>
+            <div><span style="color:#f9e2af;">   Building</span> [=========&gt;                    ] 214/612</div>
+          </div>
+          <div style="position:absolute;right:14px;bottom:70px;display:flex;flex-direction:column;align-items:flex-end;gap:7px;">
+            <div style="display:flex;align-items:center;gap:7px;padding:0 8px 1px 0;">
+              <span style="width:7px;height:7px;border-radius:4px;background:#a6e3a1;flex:none;"></span>
+              <span style="font:11px 'JBMono';color:#a6adc8;">cargo&nbsp;·&nbsp;2:14</span>
+            </div>
+            <div style="height:40px;border-radius:21px;padding:0 15px;display:flex;align-items:center;gap:8px;backdrop-filter:blur(18px) saturate(170%);background:rgba(205,214,244,0.11);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.14),0 10px 26px rgba(0,0,0,0.4);border:0.5px solid rgba(255,255,255,0.14);"><span style="font:500 14px 'JBMono';color:#cdd6f4;">^C</span><span style="font:12.5px system-ui;color:#a6adc8;">stop</span></div>
+            <div style="height:40px;border-radius:21px;padding:0 15px;display:flex;align-items:center;gap:8px;backdrop-filter:blur(18px) saturate(170%);background:rgba(205,214,244,0.11);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.14),0 10px 26px rgba(0,0,0,0.4);border:0.5px solid rgba(255,255,255,0.14);"><span style="font:500 14px 'JBMono';color:#cdd6f4;">^Z bg</span><span style="font:12.5px system-ui;color:#a6adc8;">background</span></div>
+            <div style="height:40px;border-radius:21px;padding:0 15px;display:flex;align-items:center;gap:8px;backdrop-filter:blur(18px) saturate(170%);background:rgba(243,139,168,0.14);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.1),0 10px 26px rgba(0,0,0,0.4);border:0.5px solid rgba(243,139,168,0.4);"><span style="font:500 14px 'JBMono';color:#f38ba8;">kill</span><span style="font:12.5px system-ui;color:#f38ba8;">force</span></div>
+            <div style="width:5px;height:46px;border-radius:4px;background:#a6e3a1;margin:2px 4px 0 0;"></div>
+          </div>
+          <div style="flex:none;display:flex;align-items:center;gap:7px;padding:5px 24px 6px;">
+            <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <svg width="22" height="6" viewBox="0 0 22 6"><circle cx="3" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="11" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="19" cy="3" r="2.4" fill="#cdd6f4"></circle></svg>
+            </div>
+            <div style="flex:1;height:49px;border-radius:25px;display:flex;align-items:center;gap:4px;padding:0 7px;overflow:hidden;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <div style="flex:1;min-width:0;display:flex;align-items:center;gap:3px;overflow:hidden;">
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Ctrl</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Esc</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Tab</div>
+                <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;">Paste</div>
+              </div>
+              <div style="width:1px;height:27px;background:#6c7086;flex:none;"></div>
+              <div style="height:35px;width:35px;flex:none;border-radius:18px;display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 3a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 13 3v4h4a1.5 1.5 0 0 1 1.5 1.5v3A1.5 1.5 0 0 1 17 13h-4v4a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 7 17v-4H3a1.5 1.5 0 0 1-1.5-1.5v-3A1.5 1.5 0 0 1 3 7h4V3z" fill="none" stroke="#cdd6f4" stroke-width="1.4" stroke-linejoin="round"></path></svg></div>
+            </div>
+            <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;position:relative;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+              <svg width="22" height="22" viewBox="0 0 22 22"><rect x="1.5" y="1.5" width="13" height="13" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="none"></rect><rect x="7" y="7" width="13.5" height="13.5" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="#2a2b3c"></rect></svg>
+              <span style="position:absolute;font:600 10px system-ui;color:#cdd6f4;transform:translate(3px,3px);">1</span>
+            </div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+  </div>
+
+  <div class="dv-opt" id="7c">
+    <div class="dv-olabel"><a class="dv-oid" href="#7c">7c</a><strong>Takeover.</strong> No second surface exists — while a process holds the foreground, the key strip <em>is</em> the ribbon: process badge pinned left, caps in the scroll track, system keys scrolled just off the right edge (visible as a hint, one flick away). Costs nothing, needs no tap to reveal, and the caps sit exactly where the thumb already works. The trade: Ctrl/Esc/Tab move one gesture further while something runs.</div>
+    <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" keyboard="{{ true }}" hint-size="402,874">
+      <div style="height:100%;display:flex;flex-direction:column;background:#1e1e2e;">
+        <div style="height:58px;flex:none;"></div>
+        <div style="flex:1;overflow:hidden;padding:4px 16px;font:13px/17px 'JBMono',monospace;color:#cdd6f4;display:flex;flex-direction:column;justify-content:flex-end;">
+          <div><span style="color:#a6e3a1;">❯</span> cargo build --release</div>
+          <div style="color:#a6adc8;">   Compiling tokio v1.47.0</div>
+          <div style="color:#a6adc8;">   Compiling citadel-ssh v0.9.2</div>
+          <div style="color:#a6adc8;">   Compiling port22-agent v0.3.1</div>
+          <div style="color:#a6adc8;">   Compiling port22-ui v0.3.1</div>
+          <div><span style="color:#f9e2af;">   Building</span> [=========&gt;                    ] 214/612</div>
+        </div>
+        <div style="flex:none;display:flex;align-items:center;gap:7px;padding:5px 24px 6px;">
+          <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+            <svg width="22" height="6" viewBox="0 0 22 6"><circle cx="3" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="11" cy="3" r="2.4" fill="#cdd6f4"></circle><circle cx="19" cy="3" r="2.4" fill="#cdd6f4"></circle></svg>
+          </div>
+          <div style="flex:1;height:49px;border-radius:25px;display:flex;align-items:center;gap:6px;padding:0 4px 0 9px;overflow:hidden;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+            <span style="width:8px;height:8px;border-radius:5px;background:#a6e3a1;flex:none;animation:p22pulse 1.6s ease-in-out infinite;"></span>
+            <div style="flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden;">
+              <div style="height:35px;border-radius:18px;padding:0 11px;flex:none;display:flex;align-items:center;gap:7px;background:rgba(205,214,244,0.1);"><span style="font:500 14px 'JBMono';color:#cdd6f4;">^C</span><span style="font:12px system-ui;color:#a6adc8;">stop</span></div>
+              <div style="height:35px;border-radius:18px;padding:0 11px;flex:none;display:flex;align-items:center;gap:7px;background:rgba(205,214,244,0.1);"><span style="font:500 14px 'JBMono';color:#cdd6f4;">^Z bg</span><span style="font:12px system-ui;color:#a6adc8;">background</span></div>
+              <div style="height:35px;border-radius:18px;padding:0 11px;flex:none;display:flex;align-items:center;gap:7px;background:rgba(243,139,168,0.12);"><span style="font:500 14px 'JBMono';color:#f38ba8;">kill</span><span style="font:12px system-ui;color:#f38ba8;">force</span></div>
+              <div style="height:35px;padding:0 5px;border-radius:18px;display:flex;align-items:center;flex:none;font:500 14px 'JBMono';color:#cdd6f4;opacity:0.4;">Ctrl</div>
+            </div>
+          </div>
+          <div style="width:49px;height:49px;border-radius:25px;flex:none;display:flex;align-items:center;justify-content:center;position:relative;backdrop-filter:blur(14px) saturate(160%);background:rgba(205,214,244,0.08);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid rgba(255,255,255,0.12);">
+            <svg width="22" height="22" viewBox="0 0 22 22"><rect x="1.5" y="1.5" width="13" height="13" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="none"></rect><rect x="7" y="7" width="13.5" height="13.5" rx="3" stroke="#cdd6f4" stroke-width="1.7" fill="#2a2b3c"></rect></svg>
+            <span style="position:absolute;font:600 10px system-ui;color:#cdd6f4;transform:translate(3px,3px);">1</span>
+          </div>
+        </div>
+      </div>
+    </x-import>
+  </div>
+
+  <div class="dv-opt" id="7d">
+    <div class="dv-olabel"><a class="dv-oid" href="#7d">7d</a>One cap shape for everything, and what each approach costs.</div>
+    <div style="width:402px;border-radius:14px;background:#1e1e2e;padding:18px;display:flex;flex-direction:column;gap:16px;box-sizing:border-box;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="font:600 10px system-ui;color:#6c7086;letter-spacing:0.6px;">ONE CAP, THREE INKS — 35px tall, glyph then label, always in a row</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          <div style="height:35px;border-radius:18px;padding:0 12px;display:flex;align-items:center;gap:7px;background:rgba(205,214,244,0.1);"><span style="font:500 14px 'JBMono';color:#cdd6f4;">:w</span><span style="font:12px system-ui;color:#a6adc8;">save</span></div>
+          <div style="height:35px;border-radius:18px;padding:0 12px;display:flex;align-items:center;gap:7px;background:rgba(205,214,244,0.1);"><svg width="12" height="13" viewBox="0 0 13 15" style="flex:none;"><path d="M9.4 4.2L4.9 8.7a1.9 1.9 0 002.7 2.7l4.4-4.4a3.4 3.4 0 00-4.8-4.8L2.4 6.9a4.9 4.9 0 006.9 6.9l4-4" fill="none" stroke="#cdd6f4" stroke-width="1.4" stroke-linecap="round"></path></svg><span style="font:12px system-ui;color:#a6adc8;">attach</span></div>
+          <div style="height:35px;border-radius:18px;padding:0 12px;display:flex;align-items:center;gap:7px;background:rgba(243,139,168,0.12);"><span style="font:500 14px 'JBMono';color:#f38ba8;">:q!</span><span style="font:12px system-ui;color:#f38ba8;">force quit</span></div>
+        </div>
+        <div style="font:11.5px/1.55 system-ui;color:#6c7086;">The old ribbon mixed two cap builds — 52px stacked columns with 8.5px labels for keystrokes, and wider inline rows with 12.5px labels for icons and agent actions — so the same surface had two type scales and two silhouettes. Now: glyph (mono 14px, or a 12px icon) then label (12px system, sub ink), padding 0&nbsp;12, radius 18, height 35 — identical to a key-bar key. Danger changes ink and fill tint only, never shape, and stays rightmost. No borders except on danger.</div>
+      </div>
+      <div style="height:0.5px;background:rgba(205,214,244,0.12);"></div>
+      <div style="display:flex;flex-direction:column;gap:9px;font:11.5px/1.5 system-ui;color:#a6adc8;">
+        <div style="font:600 10px system-ui;color:#6c7086;letter-spacing:0.6px;">VERTICAL COST, KEYBOARD UP</div>
+        <div style="display:flex;align-items:baseline;gap:8px;"><span style="font:500 12px 'JBMono';color:#f38ba8;width:74px;flex:none;">today</span><span>44–56px of the 214px of visible terminal — collapsed saves 12px, which is why it never felt like a state.</span></div>
+        <div style="display:flex;align-items:baseline;gap:8px;"><span style="font:500 12px 'JBMono';color:#a6e3a1;width:74px;flex:none;">7a puck</span><span>0px. Panel floats over output only while open.</span></div>
+        <div style="display:flex;align-items:baseline;gap:8px;"><span style="font:500 12px 'JBMono';color:#a6e3a1;width:74px;flex:none;">7b handle</span><span>0px, and no horizontal cost in the bar either.</span></div>
+        <div style="display:flex;align-items:baseline;gap:8px;"><span style="font:500 12px 'JBMono';color:#a6e3a1;width:74px;flex:none;">7c takeover</span><span>0px, no reveal tap — pays in displaced system keys.</span></div>
+      </div>
+      <div style="height:0.5px;background:rgba(205,214,244,0.12);"></div>
+      <div style="display:flex;flex-direction:column;gap:9px;font:11.5px/1.55 system-ui;color:#a6adc8;">
+        <div><span style="color:#cdd6f4;font-weight:600;">The dot is the whole notification.</span> Same six-colour process scale as before, pulsing only while a job actually runs. It is the only always-on pixel the ribbon gets — presence without a row.</div>
+        <div><span style="color:#cdd6f4;font-weight:600;">Collapsed state is deleted.</span> There are two states now, closed and open, and TUI recipes are no longer special-cased — everything arrives closed.</div>
+        <div><span style="color:#cdd6f4;font-weight:600;">Open is transient.</span> It closes on any cap tap, on a terminal tap, and on process exit. Nothing to dismiss permanently, so the swipe-to-dismiss setting and the "returns when the process changes" rule both go away.</div>
+        <div><span style="color:#cdd6f4;font-weight:600;">Attach keeps its progress track</span> — same cap shape, filled left-to-right, ✕ cancels. In <a class="dv-oid" href="#7a">7a</a> and <a class="dv-oid" href="#7b">7b</a> it holds the panel open until done.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<p class="dv-next">Pick one and I'll put it in both prototypes: <a class="dv-oid" href="#7a">7a</a> is the safest read, <a class="dv-oid" href="#7b">7b</a> the most thumb-friendly, <a class="dv-oid" href="#7c">7c</a> the most economical. Try next: "build 7a into the iOS prototype" · "combine 7c with the 7a panel for the full set".</p>
 </section>
 <section class="dv-turn" id="t6">
 <div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">Settings — the quick sheet keeps its job, a real surface takes the rest</span></div>
@@ -1154,3 +1436,4 @@ a{color:#1e66f5}a:hover{color:#0b57d0}
 </x-dc>
 </body>
 </html>
+

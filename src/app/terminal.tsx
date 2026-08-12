@@ -48,17 +48,16 @@ import KeyBar, {
   TabsHintPopover,
   type BarPopover,
 } from '@/keybar';
-import Ribbon, { RIBBON_PAD_TOP } from '@/ribbon';
+import { RibbonHandle, RibbonPanel } from '@/ribbon';
 import {
   RIBBON_IDLE,
   killCommand,
-  ribbonDismiss,
   ribbonPoll,
   ribbonResumed,
   ribbonSent,
   selectRecipe,
 } from '@/ribbon-model';
-import { RECIPES, type Cap } from '@/ribbon-recipes';
+import { type Cap } from '@/ribbon-recipes';
 import type { ModeSignal } from '@/scroll-model';
 import {
   answerHostKey,
@@ -419,11 +418,7 @@ export default function SessionScreen() {
   const PHASE_WATCHDOG_MS = 1500;
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
-  /** How many frames a chrome-changing select gives the refit to be reported before flying
-   *  anyway. That is a layout pass and a bridge hop — a frame or two — not a roundtrip; this is
-   *  the wedge guard for a webview that never answers, not the expected path. */
-  const ZOOM_REFIT_CAP_FRAMES = 8;
-  /** And the guard for a redraw that never comes at all: ~1–2s of frames, an order of magnitude
+  /** The guard for a redraw that never comes at all: ~1–2s of frames, an order of magnitude
    *  past the ~50ms roundtrip the trace measured, so it never shapes how a switch feels. */
   const ZOOM_WEDGE_FRAMES = 120;
 
@@ -692,7 +687,7 @@ export default function SessionScreen() {
     // finger and the motion (~250ms, against the redraw's ~50). `springBack` goes solid on its
     // first frame instead, so there is no dissolve to match and nothing to wait for; the card is
     // one frame of cut behind the live pane rather than a tenth of a second of double exposure.
-    afterHostRedraw(dataSeq.current, (recipe !== null) === IDLE_SHELLS.has(win.command), () => {
+    afterHostRedraw(dataSeq.current, () => {
       if (swRef.current === 'open') closeTo(pos);
     });
   };
@@ -712,38 +707,22 @@ export default function SessionScreen() {
    * its slide, by which time the redraw has usually already landed, and a watch that started
    * counting now would wait for a byte an idle shell never sends.
    *
-   * Where a ribbon appears or leaves, the refit has to go out first so that redraw arrives at the
-   * size the pane lands at — that is what `chromeChanges` adds. Both caps are wedge guards, not
-   * waits: the first for a webview that never reports its refit (a layout pass and a bridge hop,
-   * not a roundtrip), the second for a redraw that never comes at all. If either is what releases
-   * a caller, something upstream is broken.
+   * (A switch used to be able to change the chrome too — the old in-bar ribbon resized the
+   * terminal — and this then had to wait out the refit before counting bytes. The edge handle
+   * costs no height, so a switch redraws at the size the pane already has.) The frame cap is a
+   * wedge guard for a redraw that never comes at all, not a wait: if it is what releases a
+   * caller, something upstream is broken.
    */
-  const afterHostRedraw = (bytesAtStart: number, chromeChanges: boolean, done: () => void) => {
-    sizeReported.current = false;
+  const afterHostRedraw = (bytesAtStart: number, done: () => void) => {
     const mine = ++selectSeq.current; // a second switch mid-wait supersedes this one
     let frames = 0;
-    let base = bytesAtStart;
+    const base = bytesAtStart;
     // What has arrived ALREADY, not the baseline: "quiet for a frame" about a burst that ended
     // before this wait was armed is answerable on the first frame, and pinning this to `base`
     // spent one doing nothing. Identical for a caller that arms at the switch, where they agree.
     let lastFrame = dataSeq.current;
-    let fitted = !chromeChanges;
     const step = () => {
       if (selectSeq.current !== mine) return;
-      // Until the refit's size report has gone out, the bytes arriving are the redraw at the OLD
-      // size. The baseline moves to the report, so the wait below is for the RESIZED redraw —
-      // releasing on the pre-resize burst is how the terminal came back mid-reflow.
-      if (!fitted) {
-        if (sizeReported.current || frames >= ZOOM_REFIT_CAP_FRAMES) {
-          fitted = true;
-          base = dataSeq.current;
-          lastFrame = base;
-        } else {
-          frames++;
-          requestAnimationFrame(step);
-          return;
-        }
-      }
       const seen = dataSeq.current;
       const settled = seen > base && seen === lastFrame; // arrived, and quiet for a frame
       lastFrame = seen;
@@ -762,9 +741,6 @@ export default function SessionScreen() {
   /** The one select whose redraw-wait may still fly — bumped by every new select (superseding
    *  the last) and by the flight itself (making the cap timer a no-op after the redraw won). */
   const selectSeq = useRef(0);
-  /** Has a size report gone out to the host since the current select? What a chrome-changing
-   *  select's redraw-wait gates on — see `selectCard`. */
-  const sizeReported = useRef(false);
 
   const killCard = (win: TmuxWindow) => {
     // The last window is unkillable (user decision, 2026-08-10): killing it ends the tmux
@@ -932,25 +908,7 @@ export default function SessionScreen() {
     );
   };
 
-  /** The committed hop's ribbon change, held until the settle overlay covers the terminal: the
-   *  swap changes the bar's height and therefore the card's padding, and the webview refit that
-   *  follows repainted the very card the slide was moving — the hitch on every ribboned↔bare
-   *  hop, still visible even collapsed to a single refit (probe trace + user, 2026-08-11).
-   *
-   *  `chrome` is whether that swap changes the bar's HEIGHT (the same predicate `selectCard`
-   *  gates its refit wait on) — hopping between two plain shells, or between two ribboned ones,
-   *  moves nothing and there is no refit to cover. */
-  const pendingRibbon = useRef<{ win: TmuxWindow | null; chrome: boolean } | null>(null);
-  const applyPendingRibbon = () => {
-    const pending = pendingRibbon.current;
-    if (pending === null) return;
-    pendingRibbon.current = null;
-    if (pending.win) ribbonForWindow(pending.win);
-    else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
-  };
-
   const clearBarSwipe = (skipRefresh = false) => {
-    applyPendingRibbon();
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
     // start of this one: a capture per window is an exec burst and a parse of every answer, and
     // on the JS thread at the instant the finger goes down that is a stutter in the slide it is
@@ -966,20 +924,18 @@ export default function SessionScreen() {
   };
 
   const settleBarSwipe = () => {
-    const chromeChanges = pendingRibbon.current?.chrome === true;
-    // Nothing to cover. The overlay hides two things — a refit, and a redraw that has not landed
-    // yet — and on a same-chrome hop over a LAN neither is outstanding by the time the slide is
-    // home (the trace: redraw complete at +35ms against a ~300ms slide). Mounting it anyway costs
-    // a React commit and the wait's own frames AFTER the motion has already stopped, which is the
-    // beat between the card settling and the tab being live (user, 2026-08-11).
-    if (!chromeChanges && dataSeq.current > bytesAtCommit.current) {
+    // Nothing to cover. The overlay hides a redraw that has not landed yet, and on a LAN it is
+    // rarely outstanding by the time the slide is home (the trace: redraw complete at +35ms
+    // against a ~300ms slide). Mounting it anyway costs a React commit and the wait's own frames
+    // AFTER the motion has already stopped, which is the beat between the card settling and the
+    // tab being live (user, 2026-08-11).
+    if (dataSeq.current > bytesAtCommit.current) {
       clearBarSwipe();
       return;
     }
-    // The overlay covers the terminal until the host has finished redrawing at the size the pane
-    // lands at. Its insets FREEZE at this commit's values: the ribbon applied below changes
-    // barHeight a layout later, and an overlay tracking the live insets reflowed in plain view
-    // (the "even worse" of the first deferral attempt, user, 2026-08-11).
+    // The overlay covers the terminal until the host has finished redrawing the pane it lands
+    // on. Its insets FREEZE at this commit's values, so a chrome change under it (the keyboard)
+    // cannot reflow it in plain view.
     setPageSwipe((s) =>
       s === null
         ? s
@@ -991,12 +947,10 @@ export default function SessionScreen() {
             settleInsets: paneInsets,
           },
     );
-    // Same commit as the overlay's mount: the refit this triggers runs entirely under it.
-    applyPendingRibbon();
     roundSV.value = withTiming(0, { duration: 200 });
     // The same wait the zoom's flight uses — usually already satisfied by the time the slide has
     // landed, which is the whole point of taking the baseline back at the commit.
-    afterHostRedraw(bytesAtCommit.current, chromeChanges, clearBarSwipe);
+    afterHostRedraw(bytesAtCommit.current, clearBarSwipe);
   };
 
   // The settle overlay (a static copy of the committed page) is mounted: reset the slide offset
@@ -1053,10 +1007,10 @@ export default function SessionScreen() {
         // not exist yet, and committing onto it is what births it (user, 2026-08-10).
         const win = info.windows[target];
         console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
-        // Held for the settle overlay — see pendingRibbon.
-        // A window we are about to create runs an idle shell, so it counts as one here.
-        const idle = win ? IDLE_SHELLS.has(win.command) : true;
-        pendingRibbon.current = { win: win ?? null, chrome: (recipe !== null) === idle };
+        // The handle changes with the slide, not a poll beat after it — and it costs no height,
+        // so nothing refits. A window we are about to create runs an idle shell: no handle.
+        if (win) ribbonForWindow(win);
+        else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
         // The settle's redraw-wait counts from here, not from the settle: on a LAN tmux's redraw
         // beats the slide home.
         bytesAtCommit.current = dataSeq.current;
@@ -1112,32 +1066,31 @@ export default function SessionScreen() {
    *  already zeroed `swipeX` under it. */
   const settleEdgeStyle = useAnimatedStyle(() => ({ opacity: roundSV.value }));
 
-  /* --- T11: the context ribbon (§4.4) ---
+  /* --- T11: the edge handle (§4.4) ---
    *
    * State crosses in ribbon-model's reducer (tested): T9's foreground poll, T6's altScreen, and
    * the ^Z watch on the key bar's send path. The screen only feeds events in and executes caps. */
   const [ribbonCore, setRibbonCore] = useState(RIBBON_IDLE);
-  const [rbExpanded, setRbExpanded] = useState(false);
+  /** The panel: open by the handle's tap/swipe, closed by a cap, the scrim, or the stub. */
+  const [rbOpen, setRbOpen] = useState(false);
   const fgCommand = tmux.foreground?.command ?? null;
   const fgPid = tmux.foreground?.pid ?? null;
   useEffect(() => {
     // Not while anything is sliding: after a committed hop the very next display-message answer
-    // carries the NEW window's foreground, and this flipped the ribbon ~100ms into every slide
-    // — the exact refit the settle deferral was built to hold (probe trace, 2026-08-11).
-    // `ribbonForWindow` already set the right ribbon under the settle's cover; when the freeze
-    // lifts this re-applies the latest poll, a no-op whenever the two agree.
+    // carries the NEW window's foreground, and this flipped the handle ~100ms into every slide.
+    // `ribbonForWindow` already set the right recipe at the commit; when the freeze lifts this
+    // re-applies the latest poll, a no-op whenever the two agree.
     if (frozen) return;
     setRibbonCore((c) =>
       ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
     );
   }, [fgCommand, fgPid, frozen]);
-  // A new process instance always arrives compact (design 4a: expansion is never sticky).
-  useEffect(() => setRbExpanded(false), [ribbonCore.instance]);
+  // A new process instance means the caps under the finger changed: the panel closes.
+  useEffect(() => setRbOpen(false), [ribbonCore.instance]);
 
-  /** The ribbon for a window we are switching to, named from the list rather than waited for.
-   *  Every switch goes through here — a committed bar swipe, a card tap, a new window — because
-   *  the ribbon's height is the terminal's height, so learning about it a poll beat late means
-   *  the pane reflows after the transition has landed instead of under cover of it. */
+  /** The recipe for a window we are switching to, named from the list rather than waited for,
+   *  so the handle changes with the transition instead of a poll beat after it. Every switch
+   *  goes through here — a committed bar swipe, a card tap, a new window. */
   const ribbonForWindow = (win: TmuxWindow) => {
     const idle = IDLE_SHELLS.has(win.command);
     setRibbonCore((c) =>
@@ -1187,9 +1140,8 @@ export default function SessionScreen() {
     }
   };
 
-  /** The bar-swipe morph inputs, shared verbatim by the name pills AND the ribbon — one set of
-   *  numbers is what keeps the two moving as one (user, 2026-08-11). See KeyBarProps.pills for
-   *  why it exists at rest too. */
+  /** The bar-swipe morph inputs the name pills ride. See KeyBarProps.pills for why it exists at
+   *  rest too. */
   const pillsProp =
     showTabs && connected && stage !== null
       ? {
@@ -1208,84 +1160,8 @@ export default function SessionScreen() {
           // put tmux's redraw at +35ms and the keys at +550). Pills and keys are both mounted, so
           // this flips two opacities.
           live: pageSwipe !== null && pageSwipe.phase !== 'settle',
-          /** The half of the old `pageSwipe !== null` the split above dropped. Only the ribbon
-           *  reads it, and only to stay still: the keys land here, but the ribbon swap happens
-           *  here too, and a mount animation on top of a finished morph is a flash. */
-          settling: pageSwipe?.phase === 'settle',
-          /** The real ribbon is the current window's; a ghost overrides this with its own. */
-          index: pageSwipe?.pos ?? activePosIn(cards),
         }
       : null;
-
-  const ribbonEl =
-    recipe === null ? null : (
-      <Ribbon
-        theme={theme}
-        recipe={recipe}
-        swipe={pillsProp}
-        startedAt={ribbonCore.startedAt}
-        expanded={rbExpanded}
-        busy={sending}
-        onToggle={() => setRbExpanded((e) => !e)}
-        onDismiss={() => {
-          console.log('[ribbon] dismissed', recipe.proc);
-          setRibbonCore(ribbonDismiss);
-        }}
-        onCap={onRibbonCap}
-      />
-    );
-
-  /**
-   * The ARRIVING ribbon (§4.4). The departing one rides the finger because it is mounted; the
-   * window being swiped TO had none until `pendingRibbon` applied at the settle, so it popped in
-   * a beat after the slide while its name pill had grown in with the finger the whole way (user,
-   * 2026-08-11, proven against `[morph]` frame logs). Every reachable window's ribbon is already
-   * derivable from the list — `pane_current_command` is the only input `ribbonForWindow` has — so
-   * each neighbour renders its own, inert, told its OWN index so the shared morph numbers place
-   * it exactly as that window's name pill.
-   *
-   * The layer is absolute, which is the whole trick: a ghost growing in adds nothing to the bar's
-   * height, so the pane refit still happens once, at the settle, under the overlay that exists to
-   * hide it. And mounted from the moment tabs are reachable rather than at the swipe's first
-   * frame, for the reason the name pills are (KeyBarProps.pills): a BlurView per ghost is not
-   * something to build while a finger is already moving.
-   */
-  const ribbonGhosts =
-    pillsProp === null
-      ? null
-      : cards.map((c, i) => {
-          if (i === pillsProp.pos) return null; // the real ribbon owns this one's slot
-          if (IDLE_SHELLS.has(c.win.command)) return null;
-          // The same selection the settle will run, minus the two things a neighbour cannot
-          // know: its alt-screen flag and its own dismissals. Both only ever REMOVE a ribbon, so
-          // the ghost errs toward showing one that the settle then drops — never the reverse.
-          const ghost = selectRecipe({ ...RIBBON_IDLE, command: c.win.command }, false);
-          if (ghost === null) return null;
-          return (
-            <View
-              key={c.win.id}
-              pointerEvents="none"
-              style={[styles.ribbonGhost, !pillsProp.live && styles.hidden]}>
-              <Ribbon
-                theme={theme}
-                recipe={ghost}
-                swipe={{ ...pillsProp, index: i }}
-                // A hop starts the timer over anyway (`ribbonPoll` calls it a new instance), so
-                // the ghost's zero and the real ribbon's are the same zero.
-                startedAt={swipeInfo.current?.t0 ?? Date.now()}
-                expanded={rbExpanded}
-                busy={false}
-                onToggle={noop}
-                onDismiss={noop}
-                onCap={noop}
-              />
-            </View>
-          );
-        });
-
-  /** Outside-tap collapses an expanded TUI recipe (§4.4): one transparent layer over the
-   *  terminal area only, so the ribbon's own caps stay tappable. */
-  const rbScrim = recipe !== null && RECIPES[recipe.id].collapsible && rbExpanded;
 
   /* --- the pane's insets ---
    *
@@ -1303,22 +1179,13 @@ export default function SessionScreen() {
   // it is floored to a whole device pixel, so the box can only ever be a rounding hair TOO tall.
   // Rounding it the other way costs a row, which grows the inset by half a row, which costs
   // another — the rows walked 38 → 33 in the log before the floor went in.
-  // Below the last line the eye adds the terminal's inset to whatever the chrome under it keeps
-  // for itself — the key bar's 5pt, the ribbon's 2 — so the terminal's share is the gap minus
-  // that, and the two together come to the gap at the sides. Above there is no inset of ours at
-  // all: the row remainder goes there, and the terminal applies it itself, inside its own layout
-  // pass (see TerminalProps.onResize). Worked out here it needed a measured height, which only
-  // arrives after a layout — so every keyboard open laid out once wrong and once right, which is
-  // the bounce (user, 2026-08-10).
-  // Off the MEASURED bar height, not `ribbonEl`: the ribbon mounting flipped this 3pt in one
-  // commit and the 57pt of bar height landed a layout later — two back-to-back webview refits
-  // on every ribboned↔bare hop, the second in plain view at the slide's landing (probe trace,
-  // 2026-08-11: size at commit+36ms and again at +200ms). One source, one refit.
-  // ponytail: 80 sits between the bare bar (60) and any ribboned stack (~102+); the chord strip
-  // can cross it too, costing 3pt of gap while armed — invisible next to the resize the strip
-  // itself causes.
-  const chromePad = barHeight > 80 ? RIBBON_PAD_TOP : BAR_PAD_TOP;
-  const padBottom = Math.max(0, padH - chromePad);
+  // Below the last line the eye adds the terminal's inset to the key bar's own 5pt, so the
+  // terminal's share is the gap minus that, and the two together come to the gap at the sides.
+  // Above there is no inset of ours at all: the row remainder goes there, and the terminal
+  // applies it itself, inside its own layout pass (see TerminalProps.onResize). Worked out here
+  // it needed a measured height, which only arrives after a layout — so every keyboard open laid
+  // out once wrong and once right, which is the bounce (user, 2026-08-10).
+  const padBottom = Math.max(0, padH - BAR_PAD_TOP);
   /** The card face runs the full window now, so its content clears the notch itself — except
    *  under an armed search, whose row (padded past the notch on its own) already pushed the
    *  terminal area below it. */
@@ -1618,7 +1485,6 @@ export default function SessionScreen() {
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
           if (cols > 0) setLiveCols(cols);
           setPadTop(topInset);
-          sizeReported.current = true; // a chrome-changing select's redraw-wait gates on this
           setSize(cols, rows);
         }}
         // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:
@@ -1732,10 +1598,6 @@ export default function SessionScreen() {
         </Animated.View>
       )}
 
-      {/* Outside-tap collapses an expanded TUI ribbon; only the terminal area eats the tap. */}
-      {rbScrim && (
-        <Pressable style={StyleSheet.absoluteFill} onPress={() => setRbExpanded(false)} />
-      )}
       </View>
 
       {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
@@ -1769,10 +1631,41 @@ export default function SessionScreen() {
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? onBarSwipe : undefined}
         pills={pillsProp}
-        ribbon={ribbonEl}
-        ribbonGhosts={ribbonGhosts}
       />
       </Animated.View>
+
+      {/* The edge handle (§4.4): the recipe's colour tab on the terminal's right edge, floating
+          over output just above the bar — zero vertical cost, so a recipe appearing or leaving
+          never resizes the terminal. It fades with the bar during the switcher's flight. Open,
+          the panel is its own layer: an invisible scrim (tap the terminal to close) under a
+          right-aligned column of caps. */}
+      {recipe !== null && !rbOpen && (
+        <Animated.View
+          pointerEvents="box-none"
+          style={[StyleSheet.absoluteFill, barFadeStyle]}>
+          <RibbonHandle
+            theme={theme}
+            recipe={recipe}
+            bottom={popBase}
+            onOpen={() => {
+              console.log('[ribbon] open', recipe.proc);
+              setRbOpen(true);
+            }}
+          />
+        </Animated.View>
+      )}
+      {recipe !== null && rbOpen && (
+        <RibbonPanel
+          theme={theme}
+          recipe={recipe}
+          startedAt={ribbonCore.startedAt}
+          busy={sending}
+          bottom={popBase}
+          maxCapsHeight={Math.max(150, (stage?.h ?? 600) - popBase - insets.top - 104)}
+          onCap={onRibbonCap}
+          onClose={() => setRbOpen(false)}
+        />
+      )}
 
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the
           prototype), popovers anchored `popBase` up. That base carries the keyboard itself:
@@ -2062,13 +1955,7 @@ function Status({
   );
 }
 
-/** The ghost ribbons are looked at, never touched. */
-const noop = () => {};
-
 const styles = StyleSheet.create({
-  /** Bottom-aligned with the real ribbon inside the bar's ribbon slot, and out of its flow. */
-  ribbonGhost: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  hidden: { opacity: 0 },
   screen: { flex: 1 },
   // T14's terminal-side search bar (design: 38pt field, 12pt radius; Android 16dp per §5d).
   searchRow: {

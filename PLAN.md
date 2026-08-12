@@ -95,7 +95,7 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 - **Arrows cluster**: toggle button opens glass popover, inverted-T ↑↓←→ + Home/End; sends proper escape sequences (DECCKM-aware). (Prototype's history/caret simulation = what the shell does with those keys; app just sends keys.)
 - **⋯ menu**: UPLOAD FILE — Files / Photo or video / Camera — divider — Settings. Opening closes other popovers; the keyboard stays up under it, as in the reference app (its bar is the keyboard's own accessory view). The doors it opens put the keyboard away for themselves — Settings, and the system pickers. During upload the circle tints accent and goes inert (that's the whole progress UI).
 - Every key: press-dim/shrink + light haptic on touch, not on echo. Swipe on bar never presses keys.
-- **Context ribbon** — recipe-driven action strip above the bar, keyed on what runs in the **active pane only**. Signals: alt-screen/DECCKM/mouse state (emulator-internal, instant) + `#{pane_current_command}` poll (~2s exec channel; shell name = idle). Recipes are **declarative data** (match names → caps `{label, caption, bytes|action, danger}`) so a user recipe editor can slot in later. UX: `running`/`suspended` show expanded per design; TUI recipes start as a collapsed dot+label pill, tap expands caps, outside-tap collapses; swipe ribbon down dismisses it for that process instance. Shell idle, REPLs, unknown TUIs → nothing.
+- **Edge handle** (redesign 2026-08-12, supersedes the in-bar ribbon pill) — recipe-driven, keyed on what runs in the **active pane only**. Signals: alt-screen/DECCKM/mouse state (emulator-internal, instant) + `#{pane_current_command}` poll (~2s exec channel; shell name = idle). Recipes are **declarative data** (match names → caps `{label, caption, bytes|action, danger, arm}` plus header rows) so a user recipe editor can slot in later. UX: a 5pt colour tab on the terminal's right edge just above the bar (46×64 touch target), the recipe's identity colour, breathing while the process is live (running/agents); tap or swipe it left → a right-aligned vertical panel over the output: dot + process label, the caps as 40pt glass capsules (danger red-tinted; the agent's `^C ^C` arms — first tap fires and reads "tap again"), a colour stub at the foot. Tap the terminal, pick a cap, or swipe the panel right to close. **Zero vertical cost: the handle and panel float over output and never resize the terminal** — no dismissal gesture needed, no settle-deferred refits. Shell idle, REPLs, unknown TUIs → nothing.
   Built-in recipes v1:
   - **running** (non-shell, no alt-screen): pulsing dot + `proc · m:ss` (timer from first detection) · ^C stop · background (^Z then `bg\n`) · kill force (red; `pgrep -P #{pane_pid}` + `kill -9` via exec channel).
   - **suspended** (tracked locally: we sent ^Z, poll shows shell): `· stopped` · fg resume (types `fg\n`) · bg run-behind (types `bg\n`) · kill.
@@ -538,6 +538,10 @@ level still pops to Setup without disconnecting, the Android twin of the iOS edg
 in `terminal.tsx`; the emulator walk is TESTS.md §T10A (T10A.1–T10A.8).
 
 **T11 — Bar-swipe window switching + ribbon** ✅ implemented 2026-08-09 (not device-verified) · deps: T9, T7
+*(2026-08-12: the ribbon half was redesigned to the edge handle — see §4.4. The in-bar pill, its
+ghost-ribbon swipe morph, the settle-deferred ribbon swap and the chrome-refit wait in
+`afterHostRedraw` all left with it, since the handle never resizes the terminal. The record
+below describes what landed on 08-09.)*
 Horizontal bar swipe: page-slide cards, rounded corners during drag, name pills strip,
 rubber-band ends, flick thresholds from prototype. Neighbor page content = **fresh
 `capture-pane` snapshot taken on swipe start** (accepted ~100–300ms before slide attaches);

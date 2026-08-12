@@ -14,6 +14,7 @@
 body{margin:0;background:#0d0d15;font-family:system-ui,sans-serif}
 a{color:#89b4fa}a:hover{color:#b4befe}
 @keyframes p22blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes p22edge{0%,100%{opacity:.95;transform:scaleY(1)}50%{opacity:.45;transform:scaleY(.84)}}
 @keyframes p22pulse{0%,100%{opacity:1}50%{opacity:0.35}}
 </style>
 </helmet>
@@ -23,28 +24,53 @@ a{color:#89b4fa}a:hover{color:#b4befe}
     <div style="height:100%;position:relative;overflow:hidden;{{ vars }}">
       <div style="position:absolute;inset:0;isolation:isolate;background:var(--crust,#11111b);display:flex;flex-direction:column;">
         <div style="height:66px;flex:none;"></div>
+        <div style="flex:none;padding:0 20px 12px;">
+          <div style="height:40px;border-radius:13px;background:var(--s0,#313244);display:flex;align-items:center;gap:8px;padding:0 12px;box-sizing:border-box;">
+            <svg width="14" height="14" viewBox="0 0 16 16" style="flex:none;color:var(--ov0,#6c7086);"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M10.5 10.5L15 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+            <input value="{{ q }}" onChange="{{ onQ }}" placeholder="Search windows and output" spellcheck="false" style="flex:1;min-width:0;background:transparent;border:0;outline:none;padding:0;font:14px system-ui;color:var(--text,#cdd6f4);"></input>
+            <sc-if value="{{ qOn }}" hint-placeholder-val="{{ false }}">
+              <span style="width:19px;height:19px;border-radius:10px;flex:none;background:var(--ov0,#6c7086);display:flex;align-items:center;justify-content:center;cursor:pointer;" onClick="{{ srchOff }}">
+                <svg width="8" height="8" viewBox="0 0 9 9"><path d="M1.5 1.5l6 6M7.5 1.5l-6 6" stroke="var(--crust,#11111b)" stroke-width="1.8" stroke-linecap="round"></path></svg>
+              </span>
+            </sc-if>
+          </div>
+        </div>
         <div style="flex:1;position:relative;overflow:hidden;">
           <div style="position:absolute;left:0;top:0;width:173px;height:240px;border-radius:14px;border:1.5px dashed var(--ov0,#6c7086);background:rgba(127,132,156,0.08);box-sizing:border-box;pointer-events:none;{{ phSty }}"></div>
           <sc-for list="{{ cards }}" as="cd" hint-placeholder-count="4">
             <div style="position:absolute;left:0;top:0;width:173px;touch-action:none;cursor:pointer;{{ cd.sty }}" onPointerDown="{{ cd.down }}">
               <div style="height:240px;border-radius:14px;background:var(--bg,#1e1e2e);box-sizing:border-box;padding:5px;overflow:hidden;font-size:6px;line-height:1.4;font-family:'JBMono',monospace;color:var(--text,#cdd6f4);position:relative;{{ cd.ring }}">
-                <sc-for list="{{ cd.lines }}" as="ln" hint-placeholder-count="3">
-                  <div style="white-space:pre;overflow:hidden;"><sc-for list="{{ ln.parts }}" as="p" hint-placeholder-count="1"><span style="color:{{ p.c }};">{{ p.t }}</span></sc-for></div>
-                </sc-for>
+                <div style="position:absolute;inset:5px;overflow:hidden;display:flex;flex-direction:column;{{ cd.just }}">
+                  <div style="{{ cd.tyS }}">
+                    <sc-for list="{{ cd.lines }}" as="ln" hint-placeholder-count="3">
+                      <div style="white-space:pre;overflow:hidden;"><sc-for list="{{ ln.parts }}" as="p" hint-placeholder-count="1"><span style="color:{{ p.c }};{{ p.hl }}">{{ p.t }}</span></sc-for></div>
+                    </sc-for>
+                  </div>
+                </div>
+                <sc-if value="{{ cd.mCount }}" hint-placeholder-val="{{ false }}">
+                  <div style="position:absolute;left:5px;bottom:5px;border-radius:7px;padding:2px 6px;font:600 8px system-ui;letter-spacing:0.2px;{{ cd.mSty }}">{{ cd.mLabel }}</div>
+                </sc-if>
                 <div style="position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:11px;background:rgba(205,214,244,0.85);display:flex;align-items:center;justify-content:center;cursor:pointer;" onClick="{{ cd.close }}" onPointerDown="{{ cd.stop }}">
                   <svg width="9" height="9" viewBox="0 0 9 9"><path d="M1.5 1.5l6 6M7.5 1.5l-6 6" stroke="#1e1e2e" stroke-width="1.6" stroke-linecap="round"></path></svg>
                 </div>
               </div>
-              <div style="text-align:center;font:12px 'JBMono';margin-top:7px;color:{{ cd.nameC }};">{{ cd.name }}</div>
-              <div style="text-align:center;font:10px 'JBMono';color:var(--sub,#a6adc8);margin-top:2px;">{{ cd.sub }}</div>
+              <div style="text-align:center;font:12px 'JBMono';margin-top:7px;color:{{ cd.nameC }};"><sc-for list="{{ cd.nameParts }}" as="np" hint-placeholder-count="1"><span style="{{ np.hl }}">{{ np.t }}</span></sc-for></div>
+              <div style="text-align:center;font:10px 'JBMono';color:var(--sub,#a6adc8);margin-top:2px;"><sc-for list="{{ cd.subParts }}" as="sp" hint-placeholder-count="1"><span style="{{ sp.hl }}">{{ sp.t }}</span></sc-for></div>
             </div>
           </sc-for>
+          <sc-if value="{{ noHits }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;pointer-events:none;">
+              <svg width="26" height="26" viewBox="0 0 16 16" style="color:var(--ov0,#6c7086);"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="currentColor" stroke-width="1.4"></circle><path d="M10.5 10.5L15 15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path></svg>
+              <span style="font:15px system-ui;color:var(--sub,#a6adc8);">No window contains</span>
+              <span style="font:14px 'JBMono';color:var(--text,#cdd6f4);">“{{ noHitsQ }}”</span>
+            </div>
+          </sc-if>
         </div>
         <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:5px 34px 44px;">
           <div style="width:49px;height:49px;border-radius:25px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(14px) saturate(160%);background:var(--glassBg,rgba(205,214,244,0.08));box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12);border:0.5px solid var(--glassBd,rgba(255,255,255,0.12));" onClick="{{ newTab }}">
             <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:var(--text,#cdd6f4);"></path></svg>
           </div>
-          <span style="font:14px 'JBMono';color:var(--text,#cdd6f4);">{{ tabCount }} Tabs</span>
+          <span style="font:14px 'JBMono';color:var(--text,#cdd6f4);">{{ tabsLabel }}</span>
           <div style="width:49px;height:49px;border-radius:25px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--accent,#89b4fa);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.3);" onClick="{{ done }}">
             <svg width="20" height="16" viewBox="0 0 20 16"><path d="M2 8.5L7.5 14L18 2.5" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round" style="color:var(--bg,#1e1e2e);"></path></svg>
           </div>
@@ -52,52 +78,80 @@ a{color:#89b4fa}a:hover{color:#b4befe}
       </div>
       <div style="position:absolute;inset:0;transform-origin:0 0;display:flex;flex-direction:column;background:var(--bg,#1e1e2e);{{ termSty }}">
         <div style="height:58px;flex:none;"></div>
+        <div style="flex:none;overflow:hidden;transition:height 0.24s ease;{{ srchWrapSty }}">
+          <div style="display:flex;align-items:center;gap:8px;padding:0 16px 8px;">
+            <div style="flex:1;min-width:0;height:38px;border-radius:12px;background:var(--s0,#313244);display:flex;align-items:center;gap:7px;padding:0 11px;box-sizing:border-box;">
+              <svg width="13" height="13" viewBox="0 0 16 16" style="flex:none;color:var(--ov0,#6c7086);"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M10.5 10.5L15 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+              <input value="{{ q }}" onChange="{{ onQ }}" placeholder="Search this window" spellcheck="false" style="flex:1;min-width:0;background:transparent;border:0;outline:none;padding:0;font:13px 'JBMono',monospace;color:var(--text,#cdd6f4);"></input>
+              <span style="font:11px 'JBMono';color:var(--sub,#a6adc8);flex:none;">{{ occLabel }}</span>
+            </div>
+            <div style="display:flex;gap:2px;flex:none;{{ occNavSty }}">
+              <div style="width:34px;height:38px;border-radius:12px;background:var(--s0,#313244);display:flex;align-items:center;justify-content:center;cursor:pointer;" style-active="background:rgba(127,132,156,0.4);" onClick="{{ occPrev }}">
+                <svg width="12" height="8" viewBox="0 0 12 8"><path d="M1 6.5L6 1.5l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text,#cdd6f4);"></path></svg>
+              </div>
+              <div style="width:34px;height:38px;border-radius:12px;background:var(--s0,#313244);display:flex;align-items:center;justify-content:center;cursor:pointer;" style-active="background:rgba(127,132,156,0.4);" onClick="{{ occNext }}">
+                <svg width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text,#cdd6f4);"></path></svg>
+              </div>
+            </div>
+            <span style="font:15px system-ui;color:var(--accent,#89b4fa);cursor:pointer;flex:none;padding:0 2px;" onClick="{{ srchOff }}">Done</span>
+          </div>
+        </div>
         <div style="flex:1;position:relative;overflow:hidden;">
           <div style="position:absolute;top:0;bottom:0;left:0;display:flex;gap:28px;{{ pagesSty }}">
             <sc-for list="{{ pages }}" as="pg" hint-placeholder-count="4">
-              <div style="width:402px;flex:none;height:100%;box-sizing:border-box;padding:4px 16px;overflow:hidden;background:var(--bg,#1e1e2e);border-radius:{{ pageR }}px;transition:border-radius 0.2s;font-size:var(--fs,13px);line-height:1.32;font-family:'JBMono',monospace;color:var(--text,#cdd6f4);">
-                <sc-for list="{{ pg.lines }}" as="ln" hint-placeholder-count="5">
-                  <div style="white-space:pre-wrap;word-break:break-all;min-height:1.32em;"><sc-for list="{{ ln.parts }}" as="p" hint-placeholder-count="1"><span style="color:{{ p.c }};">{{ p.t }}</span></sc-for></div>
-                </sc-for>
-                <sc-if value="{{ pg.showInput }}" hint-placeholder-val="{{ true }}">
-                  <div style="white-space:pre-wrap;word-break:break-all;"><span style="color:var(--green,#a6e3a1);">❯ </span><span>{{ pg.inputPre }}</span><span style="display:inline-block;width:8px;height:1.1em;background:var(--rose,#f5e0dc);vertical-align:-0.15em;animation:p22blink 1.1s step-end infinite;"></span><span>{{ pg.inputPost }}</span></div>
-                </sc-if>
+              <div style="width:402px;flex:none;height:100%;box-sizing:border-box;padding:4px 16px;overflow:hidden;display:flex;flex-direction:column;{{ pg.just }}background:var(--bg,#1e1e2e);border-radius:{{ pageR }}px;transition:border-radius 0.2s;font-size:var(--fs,13px);line-height:1.32;font-family:'JBMono',monospace;color:var(--text,#cdd6f4);">
+                <div style="flex:none;{{ pg.tyS }}">
+                  <sc-for list="{{ pg.lines }}" as="ln" hint-placeholder-count="5">
+                    <div style="white-space:pre-wrap;word-break:break-all;min-height:1.32em;"><sc-for list="{{ ln.parts }}" as="p" hint-placeholder-count="1"><span style="color:{{ p.c }};{{ p.hl }}">{{ p.t }}</span></sc-for></div>
+                  </sc-for>
+                  <sc-if value="{{ pg.showInput }}" hint-placeholder-val="{{ true }}">
+                    <div style="white-space:pre-wrap;word-break:break-all;"><span style="color:var(--green,#a6e3a1);">❯ </span><span>{{ pg.inputPre }}</span><span style="display:inline-block;width:8px;height:1.1em;background:var(--rose,#f5e0dc);vertical-align:-0.15em;animation:p22blink 1.1s step-end infinite;"></span><span>{{ pg.inputPost }}</span></div>
+                  </sc-if>
+                </div>
               </div>
             </sc-for>
           </div>
         </div>
-        <div style="flex:none;overflow:hidden;transition:height 0.25s ease;{{ ribbonWrapSty }}">
-          <div style="display:flex;justify-content:center;padding:2px 20px 8px;">
-            <div style="display:flex;align-items:center;gap:5px;border-radius:19px;backdrop-filter:blur(14px) saturate(160%);background:var(--glassBg,rgba(205,214,244,0.08));box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12),0 8px 24px rgba(0,0,0,0.35);border:0.5px solid var(--glassBd,rgba(255,255,255,0.12));transition:padding 0.26s cubic-bezier(0.2,1.1,0.35,1);{{ ribbonPillSty }}" onClick="{{ rbTap }}" onTouchStart="{{ rbDown }}" onTouchEnd="{{ rbUp }}">
+        <sc-if value="{{ rbHandleOn }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;right:0;width:46px;height:64px;display:flex;align-items:center;justify-content:flex-end;cursor:pointer;z-index:6;{{ rbHandleSty }}" onClick="{{ rbOpen }}" onTouchStart="{{ rbDown }}" onTouchEnd="{{ rbUp }}">
+            <div style="width:5px;height:46px;border-radius:4px 0 0 4px;{{ rbTabSty }}"></div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ rbPanelOn }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;inset:0;z-index:5;" onClick="{{ rbClose }}"></div>
+          <div style="position:absolute;right:14px;box-sizing:border-box;z-index:6;display:flex;flex-direction:column;align-items:flex-end;gap:7px;{{ rbPanelSty }}" onTouchStart="{{ rbDown }}" onTouchEnd="{{ rbUp }}">
+            <div style="display:flex;align-items:center;gap:7px;padding:0 9px 1px 0;">
               <span style="width:7px;height:7px;border-radius:4px;flex:none;{{ ribbonDotSty }}"></span>
-              <span style="font:11px 'JBMono';color:var(--sub,#a6adc8);white-space:nowrap;{{ ribbonLabelSty }}">{{ procLabel }}</span>
-              <sc-if value="{{ rbCollapsed }}" hint-placeholder-val="{{ false }}">
-                <svg width="11" height="7" viewBox="0 0 11 7" style="flex:none;"><path d="M1 5.5L5.5 1.5 10 5.5" fill="none" stroke="var(--ov0,#6c7086)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-              </sc-if>
-              <sc-if value="{{ rbAtt }}" hint-placeholder-val="{{ false }}">
-                <div style="position:relative;overflow:hidden;width:172px;height:36px;border-radius:14px;background:rgba(127,132,156,0.16);border:0.5px solid rgba(127,132,156,0.3);display:flex;align-items:center;gap:8px;padding:0 10px 0 11px;box-sizing:border-box;cursor:pointer;" onClick="{{ attCancel }}">
-                  <div style="position:absolute;left:0;top:0;bottom:0;background:rgba(127,132,156,0.34);transition:width 0.2s linear;{{ attBarSty }}"></div>
-                  <div style="position:relative;flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
-                    <span style="font:500 11px 'JBMono';color:var(--text,#cdd6f4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ attName }}</span>
-                    <span style="font:8.5px system-ui;color:var(--sub,#a6adc8);">{{ attSub }}</span>
-                  </div>
-                  <svg style="position:relative;flex:none;" width="12" height="12" viewBox="0 0 13 13"><path d="M2 2l9 9M11 2l-9 9" stroke="var(--sub,#a6adc8)" stroke-width="1.5" stroke-linecap="round"></path></svg>
+              <span style="font:11px 'JBMono';color:var(--sub,#a6adc8);white-space:nowrap;">{{ procLabel }}</span>
+            </div>
+            <sc-if value="{{ rbAtt }}" hint-placeholder-val="{{ false }}">
+              <div style="position:relative;overflow:hidden;height:40px;border-radius:21px;backdrop-filter:blur(18px) saturate(170%);box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.14),0 10px 26px rgba(0,0,0,0.4);border:0.5px solid var(--glassBd,rgba(255,255,255,0.14));display:flex;align-items:center;gap:8px;padding:0 12px 0 14px;box-sizing:border-box;cursor:pointer;{{ attPillSty }}" onClick="{{ attCancel }}">
+                <div style="position:absolute;left:0;top:0;bottom:0;background:rgba(127,132,156,0.34);transition:width 0.2s linear;{{ attBarSty }}"></div>
+                <div style="position:relative;flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
+                  <span style="font:500 11px 'JBMono';color:var(--text,#cdd6f4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ attName }}</span>
+                  <span style="font:8.5px system-ui;color:var(--sub,#a6adc8);">{{ attSub }}</span>
                 </div>
-              </sc-if>
+                <svg style="position:relative;flex:none;" width="12" height="12" viewBox="0 0 13 13"><path d="M2 2l9 9M11 2l-9 9" stroke="var(--sub,#a6adc8)" stroke-width="1.5" stroke-linecap="round"></path></svg>
+              </div>
+            </sc-if>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:7px;overflow-y:auto;{{ rbCapsSty }}">
               <sc-for list="{{ rbCaps }}" as="cap" hint-placeholder-count="0">
-                <div style="border-radius:14px;display:flex;align-items:center;justify-content:center;height:36px;box-sizing:border-box;cursor:pointer;{{ cap.sty }}" onClick="{{ cap.tap }}">
+                <div style="display:flex;align-items:center;box-sizing:border-box;cursor:pointer;flex:none;{{ cap.sty }}" onClick="{{ cap.tap }}">
                   <sc-if value="{{ cap.ic }}" hint-placeholder-val="{{ false }}">
                     <svg width="12" height="13" viewBox="0 0 13 15" style="flex:none;"><path d="M9.4 4.2L4.9 8.7a1.9 1.9 0 002.7 2.7l4.4-4.4a3.4 3.4 0 00-4.8-4.8L2.4 6.9a4.9 4.9 0 006.9 6.9l4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="color:var(--text,#cdd6f4);"></path></svg>
                   </sc-if>
                   <sc-if value="{{ cap.txt }}" hint-placeholder-val="{{ true }}">
                     <span style="white-space:nowrap;{{ cap.kSty }}">{{ cap.k }}</span>
                   </sc-if>
-                  <span style="white-space:nowrap;{{ cap.lSty }}">{{ cap.l }}</span>
+                  <sc-if value="{{ cap.hasL }}" hint-placeholder-val="{{ true }}">
+                    <span style="white-space:nowrap;{{ cap.lSty }}">{{ cap.l }}</span>
+                  </sc-if>
                 </div>
               </sc-for>
             </div>
+            <div style="width:5px;height:46px;border-radius:4px;margin:2px 4px 0 0;flex:none;cursor:pointer;{{ rbStubSty }}" onClick="{{ rbClose }}"></div>
           </div>
-        </div>
+        </sc-if>
         <div style="flex:none;overflow:hidden;transition:height 0.25s ease;{{ chordWrapSty }}">
           <div style="display:flex;justify-content:center;padding:2px 20px 8px;">
             <div style="display:flex;gap:4px;align-items:stretch;border-radius:22px;padding:6px;backdrop-filter:blur(14px) saturate(160%);background:var(--glassBg,rgba(205,214,244,0.08));box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,0.12),0 8px 24px rgba(0,0,0,0.35);border:0.5px solid var(--glassBd,rgba(255,255,255,0.12));">
@@ -282,6 +336,7 @@ a{color:#89b4fa}a:hover{color:#b4befe}
       <span style="font:11px ui-monospace,monospace;color:#7b819c;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:5px 11px;">long-press Paste → clipboard</span>
       <span style="font:11px ui-monospace,monospace;color:#7b819c;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:5px 11px;">hold a card to reorder</span>
       <span style="font:11px ui-monospace,monospace;color:#7b819c;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:5px 11px;">+ births a tab from the button</span>
+      <span style="font:11px ui-monospace,monospace;color:#7b819c;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:5px 11px;">search “deploy” or “502” in the switcher</span>
     </div>
   </sc-if>
 </div>
@@ -289,6 +344,7 @@ a{color:#89b4fa}a:hover{color:#b4befe}
 <script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:520,&quot;height&quot;:1040},&quot;flavour&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;mocha&quot;,&quot;options&quot;:[&quot;mocha&quot;,&quot;latte&quot;,&quot;frappe&quot;,&quot;macchiato&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;fontSize&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:13,&quot;min&quot;:11,&quot;max&quot;:16,&quot;step&quot;:1,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;showHints&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Help&quot;}}">
 class Component extends DCLogic {
   static W = 402; static H = 874; static S = 173 / 402; static KB = 316;
+  static GRIDY = 118; // status bar + the switcher's search field, above slot 0
   static REST = "transform:translate(0px,0px) scale(1);clip-path:inset(0px 0px 0px 0px round 0.001px);opacity:1;pointer-events:auto;transition:transform 0.3s ease-out,clip-path 0.3s ease-out,opacity 0.12s ease-in;";
   static RING_REST = "opacity:0;height:874px;border-radius:0.001px;border-width:2px;transition:none;";
   static RING_OFF_T = "opacity:0;height:874px;border-radius:0.001px;border-width:2px;transition:height 0.3s ease-out,border-radius 0.3s ease-out,border-width 0.3s ease-out,opacity 0.12s;";
@@ -312,52 +368,134 @@ class Component extends DCLogic {
     termSty: Component.REST, termRing: Component.RING_REST, swipeX: 0, barDrag: false, dotsOn: false,
     ctrl: 'off', lastCtrl: 0, clipOpen: false, menuOpen: false, arrowsOpen: false, histI: 0, sheetOpen: false, sending: false,
     flav: null, fsO: null, tmuxOn: true, swipeCard: null, closing: {},
-    dragId: null, dragXY: null, secs: 134,
+    q: '', srchOn: false, occ: {},
+    dragId: null, dragXY: null, secs: 134, rbOpen: null, rbArm: false,
     stOpen: false, sub: null, subKeep: null,
-    cfg: { key:'id_ed25519', bell:false, haptics:true, overwrite:true, keep:false, faceid:true, collapse:true, swipeoff:true,
-      rec: { on:6, run:true, susp:true, vim:true, pager:true, htop:true, agent:true } }
+    cfg: { key:'id_ed25519', bell:false, haptics:true, overwrite:true, keep:false, faceid:true, pulse:true,
+      rec: { run:true, susp:true, vim:true, pager:true, htop:true, claude:true, vite:true, psql:true, repl:true, git:false } }
   };
 
   static P() { return [{ t:'~/port22', c:'accent' }, { t:' on ', c:'ov0' }, { t:' main', c:'mauve' }]; }
+  // Rows: 'text' (sub), ['text','colour'], or [['a','c'],['b','c']] for a mixed line.
+  static L(rows) {
+    return rows.map(r => typeof r === 'string' ? [{ t:r, c:'sub' }]
+      : Array.isArray(r[0]) ? r.map(p => ({ t:p[0], c:p[1] }))
+      : [{ t:r[0], c:r[1] }]);
+  }
   static initTabs() {
-    const P = Component.P;
+    const P = Component.P, L = Component.L;
     return [
-      { id:'t0', name:'fish', sub:'~/port22', proc:'cargo build', running:true, susp:false, input:'', noInput:false, lines:[
-        P(), [{ t:'❯ ', c:'green' }, { t:'cargo build --release', c:'text' }],
-        [{ t:'   Compiling tokio v1.47.0', c:'sub' }],
-        [{ t:'   Compiling citadel-ssh v0.9.2', c:'sub' }],
-        [{ t:'   Compiling port22-agent v0.3.1', c:'sub' }],
-        [{ t:'   Building ', c:'yellow' }, { t:'[=========>          ] 214/612', c:'sub' }]
-      ] },
-      { id:'t1', name:'claude', sub:'~/port22', proc:'claude', recipe:'agent', running:false, susp:false, input:'', noInput:true, lines:[
-        P(), [{ t:'❯ ', c:'green' }, { t:'claude', c:'text' }],
-        [{ t:'✻ Welcome to Claude Code', c:'peach' }],
-        [{ t:'  /help for help', c:'sub' }], [{ t:' ', c:'sub' }],
-        [{ t:'> tighten the zoom spring on close', c:'sub' }],
-        [{ t:'⏺ ', c:'green' }, { t:'Reading ContentView.swift…', c:'text' }]
-      ] },
-      { id:'t2', name:'htop', sub:'web-01', proc:'htop', recipe:'htop', running:false, susp:false, input:'', noInput:true, lines:[
-        [{ t:'❯ ', c:'green' }, { t:'htop', c:'text' }],
-        [{ t:'CPU [||||||||||||        34%]', c:'accent' }],
-        [{ t:'Mem [||||||||||||||||    61%]', c:'green' }],
-        [{ t:'  PID USER   COMMAND', c:'sub' }],
-        [{ t:' 1204 kamil  sshd: kamil@pts/0', c:'text' }],
-        [{ t:' 1810 kamil  tmux: server', c:'text' }],
-        [{ t:' 2201 kamil  cargo build', c:'text' }]
-      ] },
-      { id:'t3', name:'logs', sub:'web-01', proc:null, running:false, susp:false, input:'', noInput:true, lines:[
-        [{ t:'❯ ', c:'green' }, { t:'tail -f access.log', c:'text' }],
-        [{ t:'GET /api/v2/status 200', c:'sub' }],
-        [{ t:'GET /api/v2/jobs 200', c:'sub' }],
-        [{ t:'POST /hook 502', c:'red' }],
-        [{ t:'GET /healthz 200', c:'sub' }]
-      ] }
+      { id:'t0', name:'fish', sub:'~/port22', proc:'cargo build', running:true, susp:false, input:'', noInput:false, lines:[P()].concat(L([
+        [['❯ ', 'green'], ['cargo build --release', 'text']],
+        '   Compiling libc v0.2.155',
+        '   Compiling proc-macro2 v1.0.86',
+        '   Compiling unicode-ident v1.0.12',
+        '   Compiling quote v1.0.36',
+        '   Compiling syn v2.0.72',
+        '   Compiling futures-core v0.3.30',
+        '   Compiling pin-project-lite v0.2.14',
+        '   Compiling bytes v1.7.1',
+        '   Compiling mio v1.0.2',
+        '   Compiling socket2 v0.5.7',
+        '   Compiling tokio v1.47.0',
+        '   Compiling tokio-util v0.7.11',
+        '   Compiling russh-cryptovec v0.7.3',
+        '   Compiling citadel-ssh v0.9.2',
+        ['warning: unused variable: `deploy_timeout`', 'yellow'],
+        '  --> src/session/keepalive.rs:88:9',
+        '   |',
+        '88 |   let deploy_timeout = cfg.timeout;',
+        '   |       ^^^^^^^^^^^^^^ prefix with _',
+        '   = note: `#[warn(unused_variables)]`',
+        ['warning: field `retry_after` never read', 'yellow'],
+        '  --> src/deploy/hook.rs:23:5',
+        '   Compiling port22-agent v0.3.1',
+        '   Compiling port22-core v0.4.0',
+        '   Compiling port22 v1.4.0',
+        [['   Building ', 'yellow'], ['[=========>          ] 214/612', 'sub']]
+      ])) },
+      { id:'t1', name:'claude', sub:'~/port22', proc:'claude', recipe:'claude', running:false, susp:false, input:'', noInput:true, lines:[P()].concat(L([
+        [['❯ ', 'green'], ['claude', 'text']],
+        ['✻ Welcome to Claude Code', 'peach'],
+        '  /help for help · v2.1.4',
+        ' ',
+        ['> why does the deploy hook return 502?', 'text'],
+        [['⏺ ', 'green'], ['Reading src/deploy/hook.rs…', 'text']],
+        [['⏺ ', 'green'], ['Reading src/session/keepalive.rs…', 'text']],
+        '  The hook proxies to the agent socket',
+        '  and gives up after deploy_timeout (3s).',
+        '  Upstream answers in ~4.2s, so nginx',
+        '  logs a 502 and the retry never fires.',
+        ['> patch it to 10s and add a retry', 'text'],
+        [['⏺ ', 'green'], ['Edit src/deploy/hook.rs', 'text']],
+        ['   -  timeout: Duration::from_secs(3),', 'red'],
+        ['   +  timeout: Duration::from_secs(10),', 'green'],
+        ['   +  .retry(3, Backoff::exponential())', 'green'],
+        [['⏺ ', 'green'], ['cargo test -p port22-core', 'text']],
+        '   34 passed · 0 failed · 1 ignored',
+        ['> yes, roll it out', 'text'],
+        [['⏺ ', 'green'], ['Bash(./scripts/deploy.sh --rolling)', 'text']],
+        '   → web-01 draining',
+        '   → web-01 healthy in 11s',
+        [['⏺ ', 'green'], ['Watching access.log for 502s…', 'text']]
+      ])) },
+      { id:'t2', name:'htop', sub:'web-01', proc:'htop', recipe:'htop', running:false, susp:false, input:'', noInput:true, lines: L([
+        [['❯ ', 'green'], ['htop', 'text']],
+        ['  CPU [||||||||         34%]  Tasks 118', 'accent'],
+        ['  Mem [|||||||||||||    61%]  Load 1.24', 'green'],
+        ['  Swp [|                 4%]  Up 27d', 'teal'],
+        '  PID USER    CPU% MEM% COMMAND',
+        [' 2201 kamil   71.4  8.1 cargo build', 'text'],
+        [' 3120 deploy   4.1  1.2 deploy-agent', 'text'],
+        [' 3121 deploy   0.9  0.3 deploy-agent wk', 'text'],
+        [' 2988 www      1.9  2.6 nginx: worker', 'text'],
+        [' 2989 www      1.4  2.5 nginx: worker', 'text'],
+        [' 1204 kamil    0.7  0.4 sshd: kamil@pts/0', 'text'],
+        [' 1810 kamil    0.3  0.2 tmux: server', 'text'],
+        [' 3344 kamil    0.2  0.9 vim deploy/hook.rs', 'text'],
+        [' 3401 kamil    0.1  0.4 tail -f access.log', 'text'],
+        [' 2044 root     0.1  0.2 systemd-journald', 'text'],
+        [' 2077 root     0.0  0.3 containerd', 'text'],
+        [' 2101 postgres 2.2  6.4 postgres: writer', 'text'],
+        [' 2102 postgres 0.4  5.1 postgres: wal', 'text'],
+        [' 2140 redis    0.6  1.1 redis-server *:6379', 'text'],
+        [' 3502 deploy   0.0  0.2 deploy-hook retry', 'text'],
+        [' 1122 root     0.0  0.1 cron', 'text'],
+        [' 1190 root     0.0  0.2 dbus-daemon', 'text'],
+        ['F1 help  F3 search  F9 kill  F10 quit', 'sub']
+      ]) },
+      { id:'t3', name:'logs', sub:'web-01', proc:null, running:false, susp:false, input:'', noInput:true, lines: L([
+        [['❯ ', 'green'], ['tail -f /var/log/nginx/access.log', 'text']],
+        'GET  /api/v2/status      200   12ms',
+        'GET  /api/v2/jobs        200   31ms',
+        'GET  /assets/app.4f2a.js 200    8ms',
+        ['POST /hooks/deploy      502 4021ms', 'red'],
+        'GET  /healthz            200    3ms',
+        'GET  /api/v2/jobs/8812   200   44ms',
+        ['POST /hooks/deploy      502 4018ms', 'red'],
+        'GET  /api/v2/status      200   11ms',
+        'POST /api/v2/jobs        201   96ms',
+        'GET  /healthz            200    3ms',
+        ['POST /hooks/deploy      502 4033ms', 'red'],
+        'GET  /api/v2/jobs/8813   200   39ms',
+        'GET  /assets/app.4f2a.js 200    7ms',
+        ['deploy.sh: rolling restart requested', 'yellow'],
+        'GET  /healthz            503    1ms',
+        'GET  /healthz            200    4ms',
+        ['POST /hooks/deploy      200  118ms', 'green'],
+        'GET  /api/v2/status      200   13ms',
+        'POST /api/v2/jobs        201   88ms',
+        'GET  /api/v2/jobs/8814   200   36ms',
+        'GET  /healthz            200    3ms',
+        ['POST /hooks/deploy      200  104ms', 'green'],
+        'GET  /api/v2/status      200   12ms'
+      ]) }
     ];
   }
 
   componentDidUpdate(pp, ps) {
-    // Leaving a pane re-collapses its expandable recipe — coming back always starts compact.
-    if (ps.active !== this.state.active && Object.keys(this.state.rbExp || {}).length) this.setState({ rbExp: {} });
+    // The handle panel is per-pane and transient — swiping to another window closes it.
+    if (ps.active !== this.state.active && this.state.rbOpen) this.setState({ rbOpen: null, rbArm: false });
   }
   componentDidMount() {
     this._iv = setInterval(() => {
@@ -370,9 +508,64 @@ class Component extends DCLogic {
   unbindWin() { if (this._wm) window.removeEventListener('pointermove', this._wm); if (this._wu) window.removeEventListener('pointerup', this._wu); this._wm = this._wu = null; }
 
   slotXY(i) { return { x: 20 + (i % 2) * 189, y: 20 + Math.floor(i / 2) * 298 }; }
+
+  // ——— search ———————————————————————————————————————————————
+  // One query drives both surfaces: it filters the switcher grid, scrolls every
+  // preview to its first hit, and arms the jump bar on the terminal it opens.
+  qNorm() { return (this.state.q || '').trim().toLowerCase(); }
+  tabHay(t) { return (t.name + ' ' + (t.sub || '') + ' ' + (t.proc || '') + ' ' + t.lines.map(ps => ps.map(p => p.t).join('')).join('\n')).toLowerCase(); }
+  visList() { const q = this.qNorm(); return q ? this.state.tabs.filter(t => this.tabHay(t).indexOf(q) >= 0) : this.state.tabs.slice(); }
+  slotOfTab(i) {
+    const t = this.state.tabs[i];
+    if (!t) return this.slotXY(i);
+    const v = this.visList().findIndex(x => x.id === t.id);
+    return this.slotXY(v < 0 ? i : v);
+  }
+  occCount(t) {
+    const q = this.qNorm();
+    if (!q || !t) return 0;
+    let n = 0;
+    t.lines.forEach(ps => ps.forEach(p => { const lo = p.t.toLowerCase(); let i = 0, j; while ((j = lo.indexOf(q, i)) >= 0) { n++; i = j + q.length; } }));
+    return n;
+  }
+  setQ(v) { this.setState({ q: v, srchOn: true, occ: {} }); }
+  srchOff() { this.setState({ q: '', srchOn: false, occ: {} }); }
+  occStep(d) {
+    const t = this.state.tabs[this.state.active], n = this.occCount(t);
+    if (!t || !n) return;
+    const cur = Math.min(this.state.occ[t.id] || 0, n - 1);
+    this.setState(st => ({ occ: Object.assign({}, st.occ, { [t.id]: (cur + d + n) % n }) }));
+  }
+  // Split a run of text on the query so each hit carries its own highlight.
+  hlParts(str, c, q, f, occ, cur, li) {
+    if (!q) return [{ t: str, c, hl: '' }];
+    const lo = str.toLowerCase(), out = [];
+    let i = 0;
+    for (;;) {
+      const j = lo.indexOf(q, i);
+      if (j < 0) { if (i < str.length) out.push({ t: str.slice(i), c, hl: '' }); return out; }
+      if (j > i) out.push({ t: str.slice(i, j), c, hl: '' });
+      const on = occ.length === cur;
+      occ.push(li);
+      out.push({ t: str.slice(j, j + q.length), c: on ? (f.dark ? f.crust : f.text) : c, hl: 'background:' + (on ? f.yellow : this.hexA(f.yellow, 0.32)) + ';border-radius:2px;' });
+      i = j + q.length;
+    }
+  }
+  buildTab(t, q, cur, f) {
+    const col = k => f[k] || f.text, occ = [];
+    const lines = t.lines.map((parts, li) => ({ parts: [].concat.apply([], parts.map(p => this.hlParts(p.t, col(p.c), q, f, occ, cur, li))) }));
+    return { lines, occ };
+  }
+  // Output hangs from its newest line; a hit pulls the block down until it sits ~40% in.
+  scrollTy(nLines, hitLine, lh, viewH) {
+    const contentH = nLines * lh, max = Math.max(0, contentH - viewH);
+    if (hitLine == null) return 0;
+    return Math.min(Math.max(contentH - hitLine * lh - viewH * 0.62, 0), max);
+  }
+
   zoomSty(i, trans) {
-    const s = this.slotXY(i), S = Component.S;
-    const x = s.x, y = s.y + 66, clip = Component.H - 240 / S, r = 14 / S;
+    const s = this.slotOfTab(i), S = Component.S;
+    const x = s.x, y = s.y + Component.GRIDY, clip = Component.H - 240 / S, r = 14 / S;
     return 'transform:translate(' + x + 'px,' + y + 'px) scale(' + S + ');clip-path:inset(0px 0px ' + clip.toFixed(1) + 'px 0px round ' + r.toFixed(1) + 'px);opacity:0;pointer-events:none;' +
       (trans ? 'transition:transform 0.3s ease-out,clip-path 0.3s ease-out,opacity 0.12s ease-in 0.18s;' : 'transition:none;');
   }
@@ -387,7 +580,8 @@ class Component extends DCLogic {
     if (this.state.view === 'zoomI' || this.state.view === 'term') return;
     this.setState({ view: 'zoomI', termSty: this.zoomSty(i, false), termRing: Component.RING_ZOOM_N });
     clearTimeout(this._zt);
-    this._zt = setTimeout(() => this.setState({ view: 'term', kbShown: true, dotsOn: false }), 400);
+    // Arriving on a search hit, the keyboard stays down — you came here to read.
+    this._zt = setTimeout(() => this.setState({ view: 'term', kbShown: !this.qNorm(), dotsOn: false }), 400);
   }
   // Two-phase close: the instant (transition:none) reposition must be COMMITTED to the DOM
   // before REST lands, or the transition has no start frame. componentDidUpdate runs after that
@@ -462,6 +656,38 @@ class Component extends DCLogic {
     }, 180);
   }
   attCancel() { clearInterval(this._at); this.setState({ att: null }); }
+  // A command cap types the slash command and presses return — the panel closes on the way out.
+  slash(cmd) {
+    const OUT = {
+      '/plugins': [['✻ Plugins', 'peach'], ['  ● port22-tmux       v0.4.1   enabled', 'green'], ['  ● sqlite-explorer   v1.2.0   enabled', 'green'], ['  ○ figma-bridge      v0.9.3   disabled', 'sub'], ['  ↑ 1 update available — /plugins update', 'sub']],
+      '/config': [['✻ Settings', 'peach'], ['  Theme              dark', 'text'], ['  Auto-accept edits  off', 'text'], ['  Notifications      on', 'text'], ['  ↑↓ move · ⏎ change · ⎋ close', 'sub']],
+      '/usage': [['✻ Usage', 'peach'], ['  Session            38% of 5h limit', 'text'], ['  This week          61%', 'text'], ['  Resets             2:41 PM', 'sub']],
+      '/model': [['✻ Model', 'peach'], ['  ● default (recommended)', 'green'], ['  ○ opus    ○ sonnet    ○ haiku', 'sub']],
+      '/context': [['✻ Context — 42k / 200k tokens', 'peach'], ['  system 4.1k · tools 11k · files 21k', 'sub'], ['  ▓▓▓▓░░░░░░░░░░░░░░░░  21%', 'accent']],
+      '/clear': [['✻ Conversation cleared', 'peach']]
+    };
+    this.mutTab(this.state.active, t => {
+      t.lines.push([{ t:'> ', c:'green' }, { t: cmd, c:'text' }]);
+      (OUT[cmd] || []).forEach(l => t.lines.push([{ t: l[0], c: l[1] }]));
+      t.lines.push([{ t:'', c:'sub' }]);
+      return t;
+    });
+    this.setState({ rbOpen: null, rbArm: false });
+  }
+  // Claude Code needs two interrupts to exit, so the cap arms first and reads "tap again".
+  rbQuit() {
+    const P = Component.P;
+    if (!this.state.rbArm) {
+      this.setState({ rbArm: true });
+      this.mutTab(this.state.active, t => { t.lines.push([{ t:'^C', c:'text' }], [{ t:'  (^C again to exit)', c:'sub' }]); return t; });
+      clearTimeout(this._qa);
+      this._qa = setTimeout(() => this.setState({ rbArm: false }), 2800);
+      return;
+    }
+    clearTimeout(this._qa);
+    this.mutTab(this.state.active, t => { t.lines.push([{ t:'^C', c:'text' }], P()); t.proc = null; t.recipe = null; t.noInput = false; return t; });
+    this.setState({ rbOpen: null, rbArm: false });
+  }
   ribbon(action) {
     const i = this.state.active;
     if (i < 0) return;
@@ -551,7 +777,7 @@ class Component extends DCLogic {
     const id = 't' + (++Component.uid);
     const tab = { id, name:'fish', sub:'~', proc:null, running:false, susp:false, input:'', noInput:false, lines:[Component.P()] };
     const plus = 'transform:translate(34px,776px) scale(0.122);clip-path:inset(0px 0px 472px 0px round 200px);opacity:0.2;pointer-events:none;transition:none;';
-    this.setState(s => ({ tabs: [...s.tabs, tab], active: s.tabs.length, view: 'zoomI', termSty: plus, termRing: Component.RING_REST }));
+    this.setState(s => ({ tabs: [...s.tabs, tab], active: s.tabs.length, view: 'zoomI', termSty: plus, termRing: Component.RING_REST, q: '', srchOn: false, occ: {} }));
     clearTimeout(this._zt);
     this._zt = setTimeout(() => this.setState({ view: 'term', kbShown: true, dotsOn: false }), 400);
   }
@@ -573,12 +799,13 @@ class Component extends DCLogic {
   cardDown(e, id) {
     if (this.state.view !== 'tabs' || this.state.closing[id]) return;
     const idx = this.state.tabs.findIndex(t => t.id === id);
-    const slot = this.slotXY(idx);
+    const slot = this.slotOfTab(idx);
     const d = this._cd = { id, sx: e.clientX, sy: e.clientY, ox: slot.x, oy: slot.y, moved: false, drag: false, axis: null, t: Date.now() };
+    this.bindWin(this.cardMove.bind(this), this.cardUp.bind(this));
+    if (this.qNorm()) return; // a filtered grid isn't the real order — no reordering from it
     this._ht = setTimeout(() => {
       if (this._cd === d && !d.moved) { d.drag = true; this.setState({ dragId: id, dragXY: { x: d.ox, y: d.oy } }); }
     }, 300);
-    this.bindWin(this.cardMove.bind(this), this.cardUp.bind(this));
   }
   cardMove(e) {
     const d = this._cd; if (!d) return;
@@ -661,9 +888,9 @@ class Component extends DCLogic {
     const fm = (Component.FLAV[this.state.flav || this.props.flavour] || Component.FLAV.mocha).accent;
     const t = Math.min(Math.max((-dy - 24) / 280, 0), 1);
     b.t = t;
-    const slot = this.slotXY(this.state.active);
+    const slot = this.slotOfTab(this.state.active);
     const sc = 1 + (Component.S - 1) * t;
-    const tx = slot.x * t + dx * 0.6, ty = (slot.y + 66) * t;
+    const tx = slot.x * t + dx * 0.6, ty = (slot.y + Component.GRIDY) * t;
     const clip = (316.3 * t).toFixed(1), r = Math.max(32.6 * t, 0.001).toFixed(1);
     this.setState({
       termSty: 'transform:translate(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px) scale(' + sc.toFixed(4) + ');clip-path:inset(0px 0px ' + clip + 'px 0px round ' + r + 'px);opacity:1;pointer-events:none;transition:none;',
@@ -707,7 +934,7 @@ class Component extends DCLogic {
   static dotFor(rec, f) {
     return rec === 'run' ? f.green        // long-running job — building, syncing, tailing
       : rec === 'susp' ? f.ov0            // stopped, no cycles
-      : rec === 'agent' ? f.peach         // coding agents: claude, codex, aider
+      : rec === 'claude' ? f.peach        // coding agents: claude code, codex, aider
       : rec === 'vim' ? f.mauve           // editors
       : rec === 'pager' ? f.accent        // read-only pagers: less, man
       : rec === 'htop' ? f.yellow         // system monitors
@@ -742,7 +969,7 @@ class Component extends DCLogic {
         R('Appearance', { mocha:'Mocha', latte:'Latte', frappe:'Frappé', macchiato:'Macchiato' }[s.flav || this.props.flavour || 'mocha']),
         R('Cursor', 'Block'), R('Scrollback', '10 000 lines'), R('Bell', '', T('bell', c.bell)) ] },
       { key:'input', title:'INPUT', rows:[
-        P('Key bar', '4 keys', 'keybar'), P('Context ribbon', ['run','susp','vim','pager','htop','agent'].filter(k => c.rec[k]).length + ' on', 'ribbon'),
+        P('Key bar', '4 keys', 'keybar'), P('Edge handle', Object.keys(c.rec).filter(k => c.rec[k]).length + ' apps', 'ribbon'),
         R('Arrow cluster', 'Right'), R('Haptics', '', T('haptics', c.haptics)) ] },
       { key:'tmux', title:'TMUX', rows:[ R('Configure tmux', '', T('tmux', s.tmuxOn, () => this.setState(st => ({ tmuxOn: !st.tmuxOn })))), R('Session name', 'port22') ],
         note:'Off removes the tabs button — the switcher needs a configured tmux.' },
@@ -759,11 +986,11 @@ class Component extends DCLogic {
         { key:'k2', title:'ADD', rows:[ R('Import from Files…', '', { lSty:'color:' + f.accent + ';' }), R('Generate new key', '', { lSty:'color:' + f.accent + ';' }) ],
           note:'Private keys stay in the Secure Enclave; signing happens on device.' }
       ] },
-      ribbon: { title:'Context ribbon', groups:[
-        { key:'r1', title:'RECIPES', rows:[['run','Long-running job'],['susp','Suspended job'],['vim','Editors'],['pager','Pagers'],['htop','Monitors'],['agent','Coding agents']]
+      ribbon: { title:'Edge handle', groups:[
+        { key:'r1', title:'APPS', rows:[['run','Long-running jobs'],['susp','Suspended jobs'],['claude','Claude Code'],['vim','Editors — vim, nano'],['pager','Pagers — less, man'],['htop','Monitors — htop, watch'],['vite','Dev servers — vite, npm'],['psql','Database shells — psql, redis'],['repl','REPLs — python, node'],['git','Git — rebase, commit']]
           .map(p => R(p[1], '', T(p[0], c.rec[p[0]], () => this.recSet(p[0])))) },
-        { key:'r2', title:'BEHAVIOUR', rows:[ R('Start TUI recipes collapsed', '', T('collapse', c.collapse)), R('Swipe down to dismiss', '', T('swipeoff', c.swipeoff)) ],
-          note:'A dismissed ribbon returns when the foreground process changes.' }
+        { key:'r2', title:'BEHAVIOUR', rows:[ R('Handle side', 'Right'), R('Pulse while running', '', T('pulse', c.pulse)) ],
+          note:'Tap or swipe the handle to open; tap the terminal, pick a cap, or swipe back to close.' }
       ] },
       keybar: { title:'Key bar', groups:[
         { key:'b1', title:'IN THE BAR', rows:['Ctrl','Esc','Tab','Paste'].map(k => R(k, '', { chk:1 })) },
@@ -794,28 +1021,35 @@ class Component extends DCLogic {
       ';--glassBd:' + (f.dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)') +
       ';--popBg:' + this.hexA(f.mantle, 0.88) + ';--fs:' + fs + 'px;';
 
-    const mapLines = t => t.lines.map(parts => ({ parts: parts.map(p => ({ t: p.t, c: col(p.c) })) }));
-
-    const pages = s.tabs.map(t => ({
-      key: t.id, lines: mapLines(t),
-      showInput: !t.running && !t.noInput,
-      inputPre: (t.input || '').slice(0, (t.input || '').length - (t.caret || 0)),
-      inputPost: (t.input || '').slice((t.input || '').length - (t.caret || 0))
-    }));
+    const q = this.qNorm();
+    const vis = this.visList();
 
     const cards = s.tabs.map((t, i) => {
-      const slot = this.slotXY(i);
+      const vi = vis.findIndex(x => x.id === t.id), shown = vi >= 0;
+      const slot = this.slotXY(shown ? vi : i);
+      const cb = this.buildTab(t, q, 0, f);
+      const cn = cb.occ.length;
       let sty;
       if (s.dragId === t.id && s.dragXY) sty = 'transform:translate(' + s.dragXY.x + 'px,' + s.dragXY.y + 'px) scale(1.06) rotate(2deg);transition:none;z-index:10;filter:drop-shadow(0 24px 40px rgba(0,0,0,0.55));';
       else if (s.swipeCard && s.swipeCard.id === t.id) sty = 'transform:translate(' + (slot.x + s.swipeCard.off) + 'px,' + slot.y + 'px);opacity:' + (1 - Math.min(Math.max(-s.swipeCard.off, 0) / 173, 1)).toFixed(2) + ';transition:none;z-index:2;';
       else if (s.closing[t.id]) sty = 'transform:translate(' + (slot.x - 460) + 'px,' + slot.y + 'px);opacity:0;transition:transform 0.28s ease-in,opacity 0.25s;z-index:2;';
       else if (s.view === 'zoomDrag' && i === s.active) sty = 'transform:translate(' + slot.x + 'px,' + slot.y + 'px);opacity:0;transition:opacity 0.15s;z-index:1;';
       else sty = 'transform:translate(' + slot.x + 'px,' + slot.y + 'px);opacity:1;transition:transform 0.35s cubic-bezier(0.3,1.3,0.45,1),opacity 0.25s;z-index:1;';
+      // Filtered out: the card falls away in place rather than jumping to a new slot.
+      if (!shown) sty = 'transform:translate(' + slot.x + 'px,' + slot.y + 'px) scale(0.92);opacity:0;pointer-events:none;transition:transform 0.3s ease,opacity 0.2s ease;z-index:0;';
+      const nameC = i === s.active ? f.accent : f.text;
       return {
-        key: t.id, name: t.name, sub: t.sub, sty,
-        lines: mapLines(t),
+        key: t.id, sty,
+        lines: cb.lines,
+        just: cb.lines.length * 8.4 > 230 ? 'justify-content:flex-end;' : '',
+        tyS: 'transform:translateY(' + this.scrollTy(cb.lines.length, cb.occ[0], 8.4, 230).toFixed(1) + 'px);transition:transform 0.3s cubic-bezier(0.22,1,0.36,1);',
+        nameParts: this.hlParts(t.name, nameC, q, f, [], -1, 0),
+        subParts: this.hlParts(t.sub || '', f.sub, q, f, [], -1, 0),
+        mCount: q ? cn : 0,
+        mLabel: cn === 1 ? '1 match' : cn + ' matches',
+        mSty: 'background:' + f.yellow + ';color:' + (f.dark ? f.crust : f.text) + ';',
         ring: s.dragId === t.id ? 'border:2px solid ' + f.mauve + ';' : (i === s.active ? 'border:2px solid ' + f.accent + ';' : 'border:1px solid ' + f.ov0 + ';'),
-        nameC: i === s.active ? f.accent : f.text,
+        nameC,
         down: e => this.cardDown(e, t.id),
         close: e => { e.stopPropagation(); this.closeCard(t.id); },
         stop: e => e.stopPropagation()
@@ -828,32 +1062,75 @@ class Component extends DCLogic {
     const mm = Math.floor(s.secs / 60), ss = ('0' + s.secs % 60).slice(-2);
     const rid = activeT.id;
     const rec = activeT.running ? 'run' : (activeT.susp ? 'susp' : (activeT.recipe || null));
-    const isTui = rec === 'vim' || rec === 'pager' || rec === 'htop';
-    const ribbonOn = s.view === 'term' && !!rec && !(s.rbGone || {})[rid];
-    const rbCollapsed = isTui && !(s.rbExp || {})[rid];
-    const rbH = ribbonOn ? (rbCollapsed ? 44 : 56) : 0;
+    // The handle floats over output: two states, closed and open, and zero vertical cost.
+    const rbOn = s.view === 'term' && !!rec;
+    const rbPanelOn = rbOn && s.rbOpen === rid;
+    const rbH = 0;
     const chordOn = s.view === 'term' && s.ctrl !== 'off';
     const popBase = (s.view === 'term' && s.kbShown ? Component.KB : 0) + 66 + rbH + (chordOn ? 62 : 0);
     const RECS = {
-      run: [{ k:'^C', l:'stop', a:'stop' }, { k:'^Z bg', l:'background', a:'bg' }, { k:'kill', l:'force', a:'kill', d:1 }],
-      susp: [{ k:'fg', l:'resume', a:'fg' }, { k:'bg', l:'run behind', a:'bg2' }, { k:'kill', l:'force', a:'kill', d:1 }],
-      vim: [{ k:':w', l:'save' }, { k:':q', l:'quit' }, { k:'ZZ', l:'save+quit' }, { k:':q!', l:'force quit', d:1 }],
-      pager: [{ k:'q', l:'quit' }, { k:'/', l:'search' }, { k:'g', l:'top' }, { k:'G', l:'end' }],
-      htop: [{ k:'q', l:'quit' }, { k:'/', l:'filter' }, { k:'F9', l:'kill', d:1 }],
-      agent: [{ ic:1, l:'attach', a:'attach' }, { k:'⎋', l:'interrupt', row:1 }]
+      run: [{ k:'kill', l:'force', a:'kill', d:1 }, { k:'^Z bg', l:'background', a:'bg' }, { k:'^C', l:'stop', a:'stop' }],
+      susp: [{ k:'kill', l:'force', a:'kill', d:1 }, { k:'bg', l:'run behind', a:'bg2' }, { k:'fg', l:'resume', a:'fg' }],
+      vim: [{ k:':q!', l:'discard', d:1 }, { k:':q', l:'quit' }, { k:'/', l:'search' }, { k:'ZZ', l:'save+quit' }, { k:':w', l:'save' }],
+      pager: [{ k:'q', l:'quit' }, { k:'G', l:'end' }, { k:'g', l:'top' }, { k:'n', l:'next hit' }, { k:'/', l:'search' }],
+      htop: [{ k:'F9', l:'kill', d:1 }, { k:'q', l:'quit' }, { k:'F6', l:'sort' }, { k:'/', l:'filter' }],
+      claude: [
+        { hd:'SESSION' },
+        { k:'^C ^C', l:'quit', a:'quit', d:1 },
+        { hd:'COMMANDS' },
+        { k:'/clear', a:'slash' }, { k:'/context', a:'slash' }, { k:'/model', a:'slash' },
+        { k:'/usage', a:'slash' }, { k:'/config', a:'slash' }, { k:'/plugins', a:'slash' },
+        { hd:'NOW' },
+        { ic:1, l:'attach', a:'attach' }, { k:'⇧⇥', l:'plan mode' }, { k:'⎋', l:'stop' }
+      ]
     };
-    const rbAtt = !!s.att && rec === 'agent';
-    const rbCaps = (!ribbonOn || rbCollapsed ? [] : (RECS[rec] || [])).filter(c => !(rbAtt && c.a === 'attach')).map(c => ({
-      k: c.k, l: c.l, ic: !!c.ic, txt: !c.ic,
-      sty: (c.ic || c.row ? 'flex-direction:row;gap:5px;padding:0 11px;' : 'flex-direction:column;gap:1px;width:' + (c.w || 52) + 'px;')
-        + (c.d ? 'background:' + this.hexA(f.red, 0.14) + ';border:0.5px solid ' + this.hexA(f.red, 0.4) + ';' : 'background:rgba(127,132,156,0.18);'),
-      kSty: 'font:500 ' + (c.row ? 14 : 13) + "px 'JBMono';color:" + (c.d ? f.red : f.text) + ';',
-      lSty: 'font:' + (c.ic || c.row ? "500 12.5px system-ui" : '8.5px system-ui') + ';color:' + (c.ic || c.row ? f.text : c.d ? f.red : f.sub) + ';',
-      tap: e => { e.stopPropagation(); if (c.a === 'attach') this.attach(); else if (c.a) this.ribbon(c.a); else this.recKey(c.k); }
-    }));
+    const rbAtt = !!s.att && rec === 'claude';
+    const rbCaps = (!rbPanelOn ? [] : (RECS[rec] || [])).filter(c => !(rbAtt && c.a === 'attach')).map(c => {
+      if (c.hd) return { k: c.hd, l:'', hasL: false, ic: false, txt: true, lSty:'',
+        sty: 'justify-content:flex-end;padding:6px 10px 1px 0;cursor:default;',
+        kSty: 'font:600 9.5px system-ui;color:' + f.sub + ';letter-spacing:0.7px;text-shadow:0 1px 3px ' + this.hexA(f.crust, 0.9) + ';',
+        tap: e => e.stopPropagation() };
+      const arm = c.a === 'quit' && s.rbArm, dang = !!(c.d || arm);
+      return {
+        k: c.k, l: arm ? 'tap again' : (c.l || ''), hasL: !!(arm || c.l), ic: !!c.ic, txt: !c.ic,
+        sty: 'height:40px;border-radius:21px;padding:0 15px;gap:8px;backdrop-filter:blur(18px) saturate(170%);'
+          + 'box-shadow:inset 1.5px 1.5px 1px rgba(255,255,255,' + (f.dark ? '0.14' : '0.5') + '),0 10px 26px ' + this.hexA(f.crust, 0.45) + ';'
+          + (dang ? 'background:' + this.hexA(f.red, 0.16) + ';border:0.5px solid ' + this.hexA(f.red, arm ? 0.85 : 0.42) + ';'
+                  : 'background:' + this.hexA(f.s0, 0.72) + ';border:0.5px solid ' + this.hexA(f.text, 0.14) + ';'),
+        kSty: "font:500 14px 'JBMono';color:" + (dang ? f.red : f.text) + ';',
+        lSty: 'font:12.5px system-ui;color:' + (dang ? f.red : f.sub) + ';',
+        tap: e => { e.stopPropagation();
+          if (c.a === 'attach') this.attach();
+          else if (c.a === 'slash') this.slash(c.k);
+          else if (c.a === 'quit') this.rbQuit();
+          else if (c.a) this.ribbon(c.a);
+          else { this.recKey(c.k); this.setState({ rbOpen: null }); } }
+      };
+    });
     const recLabel = rec === 'run' ? activeT.proc + ' · ' + mm + ':' + ss
       : rec === 'susp' ? activeT.proc + ' · stopped'
-      : rec === 'vim' ? 'vim · KeyBarView.swift' : (activeT.proc || '');
+      : rec === 'vim' ? 'vim · KeyBarView.swift'
+      : rec === 'claude' ? 'claude code · ~/port22' : (activeT.proc || '');
+
+    const srchH = s.srchOn ? 48 : 0;
+    const lh = fs * 1.32;
+    const pageH = Math.max(140, 874 - 58 - srchH - rbH - (chordOn ? 62 : 0) - 60 - kbH - 8);
+    const pages = s.tabs.map(t => {
+      const n = this.occCount(t);
+      const cur = n ? Math.min(s.occ[t.id] || 0, n - 1) : -1;
+      const b = this.buildTab(t, q, cur, f);
+      const showInput = !t.running && !t.noInput;
+      const nl = b.lines.length + (showInput ? 1 : 0);
+      return {
+        key: t.id, lines: b.lines, showInput,
+        just: nl * lh > pageH ? 'justify-content:flex-end;' : '',
+        tyS: 'transform:translateY(' + this.scrollTy(nl, b.occ[cur], lh, pageH).toFixed(1) + 'px);transition:transform 0.3s cubic-bezier(0.22,1,0.36,1);',
+        inputPre: (t.input || '').slice(0, (t.input || '').length - (t.caret || 0)),
+        inputPost: (t.input || '').slice((t.input || '').length - (t.caret || 0))
+      };
+    });
+    const actN = this.occCount(activeT);
+    const actCur = actN ? Math.min(s.occ[activeT.id] || 0, actN - 1) : 0;
 
     let ctrlSty = '';
     if (s.ctrl === 'armed') ctrlSty = 'background:' + this.hexA(f.accent, 0.5) + ';border:1px solid ' + this.hexA(f.accent, 0.9) + ';';
@@ -876,6 +1153,16 @@ class Component extends DCLogic {
     return {
       isDark: f.dark, vars,
       pages, cards, tabCount: s.tabs.length, badge: s.active + 1,
+      q: s.q, qOn: !!s.q,
+      onQ: e => this.setQ(e.target.value),
+      srchOff: () => this.srchOff(),
+      occPrev: () => this.occStep(-1), occNext: () => this.occStep(1),
+      occLabel: !q ? '' : actN ? (actCur + 1) + '/' + actN : 'none',
+      occNavSty: 'opacity:' + (actN ? 1 : 0.35) + ';pointer-events:' + (actN ? 'auto' : 'none') + ';',
+      srchWrapSty: 'height:' + srchH + 'px;',
+      tabsLabel: q ? vis.length + ' of ' + s.tabs.length + ' tabs' : s.tabs.length + ' Tabs',
+      noHits: !!q && vis.length === 0,
+      noHitsQ: s.q,
       termSty: s.termSty, termRing: s.termRing,
       flavs, fsLabel: fs + ' pt',
       fsD: () => this.setState(st => ({ fsO: Math.max(9, (st.fsO || this.props.fontSize || 13) - 1) })),
@@ -901,25 +1188,34 @@ class Component extends DCLogic {
       sheetSty: 'transform:translateY(' + (s.sheetOpen ? 0 : 530) + 'px);transition:transform 0.34s cubic-bezier(0.32,0.72,0.3,1);',
       pagesSty: 'transform:translateX(' + (-(s.active * 430) + s.swipeX) + 'px);transition:' + (s.barDrag ? 'none' : 'transform 0.32s cubic-bezier(0.22,1,0.36,1)') + ';',
       pageR: s.dotsOn ? 16 : 0,
-      phSty: (() => { const sl = this.slotXY(s.active); return 'transform:translate(' + sl.x + 'px,' + sl.y + 'px);opacity:' + (s.view === 'zoomDrag' ? 1 : 0) + ';transition:opacity 0.15s;'; })(),
+      phSty: (() => { const sl = this.slotOfTab(s.active); return 'transform:translate(' + sl.x + 'px,' + sl.y + 'px);opacity:' + (s.view === 'zoomDrag' ? 1 : 0) + ';transition:opacity 0.15s;'; })(),
       keysRowSty: 'opacity:' + (namesOn ? 0 : 1) + ';transition:opacity 0.15s;pointer-events:' + (namesOn ? 'none' : 'auto') + ';',
       namesWrapSty: 'opacity:' + (namesOn ? 1 : 0) + ';transition:opacity 0.15s;',
       nameStripSty: 'transform:translateX(' + (-(cont * 242)) + 'px);transition:' + (s.barDrag ? 'none' : 'transform 0.32s cubic-bezier(0.22,1,0.36,1)') + ';',
       namePills,
-      ribbonWrapSty: 'height:' + rbH + 'px;',
       chordWrapSty: 'height:' + (chordOn ? 62 : 0) + 'px;',
       kbWrapSty: 'height:' + kbH + 'px;',
-      rbCaps, rbCollapsed, rbAtt,
+      rbCaps, rbAtt,
       attName: s.att ? s.att.name : '',
       attSub: s.att ? 'uploading · ' + s.att.pct + '% · 1.4 MB' : '',
       attBarSty: 'width:' + (s.att ? s.att.pct : 0) + '%;',
       attCancel: e => { e.stopPropagation(); this.attCancel(); },
-      ribbonPillSty: 'cursor:' + (isTui ? 'pointer' : 'default') + ';padding:' + (rbCollapsed ? '8px 13px' : '5px 7px 5px 13px') + ';',
+      rbHandleOn: rbOn && !rbPanelOn,
+      rbPanelOn,
+      rbHandleSty: 'bottom:' + (popBase + 6) + 'px;',
+      rbTabSty: 'background:' + Component.dotFor(rec, f) + ';'
+        + (s.cfg.pulse && (rec === 'run' || rec === 'claude') ? 'animation:p22edge 1.9s ease-in-out infinite;' : 'opacity:0.9;'),
+      rbPanelSty: 'bottom:' + (popBase + 8) + 'px;',
+      rbCapsSty: 'max-height:' + Math.max(150, 874 - 58 - srchH - popBase - 104) + 'px;padding-right:1px;',
+      attPillSty: 'background:' + this.hexA(f.s0, 0.72) + ';',
+      rbStubSty: 'background:' + Component.dotFor(rec, f) + ';',
       ribbonDotSty: 'background:' + Component.dotFor(rec, f) + ';' + (rec === 'run' ? 'animation:p22pulse 1.6s ease-in-out infinite;' : ''),
-      ribbonLabelSty: 'padding-right:' + (rbCollapsed ? 2 : 5) + 'px;',
-      rbTap: () => { if (isTui) this.setState(st => ({ rbExp: Object.assign({}, st.rbExp, { [rid]: !(st.rbExp || {})[rid] }) })); },
-      rbDown: e => { this._rbY = e.touches[0].clientY; },
-      rbUp: e => { const dy = e.changedTouches[0].clientY - (this._rbY || 0); if (dy > 34) this.setState(st => ({ rbGone: Object.assign({}, st.rbGone, { [rid]: true }) })); },
+      rbOpen: () => this.setState({ rbOpen: rid, rbArm: false }),
+      rbClose: e => { if (e && e.stopPropagation) e.stopPropagation(); this.setState({ rbOpen: null, rbArm: false }); },
+      rbDown: e => { this._rbX = e.touches[0].clientX; },
+      rbUp: e => { const dx = e.changedTouches[0].clientX - (this._rbX || 0);
+        if (dx < -28) this.setState({ rbOpen: rid, rbArm: false });
+        else if (dx > 28) this.setState({ rbOpen: null, rbArm: false }); },
       procLabel: recLabel,
       ctrlSty,
       overlaySty: (s.clipOpen || s.menuOpen || s.arrowsOpen) ? 'pointer-events:auto;' : 'pointer-events:none;display:none;',
@@ -944,3 +1240,4 @@ class Component extends DCLogic {
 </script>
 </body>
 </html>
+

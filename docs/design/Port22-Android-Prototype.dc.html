@@ -14,6 +14,7 @@
 body{margin:0;background:#0d0d15;font-family:Roboto,system-ui,sans-serif}
 a{color:#89b4fa}a:hover{color:#b4befe}
 @keyframes p22blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes p22edge{0%,100%{opacity:.95;transform:scaleY(1)}50%{opacity:.45;transform:scaleY(.84)}}
 @keyframes p22pulse{0%,100%{opacity:1}50%{opacity:0.35}}
 </style>
 </helmet>
@@ -64,38 +65,46 @@ a{color:#89b4fa}a:hover{color:#b4befe}
             </sc-for>
           </div>
         </div>
-        <div style="flex:none;overflow:hidden;transition:height 0.25s ease;{{ ribbonWrapSty }}">
-          <div style="display:flex;justify-content:center;padding:2px 20px 8px;">
-            <div style="display:flex;align-items:center;gap:5px;border-radius:19px;background:var(--elev,#313244);box-shadow:0 2px 8px rgba(0,0,0,0.45);transition:padding 0.26s cubic-bezier(0.2,1.1,0.35,1);{{ ribbonPillSty }}" onClick="{{ rbTap }}" onTouchStart="{{ rbDown }}" onTouchEnd="{{ rbUp }}">
+        <sc-if value="{{ rbHandleOn }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;right:0;width:46px;height:64px;display:flex;align-items:center;justify-content:flex-end;cursor:pointer;z-index:6;{{ rbHandleSty }}" onClick="{{ rbOpen }}" onTouchStart="{{ rbDown }}" onTouchEnd="{{ rbUp }}">
+            <div style="width:5px;height:46px;border-radius:4px 0 0 4px;{{ rbTabSty }}"></div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ rbPanelOn }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;inset:0;z-index:5;" onClick="{{ rbClose }}"></div>
+          <div style="position:absolute;right:14px;box-sizing:border-box;z-index:6;display:flex;flex-direction:column;align-items:flex-end;gap:8px;{{ rbPanelSty }}" onTouchStart="{{ rbDown }}" onTouchEnd="{{ rbUp }}">
+            <div style="display:flex;align-items:center;gap:7px;padding:0 10px 1px 0;">
               <span style="width:7px;height:7px;border-radius:4px;flex:none;{{ ribbonDotSty }}"></span>
-              <span style="font:11px 'JBMono';color:var(--sub,#a6adc8);white-space:nowrap;{{ ribbonLabelSty }}">{{ procLabel }}</span>
-              <sc-if value="{{ rbCollapsed }}" hint-placeholder-val="{{ false }}">
-                <svg width="11" height="7" viewBox="0 0 11 7" style="flex:none;"><path d="M1 5.5L5.5 1.5 10 5.5" fill="none" stroke="var(--ov0,#6c7086)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-              </sc-if>
-              <sc-if value="{{ rbAtt }}" hint-placeholder-val="{{ false }}">
-                <div style="position:relative;overflow:hidden;width:172px;height:36px;border-radius:14px;background:rgba(127,132,156,0.16);border:0.5px solid rgba(127,132,156,0.3);display:flex;align-items:center;gap:8px;padding:0 10px 0 11px;box-sizing:border-box;cursor:pointer;" onClick="{{ attCancel }}">
-                  <div style="position:absolute;left:0;top:0;bottom:0;background:rgba(127,132,156,0.34);transition:width 0.2s linear;{{ attBarSty }}"></div>
-                  <div style="position:relative;flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
-                    <span style="font:500 11px 'JBMono';color:var(--text,#cdd6f4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ attName }}</span>
-                    <span style="font:8.5px Roboto,system-ui;color:var(--sub,#a6adc8);">{{ attSub }}</span>
-                  </div>
-                  <svg style="position:relative;flex:none;" width="12" height="12" viewBox="0 0 13 13"><path d="M2 2l9 9M11 2l-9 9" stroke="var(--sub,#a6adc8)" stroke-width="1.5" stroke-linecap="round"></path></svg>
+              <span style="font:11px 'JBMono';color:var(--sub,#a6adc8);white-space:nowrap;">{{ procLabel }}</span>
+            </div>
+            <sc-if value="{{ rbAtt }}" hint-placeholder-val="{{ false }}">
+              <div style="position:relative;overflow:hidden;height:44px;border-radius:22px;box-shadow:0 4px 12px rgba(0,0,0,0.4);display:flex;align-items:center;gap:8px;padding:0 12px 0 15px;box-sizing:border-box;cursor:pointer;{{ attPillSty }}" onClick="{{ attCancel }}">
+                <div style="position:absolute;left:0;top:0;bottom:0;background:rgba(127,132,156,0.34);transition:width 0.2s linear;{{ attBarSty }}"></div>
+                <div style="position:relative;flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
+                  <span style="font:500 11px 'JBMono';color:var(--text,#cdd6f4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ attName }}</span>
+                  <span style="font:8.5px Roboto,system-ui;color:var(--sub,#a6adc8);">{{ attSub }}</span>
                 </div>
-              </sc-if>
+                <svg style="position:relative;flex:none;" width="12" height="12" viewBox="0 0 13 13"><path d="M2 2l9 9M11 2l-9 9" stroke="var(--sub,#a6adc8)" stroke-width="1.5" stroke-linecap="round"></path></svg>
+              </div>
+            </sc-if>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;overflow-y:auto;{{ rbCapsSty }}">
               <sc-for list="{{ rbCaps }}" as="cap" hint-placeholder-count="0">
-                <div style="border-radius:14px;display:flex;align-items:center;justify-content:center;height:36px;box-sizing:border-box;cursor:pointer;{{ cap.sty }}" onClick="{{ cap.tap }}">
+                <div style="display:flex;align-items:center;box-sizing:border-box;cursor:pointer;flex:none;{{ cap.sty }}" onClick="{{ cap.tap }}">
                   <sc-if value="{{ cap.ic }}" hint-placeholder-val="{{ false }}">
                     <svg width="12" height="13" viewBox="0 0 13 15" style="flex:none;"><path d="M9.4 4.2L4.9 8.7a1.9 1.9 0 002.7 2.7l4.4-4.4a3.4 3.4 0 00-4.8-4.8L2.4 6.9a4.9 4.9 0 006.9 6.9l4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="color:var(--text,#cdd6f4);"></path></svg>
                   </sc-if>
                   <sc-if value="{{ cap.txt }}" hint-placeholder-val="{{ true }}">
                     <span style="white-space:nowrap;{{ cap.kSty }}">{{ cap.k }}</span>
                   </sc-if>
-                  <span style="white-space:nowrap;{{ cap.lSty }}">{{ cap.l }}</span>
+                  <sc-if value="{{ cap.hasL }}" hint-placeholder-val="{{ true }}">
+                    <span style="white-space:nowrap;{{ cap.lSty }}">{{ cap.l }}</span>
+                  </sc-if>
                 </div>
               </sc-for>
             </div>
+            <div style="width:5px;height:46px;border-radius:4px;margin:2px 4px 0 0;flex:none;cursor:pointer;{{ rbStubSty }}" onClick="{{ rbClose }}"></div>
           </div>
-        </div>
+        </sc-if>
         <div style="flex:none;overflow:hidden;transition:height 0.25s ease;{{ chordWrapSty }}">
           <div style="display:flex;justify-content:center;padding:2px 20px 8px;">
             <div style="display:flex;gap:4px;align-items:stretch;border-radius:20px;padding:6px;background:var(--elev,#313244);box-shadow:0 2px 8px rgba(0,0,0,0.45);">
@@ -391,10 +400,10 @@ class Component extends DCLogic {
     termSty: Component.REST, termRing: Component.RING_REST, swipeX: 0, barDrag: false, dotsOn: false,
     ctrl: 'off', lastCtrl: 0, clipOpen: false, menuOpen: false, arrowsOpen: false, histI: 0, sheetOpen: false, sending: false,
     flav: null, fsO: null, tmuxOn: true, swipeCard: null, closing: {},
-    dragId: null, dragXY: null, secs: 134,
+    dragId: null, dragXY: null, secs: 134, rbOpen: null, rbArm: false,
     stOpen: false, sub: null, subKeep: null,
-    cfg: { key:'id_ed25519', bell:false, haptics:true, overwrite:true, keep:false, biometric:true, collapse:true, swipeoff:true, fgsvc:true,
-      rec: { run:true, susp:true, vim:true, pager:true, htop:true, agent:true } }
+    cfg: { key:'id_ed25519', bell:false, haptics:true, overwrite:true, keep:false, biometric:true, pulse:true, fgsvc:true,
+      rec: { run:true, susp:true, vim:true, pager:true, htop:true, claude:true, vite:true, psql:true, repl:true, git:false } }
   };
 
   static P() { return [{ t:'~/port22', c:'accent' }, { t:' on ', c:'ov0' }, { t:' main', c:'mauve' }]; }
@@ -408,7 +417,7 @@ class Component extends DCLogic {
         [{ t:'   Compiling port22-agent v0.3.1', c:'sub' }],
         [{ t:'   Building ', c:'yellow' }, { t:'[=========>          ] 214/612', c:'sub' }]
       ] },
-      { id:'t1', name:'claude', sub:'~/port22', proc:'claude', recipe:'agent', running:false, susp:false, input:'', noInput:true, lines:[
+      { id:'t1', name:'claude', sub:'~/port22', proc:'claude', recipe:'claude', running:false, susp:false, input:'', noInput:true, lines:[
         P(), [{ t:'❯ ', c:'green' }, { t:'claude', c:'text' }],
         [{ t:'✻ Welcome to Claude Code', c:'peach' }],
         [{ t:'  /help for help', c:'sub' }], [{ t:' ', c:'sub' }],
@@ -541,6 +550,38 @@ class Component extends DCLogic {
     }, 180);
   }
   attCancel() { clearInterval(this._at); this.setState({ att: null }); }
+  // A command cap types the slash command and presses return — the panel closes on the way out.
+  slash(cmd) {
+    const OUT = {
+      '/plugins': [['✻ Plugins', 'peach'], ['  ● port22-tmux       v0.4.1   enabled', 'green'], ['  ● sqlite-explorer   v1.2.0   enabled', 'green'], ['  ○ figma-bridge      v0.9.3   disabled', 'sub'], ['  ↑ 1 update available — /plugins update', 'sub']],
+      '/config': [['✻ Settings', 'peach'], ['  Theme              dark', 'text'], ['  Auto-accept edits  off', 'text'], ['  Notifications      on', 'text'], ['  ↑↓ move · ⏎ change · ⎋ close', 'sub']],
+      '/usage': [['✻ Usage', 'peach'], ['  Session            38% of 5h limit', 'text'], ['  This week          61%', 'text'], ['  Resets             2:41 PM', 'sub']],
+      '/model': [['✻ Model', 'peach'], ['  ● default (recommended)', 'green'], ['  ○ opus    ○ sonnet    ○ haiku', 'sub']],
+      '/context': [['✻ Context — 42k / 200k tokens', 'peach'], ['  system 4.1k · tools 11k · files 21k', 'sub'], ['  ▓▓▓▓░░░░░░░░░░░░░░░░  21%', 'accent']],
+      '/clear': [['✻ Conversation cleared', 'peach']]
+    };
+    this.mutTab(this.state.active, t => {
+      t.lines.push([{ t:'> ', c:'green' }, { t: cmd, c:'text' }]);
+      (OUT[cmd] || []).forEach(l => t.lines.push([{ t: l[0], c: l[1] }]));
+      t.lines.push([{ t:'', c:'sub' }]);
+      return t;
+    });
+    this.setState({ rbOpen: null, rbArm: false });
+  }
+  // Claude Code needs two interrupts to exit, so the cap arms first and reads "tap again".
+  rbQuit() {
+    const P = Component.P;
+    if (!this.state.rbArm) {
+      this.setState({ rbArm: true });
+      this.mutTab(this.state.active, t => { t.lines.push([{ t:'^C', c:'text' }], [{ t:'  (^C again to exit)', c:'sub' }]); return t; });
+      clearTimeout(this._qa);
+      this._qa = setTimeout(() => this.setState({ rbArm: false }), 2800);
+      return;
+    }
+    clearTimeout(this._qa);
+    this.mutTab(this.state.active, t => { t.lines.push([{ t:'^C', c:'text' }], P()); t.proc = null; t.recipe = null; t.noInput = false; return t; });
+    this.setState({ rbOpen: null, rbArm: false });
+  }
   ribbon(action) {
     const i = this.state.active;
     if (i < 0) return;
@@ -786,7 +827,7 @@ class Component extends DCLogic {
   static dotFor(rec, f) {
     return rec === 'run' ? f.green        // long-running job — building, syncing, tailing
       : rec === 'susp' ? f.ov0            // stopped, no cycles
-      : rec === 'agent' ? f.peach         // coding agents: claude, codex, aider
+      : rec === 'claude' ? f.peach        // coding agents: claude code, codex, aider
       : rec === 'vim' ? f.mauve           // editors
       : rec === 'pager' ? f.accent        // read-only pagers: less, man
       : rec === 'htop' ? f.yellow         // system monitors
@@ -844,7 +885,7 @@ class Component extends DCLogic {
         R('Cursor', 'Block'), R('Scrollback', '10 000 lines'), R('Bell', 'Silent', T('bell', c.bell)) ] },
       { key:'input', title:'Input', rows:[
         P('Key bar', 'Ctrl · Esc · Tab · Paste', 'keybar'),
-        P('Context ribbon', ['run','susp','vim','pager','htop','agent'].filter(k => c.rec[k]).length + ' recipes on', 'ribbon'),
+        P('Edge handle', Object.keys(c.rec).filter(k => c.rec[k]).length + ' apps recognised', 'ribbon'),
         R('Arrow cluster', 'Right of the bar'), R('Haptics', 'On key press and recipe caps', T('haptics', c.haptics)) ] },
       { key:'tmux', title:'tmux', rows:[
         R('Configure tmux', 'Session port22', T('tmux', s.tmuxOn, () => this.setState(st => ({ tmuxOn: !st.tmuxOn })))) ],
@@ -867,13 +908,13 @@ class Component extends DCLogic {
         { key:'k2', title:'Add', rows:[ R('Import from Files', '', { lSty:'color:' + f.accent + ';' }), R('Generate new key', '', { lSty:'color:' + f.accent + ';' }) ],
           note:'Private keys live in the Android Keystore; signing happens on device.' }
       ] },
-      ribbon: { title:'Context ribbon', groups:[
-        { key:'r1', title:'Recipes', rows:[['run','Long-running job','^C · ^Z bg · kill'],['susp','Suspended job','fg · bg · kill'],['vim','Editors',':w · :q · ZZ · :q!'],['pager','Pagers','q · / · g · G'],['htop','Monitors','q · / · F9'],['agent','Coding agents','Attach · interrupt']]
+      ribbon: { title:'Edge handle', groups:[
+        { key:'r1', title:'Apps', rows:[['run','Long-running jobs','^C · ^Z bg · kill'],['susp','Suspended jobs','fg · bg · kill'],['claude','Claude Code','⎋ · ⇧⇥ · slash commands · ^C ^C'],['vim','Editors — vim, nano',':w · ZZ · / · :q · :q!'],['pager','Pagers — less, man','/ · n · g · G · q'],['htop','Monitors — htop, watch','/ · F6 · q · F9'],['vite','Dev servers — vite, npm','r · o · c · q'],['psql','Database shells — psql, redis','\\dt · \\d+ · \\x · \\q'],['repl','REPLs — python, node','^L · ^D · exit()'],['git','Git — rebase, commit','continue · abort · :wq']]
           .map(p => R(p[1], p[2], T(p[0], c.rec[p[0]], () => this.recSet(p[0])))) },
         { key:'r2', title:'Behaviour', rows:[
-          R('Start TUI recipes collapsed', 'Tap the pill to expand', T('collapse', c.collapse)),
-          R('Swipe down to dismiss', '', T('swipeoff', c.swipeoff)) ],
-          note:'A dismissed ribbon returns when the foreground process changes.' }
+          R('Handle side', 'Right edge, at thumb height'),
+          R('Pulse while running', 'Breathes only while a job is live', T('pulse', c.pulse)) ],
+          note:'Tap or swipe the handle to open. Tap the terminal, pick a cap, or swipe back to close — the panel never resizes the terminal.' }
       ] },
       keybar: { title:'Key bar', groups:[
         { key:'b1', title:'In the bar', rows:[['Ctrl','Chord strip on tap'],['Esc',''],['Tab',''],['Paste','Long press for clipboard']].map(p => R(p[0], p[1], { chk:1 })) },
@@ -938,32 +979,54 @@ class Component extends DCLogic {
     const mm = Math.floor(s.secs / 60), ss = ('0' + s.secs % 60).slice(-2);
     const rid = activeT.id;
     const rec = activeT.running ? 'run' : (activeT.susp ? 'susp' : (activeT.recipe || null));
-    const isTui = rec === 'vim' || rec === 'pager' || rec === 'htop';
-    const ribbonOn = s.view === 'term' && !!rec && !(s.rbGone || {})[rid];
-    const rbCollapsed = isTui && !(s.rbExp || {})[rid];
-    const rbH = ribbonOn ? (rbCollapsed ? 44 : 56) : 0;
+    // The handle floats over output: two states, closed and open, and zero vertical cost.
+    const rbOn = s.view === 'term' && !!rec;
+    const rbPanelOn = rbOn && s.rbOpen === rid;
+    const rbH = 0;
     const chordOn = s.view === 'term' && s.ctrl !== 'off';
     const popBase = (s.view === 'term' && s.kbShown ? Component.KB : 0) + 62 + rbH + (chordOn ? 62 : 0);
     const RECS = {
-      run: [{ k:'^C', l:'stop', a:'stop' }, { k:'^Z bg', l:'background', a:'bg' }, { k:'kill', l:'force', a:'kill', d:1 }],
-      susp: [{ k:'fg', l:'resume', a:'fg' }, { k:'bg', l:'run behind', a:'bg2' }, { k:'kill', l:'force', a:'kill', d:1 }],
-      vim: [{ k:':w', l:'save' }, { k:':q', l:'quit' }, { k:'ZZ', l:'save+quit' }, { k:':q!', l:'force quit', d:1 }],
-      pager: [{ k:'q', l:'quit' }, { k:'/', l:'search' }, { k:'g', l:'top' }, { k:'G', l:'end' }],
-      htop: [{ k:'q', l:'quit' }, { k:'/', l:'filter' }, { k:'F9', l:'kill', d:1 }],
-      agent: [{ ic:1, l:'attach', a:'attach' }, { k:'⎋', l:'interrupt', row:1 }]
+      run: [{ k:'kill', l:'force', a:'kill', d:1 }, { k:'^Z bg', l:'background', a:'bg' }, { k:'^C', l:'stop', a:'stop' }],
+      susp: [{ k:'kill', l:'force', a:'kill', d:1 }, { k:'bg', l:'run behind', a:'bg2' }, { k:'fg', l:'resume', a:'fg' }],
+      vim: [{ k:':q!', l:'discard', d:1 }, { k:':q', l:'quit' }, { k:'/', l:'search' }, { k:'ZZ', l:'save+quit' }, { k:':w', l:'save' }],
+      pager: [{ k:'q', l:'quit' }, { k:'G', l:'end' }, { k:'g', l:'top' }, { k:'n', l:'next hit' }, { k:'/', l:'search' }],
+      htop: [{ k:'F9', l:'kill', d:1 }, { k:'q', l:'quit' }, { k:'F6', l:'sort' }, { k:'/', l:'filter' }],
+      claude: [
+        { hd:'SESSION' },
+        { k:'^C ^C', l:'quit', a:'quit', d:1 },
+        { hd:'COMMANDS' },
+        { k:'/clear', a:'slash' }, { k:'/context', a:'slash' }, { k:'/model', a:'slash' },
+        { k:'/usage', a:'slash' }, { k:'/config', a:'slash' }, { k:'/plugins', a:'slash' },
+        { hd:'NOW' },
+        { ic:1, l:'attach', a:'attach' }, { k:'⇧⇥', l:'plan mode' }, { k:'⎋', l:'stop' }
+      ]
     };
-    const rbAtt = !!s.att && rec === 'agent';
-    const rbCaps = (!ribbonOn || rbCollapsed ? [] : (RECS[rec] || [])).filter(c => !(rbAtt && c.a === 'attach')).map(c => ({
-      k: c.k, l: c.l, ic: !!c.ic, txt: !c.ic,
-      sty: (c.ic || c.row ? 'flex-direction:row;gap:5px;padding:0 11px;' : 'flex-direction:column;gap:1px;width:' + (c.w || 52) + 'px;')
-        + (c.d ? 'background:' + this.hexA(f.red, 0.14) + ';border:0.5px solid ' + this.hexA(f.red, 0.4) + ';' : 'background:rgba(127,132,156,0.18);'),
-      kSty: 'font:500 ' + (c.row ? 14 : 13) + "px 'JBMono';color:" + (c.d ? f.red : f.text) + ';',
-      lSty: 'font:' + (c.ic || c.row ? "500 12.5px Roboto,system-ui" : '8.5px Roboto,system-ui') + ';color:' + (c.ic || c.row ? f.text : c.d ? f.red : f.sub) + ';',
-      tap: e => { e.stopPropagation(); if (c.a === 'attach') this.attach(); else if (c.a) this.ribbon(c.a); else this.recKey(c.k); }
-    }));
+    const rbAtt = !!s.att && rec === 'claude';
+    const rbCaps = (!rbPanelOn ? [] : (RECS[rec] || [])).filter(c => !(rbAtt && c.a === 'attach')).map(c => {
+      if (c.hd) return { k: c.hd, l:'', hasL: false, ic: false, txt: true, lSty:'',
+        sty: 'justify-content:flex-end;padding:7px 11px 1px 0;cursor:default;',
+        kSty: 'font:500 9.5px Roboto,system-ui;color:' + f.sub + ';letter-spacing:0.9px;text-shadow:0 1px 3px ' + this.hexA(f.crust, 0.9) + ';',
+        tap: e => e.stopPropagation() };
+      const arm = c.a === 'quit' && s.rbArm, dang = !!(c.d || arm);
+      return {
+        k: c.k, l: arm ? 'tap again' : (c.l || ''), hasL: !!(arm || c.l), ic: !!c.ic, txt: !c.ic,
+        sty: 'height:44px;border-radius:22px;padding:0 16px;gap:8px;box-shadow:0 4px 12px ' + this.hexA(f.crust, 0.5) + ';'
+          + (dang ? 'background:' + this.hexA(f.red, 0.18) + ';border:1px solid ' + this.hexA(f.red, arm ? 0.85 : 0.45) + ';'
+                  : 'background:' + f.s0 + ';'),
+        kSty: "font:500 14px 'JBMono';color:" + (dang ? f.red : f.text) + ';',
+        lSty: 'font:12px Roboto,system-ui;color:' + (dang ? f.red : f.sub) + ';',
+        tap: e => { e.stopPropagation();
+          if (c.a === 'attach') this.attach();
+          else if (c.a === 'slash') this.slash(c.k);
+          else if (c.a === 'quit') this.rbQuit();
+          else if (c.a) this.ribbon(c.a);
+          else { this.recKey(c.k); this.setState({ rbOpen: null }); } }
+      };
+    });
     const recLabel = rec === 'run' ? activeT.proc + ' · ' + mm + ':' + ss
       : rec === 'susp' ? activeT.proc + ' · stopped'
-      : rec === 'vim' ? 'vim · KeyBarView.swift' : (activeT.proc || '');
+      : rec === 'vim' ? 'vim · KeyBarView.swift'
+      : rec === 'claude' ? 'claude code · ~/port22' : (activeT.proc || '');
 
     let ctrlSty = '';
     if (s.ctrl === 'armed') ctrlSty = 'background:' + this.hexA(f.accent, 0.5) + ';border:1px solid ' + this.hexA(f.accent, 0.9) + ';';
@@ -1037,20 +1100,29 @@ class Component extends DCLogic {
       namesWrapSty: 'opacity:' + (namesOn ? 1 : 0) + ';transition:opacity 0.15s;',
       nameStripSty: 'transform:translateX(' + (-(cont * 242)) + 'px);transition:' + (s.barDrag ? 'none' : 'transform 0.32s cubic-bezier(0.22,1,0.36,1)') + ';',
       namePills,
-      ribbonWrapSty: 'height:' + rbH + 'px;',
       chordWrapSty: 'height:' + (chordOn ? 62 : 0) + 'px;',
       kbWrapSty: 'height:' + kbH + 'px;',
-      rbCaps, rbCollapsed, rbAtt,
+      rbCaps, rbAtt,
       attName: s.att ? s.att.name : '',
       attSub: s.att ? 'uploading · ' + s.att.pct + '% · 1.4 MB' : '',
       attBarSty: 'width:' + (s.att ? s.att.pct : 0) + '%;',
       attCancel: e => { e.stopPropagation(); this.attCancel(); },
-      ribbonPillSty: 'cursor:' + (isTui ? 'pointer' : 'default') + ';padding:' + (rbCollapsed ? '8px 13px' : '5px 7px 5px 13px') + ';',
+      rbHandleOn: rbOn && !rbPanelOn,
+      rbPanelOn,
+      rbHandleSty: 'bottom:' + (popBase + 6) + 'px;',
+      rbTabSty: 'background:' + Component.dotFor(rec, f) + ';'
+        + (s.cfg.pulse && (rec === 'run' || rec === 'claude') ? 'animation:p22edge 1.9s ease-in-out infinite;' : 'opacity:0.9;'),
+      rbPanelSty: 'bottom:' + (popBase + 8) + 'px;',
+      rbCapsSty: 'max-height:' + Math.max(150, 892 - 56 - popBase - 108) + 'px;padding-right:1px;',
+      attPillSty: 'background:' + f.s0 + ';',
+      rbStubSty: 'background:' + Component.dotFor(rec, f) + ';',
       ribbonDotSty: 'background:' + Component.dotFor(rec, f) + ';' + (rec === 'run' ? 'animation:p22pulse 1.6s ease-in-out infinite;' : ''),
-      ribbonLabelSty: 'padding-right:' + (rbCollapsed ? 2 : 5) + 'px;',
-      rbTap: () => { if (isTui) this.setState(st => ({ rbExp: Object.assign({}, st.rbExp, { [rid]: !(st.rbExp || {})[rid] }) })); },
-      rbDown: e => { this._rbY = e.touches[0].clientY; },
-      rbUp: e => { const dy = e.changedTouches[0].clientY - (this._rbY || 0); if (dy > 34) this.setState(st => ({ rbGone: Object.assign({}, st.rbGone, { [rid]: true }) })); },
+      rbOpen: () => this.setState({ rbOpen: rid, rbArm: false }),
+      rbClose: e => { if (e && e.stopPropagation) e.stopPropagation(); this.setState({ rbOpen: null, rbArm: false }); },
+      rbDown: e => { this._rbX = e.touches[0].clientX; },
+      rbUp: e => { const dx = e.changedTouches[0].clientX - (this._rbX || 0);
+        if (dx < -28) this.setState({ rbOpen: rid, rbArm: false });
+        else if (dx > 28) this.setState({ rbOpen: null, rbArm: false }); },
       procLabel: recLabel,
       ctrlSty,
       overlaySty: (s.clipOpen || s.menuOpen || s.arrowsOpen) ? 'pointer-events:auto;' : 'pointer-events:none;display:none;',
@@ -1075,3 +1147,4 @@ class Component extends DCLogic {
 </script>
 </body>
 </html>
+

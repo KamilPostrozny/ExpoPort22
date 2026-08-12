@@ -1,5 +1,5 @@
-/** `bun test` — the context ribbon's decisions (T11): recipe selection, the suspended-job
- *  machine, per-instance dismissal identity, the timer, the cap bytes, kill-force. */
+/** `bun test` — the edge handle's decisions (T11): recipe selection, the suspended-job
+ *  machine, per-instance identity, the timer, the cap bytes, kill-force. */
 
 /// <reference types="bun" />
 import { expect, test } from 'bun:test';
@@ -10,7 +10,6 @@ import {
   formatElapsed,
   killCommand,
   matchRecipe,
-  ribbonDismiss,
   ribbonPoll,
   ribbonResumed,
   ribbonSent,
@@ -130,17 +129,6 @@ test('resume on a core with nothing suspended is a no-op', () => {
   expect(ribbonResumed(core)).toBe(core);
 });
 
-/* --- dismissal --- */
-
-test('swipe-down dismisses this instance; the next process brings the ribbon back', () => {
-  const core = running('vim');
-  const gone = ribbonDismiss(core);
-  expect(selectRecipe(gone, true)).toBeNull();
-  expect(ribbonPoll(gone, fg('vim'), 3000)).toBe(gone); // same instance stays gone
-  const next = ribbonPoll(ribbonPoll(gone, null, 4000), fg('vim'), 6000);
-  expect(selectRecipe(next, true)?.id).toBe('vim');
-});
-
 /* --- cap bytes (the data the taps send) --- */
 
 test('cap byte sequences', () => {
@@ -152,14 +140,22 @@ test('cap byte sequences', () => {
   expect(cap('vim', 'ZZ').bytes).toBe('\x1bZZ');
   expect(cap('vim', ':q!').bytes).toBe('\x1b:q!\r');
   expect(cap('vim', ':q!').danger).toBe(true);
-  // htop's F9 is the xterm function-key sequence.
+  // htop's F6/F9 are the xterm function-key sequences.
+  expect(cap('htop', 'F6').bytes).toBe('\x1b[17~');
   expect(cap('htop', 'F9').bytes).toBe('\x1b[20~');
   // control bytes.
   expect(cap('running', '^C').bytes).toBe('\x03');
   // pager search raises the keyboard.
   expect(cap('pager', '/').focus).toBe(true);
-  // agent interrupt is a bare ESC.
+  // agent: bare ESC to stop, shift-tab for plan mode, slash commands typed and entered,
+  // and the two-tap quit arms.
   expect(cap('agent', '⎋').bytes).toBe('\x1b');
+  expect(cap('agent', '⇧⇥').bytes).toBe('\x1b[Z');
+  expect(cap('agent', '/clear').bytes).toBe('/clear\r');
+  expect(cap('agent', '^C ^C')).toMatchObject({ bytes: '\x03', arm: true, danger: true });
+  // headers are rows, not taps.
+  expect(RECIPES.agent.caps.filter((c) => c.header !== undefined).map((c) => c.header))
+    .toEqual(['SESSION', 'COMMANDS', 'NOW']);
 });
 
 test('matchRecipe misses cleanly', () => {
@@ -176,9 +172,8 @@ test('killCommand: pgrep the pane shell, kill -9, integers only', () => {
   expect(() => killCommand(NaN)).toThrow();
 });
 
-// A window switch names the command before any poll can name the pid — the ribbon has to change
-// with the slide, because its height is the terminal's and learning about it late reflows the
-// pane after the transition has landed.
+// A window switch names the command before any poll can name the pid — the handle changes with
+// the slide, not a poll beat after it.
 test('a switch names the command, the next poll fills in the pid without restarting it', () => {
   const switched = ribbonPoll(RIBBON_IDLE, { command: 'htop', pid: null }, 1000);
   expect(switched).toMatchObject({ command: 'htop', pid: null, startedAt: 1000 });
