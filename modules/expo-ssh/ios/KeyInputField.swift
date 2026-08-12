@@ -25,11 +25,10 @@ import UIKit
 /// first responder the drag in **points**, with no caret and no text positions involved. That is
 /// what a terminal wants — points divided by the cell width are columns.
 ///
-/// Two other hacks fall out of owning the field. `hasText` is `true` outright, which is how the
-/// reference app does it (Port22's TerminalHostView.swift:226) and retires the 512-space pad the
-/// RN field needed to keep delete's auto-repeat alive — device log: a held backspace repeats every
-/// ~150ms indefinitely against a field holding nothing. And keys are reported as they are struck,
-/// so nothing has to be recovered by diffing two states of a text box.
+/// One other hack falls out of owning the field: keys are reported as they are struck, so nothing
+/// has to be recovered by diffing two states of a text box. The delete-repeat pad does *not* go
+/// away — see `init` — but it shrinks from 512 characters that JS had to diff, top up and reason
+/// about to 64 that nothing ever reads.
 final class KeyInputField: UITextField {
   /// Overriding `insertText` was the first attempt and it never fired once: a UITextField does its
   /// editing through an internal field editor rather than by calling its own `insertText`, so the
@@ -46,6 +45,14 @@ final class KeyInputField: UITextField {
   override init(frame: CGRect) {
     super.init(frame: frame)
     delegate = self
+    // The pad, and the reason it is real text rather than a claim. iOS gates delete's auto-repeat
+    // on the first responder's `hasText`, and the override below could not be relied on: exactly
+    // like `insertText`, a UITextField answers the keyboard through an internal field editor, and
+    // on device a held delete gave one DEL and stopped. So the field genuinely holds text — and
+    // genuinely always will, because every edit is refused: the delegate answers `false` to each
+    // insertion and `deleteBackward` never calls super. Invisible (`alpha` 0), never read, and
+    // nothing diffs it; the RN field's 512-space pad needed all three.
+    text = String(repeating: " ", count: 64)
   }
 
   @available(*, unavailable)
@@ -53,8 +60,9 @@ final class KeyInputField: UITextField {
     fatalError("KeyInputField is created in code, never from a nib")
   }
 
-  /// iOS gates the delete key's auto-repeat on the first responder's `hasText`, and a terminal's
-  /// field is empty even when the *line* is not. Always true, so the repeat never stops early.
+  /// Belt to the pad's braces — correct whether or not UIKit ever asks the field itself. The pad
+  /// set in `init` is what actually guarantees the repeat; if this override turns out to be the
+  /// one consulted, one of the two can go.
   override var hasText: Bool { true }
 
   override func deleteBackward() {

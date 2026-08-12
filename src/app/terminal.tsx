@@ -46,6 +46,7 @@ import KeyBar, {
   BarMenu,
   ClipboardPopover,
   TabsHintPopover,
+  dismissKeys,
   type BarPopover,
 } from '@/keybar';
 import Ribbon, { RIBBON_PAD_TOP } from '@/ribbon';
@@ -291,7 +292,7 @@ export default function SessionScreen() {
     // (always down) keys as the terminal's, or closing the grid afterwards would leave a
     // keyboard behind that was up when the person went in.
     if (swRef.current === 'closed') keysWereUp.current = keyboardPad > 0;
-    Keyboard.dismiss();
+    dismissKeys();
     setSettingsOpen(true);
   };
   const closeSettings = () => {
@@ -533,7 +534,7 @@ export default function SessionScreen() {
     console.log('[switcher] open (tabs tap)');
     setOpen('none');
     keysWereUp.current = keyboardPad > 0; // read before the dismiss moves it
-    Keyboard.dismiss();
+    dismissKeys();
     const pos = activePos();
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);

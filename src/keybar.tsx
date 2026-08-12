@@ -175,6 +175,22 @@ const HAIRLINE = 'rgba(127,132,156,0.25)';
 const ANDROID = Platform.OS === 'android';
 /** iOS gets our own keyboard owner; everything else keeps RN's `TextInput`. */
 const IOS = Platform.OS === 'ios';
+
+/** The live iOS field, so `dismissKeys` can reach it from outside the component. A module-scope
+ *  single is honest here: there is one key bar and one keyboard, and the alternative was threading
+ *  a ref through the screen to four call sites that only ever want "put the keys away". */
+let liveKeys: ExpoKeyInputRef | null = null;
+
+/**
+ * Put the keyboard away. `Keyboard.dismiss()` alone stopped working the moment iOS's field stopped
+ * being RN's: that call resigns whatever RN believes is focused, and RN knows nothing about ours,
+ * so every door that drops the keys — bar swipe down, the switcher grab, Settings, the zoom —
+ * silently did nothing (user, device). Every one of them goes through here.
+ */
+export function dismissKeys() {
+  if (IOS) void liveKeys?.blur();
+  else Keyboard.dismiss();
+}
 /** The 49pt circles and pill: iOS capsules, Android's 16pt Material corners. */
 /** The bar's own corner: every glass on the bar row uses it, T11's ribbon included — it is one
  *  bar, so one radius (user, 2026-08-11). */
@@ -310,6 +326,13 @@ export default function KeyBar(props: KeyBarProps) {
   const input = useRef<TextInput>(null);
   /** iOS's own field (see the JSX at the foot of this file). */
   const keyInput = useRef<ExpoKeyInputRef>(null);
+  // Published for `dismissKeys`, which is called from outside this component.
+  useEffect(() => {
+    liveKeys = keyInput.current;
+    return () => {
+      liveKeys = null;
+    };
+  });
   /** What the (uncontrolled) TextInput last held — the other half of `diffInput`. */
   const typed = useRef(PAD);
   /** The field's text, set *only* to top the pad back up (see `PAD`); `undefined` the rest of the
@@ -353,7 +376,7 @@ export default function KeyBar(props: KeyBarProps) {
   // (user, 2026-08-11).
   useEffect(() => {
     if (!props.focusSignal) return;
-    if (IOS) keyInput.current?.focus();
+    if (IOS) void keyInput.current?.focus();
     else input.current?.focus();
   }, [props.focusSignal]);
 
@@ -546,14 +569,14 @@ export default function KeyBar(props: KeyBarProps) {
         originX.current = e.translationX;
         props.onBarSwipe?.('start', 0);
       }
-      else if (s === 'down') Keyboard.dismiss();
+      else if (s === 'down') dismissKeys();
       else if (s === 'up') {
         // Always the drag into the switcher (§4.4), keyboard up or down — the keys have their own
         // door now, a tap on the terminal (user, 2026-08-11). Where there is no switcher to drag
         // into (no tmux) the gesture is silence, like the button.
         if (props.showTabs && props.onSwitcherDrag) {
           zooming.current = true;
-          Keyboard.dismiss(); // the prototype drops the keyboard the moment the grab starts
+          dismissKeys(); // the prototype drops the keyboard the moment the grab starts
           props.onSwitcherDrag('move', e.translationX, e.translationY);
         }
       }
