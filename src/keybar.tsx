@@ -5,10 +5,15 @@
  * and pill, 35pt keys at 18pt radius, 24pt side margins, 48pt chord caps with 8.5pt captions,
  * arrows popover at 22pt corners, menu at 26pt.
  *
- * The native `TextInput` here owns the keyboard (T4's device-proven decision): the webview never
- * takes focus, typing reaches the PTY through `sendBytes`, and touching the terminal blurs the
- * input natively — which is what lets a long-press selection proceed with the keyboard up. A plain
- * tap on the terminal asks for it back through `focusSignal`; the bar itself never raises it.
+ * A hidden field here owns the keyboard (T4's device-proven decision): the webview never takes
+ * focus, typing reaches the PTY through `sendBytes`, and touching the terminal blurs the input
+ * natively — which is what lets a long-press selection proceed with the keyboard up. A plain tap
+ * on the terminal asks for it back through `focusSignal`; the bar itself never raises it.
+ *
+ * Which field depends on the platform, and everything below marked "the RN field" is the Android
+ * half. iOS uses our own (`modules/expo-keyinput`), because RN's cannot report the hold-space
+ * trackpad at all — see that module's header for the ladder that ended in native code. Owning the
+ * field there also retires two workarounds the RN one needs: the pad below, and the diff.
  *
  * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
  * lives in `src/keybar-model.ts`, tested; this file renders and executes.
@@ -62,6 +67,7 @@ import { provenance } from '@/clipboard-model';
 import { filterDictation, trackLine } from '@/input-model';
 import {
   CHORD_STRIP,
+  DEL,
   afterChord,
   applyCtrl,
   classifyBarSwipe,
@@ -70,6 +76,7 @@ import {
   CARET_STEP_MAX,
   caretKeys,
   ctrlTap,
+  cursorColumns,
   diffInput,
   navKey,
   pasteBytes,
@@ -78,6 +85,12 @@ import {
   type NavKey,
 } from '@/keybar-model';
 import { MONO, type Theme } from '@/theme';
+import {
+  ExpoKeyInput,
+  type CursorEvent,
+  type ExpoKeyInputRef,
+  type KeyEvent,
+} from '../modules/expo-keyinput/src/ExpoKeyInput';
 
 export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
 
@@ -91,6 +104,9 @@ export type KeyBarProps = {
   bracketedPaste: boolean;
   /** Everything a key emits, on its way to the PTY. */
   sendBytes: (bytes: string) => void;
+  /** The emulator's measured cell width, which is what turns a hold-space drag in points into
+   *  columns (`cursorColumns`). Zero until the terminal has measured — no travel until then. */
+  cellWidth?: number;
   /** Which popover is up. Lifted to the screen, which renders the popovers and the outside-tap
    *  scrim in a layer over the terminal: RN cannot hit-test children drawn outside their
    *  parent's bounds, so a popover cannot float above the bar *from inside* the bar. */
@@ -157,6 +173,8 @@ const HAIRLINE = 'rgba(127,132,156,0.25)';
 
 /* --- the Android skin's metrics (see the header): same sizes, Material corners --- */
 const ANDROID = Platform.OS === 'android';
+/** iOS gets our own keyboard owner; everything else keeps RN's `TextInput`. */
+const IOS = Platform.OS === 'ios';
 /** The 49pt circles and pill: iOS capsules, Android's 16pt Material corners. */
 /** The bar's own corner: every glass on the bar row uses it, T11's ribbon included — it is one
  *  bar, so one radius (user, 2026-08-11). */
@@ -272,7 +290,10 @@ function Key({
 }
 
 /**
- * §4.2 held-delete: iOS gates the delete key's auto-repeat on the first responder's `hasText`, and
+ * §4.2 held-delete, **the RN field's problem only** — iOS has its own field now, which overrides
+ * `hasText` outright the way the reference app does, so none of this runs there.
+ *
+ * iOS gates the delete key's auto-repeat on the first responder's `hasText`, and
  * the field empties as soon as the diff has eaten what was typed — long before the *line* is empty —
  * so the repeat died after a character or two. The reference app answers that question with an
  * always-true `hasText` (Port22's TerminalHostView.swift:226); RN's `RCTUITextField` is not ours to
@@ -287,6 +308,8 @@ const PAD = ' '.repeat(512);
 export default function KeyBar(props: KeyBarProps) {
   const { theme, open, onOpenChange } = props;
   const input = useRef<TextInput>(null);
+  /** iOS's own field (see the JSX at the foot of this file). */
+  const keyInput = useRef<ExpoKeyInputRef>(null);
   /** What the (uncontrolled) TextInput last held — the other half of `diffInput`. */
   const typed = useRef(PAD);
   /** The field's text, set *only* to top the pad back up (see `PAD`); `undefined` the rest of the
@@ -329,7 +352,9 @@ export default function KeyBar(props: KeyBarProps) {
   // arrives with the terminal in full view, and the keys come up when they are asked for
   // (user, 2026-08-11).
   useEffect(() => {
-    if (props.focusSignal) input.current?.focus();
+    if (!props.focusSignal) return;
+    if (IOS) keyInput.current?.focus();
+    else input.current?.focus();
   }, [props.focusSignal]);
 
   /** T12's dictation filter needs to know whether the line is empty, so everything the bar itself
@@ -417,6 +442,36 @@ export default function KeyBar(props: KeyBarProps) {
       console.log('[caret]', delta > 0 ? 'right' : 'left', Math.abs(delta), '→', wanted.current);
       props.sendBytes(keys);
     }, CARET_SETTLE_MS);
+  };
+
+  /* --- the iOS field's seams (`modules/expo-keyinput`) --- */
+
+  /** A typed chunk or a delete, straight from the field — no diff, because nothing was inferred.
+   *  The dictation filter still runs: iOS prepends its space before the text ever leaves the
+   *  keyboard, so a chunk is still the only place spacebar and dictation can be told apart. */
+  const onKey = ({ nativeEvent }: { nativeEvent: KeyEvent }) => {
+    if (nativeEvent.delete) return emitKey(DEL);
+    const text = nativeEvent.text;
+    if (!text) return;
+    for (const key of filterDictation(lineLen.current, text)) emitKey(key);
+  };
+
+  /** Where the cursor has been sent to, in columns from where this drag began. */
+  const sentCols = useRef(0);
+
+  /**
+   * The hold-space trackpad. iOS hands over the drag in points and this converts it to columns
+   * against the emulator's measured cell, so the cursor keeps pace with the finger at any font
+   * size. Reported absolutely, so only the difference from what has already been sent goes out and
+   * a dropped frame cannot accumulate into drift.
+   */
+  const onCursor = ({ nativeEvent }: { nativeEvent: CursorEvent }) => {
+    if (nativeEvent.phase !== 'move') return void (sentCols.current = 0);
+    const cols = cursorColumns(nativeEvent.dx, props.cellWidth ?? 0);
+    const keys = caretKeys(cols - sentCols.current, props.decckm);
+    if (!keys) return;
+    sentCols.current = cols;
+    props.sendBytes(keys); // past `track`: an escape sequence carries no line-length information
   };
 
   const sendChord = (letter: string) => {
@@ -693,8 +748,20 @@ export default function KeyBar(props: KeyBarProps) {
         </View>
       </GestureDetector>
 
-      {/* The keyboard's owner. Invisible but real: iOS focuses it, every keystroke lands in
-          `onChangeText`, and the diff against what it held last is what goes to the PTY. */}
+      {/* The keyboard's owner. Invisible but real. On iOS it is ours (`modules/expo-keyinput`):
+          keys arrive as keys, held delete repeats off a native always-true `hasText`, and the
+          hold-space trackpad arrives as a drag in points — none of which RN's field can report.
+          Android keeps RN's, where the same gesture is a selection move and `onSelectionChange`
+          is the only seam there is. */}
+      {IOS ? (
+        <ExpoKeyInput
+          ref={keyInput}
+          style={styles.input}
+          keyboardAppearance={theme.isDark}
+          onKey={onKey}
+          onCursor={onCursor}
+        />
+      ) : (
       <TextInput
         ref={input}
         style={styles.input}
@@ -720,6 +787,7 @@ export default function KeyBar(props: KeyBarProps) {
         keyboardType={Platform.OS === 'ios' ? 'ascii-capable' : 'default'}
         keyboardAppearance={theme.isDark ? 'dark' : 'light'} // iOS-only prop, ignored elsewhere
       />
+      )}
     </View>
   );
 }

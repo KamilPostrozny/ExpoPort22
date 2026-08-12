@@ -1744,6 +1744,7 @@ export default function SessionScreen() {
         decckm={modes.decckm}
         bracketedPaste={modes.bracketedPaste}
         sendBytes={sendKeys}
+        cellWidth={cell.w} // hold-space: points of drag ÷ this = columns
         open={open}
         onOpenChange={setOpen}
         onHeight={(h) => {
