@@ -495,7 +495,10 @@ export default function Switcher(props: SwitcherProps) {
         {/* The cards pass under this strip rather than stopping at it, so it frosts them instead
             of hiding them — and it frosts them by degrees, clear where the field begins and
             thickest at the very top (user, 2026-08-12). */}
-        <BlurRamp height={props.insetTop} tint={theme.isDark ? 'dark' : 'light'} />
+        <BlurRamp
+          height={props.insetTop + SEARCH_FIELD_H / 2}
+          tint={theme.isDark ? 'dark' : 'light'}
+        />
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
           <SymbolView
             name="magnifyingglass"
@@ -531,34 +534,44 @@ export default function Switcher(props: SwitcherProps) {
 }
 
 /**
- * A blur that ramps rather than a strip that starts: `layers` backdrop blurs stacked from the top,
+ * A blur that ramps rather than a strip that starts: `LAYERS` backdrop blurs stacked from the top,
  * each shorter than the last, so the very top of the screen is seen through all of them and the
- * edge nearest the search field through one. Each layer adds only a little, which is what keeps
- * the steps from reading as bands.
+ * bottom of the ramp through one. Each layer blurs what the ones over it already blurred, so the
+ * strength climbs the screen while every individual step stays small — small being the whole
+ * point, since a step is a visible line and one fat step is exactly what this replaced (user,
+ * 2026-08-12, twice).
+ *
+ * The last step is the one that cannot be softened away, because below it the blur is simply
+ * gone. It is hidden instead: the ramp runs to the middle of the search field, whose pill is
+ * opaque and spans exactly the two card columns, and beside the pill there is only flat scrim,
+ * where a blur of anything shows nothing.
  *
  * A real gradient mask is the other way to do this, and it wants `@react-native-masked-view` plus
- * `expo-linear-gradient` — two native dependencies, so a full rebuild, for a ramp 68pt tall that
- * five overlapping views already draw. Android takes no blur at all, as everywhere else (§4.10).
+ * `expo-linear-gradient` — two native dependencies, so a full rebuild, for a ramp the height of
+ * the notch inset. Android takes no blur at all, as everywhere else (§4.10).
  *
- * ponytail: five steps, not a mask. If a seam ever shows on a busier flavour, raise `layers`
- * before reaching for the dependency.
+ * ponytail: ten steps, not a mask. If banding ever shows on a busier flavour, more and weaker
+ * layers is the next move — the total strength is roughly `INTENSITY × √LAYERS`, so raise one and
+ * lower the other together.
  */
+const LAYERS = 10;
+const INTENSITY = 8;
+
 function BlurRamp({ height, tint }: { height: number; tint: 'dark' | 'light' }) {
-  const layers = 5;
   if (Platform.OS === 'android' || height <= 0) return null;
   return (
     <>
-      {Array.from({ length: layers }, (_, i) => (
+      {Array.from({ length: LAYERS }, (_, i) => (
         <BlurView
           key={i}
-          intensity={12}
+          intensity={INTENSITY}
           tint={tint}
           style={{
             position: 'absolute',
             top: 0,
             left: 0,
             right: 0,
-            height: (height * (layers - i)) / layers,
+            height: (height * (LAYERS - i)) / LAYERS,
           }}
         />
       ))}
