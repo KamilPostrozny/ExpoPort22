@@ -150,19 +150,24 @@ function xtermTheme(theme: Theme): ITheme {
 /** The font the webview cannot get from the native side: same two files as `useFonts` loads for
  *  chrome, copied into `public/` because that is the one directory that reaches this bundle.
  *
- *  NL = Nerd Fonts' no-ligature cut, and it is the swipe that needs it rather than taste. The two
- *  renderers disagree about `calt`: RN's <Text> goes through CoreText, which applies a font's
- *  default features, so `->` in a captured pane comes out as an arrow; xterm cannot, because the
- *  letter-spacing it sets to land glyphs on the cell is non-zero and WebKit drops shaping when it
- *  is. Same file, same text, two different glyphs at the hand-over (device, 2026-08-11, mid-swipe
- *  screenshot of an `eza` symlink line). Dropping the feature from the file settles it for both,
- *  and a terminal has no cell to put a two-column ligature in anyway. Metrics are the plain cut's
- *  exactly — 1000upm, 0.6em advance, 1020/-300 — and every Nerd glyph is still there. */
+ *  The ligature cut, deliberately. This was the no-ligature (NL) cut for a day, because the two
+ *  renderers disagreed about `calt` at the hand-over: RN's <Text> goes through CoreText, which
+ *  applies a font's default features, so `->` in a captured pane came out as an arrow, while xterm
+ *  could not shape at all — WebKit drops shaping when letter-spacing is non-zero, and xterm sets a
+ *  non-zero one to land glyphs on the cell. Taking the feature out of the file settled it by making
+ *  neither side ligate.
+ *
+ *  The letter-spacing rule below then set that spacing to zero for its own reasons, which handed
+ *  shaping back to WebKit and removed the disagreement at its source — both renderers now apply
+ *  `calt` and agree. Verified on device (2026-08-12): `-> => != >= <= === |> ~~` all ligate in the
+ *  pane, on grid, and the snapshot matches through the swipe. So the ligatures come back, which is
+ *  what they were wanted for; if that rule ever goes back to a non-zero spacing, this file has to
+ *  go back to the NL cut in the same commit or the hand-over splits again. */
 const FONT_FACES = ['Regular', 'Bold']
   .map(
     (weight, i) => `@font-face {
       font-family: '${MONO}';
-      src: url('${process.env.EXPO_BASE_URL ?? ''}fonts/JetBrainsMonoNLNerdFontMono-${weight}.ttf');
+      src: url('${process.env.EXPO_BASE_URL ?? ''}fonts/JetBrainsMonoNerdFontMono-${weight}.ttf');
       font-weight: ${i === 0 ? 400 : 700};
     }`,
   )
@@ -184,7 +189,11 @@ const CSS = `
      the font's own advance, which is a number both sides can name, and the 0.2px the row then
      overhangs its screen is behind an overflow:hidden. Marked important because xterm writes the
      value inline, and inline loses to it. Only the row container — a span with a spacing of its
-     own keeps it, which is how a substituted glyph still gets squeezed into its cell. */
+     own keeps it, which is how a substituted glyph still gets squeezed into its cell.
+     It also carries the ligatures now: WebKit only shapes at zero spacing, so this rule is what
+     lets the pane draw '->' as the arrow the snapshot beside it draws. Putting a non-zero spacing
+     back splits the hand-over again, and the font at the top of this file has to become the NL cut
+     in the same commit. */
   .xterm .xterm-rows { letter-spacing: 0 !important; }
   /* An underline the font's own thickness, which is what the snapshot's <Text> draws: CoreText
      takes it from the face (0.05em, so two device pixels here) while WebKit's 'auto' will not go
