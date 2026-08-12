@@ -450,6 +450,7 @@ export default function KeyBar(props: KeyBarProps) {
    *  The dictation filter still runs: iOS prepends its space before the text ever leaves the
    *  keyboard, so a chunk is still the only place spacebar and dictation can be told apart. */
   const onKey = ({ nativeEvent }: { nativeEvent: KeyEvent }) => {
+    console.log('[keys] native', JSON.stringify(nativeEvent));
     if (nativeEvent.delete) return emitKey(DEL);
     const text = nativeEvent.text;
     if (!text) return;

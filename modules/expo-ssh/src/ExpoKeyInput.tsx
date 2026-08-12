@@ -4,7 +4,13 @@ import { type StyleProp, type ViewStyle } from 'react-native';
 
 /** One key as the field reports it: text that was typed (or dictated, as a whole chunk), or the
  *  delete key — including every repeat of a held one, which iOS drives itself. */
-export type KeyEvent = { text?: string; delete?: boolean };
+export type KeyEvent = {
+  text?: string;
+  delete?: boolean;
+  /** Which UIKit path the text came by ('delegate', 'insertText', 'return') — logged while the
+   *  field's two interception points are both live. See `KeyInputField.report`. */
+  source?: string;
+};
 
 /**
  * The hold-space trackpad, in points travelled since the drag began (positive right). `begin` and
