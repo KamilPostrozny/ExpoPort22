@@ -1208,6 +1208,10 @@ export default function SessionScreen() {
           // put tmux's redraw at +35ms and the keys at +550). Pills and keys are both mounted, so
           // this flips two opacities.
           live: pageSwipe !== null && pageSwipe.phase !== 'settle',
+          /** The half of the old `pageSwipe !== null` the split above dropped. Only the ribbon
+           *  reads it, and only to stay still: the keys land here, but the ribbon swap happens
+           *  here too, and a mount animation on top of a finished morph is a flash. */
+          settling: pageSwipe?.phase === 'settle',
           /** The real ribbon is the current window's; a ghost overrides this with its own. */
           index: pageSwipe?.pos ?? activePosIn(cards),
         }

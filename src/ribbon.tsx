@@ -62,6 +62,10 @@ export type RibbonProps = {
     x: SharedValue<number>;
     pitch: number;
     live: boolean;
+    /** The hop's settle, which `live` deliberately does NOT cover: the keys land with the slide
+     *  while the overlay waits out the host's redraw. The morph is over by then, but the ribbon
+     *  the settle mounts or drops is still the hop's — see the mount/unmount gate below. */
+    settling?: boolean;
   } | null;
   onToggle: () => void;
   onDismiss: () => void;
@@ -235,8 +239,14 @@ export default function Ribbon(props: RibbonProps) {
           // already squeezed the outgoing one invisible (the builder's ghost would flash it back
           // at full opacity), and the incoming one has been growing in as a ghost since the
           // finger moved — replaying `ribbonIn` at the settle would restart it from a capsule.
-          entering={swipe?.live ? undefined : ribbonIn}
-          exiting={swipe?.live ? undefined : ribbonOut}
+          //
+          // The settle is exactly when the swap happens (`pendingRibbon` is applied under the
+          // overlay), and it is the one moment `live` is already false — so gating on `live`
+          // alone played both animations on every ribboned↔bare hop: the flash at the settle
+          // (user, 2026-08-12). `ribbonOut` is the louder half, because it forces opacity back
+          // to 1 on a ribbon the drag had already faded to nothing.
+          entering={swipe?.live || swipe?.settling ? undefined : ribbonIn}
+          exiting={swipe?.live || swipe?.settling ? undefined : ribbonOut}
           style={dragStyle}>
           {/* The bar's corner, not a ribbon-specific one: the prototype's 19 read as a different
               shape sitting right above the name pill's 24.5 (user, 2026-08-11). */}
