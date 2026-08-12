@@ -310,6 +310,16 @@ export function moveWindowCommand(from: number, to: number): string {
 
 export const POLL_MS = 2000;
 
+/** Until a client is attached the poll is not watching, it is WAITING: the shell's own `tmux
+ *  attach` lands a few hundred ms after connect, and T9's tabs button waits on it — so at 2s
+ *  granularity the button arrives up to a full tick after the session is usable (log, 2026-08-12).
+ *  Fast until it flips, then the steady beat. */
+export const FAST_POLL_MS = 250;
+
+export function pollDelay(attached: boolean): number {
+  return attached ? POLL_MS : FAST_POLL_MS;
+}
+
 /**
  * One exec every ~2s answers everything at once: is a client attached, which window is active
  * (the badge), and what runs in the active pane (the ribbon). This is why the badge rides the

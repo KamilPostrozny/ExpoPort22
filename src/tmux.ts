@@ -25,7 +25,6 @@ import {
   LIST_WINDOWS,
   NEW_WINDOW,
   POLL,
-  POLL_MS,
   PROBE,
   USER_CONF_PROBE,
   appendSourceLineCommand,
@@ -44,6 +43,7 @@ import {
   parseUserConfProbe,
   parseVerify,
   parseWindows,
+  pollDelay,
   readFileCommand,
   selectWindowCommand,
   type ConfigStatus,
@@ -85,7 +85,7 @@ const DOWN: TmuxState = {
 let state: TmuxState = DOWN;
 /** Whether the side-channel should be running at all — flips with the session. */
 let up = false;
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
 let polling = false;
 
 const listeners = new Set<() => void>();
@@ -162,8 +162,7 @@ export async function startTmux(): Promise<void> {
   // The poll starts BEFORE the conf push, not after it: `attached` is what T9's tabs button also
   // waits on, and making it wait out a handful of conf round trips is the delay before the button
   // appears (user, 2026-08-12). Nothing in the poll depends on the conf.
-  timer = setInterval(poll, POLL_MS);
-  void poll();
+  void tick();
   void cacheSessions();
   if (usesTmux(getSettings())) await configure();
 }
@@ -172,7 +171,7 @@ export async function startTmux(): Promise<void> {
  *  toggled-off config gets its chance to not be pushed. */
 export function stopTmux(): void {
   up = false;
-  if (timer !== null) clearInterval(timer);
+  if (timer !== null) clearTimeout(timer);
   timer = null;
   set(DOWN);
 }
@@ -211,6 +210,14 @@ async function configure(): Promise<void> {
 }
 
 /* --- the poll (T7 badge, T11 ribbon) --- */
+
+/** Self-rescheduling rather than a fixed interval, so the beat can change with what it is waiting
+ *  for (see `pollDelay`) and a slow link can never stack ticks behind a poll still in flight. */
+async function tick(): Promise<void> {
+  await poll();
+  if (!up) return;
+  timer = setTimeout(tick, pollDelay(state.attached));
+}
 
 async function poll(): Promise<void> {
   if (polling) return; // a slow link answers late; never stack channels on top of it

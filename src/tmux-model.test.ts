@@ -8,6 +8,7 @@ import { expect, test } from 'bun:test';
 
 import {
   APPLY_AND_VERIFY,
+  FAST_POLL_MS,
   CONF_MARKER,
   CONF_PATH,
   CONF_VERSION,
@@ -15,6 +16,7 @@ import {
   LIST_WINDOWS,
   NEW_WINDOW,
   POLL,
+  POLL_MS,
   PROBE,
   SEP,
   SOURCE_LINE,
@@ -34,6 +36,7 @@ import {
   parseUserConfProbe,
   parseVerify,
   parseWindows,
+  pollDelay,
   readFileCommand,
   selectWindowCommand,
   shellQuote,
@@ -220,6 +223,12 @@ test('poll parse: attached flag, badge index, pid, command-last rejoin', () => {
   expect(parsePoll(line(['0', '1', '99', 'fish']))?.attached).toBe(false);
   expect(parsePoll('')).toBeNull(); // no server = nothing to say (§7: silence, not a message)
   expect(parsePoll('no current client\n')).toBeNull();
+});
+
+test('the poll hurries while it is waiting for the attach and settles once it has it', () => {
+  expect(pollDelay(false)).toBe(FAST_POLL_MS);
+  expect(pollDelay(true)).toBe(POLL_MS);
+  expect(FAST_POLL_MS).toBeLessThan(POLL_MS);
 });
 
 test('foreground: shells are idle, everything else is a process for the ribbon', () => {
