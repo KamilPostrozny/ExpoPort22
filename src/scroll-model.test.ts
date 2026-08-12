@@ -5,11 +5,14 @@
 import { expect, test } from 'bun:test';
 
 import {
+  COAST_MAX_VELOCITY,
   COAST_TAU_MS,
+  FLICK_MIN_VELOCITY,
   VelocityTracker,
   arrowKey,
   coastDistance,
   coastVelocity,
+  compoundVelocity,
   modesEqual,
   scrollRoute,
   takeNotches,
@@ -104,4 +107,29 @@ test('mode signals compare by value', () => {
   expect(modesEqual(modes(), modes())).toBe(true);
   expect(modesEqual(modes(), modes({ decckm: true }))).toBe(false);
   expect(modesEqual(modes({ altScreen: true }), modes({ mouseReporting: true }))).toBe(false);
+});
+
+test('compounding: same-direction flicks stack, reversals and stops do not', () => {
+  // The iOS behaviour this exists for: flick again the same way and the coast gets faster.
+  expect(compoundVelocity(2, 3)).toBe(5);
+  expect(compoundVelocity(-2, -3)).toBe(-5);
+
+  // A reversal takes the finger's own speed and nothing else — adding the leftover would subtract
+  // from what was just asked for.
+  expect(compoundVelocity(2, -3)).toBe(2);
+  expect(compoundVelocity(-2, 3)).toBe(-2);
+
+  // Nothing caught: an ordinary flick is unchanged.
+  expect(compoundVelocity(2, 0)).toBe(2);
+
+  // A release too slow to be a flick is a stop, *however* fast the caught coast was. Without the
+  // threshold reading the finger's own speed, this relaunches at ~10px/ms — grabbing a runaway
+  // scroll and setting it down would fling it again.
+  const crawl = FLICK_MIN_VELOCITY / 2;
+  expect(compoundVelocity(crawl, 10)).toBe(0);
+  expect(compoundVelocity(-crawl, -10)).toBe(0);
+
+  // Stacking is clamped: repeated catches must not walk the coast up to a seek.
+  expect(compoundVelocity(COAST_MAX_VELOCITY, COAST_MAX_VELOCITY)).toBe(COAST_MAX_VELOCITY);
+  expect(compoundVelocity(-COAST_MAX_VELOCITY, -COAST_MAX_VELOCITY)).toBe(-COAST_MAX_VELOCITY);
 });

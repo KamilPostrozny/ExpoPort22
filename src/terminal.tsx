@@ -31,6 +31,7 @@ import {
   arrowKey,
   coastDistance,
   coastVelocity,
+  compoundVelocity,
   isTwoFingerTap,
   modesEqual,
   scrollRoute,
@@ -683,6 +684,12 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     let carry = 0;
     let tracker = new VelocityTracker();
     let coast: number | null = null;
+    /** The flick the running coast is decaying from, and when it started — so a finger that catches
+     *  it can work out how much speed was left and hand that to its own flick (§4.3, compounding). */
+    let coastV0 = 0;
+    let coastT0 = 0;
+    /** Speed inherited from a caught coast, spent by the next release. 0 when nothing was caught. */
+    let carried = 0;
     /** For the two-finger tap (§4.8): how many fingers this touch ever had, and when it began. */
     let fingers = 0;
     let downAt = 0;
@@ -737,6 +744,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       if (Math.abs(v0) < FLICK_MIN_VELOCITY) return;
       console.log('[terminal] coast start', v0.toFixed(3), 'px/ms');
       const t0 = performance.now();
+      coastV0 = v0;
+      coastT0 = t0;
       let spent = 0;
       const step = () => {
         const t = performance.now() - t0;
@@ -758,9 +767,12 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       // makes WebKit agree about that last part.
       const caught = coast !== null;
       if (caught) {
-        console.log('[terminal] coast caught');
+        carried = coastVelocity(coastV0, performance.now() - coastT0);
+        console.log('[terminal] coast caught', carried.toFixed(3), 'px/ms carried');
         stopCoast();
         ev.preventDefault();
+      } else {
+        carried = 0; // a pan that began on a still screen inherits nothing
       }
       const t = ev.touches[0];
       if (!caught && pan !== 'idle') {
@@ -812,7 +824,10 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         panY = ev.touches[0].clientY;
         return;
       }
-      if (pan === 'panning') startCoast(tracker.velocity(), panX, panY);
+      if (pan === 'panning') {
+        startCoast(compoundVelocity(tracker.velocity(), carried), panX, panY);
+        carried = 0;
+      }
       // A one-finger tap on a live selection clears it. xterm would normally do this itself, off
       // the synthetic mouse pair iOS sends — but its textarea is disabled and touch is ours, so
       // that path is gone and without this the selection and its edit menu simply stay (T13/T6.7).

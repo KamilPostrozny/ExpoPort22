@@ -79,6 +79,31 @@ export const FLICK_MIN_VELOCITY = 0.25;
 /** The coast is over once it has decayed below this. px/ms. */
 export const COAST_MIN_VELOCITY = 0.05;
 
+/** Nothing may coast faster than this, however many flicks stack up. A hard single flick measures
+ *  ~6 px/ms on device, so this is about two of them — past that the notches per frame stop being a
+ *  scroll and start being a seek. Hardware-tunable like the tau. px/ms. */
+export const COAST_MAX_VELOCITY = 12;
+
+/**
+ * A flick released onto a coast the finger caught. iOS compounds these — swipe again the same way
+ * and the scroll goes faster and faster — which is the behaviour a phone user expects and the one
+ * an independent `startCoast(flick)` cannot give: every flick would reset to thumb speed.
+ *
+ * Same direction only. A flick *against* the coast is a reversal, and adding the leftover speed
+ * there would subtract from what the finger just asked for — the scroll would crawl or briefly go
+ * the wrong way, which is the opposite of compounding.
+ *
+ * A release too slow to be a flick is a stop and carries nothing — the threshold has to be read
+ * against the finger's own speed, not the compounded total. Otherwise catching a fast coast and
+ * then setting the scroll down deliberately would relaunch it at the speed it was caught at, which
+ * is the one thing a person grabbing a runaway scroll is trying to prevent.
+ */
+export function compoundVelocity(flick: number, residual: number): number {
+  if (Math.abs(flick) < FLICK_MIN_VELOCITY) return 0;
+  const v = Math.sign(flick) === Math.sign(residual) ? flick + residual : flick;
+  return Math.max(-COAST_MAX_VELOCITY, Math.min(COAST_MAX_VELOCITY, v));
+}
+
 /**
  * Where the coast has got to, `tMs` after release at `v0` px/ms: `v0·tau·(1 − e^(−t/tau))`.
  * Analytic in elapsed *time*, so a frame stepper spending `distance(now) − distance(before)` lands
