@@ -495,10 +495,10 @@ export default function Switcher(props: SwitcherProps) {
         {/* The cards pass under this strip rather than stopping at it, so it frosts them instead
             of hiding them — and it frosts them by degrees, clear where the field begins and
             thickest at the very top (user, 2026-08-12). */}
-        {/* Ends above the field by the same gap the field keeps below itself, so the strip of
-            sharp cards under it is the one over it, mirrored (user, 2026-08-12). */}
+        {/* Begins halfway down the field and thickens all the way to the top of the screen (user,
+            2026-08-12). Its weakest edge is therefore behind the pill, which is opaque. */}
         <BlurRamp
-          height={props.insetTop - (SEARCH_BAR_H - SEARCH_FIELD_H)}
+          height={props.insetTop + SEARCH_FIELD_H / 2}
           tint={theme.isDark ? 'dark' : 'light'}
         />
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
@@ -537,31 +537,30 @@ export default function Switcher(props: SwitcherProps) {
 
 /**
  * A blur that ramps rather than a strip that starts: `LAYERS` backdrop blurs stacked from the top,
- * each shorter than the last, so the very top of the screen is seen through all of them and the
- * bottom of the ramp through one. Each layer blurs what the ones over it already blurred, so the
- * strength climbs the screen while every individual step stays small — small being the whole
- * point, since a step is a visible line and one fat step is exactly what this replaced (user,
- * 2026-08-12, twice).
+ * each shorter than the last, so the top of the screen is seen through all of them and the bottom
+ * of the ramp through one. Each layer blurs what the ones over it already blurred.
  *
- * Each layer's own bottom edge is a step of exactly that layer's intensity, so the intensities
- * ramp as well as the heights — and they ramp the other way round. The tallest layer is the
- * weakest, because its edge is the one out in the open at the bottom of the ramp, with no blur
- * below it to fade into; at `STEP` it is a step from almost nothing to nothing. The short layers
- * near the top are the strong ones, and their edges land on content the layers above have already
- * smeared. Equal intensities are what this had first, twice, and both times the bottom edge read
- * as a cut rather than a fade (user, 2026-08-12).
+ * Two things have to hold, and each one cost a device round to learn:
+ *
+ * 1. The exposed bottom edge is a step of the TALLEST layer's own intensity — there is no blur
+ *    below it to fade into. So the intensities ramp opposite to the heights: tallest is weakest.
+ *    Equal intensities read as a cut through a row of text, twice (user, 2026-08-12).
+ * 2. Radii compound as the root of the sum of their squares, so intensities rising in a straight
+ *    line make the compounded total rise as depth to the 3/2 — measured on device, all the blur
+ *    sat in the top third and the bottom half of the ramp did nothing. A total rising in a
+ *    straight line needs each layer to be the difference of two squares, which is `√(2i+1)`:
+ *    `TOP/LAYERS` at the exposed edge, `TOP` where all of them overlap.
  *
  * A real gradient mask is the other way to do this, and it wants `@react-native-masked-view` plus
  * `expo-linear-gradient` — two native dependencies, so a full rebuild, for a ramp the height of
  * the notch inset. Android takes no blur at all, as everywhere else (§4.10).
  *
- * ponytail: twelve steps, not a mask. If banding ever shows on a busier flavour, more layers at a
- * smaller `STEP` is the next move — blur radii compound as the root of their squares, so the top
- * of the ramp keeps its strength as long as `STEP × LAYERS` holds roughly still.
+ * ponytail: twelve steps, not a mask. If banding ever shows on a busier flavour, raise `LAYERS` —
+ * `TOP` is the total either way, so the steps just get finer.
  */
 const LAYERS = 12;
-/** What the bottom-most edge steps by, and the increment for every layer above it. */
-const STEP = 2;
+/** Where the ramp ends up, at the top of the screen. Keybar's glass is 40, for scale. */
+const TOP = 48;
 
 function BlurRamp({ height, tint }: { height: number; tint: 'dark' | 'light' }) {
   if (Platform.OS === 'android' || height <= 0) return null;
@@ -571,7 +570,7 @@ function BlurRamp({ height, tint }: { height: number; tint: 'dark' | 'light' }) 
         <BlurView
           key={i}
           // Tallest layer, weakest blur: `i` counts up as the layers get shorter.
-          intensity={STEP * (i + 1)}
+          intensity={Math.round((TOP / LAYERS) * Math.sqrt(2 * i + 1))}
           tint={tint}
           style={{
             position: 'absolute',
