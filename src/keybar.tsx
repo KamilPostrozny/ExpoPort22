@@ -60,7 +60,6 @@ import { provenance } from '@/clipboard-model';
 import { filterDictation, trackLine } from '@/input-model';
 import {
   CHORD_STRIP,
-  DEL,
   afterChord,
   applyCtrl,
   classifyBarSwipe,
@@ -267,11 +266,40 @@ function Key({
   );
 }
 
+/**
+ * §4.2 held-delete: iOS gates the delete key's auto-repeat on the first responder's `hasText`, and
+ * the field empties as soon as the diff has eaten what was typed — long before the *line* is empty —
+ * so the repeat died after a character or two. The reference app answers that question with an
+ * always-true `hasText` (Port22's TerminalHostView.swift:226); RN's `RCTUITextField` is not ours to
+ * subclass, so the field is kept permanently non-empty instead: it holds a pad nobody ever sees
+ * (1×1, `opacity: 0`), each pad character a repeat eats diffs into one more DEL, and the pad is
+ * topped back up before it runs out. Spaces, because iOS's delete accelerates to whole words once
+ * it has been held a while, and a pad of spaces is one word per character — a pad of letters would
+ * come off in one 500-DEL bite.
+ */
+const PAD = ' '.repeat(512);
+
 export default function KeyBar(props: KeyBarProps) {
   const { theme, open, onOpenChange } = props;
   const input = useRef<TextInput>(null);
   /** What the (uncontrolled) TextInput last held — the other half of `diffInput`. */
-  const typed = useRef('');
+  const typed = useRef(PAD);
+  /** The field's text, set *only* to top the pad back up (see `PAD`); `undefined` the rest of the
+   *  time, which leaves the field uncontrolled so ordinary typing never round-trips through
+   *  React — the flip back is the effect below. */
+  const [padWrite, setPadWrite] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    // The one render this cascades is the point: RN writes a `value` from its own layout effect
+    // (TextInput.js:223, the only text write Fabric honours — `text` is not in the component's
+    // `updateProps`), and letting go on the very next render is what keeps the field uncontrolled
+    // for every keystroke that is not a top-up.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+    if (padWrite !== undefined) setPadWrite(undefined);
+  }, [padWrite]);
+  const repad = () => {
+    typed.current = PAD; // ref first: a change event fired by the write diffs against it to nothing
+    setPadWrite(PAD);
+  };
   const [ctrl, setCtrl] = useState<CtrlMode>('off');
   const lastCtrlTap = useRef(0);
   /** The axis this bar pan committed to, so it fires once and never also presses keys. */
@@ -300,7 +328,7 @@ export default function KeyBar(props: KeyBarProps) {
    * The per-key seam: every typed key passes through here one at a time — chords apply, then the
    * bytes go out. T12's dictation filter sits one level up in `onChangeText`, where the whole
    * insert chunk is still visible — spacebar vs dictation is a chunk-size question, invisible per
-   * key. Held-delete lands in `onKeyPress` on the TextInput below.
+   * key. Held-delete comes through the same diff, off the pad the field carries (see `PAD`).
    */
   const emitKey = (key: string) => {
     const applied = applyCtrl(ctrl, key);
@@ -314,12 +342,9 @@ export default function KeyBar(props: KeyBarProps) {
     const bytes = filterDictation(lineLen.current, diffInput(typed.current, next));
     typed.current = next;
     for (const key of bytes) emitKey(key); // string iteration = one code point per key
-    if (next.length > 500) {
-      // The field only ever grows (nothing reads it back); trim before iOS starts caring. The
-      // ref is cleared first so a change event fired by clear() diffs against '' to nothing.
-      typed.current = '';
-      input.current?.clear();
-    }
+    // Top the pad up before a held delete runs it dry, and trim the typed tail before iOS starts
+    // caring about the length — nothing reads the field back, so both are the same write.
+    if (next.length < PAD.length / 2 || next.length > PAD.length + 500) repad();
   };
 
   const sendChord = (letter: string) => {
@@ -603,20 +628,13 @@ export default function KeyBar(props: KeyBarProps) {
         style={styles.input}
         onChangeText={onChangeText}
         onSubmitEditing={() => emitKey('\r')}
-        // §4.2 held-delete: iOS's own keyboard auto-repeats `deleteBackward`, and each repeat
-        // reaches this input — as an `onChangeText` while the field still has content (the diff
-        // emits the DEL), and as this key event once it is empty, when there is no text change to
-        // fire on. So repeat needs no timer of ours; this handler is only the empty-field half.
-        // Non-empty backspace never lands here twice: `typed` is still non-empty at key-press
-        // time, so the diff path keeps sole custody of it.
-        onKeyPress={({ nativeEvent }) => {
-          if (nativeEvent.key === 'Backspace' && typed.current === '') emitKey(DEL);
-        }}
+        // The pad (see `PAD`) seeds the field and is written back over it; nothing else sets the
+        // text, so every repeat of a held delete arrives as an `onChangeText` the diff turns into
+        // a DEL. There is no empty-field case left for an `onKeyPress` to cover.
+        defaultValue={PAD}
+        value={padWrite}
         submitBehavior="submit" // Return sends without blurring
-        onBlur={() => {
-          typed.current = '';
-          input.current?.clear();
-        }}
+        onBlur={repad}
         // A terminal wants nothing from the keyboard but keys.
         autoCorrect={false}
         autoCapitalize="none"
