@@ -118,10 +118,33 @@ export function diffInput(prev: string, next: string): string {
 }
 
 /**
+ * A single selection event that moves the caret further than this is not the trackpad walking.
+ * Measured on device: a walking trackpad reports exactly ±1 per event, every event, however fast
+ * the finger goes — but iOS *parks the caret at a document edge the instant the drag engages*,
+ * before any movement at all, and again when it ends, each arriving as one jump of most of the
+ * field's length. The first run sent those faithfully and the line's cursor shot to column 0 on
+ * every grab. Two rather than one leaves room for a coalesced pair of real steps.
+ */
+export const CARET_STEP_MAX = 2;
+
+/**
+ * How long the caret has to sit still before its position is believed. Hovering on a character
+ * boundary makes iOS chatter the caret between two neighbours, and following that sent a real
+ * arrow each way — the cursor visibly shook rather than moved (user, device). Waiting this long
+ * lets a bounce cancel itself, while still committing the true final position of every drag, and
+ * is far below what a finger notices.
+ */
+export const CARET_SETTLE_MS = 40;
+
+/**
  * §4.2 hold-space: iOS turns the held spacebar into a trackpad that walks the caret through the
  * *field*, which sends no text change at all — so the move arrives as an `onSelectionChange` and
- * this turns it into the arrows the PTY understands. One arrow per field character crossed;
- * `delta` is signed, and zero (an edit's own caret move, see the caller) sends nothing.
+ * this turns it into the arrows the PTY understands. `delta` is signed; zero sends nothing.
+ *
+ * The caller drops the parks (see `CARET_STEP_MAX`) rather than this, because by the time a
+ * settled delta gets here it may legitimately be several characters of fast travel. Dropping them
+ * leaves the field's caret and the PTY's cursor at different offsets, which does not matter: each
+ * side edits at its own cursor, and the diff only ever says *what* changed.
  */
 export function caretKeys(delta: number, decckm: boolean): string {
   return delta === 0 ? '' : navKey(delta > 0 ? 'right' : 'left', decckm).repeat(Math.abs(delta));

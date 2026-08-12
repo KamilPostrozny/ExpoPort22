@@ -1273,6 +1273,22 @@ After all T12 changes, re-run the headline case of each earlier section — one 
 - T11.1 — horizontal bar swipe hops a window with pills + live redraw.
 - [ ]
 
+### T12.17 — Hold-space walks the cursor, and an edit lands where it was left
+- **Steps**: at a plain prompt (no alt-screen app), type `abcdefgh` and do not press ⏎.
+  Hold the spacebar until the keys grey into the trackpad; **note where the cursor is
+  the instant it greys, before moving**; drag left about four characters' worth; let the
+  spacebar go; type `X`.
+- **Expect**: the cursor does not move on the grab itself — iOS parks the *field's* caret
+  at a document edge there, and following that once drove the line's cursor to column 0
+  every time (see `caretKeys`). Dragging then walks the cursor about one column per column
+  of finger travel at the default font size. The line reads `abcdXefgh`: the shell's cursor
+  and the field's caret sit at different offsets after a grab, and that is fine — each side
+  edits at its own cursor and the diff only ever says *what* changed.
+- **Also**: drag past the start of the line — the shell's cursor stops at column 0 while the
+  field's keeps going, so the two rubber-band apart until the drag comes back. Stated
+  ceiling, not a bug; the terminal's own cursor is the thing being watched.
+- [ ]
+
 ## T12A — Android polish (emulator)
 
 All cases on the Android **emulator** (gated on T3.0's build), connected to the host machine's

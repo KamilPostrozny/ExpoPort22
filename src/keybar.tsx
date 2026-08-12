@@ -66,6 +66,8 @@ import {
   applyCtrl,
   classifyBarSwipe,
   controlByte,
+  CARET_SETTLE_MS,
+  CARET_STEP_MAX,
   caretKeys,
   ctrlTap,
   diffInput,
@@ -291,8 +293,12 @@ export default function KeyBar(props: KeyBarProps) {
    *  time, which leaves the field uncontrolled so ordinary typing never round-trips through
    *  React — the flip back is the effect below. */
   const [padWrite, setPadWrite] = useState<string | undefined>(undefined);
-  /** Where the field's caret last sat (see `onSelectionChange`). */
+  /** Where the PTY's cursor stands, in field coordinates — everything up to here has been sent. */
   const caret = useRef(PAD.length);
+  /** Where the field's caret stands right now, which during a drag runs ahead of `caret`. */
+  const wanted = useRef(PAD.length);
+  /** The pending settle (see `CARET_SETTLE_MS`), if the caret is mid-bounce. */
+  const settle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     // The one render this cascades is the point: RN writes a `value` from its own layout effect
     // (TextInput.js:223, the only text write Fabric honours — `text` is not in the component's
@@ -302,7 +308,7 @@ export default function KeyBar(props: KeyBarProps) {
       // The write puts the caret back at the end of the pad, and RN suppresses the selection event
       // for its own writes (`_comingFromJS`), so the anchor is re-set here rather than learnt —
       // and here rather than in `repad`, which runs a render too early to be true yet.
-      caret.current = PAD.length;
+      caret.current = wanted.current = PAD.length;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
       setPadWrite(undefined);
     }
@@ -356,6 +362,7 @@ export default function KeyBar(props: KeyBarProps) {
     // RCTTextInputComponentView.mm:54), so keeping the anchor level here is what leaves that
     // handler seeing a zero delta for ordinary typing and a real one only for a hold-space drag.
     caret.current += next.length - typed.current.length;
+    wanted.current = caret.current;
     typed.current = next;
     for (const key of bytes) emitKey(key); // string iteration = one code point per key
     // Top the pad up before a held delete runs it dry, and trim the typed tail before iOS starts
@@ -379,12 +386,37 @@ export default function KeyBar(props: KeyBarProps) {
    */
   const onSelectionChange = (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
     const { start, end } = e.nativeEvent.selection;
-    const delta = start - caret.current;
-    caret.current = start;
     // A range is a selection, not a caret: the system's, and nothing for the PTY to follow.
-    if (start !== end) return;
-    const keys = caretKeys(delta, props.decckm);
-    if (keys) props.sendBytes(keys);
+    if (start !== end) {
+      caret.current = wanted.current = start;
+      return;
+    }
+    const step = start - wanted.current;
+    wanted.current = start;
+    if (Math.abs(step) > CARET_STEP_MAX) {
+      // A park, not travel — iOS pinning the caret to a document edge as the drag begins and ends.
+      // Re-anchor on it and send nothing. Answering it by writing the caret back to the middle of
+      // the pad was tried and is worse than useless: `setSelection` does not stick while the
+      // floating cursor is live, iOS restored its own position at once, and every real
+      // one-character step then arrived as a fresh 200-character jump against an anchor that no
+      // longer matched the field (device log, T12).
+      caret.current = start;
+      if (settle.current) clearTimeout(settle.current);
+      settle.current = undefined;
+      return;
+    }
+    if (step === 0 || settle.current) return;
+    settle.current = setTimeout(() => {
+      settle.current = undefined;
+      const delta = wanted.current - caret.current;
+      caret.current = wanted.current;
+      const keys = caretKeys(delta, props.decckm);
+      if (!keys) return; // the bounce cancelled itself, which is the point
+      // §7: the drag is invisible in every other log — no text changes, and the PTY's answer is
+      // a cursor move buried in a screen repaint. This line is the only place it can be seen.
+      console.log('[caret]', delta > 0 ? 'right' : 'left', Math.abs(delta), '→', wanted.current);
+      props.sendBytes(keys);
+    }, CARET_SETTLE_MS);
   };
 
   const sendChord = (letter: string) => {

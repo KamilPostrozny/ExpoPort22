@@ -10,6 +10,7 @@ import {
   CTRL_DOUBLE_TAP_MS,
   DEL,
   afterChord,
+  CARET_STEP_MAX,
   applyCtrl,
   caretKeys,
   classifyBarSwipe,
@@ -159,7 +160,7 @@ test('an astral character is one key both ways', () => {
 /* --- hold-space: the caret's move, as arrows --- */
 
 test('a caret walked left or right is that many arrows', () => {
-  expect(caretKeys(3, false)).toBe('\x1b[C'.repeat(3));
+  expect(caretKeys(1, false)).toBe('\x1b[C');
   expect(caretKeys(-2, false)).toBe('\x1b[D'.repeat(2));
   expect(caretKeys(1, true)).toBe('\x1bOC'); // DECCKM: the app asked for SS3
 });
@@ -167,6 +168,13 @@ test('a caret walked left or right is that many arrows', () => {
 test('a caret that did not move sends nothing', () => {
   expect(caretKeys(0, false)).toBe('');
   expect(caretKeys(0, true)).toBe('');
+});
+
+test('a settled delta of several characters is still travel', () => {
+  // The caller drops the parks per event; what reaches here has settled, and a fast drag can
+  // legitimately have crossed more than one character in that window.
+  expect(caretKeys(5, false)).toBe('\x1b[C'.repeat(5));
+  expect(CARET_STEP_MAX).toBeGreaterThan(1); // room for a coalesced pair of real steps
 });
 
 /* --- bar swipe classification --- */
