@@ -2,6 +2,14 @@ import UIKit
 
 /// The hidden field that owns the keyboard, and the reason this module is native at all.
 ///
+/// It lives in the SSH pod, which is not where it belongs and is not a choice. A second pod
+/// alongside this one damages the generated Pods project — xcodebuild dies loading an
+/// `XCSwiftPackageProductDependency`, the object CocoaPods writes for `ExpoSSH.podspec`'s Citadel
+/// Swift package, and every module map in the build then goes missing. Measured, not assumed: the
+/// commit before this one built green, adding an empty-but-for-this pod failed on Xcode 26.6 and
+/// 26.5 alike, and stripping that podspec to nothing (no `static_framework`, no `DEFINES_MODULE`)
+/// failed the same way. So the app has one pod and this shares it.
+///
 /// The ladder in AGENTS.md was walked before writing it. `TextInput` was the keyboard owner up to
 /// here and does everything except the one thing this exists for: iOS's hold-space trackpad. React
 /// Native surfaces no floating-cursor API — `FloatingCursor` appears nowhere in `react-native` or

@@ -11,7 +11,7 @@
  * on the terminal asks for it back through `focusSignal`; the bar itself never raises it.
  *
  * Which field depends on the platform, and everything below marked "the RN field" is the Android
- * half. iOS uses our own (`modules/expo-keyinput`), because RN's cannot report the hold-space
+ * half. iOS uses our own (`modules/expo-ssh`), because RN's cannot report the hold-space
  * trackpad at all — see that module's header for the ladder that ended in native code. Owning the
  * field there also retires two workarounds the RN one needs: the pad below, and the diff.
  *
@@ -90,7 +90,7 @@ import {
   type CursorEvent,
   type ExpoKeyInputRef,
   type KeyEvent,
-} from '../modules/expo-keyinput/src/ExpoKeyInput';
+} from '../modules/expo-ssh/src/ExpoKeyInput';
 
 export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
 
@@ -444,7 +444,7 @@ export default function KeyBar(props: KeyBarProps) {
     }, CARET_SETTLE_MS);
   };
 
-  /* --- the iOS field's seams (`modules/expo-keyinput`) --- */
+  /* --- the iOS field's seams (`modules/expo-ssh`) --- */
 
   /** A typed chunk or a delete, straight from the field — no diff, because nothing was inferred.
    *  The dictation filter still runs: iOS prepends its space before the text ever leaves the
@@ -748,7 +748,7 @@ export default function KeyBar(props: KeyBarProps) {
         </View>
       </GestureDetector>
 
-      {/* The keyboard's owner. Invisible but real. On iOS it is ours (`modules/expo-keyinput`):
+      {/* The keyboard's owner. Invisible but real. On iOS it is ours (`modules/expo-ssh`):
           keys arrive as keys, held delete repeats off a native always-true `hasText`, and the
           hold-space trackpad arrives as a drag in points — none of which RN's field can report.
           Android keeps RN's, where the same gesture is a selection move and `onSelectionChange`
