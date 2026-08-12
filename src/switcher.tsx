@@ -43,6 +43,7 @@ import {
   gridTop,
   reorder,
   reorderArgs,
+  SEARCH_BAR_H,
   shouldClose,
   slotFrame,
   snapshotType,
@@ -341,12 +342,17 @@ export default function Switcher(props: SwitcherProps) {
   };
 
   const dragPos = dragId === null ? -1 : display.findIndex((c) => c.win.id === dragId);
-  const top = gridTop(stageW);
+  /** The grid scrolls the full height of the window and both bars float over it, so the cards
+   *  pass under them rather than stopping at an invisible edge (user, 2026-08-12). What the bars
+   *  would have taken as layout space is the scroll content's own inset instead: `headerH` is
+   *  exactly the offset the screen's zoom aim assumes (`zoomSlot`), so a slot stays where it was. */
+  const headerH = props.insetTop + SEARCH_BAR_H + gridTop(stageW);
+  const [barH, setBarH] = useState(64);
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }]}>
       {/* T14: the search field. Same string as the terminal view's bar; the ✕ disarms both. */}
-      <View style={[styles.searchWrap, { paddingTop: props.insetTop }]}>
+      <View style={[styles.searchWrap, { paddingTop: props.insetTop }]} pointerEvents="box-none">
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
           <SymbolView
             name="magnifyingglass"
@@ -377,7 +383,6 @@ export default function Switcher(props: SwitcherProps) {
           )}
         </View>
       </View>
-      <View style={{ height: top }} />
       {filtered && display.length === 0 && (
         <View style={styles.noHits} pointerEvents="none">
           <Text style={[styles.noHitsLead, { color: theme.muted }]}>No window contains</Text>
@@ -390,56 +395,64 @@ export default function Switcher(props: SwitcherProps) {
         scrollEnabled={interactive && dragId === null}
         onScroll={(e) => props.onScrollY(e.nativeEvent.contentOffset.y)}
         scrollEventThrottle={16}
-        contentContainerStyle={{ height: gridHeight(display.length, stageW) }}>
-        {dragPos >= 0 && (
-          <View
-            style={[
-              styles.placeholder,
-              { borderColor: theme.border },
-              frameStyle(slotFrame(dragPos, stageW)),
-            ]}
-          />
-        )}
-        {/* Children in a FIXED order (by window id), position purely via `slot`: if the child
-            list re-sorted with the grid order, a reorder would make React reinsert the native
-            views, and iOS cancels the touches of a reinserted subtree — which strands an active
-            drag mid-gesture with no finalize (T10.9's stuck lift). */}
-        {display
-          .map((card, pos) => ({ card, pos }))
-          .sort((a, b) => (a.card.win.id < b.card.win.id ? -1 : 1))
-          .map(({ card, pos }) => (
-            <WindowCard
-              key={card.win.id}
-              theme={theme}
-              card={card}
-              cell={props.cell}
-              liveCols={props.liveCols}
-              padTop={props.padTop}
-              hit={props.hits[card.win.id]}
-              query={nq}
-              slot={slotFrame(pos, stageW)}
-              stageW={stageW}
-              dragged={dragId === card.win.id}
-              // The unkillable-last-window rule counts every window, not the narrowed grid: a
-              // search filtered to one card must still let that window close (§T14).
-              closable={props.total > 1}
-              reorderable={!filtered}
-              interactive={interactive}
-              flying={card.win.id === props.zoomId}
-              fade={props.fade}
-              onTap={() => props.onSelect(pos, card.win)}
-              onKill={() => props.onKill(card.win)}
-              onDragStart={() => dragStart(card.win.id, pos)}
-              onDragMove={(x, y) => dragMove(card.win.id, x, y)}
-              onDragEnd={() => dragEnd(card.win.id)}
+        contentContainerStyle={{
+          height: headerH + gridHeight(display.length, stageW) + barH + props.insetBottom,
+        }}>
+        {/* The slots' origin. Everything inside is placed by `slotFrame` exactly as before; the
+            header inset lives here instead of in the scroll view's top edge. */}
+        <View style={{ position: 'absolute', top: headerH, left: 0, right: 0, bottom: 0 }}>
+          {dragPos >= 0 && (
+            <View
+              style={[
+                styles.placeholder,
+                { borderColor: theme.border },
+                frameStyle(slotFrame(dragPos, stageW)),
+              ]}
             />
-          ))}
+          )}
+          {/* Children in a FIXED order (by window id), position purely via `slot`: if the child
+              list re-sorted with the grid order, a reorder would make React reinsert the native
+              views, and iOS cancels the touches of a reinserted subtree — which strands an active
+              drag mid-gesture with no finalize (T10.9's stuck lift). */}
+          {display
+            .map((card, pos) => ({ card, pos }))
+            .sort((a, b) => (a.card.win.id < b.card.win.id ? -1 : 1))
+            .map(({ card, pos }) => (
+              <WindowCard
+                key={card.win.id}
+                theme={theme}
+                card={card}
+                cell={props.cell}
+                liveCols={props.liveCols}
+                padTop={props.padTop}
+                hit={props.hits[card.win.id]}
+                query={nq}
+                slot={slotFrame(pos, stageW)}
+                stageW={stageW}
+                dragged={dragId === card.win.id}
+                // The unkillable-last-window rule counts every window, not the narrowed grid: a
+                // search filtered to one card must still let that window close (§T14).
+                closable={props.total > 1}
+                reorderable={!filtered}
+                interactive={interactive}
+                flying={card.win.id === props.zoomId}
+                fade={props.fade}
+                onTap={() => props.onSelect(pos, card.win)}
+                onKill={() => props.onKill(card.win)}
+                onDragStart={() => dragStart(card.win.id, pos)}
+                onDragMove={(x, y) => dragMove(card.win.id, x, y)}
+                onDragEnd={() => dragEnd(card.win.id)}
+              />
+            ))}
+        </View>
       </ScrollView>
 
       {/* The bottom bar. iOS (§4.5): + circle | "N Tabs" | Done ✓. Android (§4.10, design §5c):
           Done as a text button | Roboto count | the 56dp FAB the container transform births
           from — same handlers, Material chrome. */}
-      <View style={[styles.bar, { marginBottom: props.insetBottom }]}>
+      <View
+        style={[styles.bar, { marginBottom: props.insetBottom }]}
+        onLayout={(e) => setBarH(e.nativeEvent.layout.height)}>
         {Platform.OS === 'android' ? (
           <>
             <Pressable
@@ -928,7 +941,18 @@ const styles = StyleSheet.create({
   grid: { flex: 1 },
   // T14's search field: 40pt + 12pt gap = switcher-model's SEARCH_BAR_H, which the zoom aim
   // adds. iOS is the prototype's 13pt radius; Android takes Material's 16dp (§5d: buttons 16).
-  searchWrap: { paddingHorizontal: 20, paddingBottom: 12 },
+  // Absolute, not a layout strip: the grid runs the full height of the window underneath it, so
+  // the cards scroll past rather than under an edge. zIndex because the scroll view is a later
+  // sibling and would otherwise paint over the field.
+  searchWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 2,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
   searchField: {
     height: 40,
     borderRadius: Platform.OS === 'android' ? 16 : 13,
@@ -986,6 +1010,10 @@ const styles = StyleSheet.create({
   },
   closeGlyph: { fontSize: 10, fontWeight: '700' },
   bar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

@@ -21,13 +21,15 @@ export type Frame = { x: number; y: number; w: number; h: number };
  *  pads `21px 24px 19px`), not headroom the app draws. On a real phone SafeAreaView already
  *  insets past the notch, so copying the 66 spent it twice: the grid began ~120pt down and the
  *  scroll view's clip edge sat that far below the crust's top, which reads as an invisible thing
- *  the cards disappear under (device, T13/T10.3). 12pt of breathing room is what is left. */
+ *  the cards disappear under (device, T13/T10.3). 4pt of breathing room is what is left — the
+ *  search field's own 12pt gap and the grid's 20pt margin already separate the two, and 12 more
+ *  on top of those read as a hole (user, 2026-08-12). */
 const CARD_W = 173 / DESIGN_W;
 const CARD_H = 240 / DESIGN_W;
 const MARGIN = 20 / DESIGN_W;
 const COL_PITCH = 189 / DESIGN_W;
 const ROW_PITCH = 298 / DESIGN_W;
-const GRID_TOP = 12 / DESIGN_W;
+const GRID_TOP = 4 / DESIGN_W;
 /** The card's own corner radius (14pt at design width). */
 const CARD_R = 14 / DESIGN_W;
 /**
