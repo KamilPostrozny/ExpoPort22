@@ -495,8 +495,10 @@ export default function Switcher(props: SwitcherProps) {
         {/* The cards pass under this strip rather than stopping at it, so it frosts them instead
             of hiding them — and it frosts them by degrees, clear where the field begins and
             thickest at the very top (user, 2026-08-12). */}
+        {/* Ends above the field by the same gap the field keeps below itself, so the strip of
+            sharp cards under it is the one over it, mirrored (user, 2026-08-12). */}
         <BlurRamp
-          height={props.insetTop + SEARCH_FIELD_H / 2}
+          height={props.insetTop - (SEARCH_BAR_H - SEARCH_FIELD_H)}
           tint={theme.isDark ? 'dark' : 'light'}
         />
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
@@ -542,9 +544,9 @@ export default function Switcher(props: SwitcherProps) {
  * 2026-08-12, twice).
  *
  * The last step is the one that cannot be softened away, because below it the blur is simply
- * gone. It is hidden instead: the ramp runs to the middle of the search field, whose pill is
- * opaque and spans exactly the two card columns, and beside the pill there is only flat scrim,
- * where a blur of anything shows nothing.
+ * gone. All that can be done is make it small, which is why the layers are many and weak rather
+ * than few and strong: the bottom edge is one layer's worth of blur, and one twelfth of the ramp
+ * is not a line the eye picks out.
  *
  * A real gradient mask is the other way to do this, and it wants `@react-native-masked-view` plus
  * `expo-linear-gradient` — two native dependencies, so a full rebuild, for a ramp the height of
@@ -554,8 +556,8 @@ export default function Switcher(props: SwitcherProps) {
  * layers is the next move — the total strength is roughly `INTENSITY × √LAYERS`, so raise one and
  * lower the other together.
  */
-const LAYERS = 10;
-const INTENSITY = 8;
+const LAYERS = 12;
+const INTENSITY = 7;
 
 function BlurRamp({ height, tint }: { height: number; tint: 'dark' | 'light' }) {
   if (Platform.OS === 'android' || height <= 0) return null;
