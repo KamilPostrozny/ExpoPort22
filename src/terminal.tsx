@@ -148,7 +148,8 @@ function xtermTheme(theme: Theme): ITheme {
 }
 
 /** The font the webview cannot get from the native side: same two files as `useFonts` loads for
- *  chrome, copied into `public/` because that is the one directory that reaches this bundle.
+ *  chrome, copied into `public/` because that is the one directory that reaches this bundle. Both
+ *  copies are upstream's, plus the cmap fills in `scripts/patch-font.py` — re-run it on a bump.
  *
  *  The ligature cut, deliberately. This was the no-ligature (NL) cut for a day, because the two
  *  renderers disagreed about `calt` at the hand-over: RN's <Text> goes through CoreText, which
