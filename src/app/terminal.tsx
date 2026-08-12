@@ -95,7 +95,6 @@ import TerminalView, { type TerminalHandle } from '@/terminal';
 import { exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
 import {
   IDLE_SHELLS,
-  deriveConfigStatus,
   tabsAvailable,
   tabsHint,
   type TmuxWindow,
@@ -339,11 +338,7 @@ export default function SessionScreen() {
   const stageSV = useSharedValue({ w: 390, h: 800 });
 
   const connected = session.status === 'connected';
-  const showTabs = tabsAvailable(
-    tmux.present,
-    deriveConfigStatus(usesTmux(settings), tmux.config),
-    tmux.attached,
-  );
+  const showTabs = tabsAvailable(tmux.present, tmux.attached);
   // T11's page-slide state lives up here with the switcher's: the snapshot cache has to know
   // when a slide is running, and it is the same "nothing may change while something is moving"
   // rule the zoom needs. Everything else about the slide is in its own block below.

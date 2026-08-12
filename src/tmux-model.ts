@@ -390,10 +390,17 @@ export function deriveConfigStatus(
 }
 
 /**
- * The switcher needs configured tmux (§4.5), so the tabs button renders on present AND applied —
- * which also makes the toggle hide it, as specified — AND on a client actually being attached.
+ * Tabs follow tmux, whoever started it: the host has it, and a client is attached.
  *
- * That last term is not decoration. Every action behind the button (`select-window`, `kill-window`,
+ * The conf used to be a third term (§4.5: "the switcher needs a configured tmux"), and it was
+ * wrong — nothing behind the button reads the conf. `list-windows`, `capture-pane`,
+ * `select-window`, `kill-window` and `move-window` are stock tmux; the conf buys the wheel notch,
+ * OSC 52 and the RGB comforts, none of which the switcher touches. What that term actually did was
+ * tie the button to the START MODE, since the conf is only pushed for a tmux one — so a user who
+ * opened a plain shell and then typed `tmux` themselves got a session with windows and a button
+ * that never lit (user, 2026-08-12).
+ *
+ * The attached term IS decoration-free. Every action behind the button (`select-window`, `kill-window`,
  * `new-window`, the snapshots) targets whatever session the exec channel resolves to, which is only
  * the session on screen while this PTY is inside tmux. With tmux installed and the conf pushed but
  * the shell never entering it — the default, since §4.9 starts a plain shell and never auto-attaches
@@ -403,12 +410,8 @@ export function deriveConfigStatus(
  * Ceiling, inherited from the probe: "attached" is `#{session_attached} > 0`, so a desktop client
  * attached while the phone is not still reads as attached. Same ponytail note as in `probe`.
  */
-export function tabsAvailable(
-  present: boolean | null,
-  status: ConfigStatus,
-  attached: boolean,
-): boolean {
-  return present === true && status === 'applied' && attached;
+export function tabsAvailable(present: boolean | null, attached: boolean): boolean {
+  return present === true && attached;
 }
 
 /**
