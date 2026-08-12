@@ -9,6 +9,7 @@ import { expect, test } from 'bun:test';
 import {
   APPLY_AND_VERIFY,
   FAST_POLL_MS,
+  FAST_POLL_TICKS,
   CONF_MARKER,
   CONF_PATH,
   CONF_VERSION,
@@ -41,6 +42,7 @@ import {
   selectWindowCommand,
   shellQuote,
   tabsAvailable,
+  tabsHint,
 } from '@/tmux-model';
 
 /* --- the conf file --- */
@@ -140,6 +142,16 @@ test('one ls answers both existence questions, and neither path matches the othe
   expect(parseUserConfProbe('')).toEqual({ home: false, xdg: false });
 });
 
+test('the greyed tabs button names the actual reason, not a generic one', () => {
+  // The question that matters: a tmux mode chosen against a host that has no tmux. Sending that
+  // user to Settings to "choose a tmux start mode" would be advice they have already taken.
+  expect(tabsHint(false, true)).toContain('has not got it');
+  expect(tabsHint(false, false)).toContain('has not got it'); // the host still decides first
+  expect(tabsHint(true, false)).toContain('Settings');
+  expect(tabsHint(null, false)).toContain('Settings'); // probe still out, mode is answer enough
+  expect(tabsHint(true, true)).toBe('Waiting for tmux…'); // pushing the conf, or not attached yet
+});
+
 test('append command is fish-and-sh common ground and creates a missing file', () => {
   const command = appendSourceLineCommand('~/.tmux.conf');
   expect(command).toBe(`printf '\\n%s\\n' '${SOURCE_LINE}' >> ~/.tmux.conf`);
@@ -225,10 +237,15 @@ test('poll parse: attached flag, badge index, pid, command-last rejoin', () => {
   expect(parsePoll('no current client\n')).toBeNull();
 });
 
-test('the poll hurries while it is waiting for the attach and settles once it has it', () => {
-  expect(pollDelay(false)).toBe(FAST_POLL_MS);
-  expect(pollDelay(true)).toBe(POLL_MS);
+test('the poll hurries for the attach, settles on it, and gives up hurrying either way', () => {
+  expect(pollDelay(false, 0)).toBe(FAST_POLL_MS);
+  expect(pollDelay(true, 0)).toBe(POLL_MS); // attached: nothing left to hurry for
   expect(FAST_POLL_MS).toBeLessThan(POLL_MS);
+  // A host with tmux under a start mode that never enters it never attaches — the fast phase has
+  // to end anyway, or it fast-polls for the life of the session.
+  expect(pollDelay(false, FAST_POLL_TICKS - 1)).toBe(FAST_POLL_MS);
+  expect(pollDelay(false, FAST_POLL_TICKS)).toBe(POLL_MS);
+  expect(pollDelay(false, 9999)).toBe(POLL_MS);
 });
 
 test('foreground: shells are idle, everything else is a process for the ribbon', () => {

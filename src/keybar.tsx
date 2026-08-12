@@ -75,7 +75,7 @@ import {
 } from '@/keybar-model';
 import { MONO, type Theme } from '@/theme';
 
-export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard';
+export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
 
 export type KeyBarProps = {
   theme: Theme;
@@ -469,7 +469,7 @@ export default function KeyBar(props: KeyBarProps) {
       )}
 
       <GestureDetector gesture={pan}>
-        <View style={[styles.row, !props.showTabs && styles.rowNoTabs]}>
+        <View style={styles.row}>
           {/* §4.6: during an upload the circle tints accent and goes inert — the whole progress
               UI. The Pressable disables, so a tap during a send does nothing at all. */}
           <Key onPress={props.sending ? undefined : () => toggle('menu')} style={styles.circleSlot}>
@@ -571,18 +571,28 @@ export default function KeyBar(props: KeyBarProps) {
             )}
           </View>
 
-          {props.showTabs && (
-            <Key onPress={props.onTabsTap /* TODO(T10): opens the switcher */} style={styles.circleSlot}>
-              <Glass theme={theme} radius={BAR_RADIUS} style={styles.circle}>
-                <SymbolView
-                  name="square.on.square"
-                  size={24}
-                  tintColor={theme.foreground}
-                  fallback={<Text style={keyLabel}>▣</Text>}
-                />
-              </Glass>
-            </Key>
-          )}
+          {/* The circle is always here, greyed when there is no tmux session behind it, and a tap
+              then says why (user, 2026-08-12 — §7 wanted it absent, and a bar that changes shape
+              with the host reads as the app losing a button rather than as a session without
+              tabs). The geometry is one bar in both states, which is also what keeps the name
+              pills' slot the same width everywhere. */}
+          <Key
+            onPress={props.showTabs ? props.onTabsTap : () => toggle('tabsHint')}
+            style={styles.circleSlot}>
+            <Glass
+              theme={theme}
+              radius={BAR_RADIUS}
+              style={[styles.circle, !props.showTabs && styles.circleOff]}>
+              <SymbolView
+                name="square.on.square"
+                size={24}
+                tintColor={props.showTabs ? theme.foreground : theme.placeholder}
+                fallback={
+                  <Text style={[keyLabel, !props.showTabs && { color: theme.placeholder }]}>▣</Text>
+                }
+              />
+            </Glass>
+          </Key>
         </View>
       </GestureDetector>
 
@@ -742,6 +752,31 @@ export function ArrowsPopover({
   );
 }
 
+/** The greyed tabs circle's answer, hanging off the same `popBase` every other popover uses and
+ *  right-aligned under the button that was tapped. Says one thing and takes no touches — the
+ *  scrim behind it is the dismiss, like the rest. */
+export function TabsHintPopover({
+  theme,
+  bottom,
+  text,
+}: {
+  theme: Theme;
+  bottom: number;
+  text: string;
+}) {
+  return (
+    <Animated.View
+      pointerEvents="none"
+      entering={FadeInDown.duration(180)}
+      exiting={FadeOutDown.duration(140)}
+      style={[styles.hintPop, { bottom }]}>
+      <Glass theme={theme} radius={16} style={styles.hintGlass}>
+        <Text style={[styles.hintText, { color: theme.foreground }]}>{text}</Text>
+      </Glass>
+    </Animated.View>
+  );
+}
+
 const UPLOAD_ROWS = [
   { label: 'Files', kind: 'files' },
   { label: 'Photo or video', kind: 'photo' },
@@ -880,12 +915,11 @@ const styles = StyleSheet.create({
     paddingTop: BAR_PAD_TOP,
     paddingBottom: 6,
   },
-  // No tabs circle (no tmux) leaves the keys pill stretching into its place, and a bar that wide
-  // reads as a different bar (user, 2026-08-12). Give the missing slot back as padding: the pill
-  // keeps the width it has everywhere else.
-  rowNoTabs: { paddingRight: SIDE_MARGIN + 49 + 7 },
   circleSlot: { width: 49, height: 49 },
   circle: { width: 49, height: 49, alignItems: 'center', justifyContent: 'center' },
+  /** Disabled, not hidden — the glyph is already `placeholder`; this takes the glass down with it
+   *  so the whole control reads inert rather than just faintly drawn. */
+  circleOff: { opacity: 0.5 },
   pill: { flex: 1, height: 49 },
   pillGlass: { flex: 1 },
   keysRow: {
@@ -938,6 +972,9 @@ const styles = StyleSheet.create({
   popDivider: { width: 1, opacity: 0.5, marginVertical: 3 },
   homeEnd: { gap: 4 },
   homeEndKey: { width: 56, height: 34, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  hintPop: { position: 'absolute', right: SIDE_MARGIN, maxWidth: 240 },
+  hintGlass: { paddingHorizontal: 14, paddingVertical: 10 },
+  hintText: { fontSize: 13, lineHeight: 18 },
   menuPop: { position: 'absolute', left: SIDE_MARGIN, width: 256 },
   menuHeader: {
     paddingHorizontal: 18,

@@ -45,6 +45,7 @@ import KeyBar, {
   BAR_PAD_TOP,
   BarMenu,
   ClipboardPopover,
+  TabsHintPopover,
   type BarPopover,
 } from '@/keybar';
 import Ribbon, { RIBBON_PAD_TOP } from '@/ribbon';
@@ -92,7 +93,13 @@ import {
 import SettingsSheet from '@/settings-sheet';
 import TerminalView, { type TerminalHandle } from '@/terminal';
 import { exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
-import { IDLE_SHELLS, deriveConfigStatus, tabsAvailable, type TmuxWindow } from '@/tmux-model';
+import {
+  IDLE_SHELLS,
+  deriveConfigStatus,
+  tabsAvailable,
+  tabsHint,
+  type TmuxWindow,
+} from '@/tmux-model';
 import { MONO, type Theme } from '@/theme';
 import { pick, quickAttach, sendFile, useUploadBusy, type UploadKind } from '@/upload';
 import { joinPath, sanitizeFilename, stampName } from '@/upload-model';
@@ -1725,9 +1732,9 @@ export default function SessionScreen() {
         }}
         focusSignal={focusSignal}
         sending={sending}
-        // §4.5: the tabs button exists only with tmux present AND the config applied — so the
-        // Settings toggle going off takes the button with it, and a host without tmux never
-        // shows one (§7: silence, not a message).
+        // §4.5: tabs are reachable only with tmux present AND the config applied AND a client
+        // attached. False no longer removes the button — it greys it, and the tap explains itself
+        // (`tabsHint`, user 2026-08-12).
         showTabs={showTabs}
         onTabsTap={openSwitcher}
         onSwitcherDrag={onSwitcherDrag}
@@ -1756,6 +1763,12 @@ export default function SessionScreen() {
               decckm={modes.decckm}
               bottom={popBase}
               sendBytes={send}
+            />
+          ) : open === 'tabsHint' ? (
+            <TabsHintPopover
+              theme={theme}
+              bottom={popBase}
+              text={tabsHint(tmux.present, usesTmux(settings))}
             />
           ) : open === 'clipboard' ? (
             <ClipboardPopover

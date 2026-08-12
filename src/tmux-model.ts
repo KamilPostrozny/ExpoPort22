@@ -316,8 +316,15 @@ export const POLL_MS = 2000;
  *  Fast until it flips, then the steady beat. */
 export const FAST_POLL_MS = 250;
 
-export function pollDelay(attached: boolean): number {
-  return attached ? POLL_MS : FAST_POLL_MS;
+/** How many fast ticks the attach gets before the poll settles anyway — 5s at `FAST_POLL_MS`. The
+ *  cap is not a nicety: a host that HAS tmux under a start mode that never enters it (`shell`, or
+ *  a custom line without it) never attaches at all, and without this it would fast-poll for the
+ *  life of the session. A hand-typed `tmux attach` an hour in is still picked up, on the steady
+ *  beat, which is what it would have been before any of this. */
+export const FAST_POLL_TICKS = 20;
+
+export function pollDelay(attached: boolean, ticks: number): number {
+  return !attached && ticks < FAST_POLL_TICKS ? FAST_POLL_MS : POLL_MS;
 }
 
 /**
@@ -402,6 +409,20 @@ export function tabsAvailable(
   attached: boolean,
 ): boolean {
   return present === true && status === 'applied' && attached;
+}
+
+/**
+ * What the disabled tabs button says when it is tapped (user, 2026-08-12). §7 wanted no button at
+ * all, and a control that is simply absent reads as this app being broken rather than as something
+ * the session does not have — so it stays, greyed, and answers when asked.
+ *
+ * The answer has to name the actual reason or it is worse than silence: a host with no tmux and a
+ * session that merely chose not to use it need opposite advice.
+ */
+export function tabsHint(present: boolean | null, usesTmuxMode: boolean): string {
+  if (present === false) return 'Tabs need tmux, and this host has not got it.';
+  if (!usesTmuxMode) return 'Tabs need a tmux session — choose a tmux start mode in Settings.';
+  return 'Waiting for tmux…';
 }
 
 /**

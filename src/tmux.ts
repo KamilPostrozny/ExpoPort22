@@ -87,6 +87,8 @@ let state: TmuxState = DOWN;
 let up = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let polling = false;
+/** Polls run since this connect — the fast phase's budget (see `pollDelay`). */
+let ticks = 0;
 
 const listeners = new Set<() => void>();
 
@@ -173,6 +175,7 @@ export function stopTmux(): void {
   up = false;
   if (timer !== null) clearTimeout(timer);
   timer = null;
+  ticks = 0;
   set(DOWN);
 }
 
@@ -214,9 +217,10 @@ async function configure(): Promise<void> {
 /** Self-rescheduling rather than a fixed interval, so the beat can change with what it is waiting
  *  for (see `pollDelay`) and a slow link can never stack ticks behind a poll still in flight. */
 async function tick(): Promise<void> {
+  ticks += 1;
   await poll();
   if (!up) return;
-  timer = setTimeout(tick, pollDelay(state.attached));
+  timer = setTimeout(tick, pollDelay(state.attached, ticks));
 }
 
 async function poll(): Promise<void> {
