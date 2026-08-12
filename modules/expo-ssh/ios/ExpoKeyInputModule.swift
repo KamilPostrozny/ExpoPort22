@@ -27,9 +27,9 @@ final class ExpoKeyInputView: ExpoView {
     field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     addSubview(field)
 
-    field.onText = { [weak self] text, source in
+    field.onText = { [weak self] text in
       // Return arrives as a newline; the PTY wants a carriage return.
-      self?.onKey(["text": text == "\n" ? "\r" : text, "source": source])
+      self?.onKey(["text": text == "\n" ? "\r" : text])
     }
     field.onDelete = { [weak self] in
       self?.onKey(["delete": true])

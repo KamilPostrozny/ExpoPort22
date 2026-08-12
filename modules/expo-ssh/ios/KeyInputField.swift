@@ -27,16 +27,18 @@ import UIKit
 ///
 /// Two other hacks fall out of owning the field. `hasText` is `true` outright, which is how the
 /// reference app does it (Port22's TerminalHostView.swift:226) and retires the 512-space pad the
-/// RN field needed to keep delete's auto-repeat alive. And `insertText`/`deleteBackward` report
-/// what was typed directly, so nothing has to be recovered by diffing two states of a text box.
+/// RN field needed to keep delete's auto-repeat alive — device log: a held backspace repeats every
+/// ~150ms indefinitely against a field holding nothing. And keys are reported as they are struck,
+/// so nothing has to be recovered by diffing two states of a text box.
 final class KeyInputField: UITextField {
-  /// `source` names the UIKit path the text arrived by; JS logs it. Overriding `insertText` alone
-  /// was not enough on device — the keyboard came up and nothing reached JS — because a
-  /// UITextField does its editing through an internal field editor rather than by calling its own
-  /// `insertText`. The delegate is the path UIKit is documented to always take, so that is the one
-  /// relied on; `insertText` stays as a belt to the delegate's braces, deduplicated below, and the
-  /// tag is what will say which is doing the work.
-  var onText: ((String, String) -> Void)?
+  /// Overriding `insertText` was the first attempt and it never fired once: a UITextField does its
+  /// editing through an internal field editor rather than by calling its own `insertText`, so the
+  /// keyboard came up on device and not a keystroke reached JS. Everything arrives by the delegate
+  /// below instead, which is the path UIKit always offers an insertion to. Both were carried for
+  /// one build with a tag saying which fired; every key came back `delegate`, so the other went —
+  /// along with the same-string guard that had deduplicated them, which would have swallowed the
+  /// second `l` of `hello` typed inside 50ms.
+  var onText: ((String) -> Void)?
   var onDelete: (() -> Void)?
   /// `dx` is points travelled since the drag began, positive to the right.
   var onCursor: ((CGFloat, String) -> Void)?
@@ -51,24 +53,9 @@ final class KeyInputField: UITextField {
     fatalError("KeyInputField is created in code, never from a nib")
   }
 
-  /// The same key can arrive twice when both paths are live. Two reports of the same string inside
-  /// one run loop's worth of time are one keypress.
-  private var lastText: (String, CFTimeInterval)?
-
-  fileprivate func report(_ text: String, from source: String) {
-    let now = CACurrentMediaTime()
-    if let (previous, at) = lastText, previous == text, now - at < 0.05 { return }
-    lastText = (text, now)
-    onText?(text, source)
-  }
-
   /// iOS gates the delete key's auto-repeat on the first responder's `hasText`, and a terminal's
   /// field is empty even when the *line* is not. Always true, so the repeat never stops early.
   override var hasText: Bool { true }
-
-  override func insertText(_ text: String) {
-    report(text, from: "insertText")
-  }
 
   override func deleteBackward() {
     onDelete?()
@@ -111,13 +98,13 @@ extension KeyInputField: UITextFieldDelegate {
     shouldChangeCharactersIn range: NSRange,
     replacementString string: String
   ) -> Bool {
-    if !string.isEmpty { report(string, from: "delegate") }
+    if !string.isEmpty { onText?(string) }
     return false
   }
 
   /// Return sends, and never dismisses the keyboard — the terminal is still there to type at.
   func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-    report("\n", from: "return")
+    onText?("\n")
     return false
   }
 }
