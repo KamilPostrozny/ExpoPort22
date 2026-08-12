@@ -543,21 +543,25 @@ export default function Switcher(props: SwitcherProps) {
  * point, since a step is a visible line and one fat step is exactly what this replaced (user,
  * 2026-08-12, twice).
  *
- * The last step is the one that cannot be softened away, because below it the blur is simply
- * gone. All that can be done is make it small, which is why the layers are many and weak rather
- * than few and strong: the bottom edge is one layer's worth of blur, and one twelfth of the ramp
- * is not a line the eye picks out.
+ * Each layer's own bottom edge is a step of exactly that layer's intensity, so the intensities
+ * ramp as well as the heights — and they ramp the other way round. The tallest layer is the
+ * weakest, because its edge is the one out in the open at the bottom of the ramp, with no blur
+ * below it to fade into; at `STEP` it is a step from almost nothing to nothing. The short layers
+ * near the top are the strong ones, and their edges land on content the layers above have already
+ * smeared. Equal intensities are what this had first, twice, and both times the bottom edge read
+ * as a cut rather than a fade (user, 2026-08-12).
  *
  * A real gradient mask is the other way to do this, and it wants `@react-native-masked-view` plus
  * `expo-linear-gradient` — two native dependencies, so a full rebuild, for a ramp the height of
  * the notch inset. Android takes no blur at all, as everywhere else (§4.10).
  *
- * ponytail: ten steps, not a mask. If banding ever shows on a busier flavour, more and weaker
- * layers is the next move — the total strength is roughly `INTENSITY × √LAYERS`, so raise one and
- * lower the other together.
+ * ponytail: twelve steps, not a mask. If banding ever shows on a busier flavour, more layers at a
+ * smaller `STEP` is the next move — blur radii compound as the root of their squares, so the top
+ * of the ramp keeps its strength as long as `STEP × LAYERS` holds roughly still.
  */
 const LAYERS = 12;
-const INTENSITY = 7;
+/** What the bottom-most edge steps by, and the increment for every layer above it. */
+const STEP = 2;
 
 function BlurRamp({ height, tint }: { height: number; tint: 'dark' | 'light' }) {
   if (Platform.OS === 'android' || height <= 0) return null;
@@ -566,7 +570,8 @@ function BlurRamp({ height, tint }: { height: number; tint: 'dark' | 'light' }) 
       {Array.from({ length: LAYERS }, (_, i) => (
         <BlurView
           key={i}
-          intensity={INTENSITY}
+          // Tallest layer, weakest blur: `i` counts up as the layers get shorter.
+          intensity={STEP * (i + 1)}
           tint={tint}
           style={{
             position: 'absolute',
