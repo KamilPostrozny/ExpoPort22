@@ -1287,7 +1287,11 @@ After all T12 changes, re-run the headline case of each earlier section — one 
 - **Also**: drag past the start of the line — the shell's cursor stops at column 0 while the
   field's keeps going, so the two rubber-band apart until the drag comes back. Stated
   ceiling, not a bug; the terminal's own cursor is the thing being watched.
-- [ ]
+- **Seen on device (2026-08-12)**: where iOS parks the caret on grab varies, and when it parks
+  at 0 there is no leftward room at all — the drag has to go right first to buy some. Walked
+  in a plain shell and under Claude Code, which runs the alt screen with DECCKM on, so the
+  SS3 form of the arrows is covered too.
+- [x]
 
 ## T12A — Android polish (emulator)
 
