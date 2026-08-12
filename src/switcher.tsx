@@ -492,15 +492,10 @@ export default function Switcher(props: SwitcherProps) {
           past its ancestor's siblings: the field drew over the live terminal, from a switcher
           nobody had opened (user, 2026-08-12, screenshot). Paint order cannot leak. */}
       <View style={[styles.searchWrap, { paddingTop: props.insetTop }]} pointerEvents="box-none">
-        {/* The cards pass under this strip rather than stopping at it, so the strip frosts them
-            instead of hiding them. Android takes no blur, as everywhere else (§4.10). */}
-        {Platform.OS !== 'android' && (
-          <BlurView
-            intensity={40}
-            tint={theme.isDark ? 'dark' : 'light'}
-            style={StyleSheet.absoluteFill}
-          />
-        )}
+        {/* The cards pass under this strip rather than stopping at it, so it frosts them instead
+            of hiding them — and it frosts them by degrees, clear where the field begins and
+            thickest at the very top (user, 2026-08-12). */}
+        <BlurRamp height={props.insetTop} tint={theme.isDark ? 'dark' : 'light'} />
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
           <SymbolView
             name="magnifyingglass"
@@ -532,6 +527,42 @@ export default function Switcher(props: SwitcherProps) {
         </View>
       </View>
     </View>
+  );
+}
+
+/**
+ * A blur that ramps rather than a strip that starts: `layers` backdrop blurs stacked from the top,
+ * each shorter than the last, so the very top of the screen is seen through all of them and the
+ * edge nearest the search field through one. Each layer adds only a little, which is what keeps
+ * the steps from reading as bands.
+ *
+ * A real gradient mask is the other way to do this, and it wants `@react-native-masked-view` plus
+ * `expo-linear-gradient` — two native dependencies, so a full rebuild, for a ramp 68pt tall that
+ * five overlapping views already draw. Android takes no blur at all, as everywhere else (§4.10).
+ *
+ * ponytail: five steps, not a mask. If a seam ever shows on a busier flavour, raise `layers`
+ * before reaching for the dependency.
+ */
+function BlurRamp({ height, tint }: { height: number; tint: 'dark' | 'light' }) {
+  const layers = 5;
+  if (Platform.OS === 'android' || height <= 0) return null;
+  return (
+    <>
+      {Array.from({ length: layers }, (_, i) => (
+        <BlurView
+          key={i}
+          intensity={12}
+          tint={tint}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: (height * (layers - i)) / layers,
+          }}
+        />
+      ))}
+    </>
   );
 }
 
