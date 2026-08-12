@@ -1333,7 +1333,14 @@ export default function SessionScreen() {
   const searchRowH = search.on ? insets.top + 46 : 0;
   const innerH =
     stage === null ? 0 : stage.h - keyboardPad - searchRowH - notchPad - padBottom - barPad;
-  const rowRemainder = cell.h > 0 && innerH > 0 ? innerH % cell.h : 0;
+  // A point of slack, because an exact multiple is the one number this must not aim at. The box is
+  // handed over through three fractional paddings, each rounded to a device pixel on the way, so
+  // what the webview measures is up to a point SHORT of what is computed here — and a box a hair
+  // under a whole row costs the row: xterm drops it and parks the leftover as a top inset, which is
+  // the whole pane stepping down 17pt of an 18pt cell every time the keyboard leaves (device,
+  // 2026-08-12: box 738.00 out, `clientHeight` 737 in, 41 rows → 40 and padTop 0 → 17). A point over
+  // is free — it lands as a padTop of a few tenths, under a device pixel.
+  const rowRemainder = cell.h > 0 && innerH > 0 ? Math.max(0, (innerH % cell.h) - 1) : 0;
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
    *  the same three numbers, or their text does not line up with the live terminal's. */
   const paneInsets = { top: notchPad + padTop, side: padH, bottom: padBottom + barPad + rowRemainder };
