@@ -14,7 +14,6 @@ import {
   applyCtrl,
   caretKeys,
   classifyBarSwipe,
-  cursorColumns,
   controlByte,
   ctrlTap,
   diffInput,
@@ -169,14 +168,6 @@ test('a caret walked left or right is that many arrows', () => {
 test('a caret that did not move sends nothing', () => {
   expect(caretKeys(0, false)).toBe('');
   expect(caretKeys(0, true)).toBe('');
-});
-
-test('a hold-space drag in points becomes columns against the measured cell', () => {
-  expect(cursorColumns(7.8, 7.8)).toBe(1);
-  expect(cursorColumns(-31.2, 7.8)).toBe(-4);
-  expect(cursorColumns(3, 7.8)).toBe(0); // under half a cell is not a column yet
-  expect(cursorColumns(0, 7.8)).toBe(0);
-  expect(cursorColumns(100, 0)).toBe(0); // the terminal has not measured — no travel, no divide
 });
 
 test('a settled delta of several characters is still travel', () => {

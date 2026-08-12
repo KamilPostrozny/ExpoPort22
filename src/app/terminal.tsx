@@ -46,7 +46,6 @@ import KeyBar, {
   BarMenu,
   ClipboardPopover,
   TabsHintPopover,
-  dismissKeys,
   type BarPopover,
 } from '@/keybar';
 import Ribbon, { RIBBON_PAD_TOP } from '@/ribbon';
@@ -292,7 +291,7 @@ export default function SessionScreen() {
     // (always down) keys as the terminal's, or closing the grid afterwards would leave a
     // keyboard behind that was up when the person went in.
     if (swRef.current === 'closed') keysWereUp.current = keyboardPad > 0;
-    dismissKeys();
+    Keyboard.dismiss();
     setSettingsOpen(true);
   };
   const closeSettings = () => {
@@ -534,7 +533,7 @@ export default function SessionScreen() {
     console.log('[switcher] open (tabs tap)');
     setOpen('none');
     keysWereUp.current = keyboardPad > 0; // read before the dismiss moves it
-    dismissKeys();
+    Keyboard.dismiss();
     const pos = activePos();
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
@@ -1663,7 +1662,14 @@ export default function SessionScreen() {
         }}
         onTwoFingerTap={async () => openSettings()}
         // §4.4: a tap on the terminal is the keyboard's door — the bar no longer raises it.
-        onTap={async () => setFocusSignal((n) => n + 1)}
+        // §4.4's door to the keyboard, both ways (user, 2026-08-12): a tap puts the keys away when
+        // they are up and asks for them when they are down. It used to only ask — the going-away
+        // half was the field resigning when the webview took the touch, which is not the same
+        // thing as a tap and did not read as one.
+        onTap={async () => {
+          if (keyboardPad > 0) Keyboard.dismiss();
+          else setFocusSignal((n) => n + 1);
+        }}
         onSearchResults={async (i, n) => setOcc({ i, n })}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
@@ -1745,7 +1751,6 @@ export default function SessionScreen() {
         decckm={modes.decckm}
         bracketedPaste={modes.bracketedPaste}
         sendBytes={sendKeys}
-        cellWidth={cell.w} // hold-space: points of drag ÷ this = columns
         open={open}
         onOpenChange={setOpen}
         onHeight={(h) => {

@@ -150,20 +150,6 @@ export function caretKeys(delta: number, decckm: boolean): string {
   return delta === 0 ? '' : navKey(delta > 0 ? 'right' : 'left', decckm).repeat(Math.abs(delta));
 }
 
-/**
- * iOS's floating cursor reports the drag in points from where it began (`modules/expo-keyinput`),
- * and this turns that into columns. Absolute, never incremental: a dropped frame cannot make the
- * cursor drift, because every report says where the finger *is* rather than how far it moved since
- * the last one.
- *
- * The cell width is the calibration — the emulator's measured one, so the cursor keeps pace with
- * the finger at any font size rather than at the default only. A cell of zero means the terminal
- * has not measured yet; no travel then, rather than a division by nothing.
- */
-export function cursorColumns(dx: number, cellWidth: number): number {
-  return cellWidth > 0 ? Math.round(dx / cellWidth) : 0;
-}
-
 /* --- bar swipes --- */
 
 /** Travel before an axis is even chosen (the prototype's 10px). */

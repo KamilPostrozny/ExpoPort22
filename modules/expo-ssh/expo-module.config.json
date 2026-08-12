@@ -1,17 +1,9 @@
 {
-  "platforms": [
-    "apple",
-    "android"
-  ],
+  "platforms": ["apple", "android"],
   "apple": {
-    "modules": [
-      "ExpoSSHModule",
-      "ExpoKeyInputModule"
-    ]
+    "modules": ["ExpoSSHModule"]
   },
   "android": {
-    "modules": [
-      "expo.modules.ssh.ExpoSSHModule"
-    ]
+    "modules": ["expo.modules.ssh.ExpoSSHModule"]
   }
 }
