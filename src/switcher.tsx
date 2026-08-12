@@ -10,6 +10,7 @@
  * grid sits behind.
  */
 
+import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
@@ -44,6 +45,7 @@ import {
   reorder,
   reorderArgs,
   SEARCH_BAR_H,
+  SEARCH_FIELD_H,
   shouldClose,
   slotFrame,
   snapshotType,
@@ -351,38 +353,6 @@ export default function Switcher(props: SwitcherProps) {
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }]}>
-      {/* T14: the search field. Same string as the terminal view's bar; the ✕ disarms both. */}
-      <View style={[styles.searchWrap, { paddingTop: props.insetTop }]} pointerEvents="box-none">
-        <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
-          <SymbolView
-            name="magnifyingglass"
-            size={14}
-            tintColor={theme.muted}
-            //  is the Nerd Font magnifier, already bundled — the Android face of the icon.
-            fallback={
-              <Text style={{ color: theme.muted, fontSize: 13, fontFamily: MONO }}>{''}</Text>
-            }
-          />
-          <TextInput
-            value={props.query}
-            onChangeText={props.onQuery}
-            placeholder="Search windows and output"
-            placeholderTextColor={theme.placeholder}
-            autoCapitalize="none"
-            autoCorrect={false}
-            spellCheck={false}
-            style={[styles.searchInput, { color: theme.foreground }]}
-          />
-          {props.query !== '' && (
-            <Pressable
-              onPress={props.onClearSearch}
-              hitSlop={10}
-              style={[styles.searchClear, { backgroundColor: theme.muted }]}>
-              <Text style={[styles.searchClearGlyph, { color: theme.scrim }]}>✕</Text>
-            </Pressable>
-          )}
-        </View>
-      </View>
       {filtered && display.length === 0 && (
         <View style={styles.noHits} pointerEvents="none">
           <Text style={[styles.noHitsLead, { color: theme.muted }]}>No window contains</Text>
@@ -515,6 +485,51 @@ export default function Switcher(props: SwitcherProps) {
         </Pressable>
           </>
         )}
+      </View>
+      {/* T14: the search field. Same string as the terminal view's bar; the ✕ disarms both.
+          LAST among these siblings on purpose — that is what puts it over the grid. `zIndex` says
+          the same thing in one line and is what this had first, but iOS hoists a zIndexed child
+          past its ancestor's siblings: the field drew over the live terminal, from a switcher
+          nobody had opened (user, 2026-08-12, screenshot). Paint order cannot leak. */}
+      <View style={[styles.searchWrap, { paddingTop: props.insetTop }]} pointerEvents="box-none">
+        {/* The cards pass under this strip rather than stopping at it, so the strip frosts them
+            instead of hiding them. Android takes no blur, as everywhere else (§4.10). */}
+        {Platform.OS !== 'android' && (
+          <BlurView
+            intensity={40}
+            tint={theme.isDark ? 'dark' : 'light'}
+            style={StyleSheet.absoluteFill}
+          />
+        )}
+        <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
+          <SymbolView
+            name="magnifyingglass"
+            size={14}
+            tintColor={theme.muted}
+            //  is the Nerd Font magnifier, already bundled — the Android face of the icon.
+            fallback={
+              <Text style={{ color: theme.muted, fontSize: 13, fontFamily: MONO }}>{''}</Text>
+            }
+          />
+          <TextInput
+            value={props.query}
+            onChangeText={props.onQuery}
+            placeholder="Search windows and output"
+            placeholderTextColor={theme.placeholder}
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            style={[styles.searchInput, { color: theme.foreground }]}
+          />
+          {props.query !== '' && (
+            <Pressable
+              onPress={props.onClearSearch}
+              hitSlop={10}
+              style={[styles.searchClear, { backgroundColor: theme.muted }]}>
+              <Text style={[styles.searchClearGlyph, { color: theme.scrim }]}>✕</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -939,22 +954,25 @@ function HlText({
 
 const styles = StyleSheet.create({
   grid: { flex: 1 },
-  // T14's search field: 40pt + 12pt gap = switcher-model's SEARCH_BAR_H, which the zoom aim
-  // adds. iOS is the prototype's 13pt radius; Android takes Material's 16dp (§5d: buttons 16).
+  // T14's search field: the block the zoom aim adds is switcher-model's SEARCH_BAR_H, and the two
+  // numbers below are that constant taken apart, not a copy of it.
   // Absolute, not a layout strip: the grid runs the full height of the window underneath it, so
-  // the cards scroll past rather than under an edge. zIndex because the scroll view is a later
-  // sibling and would otherwise paint over the field.
+  // the cards scroll past rather than stopping at an edge. It is the last child of the switcher
+  // for its layer — see the comment there, and do not reach for zIndex.
   searchWrap: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 2,
     paddingHorizontal: 20,
-    paddingBottom: 12,
+    // Derived, never a second number: the zoom aim and the grid's own top both count the field
+    // plus this gap as SEARCH_BAR_H, and a hand-kept copy of it drifts the two apart.
+    paddingBottom: SEARCH_BAR_H - SEARCH_FIELD_H,
+    overflow: 'hidden', // the blur strip is a child, and it ends where this does
   },
+  // iOS is the prototype's 13pt radius; Android takes Material's 16dp (§5d: buttons 16).
   searchField: {
-    height: 40,
+    height: SEARCH_FIELD_H,
     borderRadius: Platform.OS === 'android' ? 16 : 13,
     flexDirection: 'row',
     alignItems: 'center',

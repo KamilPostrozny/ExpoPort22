@@ -21,15 +21,17 @@ export type Frame = { x: number; y: number; w: number; h: number };
  *  pads `21px 24px 19px`), not headroom the app draws. On a real phone SafeAreaView already
  *  insets past the notch, so copying the 66 spent it twice: the grid began ~120pt down and the
  *  scroll view's clip edge sat that far below the crust's top, which reads as an invisible thing
- *  the cards disappear under (device, T13/T10.3). 4pt of breathing room is what is left — the
- *  search field's own 12pt gap and the grid's 20pt margin already separate the two, and 12 more
- *  on top of those read as a hole (user, 2026-08-12). */
+ *  the cards disappear under (device, T13/T10.3). Nothing is what is left: the search field's own
+ *  gap (`SEARCH_BAR_H`) and the grid's 20pt margin already separate the two, and a third gap on
+ *  top of those is the hole the user kept asking to close (2026-08-12). Kept as a named zero
+ *  because the zoom aim and the grid's scroll inset both have to count the same headroom, and a
+ *  future one belongs here rather than in two files. */
 const CARD_W = 173 / DESIGN_W;
 const CARD_H = 240 / DESIGN_W;
 const MARGIN = 20 / DESIGN_W;
 const COL_PITCH = 189 / DESIGN_W;
 const ROW_PITCH = 298 / DESIGN_W;
-const GRID_TOP = 4 / DESIGN_W;
+const GRID_TOP = 0;
 /** The card's own corner radius (14pt at design width). */
 const CARD_R = 14 / DESIGN_W;
 /**
@@ -70,9 +72,12 @@ export function termPad(width: number): number {
  *  in step by hand. */
 export const SHOT_PAD = TERM_PAD * CARD_W;
 
-/** T14: the search field's block above the grid (40pt field + 12pt gap, absolute like the other
- *  controls). The zoom aim adds it — the grid, and every card slot, sits this far lower. */
-export const SEARCH_BAR_H = 52;
+/** T14: the search field itself, and its whole block above the grid — the field plus the gap under
+ *  it. The zoom aim adds the block, and so does the grid's own scroll inset: every card slot sits
+ *  this far lower. The gap is 8, not the 12 it started at: the grid's 20pt margin is under it as
+ *  well, and the two together read as a hole (user, 2026-08-12). */
+export const SEARCH_FIELD_H = 40;
+export const SEARCH_BAR_H = SEARCH_FIELD_H + 8;
 
 export function rowPitch(width: number): number {
   return ROW_PITCH * width;

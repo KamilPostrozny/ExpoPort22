@@ -46,9 +46,9 @@ test('slot geometry at design width matches the prototype exactly', () => {
   closeTo(slotFrame(1, 402), { x: 209, y: 20, w: 173, h: 240 });
   closeTo(slotFrame(2, 402), { x: 20, y: 318, w: 173, h: 240 });
   closeTo(slotFrame(5, 402), { x: 209, y: 318 + 298, w: 173, h: 240 });
-  // 4, not the prototype's 66: that band is the device frame's status bar, which SafeAreaView
+  // Nothing, not the prototype's 66: that band is the device frame's status bar, which SafeAreaView
   // already accounts for on a real phone (T13/T10.3), and the search field brings its own gap.
-  expect(gridTop(402)).toBeCloseTo(4, 6);
+  expect(gridTop(402)).toBe(0);
 });
 
 test('slot geometry scales with the screen width', () => {
