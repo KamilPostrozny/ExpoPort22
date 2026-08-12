@@ -758,6 +758,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       // makes WebKit agree about that last part.
       const caught = coast !== null;
       if (caught) {
+        console.log('[terminal] coast caught');
         stopCoast();
         ev.preventDefault();
       }
