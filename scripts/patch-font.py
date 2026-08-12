@@ -46,8 +46,82 @@ FILL = {
 
 ADVANCE = 600  # 0.6em at 1000upm — a substitute on any other advance would break the cell
 
+#: The characters that are supposed to tile — box drawing and block elements. Everything else in a
+#: terminal is a letter in the middle of its cell, where a hair of space on either side is what you
+#: want; these two ranges are drawings that continue into the neighbouring cell, and a hair of space
+#: is a seam straight through the picture.
+TILING = ((0x2500, 0x257F), (0x2580, 0x259F))
 
-def patch(path: Path) -> int:
+# The glyph box these two ranges are drawn on: the full advance, and hhea's 1020/-300.
+BOX_LEFT, BOX_RIGHT, BOX_BOTTOM, BOX_TOP = 0, ADVANCE, -300, 1020
+EDGE = 20  # units; a point this near a side counts as sitting on it (0.78 device px at 13pt/3x)
+
+# How far past the box those edges go. The two axes fail for different reasons and want different
+# numbers, both measured against a 13pt pane at dpr 3 (`[terminal] size … cell 7.7999 × 18.00`):
+#
+#   x — the ink is already exactly one advance, so the columns tile in arithmetic and seam only in
+#       rasterisation: a cell is 23.4 device pixels, so no column starts on a pixel boundary, and
+#       two glyphs meeting mid-pixel each get partial coverage of it. Painted one after the other
+#       rather than summed, two half-covered pinks over a black background leave a dark line. An
+#       overlap of a whole pixel is what removes the shared edge; 16 a side is 1.25 of one.
+#
+#   y — this one is a real gap, not a rasterising artefact. The row box is what WebKit reports for
+#       the face (1.3846em here, 54 device pixels) while the ink is hhea's 1.32em, 51.48 of them,
+#       centred by half-leading. That leaves about 32 units bare above and below, and it is a ratio
+#       rather than a length, so it is the same gap at every size. 56 a side clears it with about a
+#       pixel to spare.
+#
+# ponytail: em-relative, so the overlap scales with the text while the pixel it has to cover does
+# not. Sized for the pane; the swipe's thumbnail draws the same art several times smaller, where
+# 32 units stops being a whole pixel and the x seams can come back. Invisible at thumbnail size,
+# which is why it is not worth a second pair of numbers. If a pane ever gets very small, or the
+# seams turn up somewhere that matters, the fix is to stop shipping geometry in a font and let a
+# canvas renderer draw these two ranges as rectangles, the way SwiftTerm does in ../Port22.
+BLEED_X, BLEED_Y = 16, 56
+
+
+def bleed(font: TTFont, name: str) -> bool:
+    """Push a tiling glyph's outer edges past its box, so its neighbours overlap instead of meeting.
+
+    Only points already sitting on an edge move, and they move to a fixed place rather than by an
+    offset — so a stroke's thickness and every interior division survive (the quadrant split at
+    x=300 does not budge, and a `─` keeps its weight while growing sideways), and a second run is
+    a no-op.
+    """
+    glyph = font['glyf'][name]
+    if glyph.numberOfContours == 0:
+        return False
+    if glyph.isComposite():
+        sys.exit(f'{name} is composite; this only knows how to move a simple outline')
+    coordinates = glyph.coordinates
+    moved = False
+    for i, (x, y) in enumerate(coordinates):
+        new = (
+            -BLEED_X if x <= BOX_LEFT + EDGE else ADVANCE + BLEED_X if x >= BOX_RIGHT - EDGE else x,
+            BOX_BOTTOM - BLEED_Y if y <= BOX_BOTTOM + EDGE else
+            BOX_TOP + BLEED_Y if y >= BOX_TOP - EDGE else y,
+        )
+        if new != (x, y):
+            coordinates[i] = new
+            moved = True
+    if moved:
+        # The hinting was written for the outline that just changed, and its whole job is to snap
+        # edges back onto the pixel grid — which is exactly the overlap being removed again. iOS
+        # ignores TrueType instructions anyway, so dropping them from a rectangle costs nothing.
+        if hasattr(glyph, 'program'):
+            glyph.program.fromBytecode(b'')
+        glyph.recalcBounds(font['glyf'])
+        # A TrueType glyph's left side bearing is not decoration: the rasteriser trusts it over the
+        # outline and shifts the whole thing by `lsb - xMin` when the two disagree. Moving the left
+        # edge out without following it here bought nothing — the glyph came back 16 units to the
+        # right, seam intact, and the left column of `█` still landed on 0 (measured, 2026-08-12).
+        # The advance is untouched; only where the ink sits inside it moves.
+        font['hmtx'][name] = (ADVANCE, glyph.xMin)
+    return moved
+
+
+def patch(path: Path) -> tuple[int, int]:
+    """Returns (cmap entries added, tiling glyphs widened). Both zero means it was already done."""
     font = TTFont(path)
     hmtx, glyphs = font['hmtx'], font.getGlyphOrder()
     added = 0
@@ -61,16 +135,25 @@ def patch(path: Path) -> int:
                 continue
             table.cmap[codepoint] = glyph
             added += 1
-    if added:
+
+    cmap = font.getBestCmap()
+    tiling = {cmap[cp] for low, high in TILING for cp in range(low, high + 1) if cp in cmap}
+    bled = sum(bleed(font, name) for name in sorted(tiling))
+
+    if added or bled:
         font.save(path)
-    return added
+    return added, bled
 
 
 def main() -> None:
     for regular_or_bold in sorted(ASSETS.glob('JetBrainsMono*.ttf')):
-        added = patch(regular_or_bold)
+        added, bled = patch(regular_or_bold)
+        # The check, and the reason the file can be re-run after an upstream bump without thinking:
+        # everything here is written as a destination rather than a nudge, so a second pass over its
+        # own output has nothing left to do. If this ever trips, something started compounding.
+        assert patch(regular_or_bold) == (0, 0), f'{regular_or_bold.name}: patch is not idempotent'
         shutil.copyfile(regular_or_bold, PUBLIC / regular_or_bold.name)
-        print(f'{regular_or_bold.name}: {added} cmap entries added')
+        print(f'{regular_or_bold.name}: {added} cmap entries, {bled} tiling glyphs widened')
 
 
 if __name__ == '__main__':
