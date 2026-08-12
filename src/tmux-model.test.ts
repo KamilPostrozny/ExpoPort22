@@ -20,21 +20,16 @@ import {
   POLL_MS,
   PROBE,
   SEP,
-  SOURCE_LINE,
-  appendSourceLineCommand,
   capturePaneCommand,
-  chooseUserConf,
   deriveConfigStatus,
   foregroundFrom,
   generateConf,
-  hasSourceLine,
   killWindowCommand,
   moveWindowCommand,
   needsPush,
   parsePoll,
   parseProbe,
   parseSessions,
-  parseUserConfProbe,
   parseVerify,
   parseWindows,
   pollDelay,
@@ -44,6 +39,7 @@ import {
   tabsAvailable,
   tabsHint,
 } from '@/tmux-model';
+import * as model from '@/tmux-model';
 
 /* --- the conf file --- */
 
@@ -113,35 +109,6 @@ test('sessions: names only, tmux’s own chatter dropped', () => {
   expect(LIST_SESSIONS).toContain(`-F '${SEP}#{session_name}'`);
 });
 
-/* --- the source line in the user's own conf --- */
-
-test('source line is spotted whether ours, hand-written, or commented out', () => {
-  expect(hasSourceLine('')).toBe(false);
-  expect(hasSourceLine('set -g mouse on\nbind r source-file ~/.tmux.conf\n')).toBe(false);
-  expect(hasSourceLine(`set -g status off\n${SOURCE_LINE}\n`)).toBe(true);
-  expect(hasSourceLine('source-file ~/.config/port22/port22.conf\n')).toBe(true); // theirs, no -q
-  // Commented out = the user turned it off on purpose; re-appending would override that.
-  expect(hasSourceLine(`# ${SOURCE_LINE}\n`)).toBe(true);
-});
-
-test('the conf tmux actually reads wins: home first, XDG next, create home last', () => {
-  expect(chooseUserConf(true, true)).toEqual({ path: '~/.tmux.conf', exists: true });
-  expect(chooseUserConf(true, false)).toEqual({ path: '~/.tmux.conf', exists: true });
-  // An XDG user must get the line there — creating ~/.tmux.conf would shadow their whole config.
-  expect(chooseUserConf(false, true)).toEqual({ path: '~/.config/tmux/tmux.conf', exists: true });
-  expect(chooseUserConf(false, false)).toEqual({ path: '~/.tmux.conf', exists: false });
-});
-
-test('one ls answers both existence questions, and neither path matches the other', () => {
-  expect(parseUserConfProbe('/home/k/.tmux.conf\n')).toEqual({ home: true, xdg: false });
-  expect(parseUserConfProbe('/home/k/.config/tmux/tmux.conf\n')).toEqual({ home: false, xdg: true });
-  expect(parseUserConfProbe('/home/k/.tmux.conf\n/home/k/.config/tmux/tmux.conf\n')).toEqual({
-    home: true,
-    xdg: true,
-  });
-  expect(parseUserConfProbe('')).toEqual({ home: false, xdg: false });
-});
-
 test('the greyed tabs button names the actual reason, not a generic one', () => {
   // The question that matters: a tmux mode chosen against a host that has no tmux. Sending that
   // user to Settings to "choose a tmux start mode" would be advice they have already taken.
@@ -150,13 +117,6 @@ test('the greyed tabs button names the actual reason, not a generic one', () => 
   expect(tabsHint(true, false)).toContain('Settings');
   expect(tabsHint(null, false)).toContain('Settings'); // probe still out, mode is answer enough
   expect(tabsHint(true, true)).toBe('Waiting for tmux…'); // pushing the conf, or not attached yet
-});
-
-test('append command is fish-and-sh common ground and creates a missing file', () => {
-  const command = appendSourceLineCommand('~/.tmux.conf');
-  expect(command).toBe(`printf '\\n%s\\n' '${SOURCE_LINE}' >> ~/.tmux.conf`);
-  expect(command).not.toContain('$('); // no substitution, no heredoc, nothing fish chokes on
-  expect(command).not.toContain('<<');
 });
 
 /* --- probe / apply / verify --- */
@@ -177,6 +137,16 @@ test('apply and verify travel as one tmux client command', () => {
   expect(parseVerify(`${CONF_VERSION}\n`)).toBe(true);
   expect(parseVerify('')).toBe(false); // no server reachable, or our option never landed
   expect(parseVerify('9000')).toBe(false); // some other build's conf answered
+});
+
+test('nothing this app sends writes anywhere outside its own directory', () => {
+  // The guard on 2026-08-12's decision: host state must not outlive the session. The app used to
+  // append a source-file line to the user's own tmux conf, which was the one permanent edit it
+  // made. Any new command that redirects, tees or sed-i's into a path fails here.
+  for (const [name, value] of Object.entries(model)) {
+    if (typeof value !== 'string') continue;
+    expect(`${name} = ${value}`).not.toMatch(/>>|\btee\b|sed -i/);
+  }
 });
 
 test('file reads come back empty rather than failing on a missing file', () => {

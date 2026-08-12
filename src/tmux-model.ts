@@ -113,52 +113,23 @@ export function needsPush(remote: string | null, extras: boolean): boolean {
   return remote !== generateConf(extras);
 }
 
-/* --- sourcing it from the user's own conf --- */
-
-/** `-q`, so a user who deletes our file breaks nothing of their own. */
-export const SOURCE_LINE = `source-file -q ~/${CONF_PATH}`;
-
-/** Any mention counts, commented out included: a user who commented our line out turned the
- *  feature off on purpose, and re-appending it on every connect would override that choice. */
-export function hasSourceLine(conf: string): boolean {
-  return conf.includes('port22.conf');
-}
+/* --- why nothing of the user's is edited --- */
 
 /**
- * Which conf tmux will actually read. It loads only the FIRST found of `~/.tmux.conf` and the XDG
- * path — so an XDG user must get the line in the XDG file (creating `~/.tmux.conf` would shadow
- * their whole config), and everyone else gets `~/.tmux.conf`, created if missing.
+ * The app used to append one `source-file` line to the user's own tmux conf, so its options
+ * survived a tmux server restart. That was the only thing this app wrote outside its own
+ * directory, and it was permanent: the options went on applying to every tmux on that host, from
+ * any terminal, long after the phone was gone (user, 2026-08-12 — "this app shouldn't alter host
+ * state forever").
+ *
+ * It was also unnecessary. `APPLY_AND_VERIFY` sources the file itself on every connect and the
+ * options are `set -g`, which lives on the running server — so the session on the phone is
+ * configured either way. The line only bought persistence across a server restart the app is not
+ * present for, which is exactly the state it should not own.
+ *
+ * What is left on a host is one file in a directory named after this app (`~/.config/port22/`),
+ * inert unless something sources it, and this is the only thing that does.
  */
-export function chooseUserConf(
-  hasHomeConf: boolean,
-  hasXdgConf: boolean,
-): { path: string; exists: boolean } {
-  if (hasHomeConf) return { path: '~/.tmux.conf', exists: true };
-  if (hasXdgConf) return { path: '~/.config/tmux/tmux.conf', exists: true };
-  return { path: '~/.tmux.conf', exists: false };
-}
-
-/** Both candidates' existence in one exec. It used to be two `listDirectory` calls, and each of
- *  those opens a whole SFTP subsystem for an answer that is one boolean — most of the wait before
- *  the tabs button appeared (user, 2026-08-12). No new shell question either: `2>/dev/null; true`
- *  is the same idiom `readFileCommand` already relies on, fish included. */
-export const USER_CONF_PROBE = 'ls -d ~/.tmux.conf ~/.config/tmux/tmux.conf 2>/dev/null; true';
-
-/** `ls -d` prints the paths it found, expanded; anything else it printed is not one of ours. */
-export function parseUserConfProbe(stdout: string): { home: boolean; xdg: boolean } {
-  const lines = stdout.split('\n').map((line) => line.trim());
-  return {
-    home: lines.some((line) => line.endsWith('/.tmux.conf')),
-    xdg: lines.some((line) => line.endsWith('/tmux/tmux.conf')),
-  };
-}
-
-/** Append-only, via the shell: SFTP would be read-modify-write on a file the user owns, and a
- *  truncated read (exec output is capped) rewritten back is data loss. `>>` creates the file when
- *  it is missing, which is the fresh-host case. */
-export function appendSourceLineCommand(confPath: string): string {
-  return `printf '\\n%s\\n' '${SOURCE_LINE}' >> ${confPath}`;
-}
 
 /* --- probe, apply, verify --- */
 

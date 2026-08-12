@@ -26,21 +26,16 @@ import {
   NEW_WINDOW,
   POLL,
   PROBE,
-  USER_CONF_PROBE,
-  appendSourceLineCommand,
   capturePaneCommand,
-  chooseUserConf,
   deriveConfigStatus,
   foregroundFrom,
   generateConf,
-  hasSourceLine,
   killWindowCommand,
   moveWindowCommand,
   needsPush,
   parsePoll,
   parseProbe,
   parseSessions,
-  parseUserConfProbe,
   parseVerify,
   parseWindows,
   pollDelay,
@@ -180,28 +175,24 @@ export function stopTmux(): void {
 }
 
 /**
- * The §4.5 push: conf over SFTP (only when it differs), one source-file line into the conf tmux
- * actually reads, then apply-and-verify in a single tmux client command. Every failure lands in
- * the catch: the status just stays 'not-applied' and nothing else is visible (§7).
+ * The §4.5 push: our conf over SFTP (only when it differs), then apply-and-verify in one tmux
+ * client command. Every failure lands in the catch: the status just stays 'not-applied' and
+ * nothing else is visible (§7).
+ *
+ * Runs on every connect BECAUSE nothing persists it any more — the options live on the running
+ * tmux server and die with it, which is the point (tmux-model, "why nothing of the user's is
+ * edited").
  */
 async function configure(): Promise<void> {
   try {
     const { tmuxExtras } = getSettings();
-    // Both reads at once — they answer different questions, and a serial chain of them is the wait
-    // the user sees (2026-08-12). Concurrent execs are separate channels on the one connection.
-    const [remote, probed] = await Promise.all([
-      run(readFileCommand(`~/${CONF_PATH}`)),
-      run(USER_CONF_PROBE),
-    ]);
+    const remote = await run(readFileCommand(`~/${CONF_PATH}`));
     if (needsPush(remote, tmuxExtras)) {
       const bytes = new TextEncoder().encode(generateConf(tmuxExtras));
       await ExpoSSH.upload(toBase64(bytes), CONF_PATH, CONF_DIRECTORIES);
     }
-    // Which conf tmux reads depends on which exists (~/.tmux.conf shadows the XDG path).
-    const { home, xdg } = parseUserConfProbe(probed);
-    const target = chooseUserConf(home, xdg);
-    const existing = target.exists ? await run(readFileCommand(target.path)) : '';
-    if (!hasSourceLine(existing)) await run(appendSourceLineCommand(target.path));
+    // The whole apply: source our own file onto the running server, read the option back. Nothing
+    // of the user's is touched on the way — see tmux-model's "why nothing of the user's is edited".
     const verified = parseVerify(await run(APPLY_AND_VERIFY));
     set({ config: verified ? 'applied' : 'not-applied' });
     console.log('[tmux] configure:', verified ? 'applied' : 'not-applied (read-back said no)');
