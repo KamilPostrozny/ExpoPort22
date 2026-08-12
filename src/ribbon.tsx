@@ -165,7 +165,14 @@ export function RibbonPanel(props: RibbonPanelProps) {
   const cap = (c: Cap, i: number) => {
     if (c.header !== undefined)
       return (
-        <Text key={i} style={[styles.header, { color: theme.muted }]}>
+        <Text
+          key={i}
+          // The prototype's text-shadow (`0 1px 3px crust@0.9`) — a header floats bare over
+          // whatever the pane is showing, and the shadow is what keeps it legible there.
+          style={[
+            styles.header,
+            { color: theme.muted, textShadowColor: rgba(theme.palette.crust, 0.9) },
+          ]}>
           {c.header}
         </Text>
       );
@@ -179,6 +186,11 @@ export function RibbonPanel(props: RibbonPanelProps) {
         theme={theme}
         radius={21}
         style={danger ? { borderColor: rgba(theme.danger, arm ? 0.85 : 0.42) } : null}>
+        {/* The bar's glass tint is tuned for the card's quiet bottom band; these caps float
+            over a wall of text, so they take the prototype's own ground — surface0 at ~0.7
+            over the blur (`hexA(f.s0, 0.72)`), which is what keeps a cap readable on top of
+            a full CLAUDE.md (user, 2026-08-12, screenshot). */}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.surface, 0.62) }]} />
         {danger && (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.danger, 0.16) }]} />
         )}
@@ -209,10 +221,18 @@ export function RibbonPanel(props: RibbonPanelProps) {
       <Pressable style={StyleSheet.absoluteFill} onPress={props.onClose} />
       <GestureDetector gesture={swipeClose}>
         <View style={[styles.column, { bottom: props.bottom + 2 }]}>
-          <View style={styles.labelRow}>
-            <Animated.View style={[styles.dot, { backgroundColor: dotColor }, dotStyle]} />
-            <Text style={[styles.label, { color: theme.muted }]}>{label}</Text>
-          </View>
+          {/* The label needs its own ground: bare over a busy pane, an 11pt muted name simply
+              vanished (user, 2026-08-12, dark-mode screenshot) — so it rides the same glass
+              the caps do, one size down. */}
+          <Glass theme={theme} radius={14}>
+            <View
+              style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.surface, 0.62) }]}
+            />
+            <View style={styles.labelRow}>
+              <Animated.View style={[styles.dot, { backgroundColor: dotColor }, dotStyle]} />
+              <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
+            </View>
+          </Glass>
           <ScrollView
             style={{ maxHeight: props.maxCapsHeight }}
             contentContainerStyle={styles.caps}
@@ -242,12 +262,15 @@ const styles = StyleSheet.create({
   handleTab: { width: 5, height: 46, borderTopLeftRadius: 4, borderBottomLeftRadius: 4 },
 
   column: { position: 'absolute', right: 14, alignItems: 'flex-end', gap: 7 },
+  // No drop shadow, deliberately: on iOS a shadow on the glass's transparent outer view draws
+  // as a RECTANGLE around the capsule (user, 2026-08-12, screenshot) — the bar's glass skips
+  // it for the same reason. The surface0 ground carries the separation alone.
   labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    paddingRight: 9,
-    paddingBottom: 1,
+    height: 28,
+    paddingHorizontal: 12,
   },
   dot: { width: 7, height: 7, borderRadius: 4 },
   label: { fontFamily: MONO, fontSize: 11 },
@@ -259,6 +282,8 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingRight: 10,
     paddingBottom: 1,
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   cap: {
     height: 40,
