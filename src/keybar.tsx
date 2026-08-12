@@ -455,11 +455,11 @@ export default function KeyBar(props: KeyBarProps) {
           exiting={FadeOutDown.duration(140)}
           style={styles.chordWrap}>
           <Glass theme={theme} radius={22} style={styles.chordPill}>
-            {CHORD_STRIP.map(({ letter, caption }, i) => (
+            {CHORD_STRIP.map(({ letter, caption }) => (
               <Key
                 key={letter}
                 onPress={() => sendChord(letter)}
-                style={[styles.cap, i === 0 && { backgroundColor: KEY_TINT }]}>
+                style={styles.cap}>
                 <Text style={[styles.capLetter, { color: theme.foreground }]}>{letter}</Text>
                 <Text style={[styles.capCaption, { color: theme.muted }]}>{caption}</Text>
               </Key>
