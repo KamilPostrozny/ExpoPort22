@@ -31,7 +31,9 @@ import {
   Text,
   TextInput,
   View,
+  type NativeSyntheticEvent,
   type StyleProp,
+  type TextInputSelectionChangeEventData,
   type ViewStyle,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -64,6 +66,7 @@ import {
   applyCtrl,
   classifyBarSwipe,
   controlByte,
+  caretKeys,
   ctrlTap,
   diffInput,
   navKey,
@@ -288,13 +291,21 @@ export default function KeyBar(props: KeyBarProps) {
    *  time, which leaves the field uncontrolled so ordinary typing never round-trips through
    *  React — the flip back is the effect below. */
   const [padWrite, setPadWrite] = useState<string | undefined>(undefined);
+  /** Where the field's caret last sat (see `onSelectionChange`). */
+  const caret = useRef(PAD.length);
   useEffect(() => {
     // The one render this cascades is the point: RN writes a `value` from its own layout effect
     // (TextInput.js:223, the only text write Fabric honours — `text` is not in the component's
     // `updateProps`), and letting go on the very next render is what keeps the field uncontrolled
     // for every keystroke that is not a top-up.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
-    if (padWrite !== undefined) setPadWrite(undefined);
+    if (padWrite !== undefined) {
+      // The write puts the caret back at the end of the pad, and RN suppresses the selection event
+      // for its own writes (`_comingFromJS`), so the anchor is re-set here rather than learnt —
+      // and here rather than in `repad`, which runs a render too early to be true yet.
+      caret.current = PAD.length;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+      setPadWrite(undefined);
+    }
   }, [padWrite]);
   const repad = () => {
     typed.current = PAD; // ref first: a change event fired by the write diffs against it to nothing
@@ -340,11 +351,40 @@ export default function KeyBar(props: KeyBarProps) {
     // §4.2: drop iOS dictation's prepended space at an empty line; a real spacebar (a single-char
     // insert) always passes. Decided on the whole diff, before it is split into keys.
     const bytes = filterDictation(lineLen.current, diffInput(typed.current, next));
+    // The edit happened at the caret, so it moved by what the edit added or took away. iOS fires
+    // `onChange` before `onSelectionChange` on a single-line field (RN leans on that ordering too:
+    // RCTTextInputComponentView.mm:54), so keeping the anchor level here is what leaves that
+    // handler seeing a zero delta for ordinary typing and a real one only for a hold-space drag.
+    caret.current += next.length - typed.current.length;
     typed.current = next;
     for (const key of bytes) emitKey(key); // string iteration = one code point per key
     // Top the pad up before a held delete runs it dry, and trim the typed tail before iOS starts
     // caring about the length — nothing reads the field back, so both are the same write.
     if (next.length < PAD.length / 2 || next.length > PAD.length + 500) repad();
+  };
+
+  /**
+   * §4.2 hold-space: the held spacebar is iOS's trackpad, and it walks the caret without changing
+   * a character of text — so this is the only event that reports it. The delta against the anchor
+   * becomes arrows (`caretKeys`); an edit's own caret move was already levelled out in
+   * `onChangeText`, so it reads as zero here. Sent past `track`, like the arrows popover: an
+   * escape sequence carries no line-length information, and counting its bytes as typed would
+   * poison the dictation heuristic.
+   *
+   * Rightward travel stops at the end of the field, which is the end of the line — the shell will
+   * not go further either. Leftward it runs to the pad, far past any line; drag past column 0 and
+   * the PTY's cursor simply stops while the field's keeps going, so the two are out of step until
+   * the drag comes back. The eye closes that loop — the terminal's cursor is what the person is
+   * watching — and a hidden field can offer no better anchor.
+   */
+  const onSelectionChange = (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
+    const { start, end } = e.nativeEvent.selection;
+    const delta = start - caret.current;
+    caret.current = start;
+    // A range is a selection, not a caret: the system's, and nothing for the PTY to follow.
+    if (start !== end) return;
+    const keys = caretKeys(delta, props.decckm);
+    if (keys) props.sendBytes(keys);
   };
 
   const sendChord = (letter: string) => {
@@ -627,6 +667,7 @@ export default function KeyBar(props: KeyBarProps) {
         ref={input}
         style={styles.input}
         onChangeText={onChangeText}
+        onSelectionChange={onSelectionChange}
         onSubmitEditing={() => emitKey('\r')}
         // The pad (see `PAD`) seeds the field and is written back over it; nothing else sets the
         // text, so every repeat of a held delete arrives as an `onChangeText` the diff turns into
@@ -1044,5 +1085,29 @@ const styles = StyleSheet.create({
   },
 
   /* the invisible keyboard owner */
-  input: { position: 'absolute', width: 1, height: 1, opacity: 0 },
+  /**
+   * Invisible, but no longer 1×1: iOS's hold-space trackpad walks the caret by hit-testing the
+   * field's own text layout, and a field one point wide has nowhere to walk — the caret never
+   * moved and no selection event ever fired. Full width gives the drag real characters to cross
+   * (the field scrolls its content, as any single-line field does, so the pad past the edge is
+   * still reachable). It lies over the keys but cannot take their touches: RN's own hit test
+   * drops any view under `alpha < 0.01` (RCTViewComponentView.mm:746), and `pointerEvents:
+   * 'none'` is deliberately *not* used — that sets `userInteractionEnabled = NO`, which is what
+   * a UITextField consults before agreeing to become first responder.
+   *
+   * MONO at 13 is the calibration: the drag moves one terminal column per column of finger
+   * travel only if the field's characters are about as wide as the terminal's, and 13 is the
+   * default font size. Set larger in Settings and the cursor runs a little ahead of the finger —
+   * the eye closes that loop; threading the live size down here would be a prop for a feel.
+   */
+  input: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 24,
+    opacity: 0,
+    fontFamily: MONO,
+    fontSize: 13,
+  },
 });

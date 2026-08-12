@@ -94,17 +94,37 @@ export const DEL = '\x7f';
 /**
  * The keys between two states of the (uncontrolled) native TextInput: deletes for what left,
  * then whatever was typed. Deletes are counted in code points — one DEL per character the user
- * saw vanish — and the common prefix backs off a split surrogate pair so an emoji is never half
- * kept.
+ * saw vanish — and both ends back off a split surrogate pair so an emoji is never half kept.
+ *
+ * Prefix first, then the tail the two still share, because the caret is no longer always at the
+ * end: hold-space moves it (see `caretKeys`), and a character typed mid-line must come out as
+ * that one character rather than "delete the rest of the line and retype it" — the PTY's cursor
+ * was moved to the same place by the arrows, so a prefix-only diff would eat the line from
+ * there. Prefix wins ties, so every edit at the end still diffs exactly as it did before.
  */
 export function diffInput(prev: string, next: string): string {
-  let common = 0;
   const max = Math.min(prev.length, next.length);
+  let common = 0;
   while (common < max && prev[common] === next[common]) common++;
   const code = prev.charCodeAt(common - 1);
   if (common > 0 && code >= 0xd800 && code <= 0xdbff) common--;
-  const deletes = [...prev.slice(common)].length;
-  return DEL.repeat(deletes) + next.slice(common);
+  let tail = 0;
+  while (tail < max - common && prev[prev.length - 1 - tail] === next[next.length - 1 - tail])
+    tail++;
+  const low = next.charCodeAt(next.length - tail);
+  if (tail > 0 && low >= 0xdc00 && low <= 0xdfff) tail--;
+  const deletes = [...prev.slice(common, prev.length - tail)].length;
+  return DEL.repeat(deletes) + next.slice(common, next.length - tail);
+}
+
+/**
+ * §4.2 hold-space: iOS turns the held spacebar into a trackpad that walks the caret through the
+ * *field*, which sends no text change at all — so the move arrives as an `onSelectionChange` and
+ * this turns it into the arrows the PTY understands. One arrow per field character crossed;
+ * `delta` is signed, and zero (an edit's own caret move, see the caller) sends nothing.
+ */
+export function caretKeys(delta: number, decckm: boolean): string {
+  return delta === 0 ? '' : navKey(delta > 0 ? 'right' : 'left', decckm).repeat(Math.abs(delta));
 }
 
 /* --- bar swipes --- */

@@ -11,6 +11,7 @@ import {
   DEL,
   afterChord,
   applyCtrl,
+  caretKeys,
   classifyBarSwipe,
   controlByte,
   ctrlTap,
@@ -126,6 +127,20 @@ test('a replacement is deletes then the new tail', () => {
   expect(diffInput('abc', 'abX')).toBe(DEL + 'X');
 });
 
+test('an edit at a moved caret is that edit alone, not the tail retyped', () => {
+  // Hold-space put the caret after `ls `; the PTY's cursor went with it, so the line past the
+  // caret is the shell's business and must not come back as deletes.
+  expect(diffInput('ls -la', 'ls x-la')).toBe('x');
+  expect(diffInput('ls -la', 'ls-la')).toBe(DEL); // backspace at the same spot
+  expect(diffInput('ls -la', 'x' + 'ls -la')).toBe('x'); // at the very start
+});
+
+test('a tail edit still wins the tie — the prefix is matched first', () => {
+  expect(diffInput('aa', 'aaa')).toBe('a');
+  expect(diffInput('aaa', 'aa')).toBe(DEL);
+  expect(diffInput(' '.repeat(8), ' '.repeat(7))).toBe(DEL); // the pad, one held-delete repeat
+});
+
 test('no change sends nothing', () => {
   expect(diffInput('a', 'a')).toBe('');
   expect(diffInput('', '')).toBe('');
@@ -136,6 +151,22 @@ test('an astral character is one key both ways', () => {
   expect(diffInput('😀', '')).toBe(DEL);
   // A shared high surrogate must not be counted as common prefix.
   expect(diffInput('😀', '😁')).toBe(DEL + '😁');
+  // Nor a shared low surrogate as common tail: 'x😀' → '😀' is one delete, not half a pair kept.
+  expect(diffInput('x😀', '😀')).toBe(DEL);
+  expect(diffInput('a😀', 'b😀')).toBe(DEL + 'b');
+});
+
+/* --- hold-space: the caret's move, as arrows --- */
+
+test('a caret walked left or right is that many arrows', () => {
+  expect(caretKeys(3, false)).toBe('\x1b[C'.repeat(3));
+  expect(caretKeys(-2, false)).toBe('\x1b[D'.repeat(2));
+  expect(caretKeys(1, true)).toBe('\x1bOC'); // DECCKM: the app asked for SS3
+});
+
+test('a caret that did not move sends nothing', () => {
+  expect(caretKeys(0, false)).toBe('');
+  expect(caretKeys(0, true)).toBe('');
 });
 
 /* --- bar swipe classification --- */
