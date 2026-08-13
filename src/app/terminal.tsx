@@ -1714,7 +1714,7 @@ export default function SessionScreen() {
         style={[
           StyleSheet.absoluteFill,
           styles.pageEdge,
-          { borderColor: theme.border, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
+          { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
           pageEdgeStyle,
         ]}
       />
@@ -1750,7 +1750,7 @@ export default function SessionScreen() {
             style={[
               StyleSheet.absoluteFill,
               styles.pageEdge,
-              { borderColor: theme.border, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
+              { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
               settleEdgeStyle,
             ]}
           />
@@ -2075,7 +2075,7 @@ function NeighborPage({
         style={[
           StyleSheet.absoluteFill,
           styles.pageEdge,
-          { borderColor: theme.border, borderRadius: pageRadius(stageW), borderBottomLeftRadius: bottomR, borderBottomRightRadius: bottomR },
+          { borderColor: theme.accent, borderRadius: pageRadius(stageW), borderBottomLeftRadius: bottomR, borderBottomRightRadius: bottomR },
         ]}
       />
     </View>
@@ -2195,7 +2195,10 @@ const styles = StyleSheet.create({
   termArea: { flex: 1 },
   termSlide: { flex: 1, overflow: 'hidden' },
   page: { overflow: 'hidden' },
-  pageEdge: { borderWidth: 1 },
+  /** The card edge during a swipe — the ZOOM's ring, deliberately: the hop and the flick start
+   *  from the same grab, so their outline is one outline (user, 2026-08-13). Same accent, same
+   *  3pt the ring draws; it was a grey 1pt hairline, which read as a different gesture. */
+  pageEdge: { borderWidth: 3 },
   status: {
     position: 'absolute',
     top: 0,
