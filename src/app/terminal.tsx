@@ -1730,6 +1730,20 @@ export default function SessionScreen() {
   /** The card face's corners, riding the SAME `f.radius` the ring draws — the page wore its
    *  static at-rest radius mid-air, and its rounder corner pulled away from the ring's arc
    *  (movement 3, screenshot). Shared by the live page, its edge, and the neighbours. */
+  /**
+   * ALWAYS attached, unlike the crop below. Detaching a Reanimated style does not put back what it
+   * wrote: the props it set stay on the view, and a React commit carrying the static value does
+   * not reliably clear them. So the rounded corner a gesture left behind stayed on the page
+   * afterwards, sitting at the top of the keys under a raised keyboard where `kbSquare` wants it
+   * square — and stating the resting radius statically did not displace it (user, 2026-08-13,
+   * twice). Nothing to displace if the style never leaves.
+   *
+   * It costs nothing to keep: a mapper runs when a value it READS changes, and this one reads
+   * `prog`, `dragX`, the aim's values and `stageSV` — none of which move during a flat hop, which
+   * animates `swipeX` alone. So the raster write 85b36ab took out of the hop stays out; what comes
+   * back is one write when `kbSquare` flips, which is exactly the write that was going missing.
+   * At rest the worklet computes the same `pageR`/`pageRB` the static style states.
+   */
   const cardRadiiStyle = useAnimatedStyle(() => {
     'worklet';
     const r = zoomFrame(prog.value, dragX.value, aim(), stageSV.value).radius;
@@ -2054,21 +2068,18 @@ export default function SessionScreen() {
             // The remainder makes the box an exact multiple of the cell, so the webview's own
             // top inset stays ~0 and the first row never moves — see rowRemainder.
             paddingBottom: padBottom + barPad + rowRemainder,
-            // The resting corner, stated rather than left to the absence of one. `cardRadiiStyle`
-            // is attached only while the zoom is live, and a Reanimated style that goes away does
-            // not put back what it wrote — the view keeps the last radius the worklet gave it. So
-            // the rounded corner from a gesture stayed on the page afterwards, and with the
-            // keyboard up it sat in plain sight at the top of the keys, where `kbSquare` wants it
-            // square (user, 2026-08-13). These are exactly what the worklet itself computes at
-            // rest — `zoomFrame`'s radius at t=0 is `SCREEN_R * stage.w`, which is `pageRadius`,
-            // and `pageRB` applies the same `kbSquare` — so nothing moves when the two swap; the
-            // difference is that now there is something to swap BACK to.
+            // The resting corner, stated rather than left to the absence of one — what the view
+            // wears before the first frame, and what the code says the page's corner IS. It is
+            // not the mechanism that keeps it right (see `cardRadiiStyle`'s note on why the style
+            // is no longer detached); stating it twice is deliberate, and the two agree by
+            // construction: `zoomFrame`'s radius at t=0 is `SCREEN_R * stage.w`, which is
+            // `pageRadius`, and `pageRB` carries the same `kbSquare` the worklet applies.
             borderTopLeftRadius: pageR,
             borderTopRightRadius: pageR,
             borderBottomLeftRadius: pageRB,
             borderBottomRightRadius: pageRB,
           },
-          zoomActive && cardRadiiStyle,
+          cardRadiiStyle,
         ]}>
       {terminalView}
       {/* see pageEdgeStyle — the live page's card edge while a swipe is on */}
@@ -2078,7 +2089,7 @@ export default function SessionScreen() {
           StyleSheet.absoluteFill,
           styles.pageEdge,
           { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
-          zoomActive && cardRadiiStyle,
+          cardRadiiStyle,
           pageEdgeStyle,
         ]}
       />
@@ -2131,7 +2142,7 @@ export default function SessionScreen() {
                 zoomActive && cardClipStyle,
               ]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={zoomActive ? cardRadiiStyle : null} />
+                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
               </Animated.View>
               {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
                   crop's upward translate and clipped out at the top, the ring bug over again
@@ -2152,7 +2163,7 @@ export default function SessionScreen() {
                 zoomActive && cardClipStyle,
               ]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={zoomActive ? cardRadiiStyle : null} />
+                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
               </Animated.View>
               {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
                   crop's upward translate and clipped out at the top, the ring bug over again
