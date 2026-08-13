@@ -24,6 +24,8 @@ import Animated, {
   FadeOut,
   SlideInLeft,
   SlideInRight,
+  SlideOutLeft,
+  SlideOutRight,
   runOnJS,
   useAnimatedStyle,
   type AnimatedStyle,
@@ -1832,13 +1834,19 @@ export default function SessionScreen() {
           Gone once the release commits to the GRID (`opening`), or they would fly in one pitch
           behind the card: tabs arriving in pairs (user, 2026-08-13, screenshot). `closing` keeps
           them: that is the spring back from a lift, the slide can still be live under it, and
-          sitting the phase out unmounted them mid-slide — the flash (trace, movement 1). */}
+          sitting the phase out unmounted them mid-slide — the flash (trace, movement 1).
+
+          The exits are conditional on purpose: releasing a HELD card (no page swipe live) sends
+          the neighbours back out to their sides so the main card flies to the grid alone (user,
+          2026-08-13) — but a hop's landing must stay an instant cut, because the landed card sits
+          exactly over the settle overlay's identical picture, and sliding it away would show the
+          same tab twice, one peeling off the other. */}
       {stage !== null && showTabs && connected &&
         ((pageSwipe !== null && pageSwipe.phase !== 'settle') || airSettled) &&
         (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" entering={SlideInLeft.springify().damping(26).stiffness(110).overshootClamping(1)} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" entering={SlideInLeft.springify().damping(26).stiffness(110).overshootClamping(1)} exiting={pageSwipe === null ? SlideOutLeft.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
@@ -1848,7 +1856,7 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" entering={SlideInRight.springify().damping(26).stiffness(110).overshootClamping(1)} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" entering={SlideInRight.springify().damping(26).stiffness(110).overshootClamping(1)} exiting={pageSwipe === null ? SlideOutRight.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
