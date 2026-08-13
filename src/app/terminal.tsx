@@ -1327,6 +1327,39 @@ export default function SessionScreen() {
     };
   });
 
+  /* --- §7 structured-test trace (TEMPORARY, 2026-08-13) ---
+   * The reported artifacts are motion — flicker, layers over layers, a row moving inside its
+   * outline — and neither a screenshot nor a video the assistant cannot watch holds them. So the
+   * log holds them instead: one compact line ~10×/s while anything is moving (every animated
+   * input the three transforms are built from), a line for every layer mount/unmount, a line for
+   * every phase flip. One described movement at a time reconstructs the whole timeline. */
+  const traceTick = useSharedValue(0);
+  const logTrace = (s: string) => console.log('[trace]', s);
+  useFrameCallback(() => {
+    const moving =
+      prog.value > 0.001 || swipeX.value !== 0 || alpha.value < 1 || flight.value < 1;
+    if (!moving) {
+      traceTick.value = 0;
+      return;
+    }
+    traceTick.value++;
+    if (traceTick.value % 6 !== 1) return; // ~10 lines/s at 60fps, and the first moving frame
+    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
+    runOnJS(logTrace)(
+      `prog ${prog.value.toFixed(2)} flight ${flight.value.toFixed(2)} x ${swipeX.value.toFixed(0)} ` +
+        `drag ${dragX.value.toFixed(0)} a ${alpha.value.toFixed(2)} carry ${cardCarry(prog.value).toFixed(2)} ` +
+        `scale ${f.scale.toFixed(2)} ring ${f.ringOpacity.toFixed(2)} round ${roundSV.value.toFixed(2)}`,
+    );
+  });
+  useEffect(() => {
+    console.log('[trace] sw →', sw);
+  }, [sw]);
+  const pagePhase = pageSwipe?.phase ?? 'none';
+  useEffect(() => {
+    console.log('[trace] page →', pagePhase);
+  }, [pagePhase]);
+  /* --- end trace --- */
+
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
   // compensated for RN's centre-origin scale — all from the one tested function.
@@ -1690,6 +1723,7 @@ export default function SessionScreen() {
             styles.page,
             { backgroundColor: theme.background, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
           ]}>
+          <MountProbe name="settle" />
           <PageContent
             snap={pageSwipe.settled}
             stageW={stage.w}
@@ -1740,6 +1774,7 @@ export default function SessionScreen() {
           {anchor > 0 && (
             <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
               </Animated.View>
             </Animated.View>
@@ -1749,6 +1784,7 @@ export default function SessionScreen() {
           {anchor < cards.length && (
             <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
               </Animated.View>
             </Animated.View>
@@ -1971,6 +2007,16 @@ function PageContent({
       />
     </View>
   );
+}
+
+/** §7 structured-test trace (TEMPORARY): a layer announcing its own lifetime — "over each
+ *  other" and "flickering" are mount/unmount questions, invisible in every other log. */
+function MountProbe({ name }: { name: string }) {
+  useEffect(() => {
+    console.log('[trace] +', name);
+    return () => console.log('[trace] -', name);
+  }, [name]);
+  return null;
 }
 
 /** One neighbouring window's page. The pitch, the swipe offset and the zoom all live on the card
