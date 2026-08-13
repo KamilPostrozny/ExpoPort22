@@ -264,19 +264,35 @@ export async function searchPane(windowIndex: number, query: string): Promise<Se
   return parseSearchOutput(await run(searchPaneCommand(windowIndex, query)));
 }
 
+/**
+ * How long a nudge on the SWITCH path waits before it asks. The badge should not wait out the
+ * interval to notice — but firing the moment `select-window` returns lands the answer ~50-120ms
+ * in, which is the first third of a page slide, and it is an answer that cannot be quiet:
+ * `windowIndex` has changed by definition, so `set` fans out to every listener and re-renders the
+ * whole terminal screen mid-animation. 400ms clears the slide (`slideMs`, ~350ms for a full pitch)
+ * and is still five times sooner than the 2s beat, so the badge intent survives intact.
+ *
+ * No cancellation handle: `poll` returns early on `!up`, so a timer that fires into a dropped
+ * session costs one rejected exec and nothing else.
+ */
+const NUDGE_AFTER_SLIDE_MS = 400;
+
 export async function selectWindow(windowIndex: number): Promise<void> {
   await run(selectWindowCommand(windowIndex));
-  void poll(); // the badge should not wait out the interval to notice
+  setTimeout(() => void poll(), NUDGE_AFTER_SLIDE_MS);
 }
 
+// Not deferred: a kill is not on the swipe path, and its grid wants the fresh list at once.
 export async function killWindow(windowIndex: number): Promise<void> {
   await run(killWindowCommand(windowIndex));
   void poll();
 }
 
+// Deferred like `selectWindow`: committing a swipe past the last tab births a window, and that
+// commit is followed by the same slide.
 export async function newWindow(): Promise<void> {
   await run(NEW_WINDOW);
-  void poll();
+  setTimeout(() => void poll(), NUDGE_AFTER_SLIDE_MS);
 }
 
 /** Reorder for T10's drag-drop. Landing indices depend on the user's base-index/renumber
