@@ -3,7 +3,7 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { router, Stack } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -357,6 +357,110 @@ export default function SessionScreen() {
     showTabs && connected,
     sw !== 'closed',
     frozen,
+  );
+
+  /* The terminal is a DOM component: every render re-serializes its props across the webview
+   * bridge, and the screen re-renders on every phase of every gesture. The element is
+   * memoized on the three props that actually change it, and the handlers reach the latest
+   * closure through a ref so their identities can stay stable (perf, 2026-08-13). */
+  const termH = useRef<Record<string, (...args: any[]) => any>>({});
+  termH.current = {
+    onData: async (data) => send(data),
+    onResize: async (cols, rows, cellW, cellH, topInset) => {
+          // What MOVED, not what was measured: the pane shifting up a touch a beat after the
+          // landing is either this report changing the top inset (or the row count, which re-rolls
+          // the remainder) or the flushed bytes scrolling a line. The two are a row apart and look
+          // alike; only the trace tells them apart (user, 2026-08-11).
+          const was = lastFit.current;
+          if (was === null || was.cols !== cols || was.rows !== rows || was.top !== topInset)
+            probe(
+              `FIT ${was ? `${was.cols}×${was.rows} padTop ${was.top.toFixed(1)}` : 'first'} → ` +
+                `${cols}×${rows} padTop ${topInset.toFixed(1)}`,
+            );
+          // The box this side computed, checked against the box the webview actually got. The two
+          // are worked out on opposite sides of a bridge that rounds — fractional points here,
+          // integer `clientHeight` there — so `rowRemainder` leaves a point of slack and this inset
+          // is what is left of it. More than that means the sides disagree, and the disagreement is
+          // paid in whole rows: 17pt of an 18pt cell was a lost row and the pane sitting one row
+          // low, on every keyboard close, for a day (2026-08-12). Any chrome change can re-open it,
+          // and the webview is the only witness — so it says so rather than being read off a probe
+          // that has to be there at the time. The first report is the boot fit, whose cell is not
+          // measured yet.
+          if (__DEV__ && was !== null && topInset >= 2 && cellH > 0)
+            console.warn(
+              `[terminal] box off by ${topInset.toFixed(1)}pt of a ${cellH.toFixed(1)}pt cell — ` +
+                'the stage and the webview disagree; see `rowRemainder`',
+            );
+          lastFit.current = { cols, rows, top: topInset };
+          if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
+            console.log('[terminal] size held, not sent:', cols, '×', rows);
+            return;
+          }
+          if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
+          if (cols > 0) setLiveCols(cols);
+          setPadTop(topInset);
+          setSize(cols, rows);
+        },
+    onBoot: async () => {
+          detach.current?.();
+          detach.current = attachTerminal((base64) => {
+            dataSeq.current++; // "has the host redrawn yet" — see `afterHostRedraw`
+            probe(`byte ${base64.length}b`);
+            terminal.current?.write(base64);
+          });
+        },
+    onBell: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light),
+    onClipboard: async (text) => {
+          await Clipboard.setStringAsync(text);
+          pushYank(text);
+        },
+    onLink: async (url) => {
+          await WebBrowser.openBrowserAsync(url);
+        },
+    onModes: async (next) => {
+          console.log('[session] modes', JSON.stringify(next));
+          setModes(next);
+        },
+    onTwoFingerTap: async () => openSettings(),
+    onTap: async () => {
+          if (keyboardPad > 0) Keyboard.dismiss();
+          else setFocusSignal((n) => n + 1);
+        },
+    onSearchResults: async (i, n) => setOcc({ i, n }),
+  };
+  const tv_onData = useCallback(async (...a: any[]) => termH.current.onData?.(...a), []);
+  const tv_onResize = useCallback(async (...a: any[]) => termH.current.onResize?.(...a), []);
+  const tv_onBoot = useCallback(async (...a: any[]) => termH.current.onBoot?.(...a), []);
+  const tv_onBell = useCallback(async (...a: any[]) => termH.current.onBell?.(...a), []);
+  const tv_onClipboard = useCallback(async (...a: any[]) => termH.current.onClipboard?.(...a), []);
+  const tv_onLink = useCallback(async (...a: any[]) => termH.current.onLink?.(...a), []);
+  const tv_onModes = useCallback(async (...a: any[]) => termH.current.onModes?.(...a), []);
+  const tv_onTwoFingerTap = useCallback(async (...a: any[]) => termH.current.onTwoFingerTap?.(...a), []);
+  const tv_onTap = useCallback(async (...a: any[]) => termH.current.onTap?.(...a), []);
+  const tv_onSearchResults = useCallback(async (...a: any[]) => termH.current.onSearchResults?.(...a), []);
+  const termHold = (sw !== 'closed' && sw !== 'open') || kbSettle;
+  const terminalView = useMemo(
+    () => (
+      <TerminalView
+        ref={terminal}
+        theme={theme}
+        fontSize={fontSize}
+        holdSize={termHold}
+        onData={tv_onData}
+        onResize={tv_onResize}
+        onBoot={tv_onBoot}
+        onBell={tv_onBell}
+        onClipboard={tv_onClipboard}
+        onLink={tv_onLink}
+        onModes={tv_onModes}
+        onTwoFingerTap={tv_onTwoFingerTap}
+        onTap={tv_onTap}
+        onSearchResults={tv_onSearchResults}
+        dom={{ scrollEnabled: false, style: styles.terminal }}
+      />
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the handlers are identity-stable
+    [theme, fontSize, termHold],
   );
 
   /** The cards as of this render, for the deferred neighbour refresh — a `setTimeout` closure
@@ -1870,103 +1974,7 @@ export default function SessionScreen() {
           },
           cardRadiiStyle,
         ]}>
-      <TerminalView
-        ref={terminal}
-        theme={theme}
-        fontSize={fontSize}
-        onData={async (data) => send(data)}
-        // The same hold, on this side of the bridge. `holdSize` is a prop, so it reaches the
-        // webview a frame or two after the zoom has already started animating the stage's height
-        // — long enough for one report to get out (a 25 on every tabs-tap open, device). This
-        // guard is state, read in the same tick, so nothing slips through; the release re-reports
-        // unconditionally, which is what makes dropping a report here safe.
-        onResize={async (cols, rows, cellW, cellH, topInset) => {
-          // What MOVED, not what was measured: the pane shifting up a touch a beat after the
-          // landing is either this report changing the top inset (or the row count, which re-rolls
-          // the remainder) or the flushed bytes scrolling a line. The two are a row apart and look
-          // alike; only the trace tells them apart (user, 2026-08-11).
-          const was = lastFit.current;
-          if (was === null || was.cols !== cols || was.rows !== rows || was.top !== topInset)
-            probe(
-              `FIT ${was ? `${was.cols}×${was.rows} padTop ${was.top.toFixed(1)}` : 'first'} → ` +
-                `${cols}×${rows} padTop ${topInset.toFixed(1)}`,
-            );
-          // The box this side computed, checked against the box the webview actually got. The two
-          // are worked out on opposite sides of a bridge that rounds — fractional points here,
-          // integer `clientHeight` there — so `rowRemainder` leaves a point of slack and this inset
-          // is what is left of it. More than that means the sides disagree, and the disagreement is
-          // paid in whole rows: 17pt of an 18pt cell was a lost row and the pane sitting one row
-          // low, on every keyboard close, for a day (2026-08-12). Any chrome change can re-open it,
-          // and the webview is the only witness — so it says so rather than being read off a probe
-          // that has to be there at the time. The first report is the boot fit, whose cell is not
-          // measured yet.
-          if (__DEV__ && was !== null && topInset >= 2 && cellH > 0)
-            console.warn(
-              `[terminal] box off by ${topInset.toFixed(1)}pt of a ${cellH.toFixed(1)}pt cell — ` +
-                'the stage and the webview disagree; see `rowRemainder`',
-            );
-          lastFit.current = { cols, rows, top: topInset };
-          if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
-            console.log('[terminal] size held, not sent:', cols, '×', rows);
-            return;
-          }
-          if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
-          if (cols > 0) setLiveCols(cols);
-          setPadTop(topInset);
-          setSize(cols, rows);
-        }}
-        // The zoom owns the stage's height while it runs, and the keyboard leaves on the way in:
-        // the terminal keeps the geometry it had at rest until the grid is gone, so the panes the
-        // cards capture are the panes the user was just looking at.
-        //
-        // Except while the grid stands fully over it. A select can change the chrome under the
-        // pane — a different window's ribbon appears or leaves with `ribbonForWindow` — and a
-        // hold across `open` deferred that refit to the release settle, ~150ms after the landing:
-        // the pane rewrapping in plain view on every switch between windows whose ribbons differ
-        // (device, 2026-08-11, screenshots). While `open` the terminal is invisible, so the fit,
-        // the report and tmux's redraw all run there for free; `selectCard` waits for the
-        // redraw's first byte before it flies. Every phase where the terminal is on screen and
-        // moving — opening, drag, birth, closing — stays held.
-        holdSize={(sw !== 'closed' && sw !== 'open') || kbSettle}
-        // Every boot, not just the first: iOS reaps a backgrounded webview, and the one that comes
-        // back is empty even though the shell behind it never went anywhere.
-        onBoot={async () => {
-          detach.current?.();
-          detach.current = attachTerminal((base64) => {
-            dataSeq.current++; // "has the host redrawn yet" — see `afterHostRedraw`
-            probe(`byte ${base64.length}b`);
-            terminal.current?.write(base64);
-          });
-        }}
-        onBell={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-        // §4.7: a yank lands on the phone's pasteboard AND in the clipboard slots. OSC 52 reads
-        // are refused inside the webview and never get here.
-        onClipboard={async (text) => {
-          await Clipboard.setStringAsync(text);
-          pushYank(text);
-        }}
-        onLink={async (url) => {
-          await WebBrowser.openBrowserAsync(url);
-        }}
-        // T6 produces the signal; the bar's arrows cluster consumes DECCKM, the ribbon consumes
-        // altScreen. The log line stays — a missing one is a bridge fault.
-        onModes={async (next) => {
-          console.log('[session] modes', JSON.stringify(next));
-          setModes(next);
-        }}
-        onTwoFingerTap={async () => openSettings()}
-        // §4.4: a tap on the terminal is the keyboard's door — the bar no longer raises it.
-        // §4.4's door to the keyboard, both ways (user, 2026-08-12): a tap puts the keys away when
-        // they are up and asks for them when they are down. It used to only ask — the going-away
-        // half was the field resigning when the webview took the touch, which is not the same
-        // thing as a tap and did not read as one.
-        onTap={async () => {
-          if (keyboardPad > 0) Keyboard.dismiss();
-          else setFocusSignal((n) => n + 1);
-        }}
-        onSearchResults={async (i, n) => setOcc({ i, n })}
-        dom={{ scrollEnabled: false, style: styles.terminal }}
-      />
+      {terminalView}
       {/* see pageEdgeStyle — the live page's card edge while a swipe is on */}
       <Animated.View
         pointerEvents="none"
