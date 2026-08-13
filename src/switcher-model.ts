@@ -161,15 +161,21 @@ export function swipeOpacity(offset: number, width: number): number {
 
 /* --- the zoom (prototype zoomFollow / zoomSty) --- */
 
-/** Bar-swipe-up drag travel → zoom progress, saturating 280pt later. Design-width points, scaled.
- *
- *  The travel is measured from where the drag-follow ARMS, not from touch-down: the 24pt the
- *  gesture spends being classified and the two frames it spends paying the open's one-off costs
- *  are both dropped by the screen's re-origin, so the 24pt dead zone that used to live here would
- *  now be a second one — the surface sitting still for 24pt after the finger had already earned
- *  its motion. */
+/** Upward travel the zoom ignores before it starts — an ORIGIN OFFSET, not a gate: past it the
+ *  card tracks the finger continuously, and coming back down re-enters it symmetrically. It
+ *  exists because there is no threshold anywhere else any more (2026-08-13): the zoom arms at the
+ *  grab, and a thumb swiping a bottom bar sideways arcs 20-odd points upward all by itself — so
+ *  without this every flat hop shrank the row a few percent and uncovered the grid behind it
+ *  (structured test, movement 2). Sized just past the measured arcs (dy -24…-26). */
+export const ZOOM_DEAD = 30;
+
+/** Bar-swipe-up drag travel → zoom progress: nothing for `ZOOM_DEAD`, then saturating 280pt
+ *  later. Design-width points, scaled. Travel is measured from where the drag-follow ARMS (the
+ *  grab), not from touch-down — the slop and the two set-up frames are dropped by the screen's
+ *  re-origin, so the dead zone here is the only one the finger pays. */
 export function zoomProgress(travel: number, width: number): number {
-  return Math.min(Math.max(-travel / (280 * (width / DESIGN_W)), 0), 1);
+  const s = width / DESIGN_W;
+  return Math.min(Math.max((-travel - ZOOM_DEAD * s) / (280 * s), 0), 1);
 }
 
 /** Release above this progress commits to the grid; below springs back. */
