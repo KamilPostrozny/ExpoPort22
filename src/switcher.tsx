@@ -352,7 +352,12 @@ export default function Switcher(props: SwitcherProps) {
   const [barH, setBarH] = useState(64);
 
   return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }]}>
+    // No ground of its own: the screen's root paints the one dark everything sits on, and this
+    // whole subtree fades in with the card's travel (`gridInStyle`). A scrim here cross-faded one
+    // dark over another as the grid arrived — a backdrop that visibly slid in over the backdrop
+    // (user, 2026-08-13, screenshot) — and the pre-grid dark must equal the plain swipe's, which
+    // is the root's.
+    <View style={StyleSheet.absoluteFill}>
       {filtered && display.length === 0 && (
         <View style={styles.noHits} pointerEvents="none">
           <Text style={[styles.noHitsLead, { color: theme.muted }]}>No window contains</Text>
