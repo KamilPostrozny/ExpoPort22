@@ -1944,6 +1944,7 @@ export default function SessionScreen() {
           onQuery={sw_onQuery}
           onClearSearch={sw_onClearSearch}
           interactive={sw === 'open'}
+          zoomActive={zoomActive}
           onSelect={sw_onSelect}
           onKill={sw_onKill}
           onNew={sw_onNew}

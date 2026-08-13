@@ -264,6 +264,14 @@ export type SwitcherProps = {
   onClearSearch: () => void;
   /** Gestures live only while the grid is fully open — not during the zoom transitions. */
   interactive: boolean;
+  /** Is anything scaling? The grid is mounted from the moment tabs are reachable so its cards are
+   *  built before a gesture wants them, which leaves the search strip's blur ramp — twelve stacked
+   *  UIVisualEffectViews — sampling and compositing behind an opacity-0 parent at rest. The screen
+   *  established that exact cost on device for the grid's own backdrop blur (terminal.tsx: a
+   *  UIVisualEffectView does not stop costing GPU because a parent's opacity is zero). NOT
+   *  `interactive`: that is `sw === 'open'`, which is still false while the grid is already visible
+   *  — the arrival opens at prog 0.75, before the flight lands — so the ramp would pop in mid-flight. */
+  zoomActive: boolean;
   onSelect: (pos: number, win: TmuxWindow) => void;
   onKill: (win: TmuxWindow) => void;
   onNew: () => void;
@@ -507,10 +515,12 @@ function SwitcherInner(props: SwitcherProps) {
             thickest at the very top (user, 2026-08-12). */}
         {/* Begins halfway down the field and thickens all the way to the top of the screen (user,
             2026-08-12). Its weakest edge is therefore behind the pill, which is opaque. */}
-        <BlurRamp
-          height={props.insetTop + SEARCH_FIELD_H / 2}
-          tint={theme.isDark ? 'dark' : 'light'}
-        />
+        {props.zoomActive && (
+          <BlurRamp
+            height={props.insetTop + SEARCH_FIELD_H / 2}
+            tint={theme.isDark ? 'dark' : 'light'}
+          />
+        )}
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
           <SymbolView
             name="magnifyingglass"
