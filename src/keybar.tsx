@@ -144,7 +144,6 @@ export type KeyBarProps = {
   /** The gesture's shared values, owned by the screen: the worklet writes the hot path here. */
   panSV?: {
     swipeX: SharedValue<number>;
-    swipeVX: SharedValue<number>;
     prog: SharedValue<number>;
     dragX: SharedValue<number>;
     join: SharedValue<number>;
@@ -669,7 +668,6 @@ function KeyBarInner(props: KeyBarProps) {
         return;
       }
       if (sv !== undefined) {
-        sv.swipeVX.value = sv.swipeVX.value * 0.7 + e.velocityX * 0.3;
         // Guarded by the screen's own live flag: the JS 'start' above may still be in flight for
         // the first frame or two, and the rubber band needs its position/count.
         if (sv.rowLive.value === 1)

@@ -28,6 +28,12 @@ export function pageRadius(stageW: number): number {
   return SCREEN_R * stageW;
 }
 
+/** The travel over which a neighbour closes the last of its gap and seats — one distance for
+ *  every swipe, fast or slow. It briefly scaled with the swipe's speed (130pt at a walk, ~40pt at
+ *  a flick, user 2026-08-13); the coupling was withdrawn the next day — the row arrives at its own
+ *  pace, not the hand's (user, 2026-08-14). */
+export const ROW_REACH = 130;
+
 /* --- the drag --- */
 
 /** Finger travel → displayed offset. Pulling past the first or last window shows a third of the

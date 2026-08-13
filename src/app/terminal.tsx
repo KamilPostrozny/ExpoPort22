@@ -33,6 +33,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   PAGE_GAP,
+  ROW_REACH,
   pageRadius,
   pagePitch,
   slideMs,
@@ -1403,15 +1404,10 @@ export default function SessionScreen() {
     slideTo(0, () => clearBarSwipe(skipRefresh));
   };
 
-  /** The swipe's horizontal speed, low-passed — the join's approach distance shrinks with it
-   *  (user, 2026-08-13: the quicker the swipe, the faster the slide-in). */
-  const swipeVX = useSharedValue(0);
-
   /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
   const panBridge = useMemo(
     () => ({
       swipeX,
-      swipeVX,
       prog,
       dragX,
       join: joinSV,
@@ -1828,9 +1824,10 @@ export default function SessionScreen() {
       // 130pt — slow and firm, and it can never lag the swipe or pop (user, 2026-08-13, after
       // instant read as harsh and every timed entrance was either too quick or too slow). A held
       // join seats immediately; its entrance is the clamped spring on the mount instead.
-      // The approach distance shrinks with the swipe's speed: 130pt at a walk, ~40pt at a flick.
-      const reachD = 130 / (1 + Math.min(Math.abs(swipeVX.value), 2000) / 900);
-      const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / reachD, 1));
+      // One distance for every swipe. It used to shrink with the swipe's speed — the quicker the
+      // swipe, the faster the slide-in (user, 2026-08-13) — and that coupling was withdrawn a day
+      // later: the neighbours are to arrive at one speed whatever the hand did (user, 2026-08-14).
+      const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / ROW_REACH, 1));
       return {
         // `phantom` is the new-tab page — the one past the last window, which a card held in the
         // air must not be given. Read off the worklet's own latch so it is dark on the very frame
