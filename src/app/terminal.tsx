@@ -899,8 +899,7 @@ export default function SessionScreen() {
       const info = swipeInfo.current;
       const hopWould =
         info?.live === true &&
-        swipeTarget(swipeX.value, Date.now() - info.t0, info.pos, info.windows.length + 1) !==
-          info.pos;
+        swipeTarget(swipeX.value, Date.now() - info.t0, info.pos, info.slots) !== info.pos;
       if (!hopWould && zoomCommits(prog.value, vx, vy)) {
         // The grid outranks the hop: the card flying into the grid is the one that was under the
         // finger, so a page swipe still open under this release must decide nothing. It is told by
@@ -1221,9 +1220,16 @@ export default function SessionScreen() {
   const pillHoldSV = useSharedValue(1);
   const roundSV = useSharedValue(0); // gate for the page's card edge, 0→1 (the corners are constant)
   // `pageSwipe` itself is declared with the switcher state above (the cache freezes on it).
-  const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
-    null,
-  );
+  const swipeInfo = useRef<{
+    windows: TmuxWindow[];
+    pos: number;
+    t0: number;
+    live: boolean;
+    /** How many pages this swipe has — the windows, plus the phantom new-tab slot when it has
+     *  one. Fixed at 'start' and read by every decision after it, so the band, the release and
+     *  the row all end at the same place. */
+    slots: number;
+  } | null>(null);
   /** The pending neighbour-cache warm (see `clearBarSwipe`) — so a new swipe can call it off. */
   const warmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Bytes off the shell, counted. A one-shot watch cannot answer "has anything arrived since the
@@ -1372,7 +1378,7 @@ export default function SessionScreen() {
   );
   /* eslint-enable react-hooks/exhaustive-deps */
 
-  const onBarSwipe = (phase: 'start' | 'end', dx: number) => {
+  const onBarSwipe = (phase: 'start' | 'end', dx: number, air = false) => {
     if (stage === null) return;
     if (phase === 'start') {
       // `drag` is a swipe that has ALREADY lifted — Safari's card can be paged sideways after it
@@ -1397,11 +1403,18 @@ export default function SessionScreen() {
       // A lift that never went sideways leaves the flag set — no 'end' arrives on this axis to
       // read it — so every swipe starts by clearing it rather than trusting the last one to.
       gridTookIt.current = false;
-      swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
+      // The phantom slot past the last window belongs to a FLAT hop, not to a card held up in the
+      // hand. Held, the row is a thing being rearranged, and a page for a window that does not
+      // exist has no business in it — it should end at the last tab exactly as it ends at the
+      // first (user, 2026-08-13). One number says all of it: the band rubber-bands here, the
+      // release cannot commit past it, the pill strip stops here, and the next page stops being
+      // rendered — every one of those reads `slots`.
+      const slots = windows.length + (air ? 0 : 1);
+      swipeInfo.current = { windows, pos, t0: Date.now(), live: true, slots };
       rowLiveSV.value = 1;
       rowVisSV.value = 1;
       rowPosSV.value = pos;
-      rowCountSV.value = windows.length + 1;
+      rowCountSV.value = slots;
       setOpen('none');
       // §7: "the neighbour did not render" and "the neighbour rendered with nothing in it" look
       // identical on a dark theme — an empty page card is the background colour. Only the cache
@@ -1412,7 +1425,7 @@ export default function SessionScreen() {
           'snaps', cards.map((c) => (c.snap ? '#' : '.')).join(''),
         );
       setPageSwipe({
-        names: [...windows.map((w) => w.name), NEW_TAB_NAME],
+        names: [...windows.map((w) => w.name), ...(air ? [] : [NEW_TAB_NAME])],
         pos,
         target: pos,
         phase: 'drag',
@@ -1420,7 +1433,7 @@ export default function SessionScreen() {
         settleInsets: null,
       });
       roundSV.value = 1; // the edge itself rides the travel — see pageEdgeStyle
-      swipeX.value = rubber(dx, pos, windows.length + 1);
+      swipeX.value = rubber(dx, pos, slots);
     } else {
       const info = swipeInfo.current;
       if (!info?.live) return;
@@ -1433,7 +1446,7 @@ export default function SessionScreen() {
         springPageHome(true);
         return;
       }
-      const target = swipeTarget(dx, Date.now() - info.t0, info.pos, info.windows.length + 1);
+      const target = swipeTarget(dx, Date.now() - info.t0, info.pos, info.slots);
       if (target === info.pos) {
         if (GESTURE_LOG) console.log('[barswipe] cancel');
         springPageHome(false);
@@ -1635,6 +1648,10 @@ export default function SessionScreen() {
    *  hop's `setCards` plus the two warm captures behind it changed its identity three times a
    *  swipe without a single name being different. */
   const pillNames = pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME];
+  /** The row's length, pills and pages alike — the live swipe's `slots` seen through the names it
+   *  was built with, so the page one past the anchor exists exactly when there is a pill for it.
+   *  A held card's row has no new-tab slot, and this is what stops its page being drawn. */
+  const rowSlots = pillNames.length;
   const pillNamesKey = pillNames.join('\u0000');
   /** Keys or pills? The settle is the BAR's landing, not the terminal's — the overlay still waits
    *  for the host to finish redrawing because it is a picture of a pane, but the keys are not a
@@ -2200,8 +2217,11 @@ export default function SessionScreen() {
             </Animated.View>
           )}
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
-              empty pane the shell about to be born will draw into. */}
-          {anchor < cards.length && (
+              empty pane the shell about to be born will draw into — and it is only there when the
+              row has that slot at all. A card held in the air does not (see `rowSlots`), so at the
+              last tab there is nothing to the right, the same way there is nothing to the left of
+              the first. */}
+          {anchor < rowSlots - 1 && (
             <Animated.View pointerEvents="none" style={[
                 styles.stageWrapper,
                 { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },

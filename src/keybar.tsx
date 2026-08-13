@@ -71,6 +71,7 @@ import {
   barDismisses,
   barGrabbed,
   KEYS_DROP_DY,
+  ROW_AIR_DY,
   rowJoins,
   controlByte,
   CARET_SETTLE_MS,
@@ -131,8 +132,12 @@ export type KeyBarProps = {
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
    *  the worklet. The screen owns the model: rubber band, thresholds, commit
-   *  (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
-  onBarSwipe?: (phase: 'start' | 'end', dx: number) => void;
+   *  (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux).
+   *
+   *  'start' also says whether the card was already AIRBORNE when the finger went sideways —
+   *  `rowJoins`' own test, which is the only place that distinction exists. A held card's row
+   *  has no phantom new-tab slot past the last window (see the screen's `onBarSwipe`). */
+  onBarSwipe?: (phase: 'start' | 'end', dx: number, air?: boolean) => void;
   /** The gesture's shared values, owned by the screen: the worklet writes the hot path here. */
   panSV?: {
     swipeX: SharedValue<number>;
@@ -531,7 +536,8 @@ function KeyBarInner(props: KeyBarProps) {
   const jsAirSettled = useCallback(() => cbRef.current.onAirSettled?.(), []);
   const jsZoomArm = useCallback(() => cbRef.current.onZoomArm?.(), []);
   const jsBarSwipe = useCallback(
-    (phase: 'start' | 'end', dx: number) => cbRef.current.onBarSwipe?.(phase, dx),
+    (phase: 'start' | 'end', dx: number, air?: boolean) =>
+      cbRef.current.onBarSwipe?.(phase, dx, air),
     [],
   );
   const dismissKeys = useCallback(() => Keyboard.dismiss(), []);
@@ -616,7 +622,11 @@ function KeyBarInner(props: KeyBarProps) {
         if (!rowJoins(tx, ty)) return;
         held.value = 1;
         originX.value = tx;
-        runOnJS(jsBarSwipe)('start', 0);
+        // …and whether it joined around a card that is already up in the air — the same travel
+        // `rowJoins` just tested. Read here rather than derived on JS later: `sw` only becomes
+        // 'drag' at a render the screen may not have committed yet, and this is the one frame
+        // where the answer is certain.
+        runOnJS(jsBarSwipe)('start', 0, -ty > ROW_AIR_DY);
         return;
       }
       if (sv !== undefined) {

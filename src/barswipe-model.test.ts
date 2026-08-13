@@ -63,6 +63,17 @@ test('a phantom slot past the last window is reachable, and does not rubber-band
   expect(rubber(50, 0, REAL + 1)).toBe(50 / 3); // and still bands there
 });
 
+/* …and the screen withholds that slot while the card is HELD in the air (terminal's `onBarSwipe`
+ * takes `air` from `rowJoins`' own travel test): the row is then just the windows, and its right
+ * end has to behave exactly like its left. */
+test('without the phantom slot the last tab bands and clamps like the first', () => {
+  const REAL = 3;
+  expect(rubber(-60, REAL - 1, REAL)).toBe(-20); // last tab, leftward: bands
+  expect(rubber(60, 0, REAL)).toBe(20); // first tab, rightward: the mirror image
+  expect(swipeTarget(-(COMMIT_PX + 1), 800, REAL - 1, REAL)).toBe(REAL - 1); // nothing to commit to
+  expect(swipeTarget(COMMIT_PX + 1, 800, 0, REAL)).toBe(0);
+});
+
 test('zoomCommits: a quarter pulled, or thrown upward at the release', () => {
   // The pull, unchanged: a quarter of the way into the card and let go.
   expect(zoomCommits(ZOOM_COMMIT + 0.01, 0, 0)).toBe(true);
