@@ -75,6 +75,7 @@ import {
   rowJoins,
   ROW_MAX_PROG,
   ROW_OUT_MS,
+  ROW_STILL_FRAMES,
   controlByte,
   CARET_SETTLE_MS,
   CARET_STEP_MAX,
@@ -511,6 +512,8 @@ function KeyBarInner(props: KeyBarProps) {
    *  A separate latch because `rowVis` is animated now — mid-slide it holds 0.4, and comparing the
    *  wanted state against it would restart the slide every frame. */
   const rowLow = useSharedValue(-1);
+  /** Consecutive frames the hand has been still — see `ROW_STILL_FRAMES`. */
+  const still = useSharedValue(0);
   /** The pan's translation at the instant the card was grabbed. The grab costs `BAR_AXIS_SLOP` of
    *  travel, and the pan reports it from TOUCH-DOWN — so handing the page `e.translationX` made
    *  it open 10pt along instead of at zero: the card detached from the edge with a jump in the
@@ -564,6 +567,7 @@ function KeyBarInner(props: KeyBarProps) {
       dismissed.value = 0;
       settled.value = 0;
       rowLow.value = -1;
+      still.value = 0;
     })
     .onUpdate((e) => {
       'worklet';
@@ -599,16 +603,19 @@ function KeyBarInner(props: KeyBarProps) {
           sv.armed.value = 1;
           runOnJS(jsZoomArm)();
         }
-        // Settled: airborne and the hand has stopped. 90pt/s is stillness to a finger, not to a
-        // slow flick. The join spring starts HERE, on this thread; React only mounts the row.
-        if (
-          settled.value === 0 &&
-          sv.prog.value > 0.02 &&
-          Math.abs(e.velocityY) < 90 &&
-          Math.abs(e.velocityX) < 90
-        ) {
-          settled.value = 1;
-          sv.heldAir.value = 1;
+        // Settled: airborne and the hand has STOPPED — 90pt/s for `ROW_STILL_FRAMES` frames
+        // running, not the one frame a slow pull dips below it by itself. 90pt/s is stillness to
+        // a finger, not to a slow flick.
+        if (settled.value === 0 && sv.prog.value > 0.02) {
+          if (Math.abs(e.velocityY) < 90 && Math.abs(e.velocityX) < 90) {
+            still.value += 1;
+            if (still.value >= ROW_STILL_FRAMES) {
+              settled.value = 1;
+              sv.heldAir.value = 1;
+            }
+          } else {
+            still.value = 0;
+          }
         }
         // The neighbours around a held card, and the only thing that draws them: the hand has
         // stopped (`heldAir`) AND the card is low — inside `ROW_MAX_PROG` of the pull. Climb past
@@ -655,7 +662,7 @@ function KeyBarInner(props: KeyBarProps) {
       // latch a few lines up) and stopped inside the bottom 30% of the pull. Higher than that the
       // card is on its way to the grid alone (user, 2026-08-14).
       if (held.value === 0) {
-        if (!rowJoins(tx, sv?.prog.value ?? 0, sv?.heldAir.value === 1)) return;
+        if (!rowJoins(tx, ty, sv?.prog.value ?? 0, sv?.heldAir.value === 1)) return;
         held.value = 1;
         originX.value = tx;
         runOnJS(jsBarSwipe)('start', 0, sv?.heldAir.value === 1);

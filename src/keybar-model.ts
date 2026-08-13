@@ -202,11 +202,20 @@ export const ROW_OUT_MS = 180;
  *  deliberate travel AND a card that is being held — the hand stopped climbing (`held`, the
  *  settle latch) and stopped low (`prog` inside `ROW_MAX_PROG`). Still climbing, or already high,
  *  means one card and no row. */
-export function rowJoins(dx: number, prog: number, held: boolean): boolean {
+export function rowJoins(dx: number, dy: number, prog: number, held: boolean): boolean {
   'worklet';
-  if (prog <= ROW_AIR_PROG) return Math.abs(dx) > BAR_AXIS_SLOP;
+  // On the bar: low AND going sideways more than up. `prog` alone was not enough — the first
+  // 25pt of a pull up are below the ceiling too, so 10pt of the drift a rising thumb makes by
+  // itself took this branch and joined the row without any stop at all (user, 2026-08-14). A hop
+  // is the gesture whose sideways travel leads; a pull's drift never does.
+  if (prog <= ROW_AIR_PROG && Math.abs(dx) > Math.abs(dy)) return Math.abs(dx) > BAR_AXIS_SLOP;
   return held && prog <= ROW_MAX_PROG && Math.abs(dx) > ROW_AIR_DX;
 }
+
+/** Consecutive still frames that count as an intentional stop. One frame under 90pt/s is not a
+ *  decision — a slow pull dips below that on its own, and the row arrived at a hand that never
+ *  stopped (user, 2026-08-14). Four frames is ~66ms; a real pause is several times that. */
+export const ROW_STILL_FRAMES = 4;
 
 /** Upward travel at which the keyboard gets out of the way. Not the slop: the opening of an
  *  ordinary flat swipe on a bottom bar IS upward — a thumb pivots, and the device log has ten
