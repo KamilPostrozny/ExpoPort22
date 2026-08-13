@@ -15,6 +15,11 @@ on:
       xcode:
         description: 'Xcode version on the runner (26.6, 26.5, 26.4.1, 26.3, 26.2, 26.1.1, 26.0.1)'
         default: '26.6'
+      configuration:
+        description: 'Debug = dev client fed by Metro (the daily loop). Release = the real thing, JS embedded.'
+        default: 'Debug'
+        type: choice
+        options: ['Debug', 'Release']
 
 concurrency:
   group: ipa-${{ github.ref }}
@@ -43,28 +48,61 @@ jobs:
       # references that ExpoSSH.podspec declares.
       - run: bunx expo prebuild -p ios
 
-      # Debug, because this is a dev client that loads its JS from Metro over the LAN; Release would
-      # bake in a bundle and take longer to build for no gain here.
+      # Debug by default: that is a dev client which loads its JS from Metro over the LAN, which is
+      # the daily loop (docs/ship.md). Release is the on-demand one, and it is a different app in
+      # every way that matters to a measurement:
+      #
+      #   - `#if DEBUG` in the generated AppDelegate picks the Metro URL; Release returns the
+      #     embedded `main.jsbundle`, so `__DEV__` is false and React runs `ReactFabric-prod.js`
+      #     instead of the dev renderer, with no per-element `__source`/`__self` debug objects.
+      #   - The "Bundle React Native code and images" phase runs `expo export:embed`, which is also
+      #     what writes `www.bundle` — the DOM component's HTML. Without it the terminal's webview
+      #     has nothing to load, which is exactly why `expo start --no-dev` renders a blank
+      #     terminal against a Debug client and cannot be used to measure this app (2026-08-13).
+      #
+      # Every frame-rate number this project has was taken on a Debug bundle, so it carries an
+      # unknown constant. This is how to get one that does not.
       - name: Build and package an unsigned IPA
+        env:
+          CONFIG: ${{ inputs.configuration || 'Debug' }}
         run: |
           set -euo pipefail
           workspace=$(ls -d ios/*.xcworkspace)
           scheme=$(basename "$workspace" .xcworkspace)
           xcodebuild -workspace "$workspace" -scheme "$scheme" \
-            -configuration Debug -sdk iphoneos -derivedDataPath build \
+            -configuration "$CONFIG" -sdk iphoneos -derivedDataPath build \
             COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
           mkdir -p Payload
-          cp -R "build/Build/Products/Debug-iphoneos/$scheme.app" Payload/
+          cp -R "build/Build/Products/$CONFIG-iphoneos/$scheme.app" Payload/
+          # The embedded bundle is the whole point of a Release build — fail loudly rather than
+          # shipping an app whose webview will come up blank on the phone.
+          if [ "$CONFIG" = "Release" ]; then
+            test -f "Payload/$scheme.app/main.jsbundle" || { echo "no main.jsbundle — export:embed did not run"; exit 1; }
+            test -d "Payload/$scheme.app/www.bundle" || { echo "no www.bundle — the DOM component would load nothing"; exit 1; }
+          fi
           zip -qry Port22.ipa Payload
 
       # One URL that is always the latest build. Delete-then-create rather than clobber-in-place, so
       # the tag points at the commit that was actually built.
+      # Two rolling tags, not one: a Release build must not replace the dev client the daily loop
+      # installs from, and a push to main must not replace a Release build somebody is mid-way
+      # through testing. `dev` is the automatic one, `prod` only ever appears on a dispatch.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          CONFIG: ${{ inputs.configuration || 'Debug' }}
         run: |
-          gh release delete dev --yes --cleanup-tag || true
-          gh release create dev Port22.ipa --prerelease --target "${GITHUB_SHA}" \
-            --title "dev — latest main" \
-            --notes "Unsigned Debug dev-client build of ${GITHUB_SHA}. Rolling: every push to main replaces it. Install with \`xtool install\`."
+          set -euo pipefail
+          if [ "$CONFIG" = "Release" ]; then
+            tag=prod
+            title="prod — Release, JS embedded"
+            notes="Unsigned **Release** build of ${GITHUB_SHA}: JS is embedded (\`main.jsbundle\` + \`www.bundle\`), \`__DEV__\` is false, Metro is not involved. Install with \`xtool install\` and just launch it — do NOT start a bundler for it. Use this to measure; use \`dev\` to develop."
+          else
+            tag=dev
+            title="dev — latest main"
+            notes="Unsigned Debug dev-client build of ${GITHUB_SHA}. Rolling: every push to main replaces it. Needs \`bunx expo start --dev-client\` running. Install with \`xtool install\`."
+          fi
+          gh release delete "$tag" --yes --cleanup-tag || true
+          gh release create "$tag" Port22.ipa --prerelease --target "${GITHUB_SHA}" \
+            --title "$title" --notes "$notes"
