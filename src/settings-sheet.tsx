@@ -25,7 +25,7 @@
 
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Dimensions,
@@ -74,6 +74,7 @@ import {
   DARK_THEMES,
   LIGHT_THEMES,
   MONO,
+  resolveTheme,
   type Theme,
   type ThemeName,
 } from '@/theme';
@@ -128,6 +129,9 @@ export default function SettingsSheet({
    *  twenty-six rows the list is almost never at the top, so the one handle whose entire job is
    *  dismissing was the one place dismissing did not work. */
   const fromGrabber = useRef(false);
+  /** Which theme list is expanded, if any — one at a time, so the sheet never has two long lists
+   *  in it at once. */
+  const [open, setOpen] = useState<'theme' | 'themeDark' | 'themeLight' | null>(null);
   useEffect(() => {
     ty.value = withTiming(0, SLIDE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,6 +178,7 @@ export default function SettingsSheet({
 
   const toggleFollow = (on: boolean) => {
     console.log('[settings] followSystem →', on);
+    setOpen(null); // the rows the switch swaps in are different rows; none of them was the open one
     updateSettings({ followSystem: on });
   };
 
@@ -220,39 +225,64 @@ export default function SettingsSheet({
     />
   );
 
-  const themeList = (
-    title: string,
-    list: Theme[],
-    field: 'theme' | 'themeDark' | 'themeLight',
-  ) => (
-    <>
-      <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>{title}</Text>
-      <View style={[styles.card, { backgroundColor: theme.surface }]}>
-        {list.map((t, i) => (
-          <Pressable
-            key={t.name}
-            onPress={() => pickTheme(field, t.name)}
-            style={({ pressed }) => [
-              styles.row,
-              i > 0 && styles.rowLine,
-              pressed && { backgroundColor: STEPPER_TINT },
-            ]}>
-            <Text style={[styles.label, { color: theme.foreground }]} numberOfLines={1}>
-              {t.label}
-            </Text>
-            {/* The scheme's own background under its own six hues: the row is a sample of the
-                terminal it would produce, which is the only thing a name like "Kanagawa" is not. */}
-            <View style={[styles.swatch, { backgroundColor: t.background }]}>
-              {SWATCHES.map((slot) => (
-                <View key={slot} style={[styles.chip, { backgroundColor: t.ansi[slot] }]} />
-              ))}
-            </View>
-            <View style={styles.checkSlot}>{settings[field] === t.name && check}</View>
-          </Pressable>
-        ))}
-      </View>
-    </>
-  );
+  /**
+   * A disclosure row naming the theme in that slot, and its list underneath while it is open.
+   * Collapsed by default: twenty-six rows pushed the switch this row belongs with off one end of
+   * the sheet and the font stepper off the other (user, 2026-08-14: "follow system and themes
+   * should be close to each other… make theme lists collapsed, they take too much space").
+   *
+   * Picking does not close it — the log of an evening with this sheet is a dozen themes tried in a
+   * row, and a list that shut after each one would be a dozen extra taps.
+   */
+  const themeRow = (label: string, list: Theme[], field: 'theme' | 'themeDark' | 'themeLight') => {
+    const isOpen = open === field;
+    return (
+      <>
+        <Pressable
+          onPress={() => setOpen(isOpen ? null : field)}
+          style={({ pressed }) => [
+            styles.row,
+            styles.rowLine,
+            pressed && { backgroundColor: STEPPER_TINT },
+          ]}>
+          <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
+          <Text style={[styles.value, { color: theme.muted }]} numberOfLines={1}>
+            {resolveTheme(settings[field]).label}
+          </Text>
+          <SymbolView
+            name={isOpen ? 'chevron.up' : 'chevron.down'}
+            size={12}
+            tintColor={theme.muted}
+            fallback={<Text style={{ fontSize: 12, color: theme.muted }}>{isOpen ? '⌃' : '⌄'}</Text>}
+          />
+        </Pressable>
+        {isOpen &&
+          list.map((t) => (
+            <Pressable
+              key={t.name}
+              onPress={() => pickTheme(field, t.name)}
+              style={({ pressed }) => [
+                styles.row,
+                styles.subRow,
+                styles.rowLine,
+                pressed && { backgroundColor: STEPPER_TINT },
+              ]}>
+              <Text style={[styles.label, { color: theme.foreground }]} numberOfLines={1}>
+                {t.label}
+              </Text>
+              {/* The scheme's own background under its own six hues: the row is a sample of the
+                  terminal it would produce, which a name like "Kanagawa" is not. */}
+              <View style={[styles.swatch, { backgroundColor: t.background }]}>
+                {SWATCHES.map((slot) => (
+                  <View key={slot} style={[styles.chip, { backgroundColor: t.ansi[slot] }]} />
+                ))}
+              </View>
+              <View style={styles.checkSlot}>{settings[field] === t.name && check}</View>
+            </Pressable>
+          ))}
+      </>
+    );
+  };
 
   return (
     <Modal transparent statusBarTranslucent animationType="none" onRequestClose={close}>
@@ -296,6 +326,17 @@ export default function SettingsSheet({
                     trackColor={{ true: theme.accent }}
                   />
                 </View>
+                {/* Straight under the switch that decides how many of these rows there are — the
+                    font stepper used to sit between them, which put the answer two scrolls from
+                    the question. */}
+                {settings.followSystem ? (
+                  <>
+                    {themeRow('Dark theme', DARK_THEMES, 'themeDark')}
+                    {themeRow('Light theme', LIGHT_THEMES, 'themeLight')}
+                  </>
+                ) : (
+                  themeRow('Theme', ALL_THEMES, 'theme')
+                )}
                 <View style={[styles.row, styles.rowLine]}>
                   <Text style={[styles.label, { color: theme.foreground }]}>Font size</Text>
                   <Text style={[styles.value, { color: theme.muted }]}>{settings.fontSize} pt</Text>
@@ -314,15 +355,6 @@ export default function SettingsSheet({
                   </View>
                 </View>
               </View>
-
-              {settings.followSystem ? (
-                <>
-                  {themeList('WHEN THE SYSTEM IS DARK', DARK_THEMES, 'themeDark')}
-                  {themeList('WHEN THE SYSTEM IS LIGHT', LIGHT_THEMES, 'themeLight')}
-                </>
-              ) : (
-                themeList('THEME', ALL_THEMES, 'theme')
-              )}
 
               {/* Only on a tmux session: on any other the toggle governs nothing, and a row that
                   explains why it is inert is worse than no row. */}
@@ -410,6 +442,8 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   rowLine: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HAIRLINE },
+  /** A theme inside an expanded list, indented off the disclosure row that opened it. */
+  subRow: { paddingLeft: 32 },
   label: { flex: 1, fontSize: 15 },
   value: { fontFamily: MONO, fontSize: 13, marginRight: 12 },
   swatch: { flexDirection: 'row', gap: 3, borderRadius: 6, padding: 3, marginRight: 12 },
