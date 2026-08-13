@@ -203,7 +203,7 @@ test('the row joins at the slop on the bar, but wants intent in the air', () => 
 
 test('a card still climbing, or held high, keeps its neighbours away', () => {
   expect(rowJoins(60, 0.1, false)).toBe(false); // the hand has not stopped: no row
-  expect(rowJoins(60, ROW_MAX_PROG, true)).toBe(true); // the last of the bottom 30%
+  expect(rowJoins(60, ROW_MAX_PROG, true)).toBe(true); // the last of the low half
   expect(rowJoins(60, ROW_MAX_PROG + 0.01, true)).toBe(false); // above it: one card, to the grid
 });
 

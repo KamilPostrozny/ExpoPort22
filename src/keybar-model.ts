@@ -184,10 +184,13 @@ export const ROW_AIR_DX = 48;
  *  already discounted: its dead zone grows with |dx| precisely to read a sideways swipe as zero. */
 export const ROW_AIR_PROG = 0.05;
 
-/** How far up the card may be and still gather neighbours: the bottom 30% of the pull. Past it
- *  the card is a single tab on its way to the grid, and neighbours around it are just clutter in
- *  the flight path (user, 2026-08-14). */
-export const ROW_MAX_PROG = 0.3;
+/** How far up the card may be and still gather neighbours. Past it the card is a single tab on
+ *  its way to the grid, and neighbours around it are just clutter in the flight path (user,
+ *  2026-08-14). The ceiling asked for was 30% of the pull, but `prog` saturates at 280pt of
+ *  travel: 0.3 of it is 84pt, which on the phone is the very bottom of the motion and left the
+ *  row triggerable only at the start (user, same day). Half the pull is the same intent at the
+ *  scale the thumb actually works in — and it is the knob to turn if it still reads tight. */
+export const ROW_MAX_PROG = 0.5;
 
 /** Horizontal travel that earns the page row (see `barGrabbed`): the slop on the bar; in the air,
  *  deliberate travel AND a card that is being held — the hand stopped climbing (`held`, the
