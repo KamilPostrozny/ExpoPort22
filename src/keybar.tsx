@@ -604,7 +604,7 @@ function KeyBarInner(props: KeyBarProps) {
           sv.heldAir.value = 1;
         }
         // The neighbours around a held card, and the only thing that draws them: the hand has
-        // stopped (`heldAir`) AND the card is low — inside the bottom 30% of the pull. Climb past
+        // stopped (`heldAir`) AND the card is low — inside `ROW_MAX_PROG` of the pull. Climb past
         // that and they leave again; it is one card up there, on its way to the grid alone (user,
         // 2026-08-14). Reversible on purpose, because the pull itself is: up, and back down.
         //
@@ -617,9 +617,10 @@ function KeyBarInner(props: KeyBarProps) {
         // before it runs. Revealed in the SAME frame as `heldAir` — the JS hop this used to make
         // said the same thing a commit later, long enough to see the page it is meant to suppress.
         //
-        // Once the page swipe is actually running (`held`) the row belongs to it, and no amount
-        // of climbing takes it back: the finger is already carrying pages sideways.
-        if (held.value === 0 && sv.heldAir.value === 1) {
+        // The ceiling applies to a row that has already joined, too — a page swipe running under
+        // the finger is no exception (user, 2026-08-14). So the row is EARNED once (held and
+        // stopped, or the swipe started) and DRAWN only while the card is low.
+        if (sv.heldAir.value === 1 || held.value === 1) {
           const low = sv.prog.value <= ROW_MAX_PROG ? 1 : 0;
           if (low !== sv.rowVis.value) {
             sv.rowVis.value = low;
