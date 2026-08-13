@@ -129,7 +129,7 @@ test('zoomProgress: a 30pt dead zone, then saturating 280pt later', () => {
   expect(zoomProgress(50, 402)).toBe(0); // downward drag is not a zoom
   // The dead zone scales with the screen like the ramp does.
   expect(zoomProgress(-14, 201)).toBe(0);
-  expect(zoomProgress(-15 - 140, 201)).toBeCloseTo(0.5);
+  expect(zoomProgress(-15 - 70, 201)).toBeCloseTo(0.5); // half of the half-width 140pt ramp
   expect(ZOOM_COMMIT).toBe(0.25);
 });
 
