@@ -1658,8 +1658,6 @@ export default function SessionScreen() {
       const reachD = 130 / (1 + Math.min(Math.abs(swipeVX.value), 2000) / 900);
       const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / reachD, 1));
       return {
-        height: f.height,
-        borderRadius: f.radius,
         opacity: rowVisSV.value,
         transform: [{ translateX: side * (pitch + 44 * (1 - seat)) }],
       };
@@ -1668,6 +1666,7 @@ export default function SessionScreen() {
    *  static at-rest radius mid-air, and its rounder corner pulled away from the ring's arc
    *  (movement 3, screenshot). Shared by the live page, its edge, and the neighbours. */
   const cardRadiiStyle = useAnimatedStyle(() => {
+    'worklet';
     const r = zoomFrame(prog.value, dragX.value, aim(), stageSV.value).radius;
     const rb = kbSquare ? 0 : r;
     return {
@@ -1680,6 +1679,31 @@ export default function SessionScreen() {
 
   const prevCardStyle = usePageCardStyle(-1);
   const nextCardStyle = usePageCardStyle(1);
+
+  /**
+   * The card's crop and corner, SEPARATED from the per-frame transform above and applied only
+   * while the zoom is actually live (`zoomActive`).
+   *
+   * `height` is a layout prop — writing it per frame runs Yoga over the card's subtree, a
+   * snapshot tree of Text runs — and `borderRadius` re-rasterizes the layer. Neither value even
+   * changes during a flat hop, but Reanimated writes what the worklet returns every frame, so
+   * both costs were being paid on every swipe by six views at once. That is the lag inside the
+   * frames, which a frame-gap counter cannot see (user, 2026-08-13: "the animation itself is
+   * laggy"). At rest the static styles below stand in, and the gesture animates transforms only.
+   */
+  const cardClipStyle = useAnimatedStyle(() => {
+    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
+    const rb = kbSquare ? 0 : f.radius;
+    return {
+      height: f.height,
+      borderTopLeftRadius: f.radius,
+      borderTopRightRadius: f.radius,
+      borderBottomLeftRadius: rb,
+      borderBottomRightRadius: rb,
+    };
+  });
+  /** Is anything scaling? Only then do the layout-and-raster styles above go live. */
+  const zoomActive = sw !== 'closed';
 
   /** The grid's arrival, the same travel that carries the card (§7's no-clocks principle): the
    *  backdrop stays dark until the card is halfway to the tabs view, then the grid comes in
@@ -1739,16 +1763,9 @@ export default function SessionScreen() {
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
   // compensated for RN's centre-origin scale — all from the one tested function.
-  const wrapperStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
-    return {
-      height: f.height,
-      // All four corners together, the keyboard's cut included: the flying surface is the card,
-      // and a card's bottom rounds in on the same beat as its top (user, 2026-08-11). The square
-      // cut lives on the page inside it — see `kbSquare`.
-      borderRadius: f.radius,
-    };
-  });
+  // The live card's crop and corner — the same layout-and-raster props as `cardClipStyle`, and
+  // applied on the same condition, for the same reason.
+  const wrapperStyle = cardClipStyle;
 
   /** What the card is NOT a picture of: the chrome above the pane — the notch strip, and the
    *  search row when it is armed. Safari's cards are the page, cropped past the status bar
@@ -1892,8 +1909,11 @@ export default function SessionScreen() {
         style={[
           stage === null
             ? styles.screen
-            : [styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }],
-          stage !== null && wrapperStyle,
+            : [
+                styles.stageWrapper,
+                { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
+              ],
+          stage !== null && zoomActive && wrapperStyle,
         ]}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
           screen, so it clips and flies with the zoom — but it fills the border box, padding and
@@ -1986,7 +2006,7 @@ export default function SessionScreen() {
             // top inset stays ~0 and the first row never moves — see rowRemainder.
             paddingBottom: padBottom + barPad + rowRemainder,
           },
-          cardRadiiStyle,
+          zoomActive && cardRadiiStyle,
         ]}>
       {terminalView}
       {/* see pageEdgeStyle — the live page's card edge while a swipe is on */}
@@ -1995,8 +2015,8 @@ export default function SessionScreen() {
         style={[
           StyleSheet.absoluteFill,
           styles.pageEdge,
-          { borderColor: theme.accent },
-          cardRadiiStyle,
+          { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
+          zoomActive && cardRadiiStyle,
           pageEdgeStyle,
         ]}
       />
@@ -2042,9 +2062,14 @@ export default function SessionScreen() {
       {stage !== null && showTabs && connected && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" style={[
+                styles.stageWrapper,
+                { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
+                prevCardStyle,
+                zoomActive && cardClipStyle,
+              ]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
+                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={zoomActive ? cardRadiiStyle : null} />
               </Animated.View>
               {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
                   crop's upward translate and clipped out at the top, the ring bug over again
@@ -2058,9 +2083,14 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" style={[
+                styles.stageWrapper,
+                { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
+                nextCardStyle,
+                zoomActive && cardClipStyle,
+              ]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
+                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={zoomActive ? cardRadiiStyle : null} />
               </Animated.View>
               {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
                   crop's upward translate and clipped out at the top, the ring bug over again
@@ -2317,8 +2347,8 @@ function NeighborPage({
 }: {
   snap: PageSnap;
   stageW: number;
-  /** The shared card-corner style (`cardRadiiStyle`) — the same radius the ring draws. */
-  radii: AnimatedStyle<ViewStyle>;
+  /** The shared card-corner style while the zoom is live, null at rest (see `cardClipStyle`). */
+  radii: AnimatedStyle<ViewStyle> | null;
   theme: Theme;
   cell: { w: number; h: number };
   insets: { top: number; side: number; bottom: number };
@@ -2330,7 +2360,7 @@ function NeighborPage({
       style={[
         StyleSheet.absoluteFill,
         styles.page,
-        { backgroundColor: theme.background },
+        { backgroundColor: theme.background, borderRadius: pageRadius(stageW) },
         radii,
       ]}>
       <PageContent
