@@ -433,6 +433,48 @@ export default function SessionScreen() {
   const PHASE_WATCHDOG_MS = 1500;
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
+  /* --- §7 perf harness (TEMPORARY, 2026-08-13): "measure that every animation is actually
+   * happening without dropped frames" (user). `perfOn` spans a gesture from its first event to
+   * the frame everything settles; the UI-thread frame callback histograms real frame gaps, and
+   * the report prints at the settle. A separate 100ms heartbeat exposes JS-thread stalls, which
+   * is where a runOnJS pan handler would hitch. --- */
+  const perfOn = useSharedValue(0);
+  const perfBuf = useSharedValue({ n: 0, drops: 0, worst: 0 });
+  useFrameCallback((fi) => {
+    if (perfOn.value === 0) return;
+    const dt = fi.timeSincePreviousFrame ?? 0;
+    if (dt <= 0) return;
+    const b = perfBuf.value;
+    b.n += 1;
+    if (dt > 20) b.drops += 1;
+    if (dt > b.worst) b.worst = dt;
+  });
+  const perfStart = () => {
+    if (perfOn.value === 1) return;
+    perfBuf.value = { n: 0, drops: 0, worst: 0 };
+    perfOn.value = 1;
+  };
+  const perfEnd = (label: string) => {
+    if (perfOn.value === 0) return;
+    perfOn.value = 0;
+    const b = perfBuf.value;
+    if (b.n > 5)
+      console.log(
+        `[perf] ${label}: ${b.n} frames, ${b.drops} dropped (>20ms), worst ${Math.round(b.worst)}ms`,
+      );
+  };
+  useEffect(() => {
+    let last = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      const late = now - last - 100;
+      last = now;
+      if (late > 40) console.log(`[perf] js thread stalled ${late}ms`);
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
+
+
   /** The guard for a redraw that never comes at all: ~1–2s of frames, an order of magnitude
    *  past the ~50ms roundtrip the trace measured, so it never shapes how a switch feels. */
   const ZOOM_WEDGE_FRAMES = 120;
@@ -1439,47 +1481,6 @@ export default function SessionScreen() {
       ],
     };
   });
-
-  /* --- §7 perf harness (TEMPORARY, 2026-08-13): "measure that every animation is actually
-   * happening without dropped frames" (user). `perfOn` spans a gesture from its first event to
-   * the frame everything settles; the UI-thread frame callback histograms real frame gaps, and
-   * the report prints at the settle. A separate 100ms heartbeat exposes JS-thread stalls, which
-   * is where a runOnJS pan handler would hitch. --- */
-  const perfOn = useSharedValue(0);
-  const perfBuf = useSharedValue({ n: 0, drops: 0, worst: 0 });
-  useFrameCallback((fi) => {
-    if (perfOn.value === 0) return;
-    const dt = fi.timeSincePreviousFrame ?? 0;
-    if (dt <= 0) return;
-    const b = perfBuf.value;
-    b.n += 1;
-    if (dt > 20) b.drops += 1;
-    if (dt > b.worst) b.worst = dt;
-  });
-  const perfStart = () => {
-    if (perfOn.value === 1) return;
-    perfBuf.value = { n: 0, drops: 0, worst: 0 };
-    perfOn.value = 1;
-  };
-  const perfEnd = (label: string) => {
-    if (perfOn.value === 0) return;
-    perfOn.value = 0;
-    const b = perfBuf.value;
-    if (b.n > 5)
-      console.log(
-        `[perf] ${label}: ${b.n} frames, ${b.drops} dropped (>20ms), worst ${Math.round(b.worst)}ms`,
-      );
-  };
-  useEffect(() => {
-    let last = Date.now();
-    const id = setInterval(() => {
-      const now = Date.now();
-      const late = now - last - 100;
-      last = now;
-      if (late > 40) console.log(`[perf] js thread stalled ${late}ms`);
-    }, 100);
-    return () => clearInterval(id);
-  }, []);
 
   /* --- §7 structured-test trace (TEMPORARY, 2026-08-13) ---
    * The reported artifacts are motion — flicker, layers over layers, a row moving inside its
