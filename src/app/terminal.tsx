@@ -678,28 +678,6 @@ export default function SessionScreen() {
    *  2026-08-13, "flickeringly show up"). A shared value through the same seat term the swipe
    *  join uses cannot. */
   const joinSV = useSharedValue(0);
-  /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
-  const panBridge = useMemo(
-    () => ({
-      swipeX,
-      swipeVX,
-      prog,
-      dragX,
-      join: joinSV,
-      zoomReady: zoomReadySV,
-      zoomBase: zoomBaseSV,
-      zoomFromX: zoomFromXSV,
-      zoomFromY: zoomFromYSV,
-      zoomFromSet: zoomFromSetSV,
-      dragging: draggingSV,
-      rowLive: rowLiveSV,
-      rowPos: rowPosSV,
-      rowCount: rowCountSV,
-      stage: stageSV,
-    }),
-    [],
-  );
-  /* eslint-enable react-hooks/exhaustive-deps */
 
   /** The grab, one JS call per gesture: the open's one-off costs. Everything per-frame — prog,
    *  dragX, the settle latch — runs in the bar's worklet against the shared values above. */
@@ -1151,6 +1129,30 @@ export default function SessionScreen() {
   /** The swipe's horizontal speed, low-passed — the join's approach distance shrinks with it
    *  (user, 2026-08-13: the quicker the swipe, the faster the slide-in). */
   const swipeVX = useSharedValue(0);
+
+  /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
+  const panBridge = useMemo(
+    () => ({
+      swipeX,
+      swipeVX,
+      prog,
+      dragX,
+      join: joinSV,
+      zoomReady: zoomReadySV,
+      zoomBase: zoomBaseSV,
+      zoomFromX: zoomFromXSV,
+      zoomFromY: zoomFromYSV,
+      zoomFromSet: zoomFromSetSV,
+      dragging: draggingSV,
+      rowLive: rowLiveSV,
+      rowPos: rowPosSV,
+      rowCount: rowCountSV,
+      stage: stageSV,
+    }),
+    [],
+  );
+  /* eslint-enable react-hooks/exhaustive-deps */
+
   const onBarSwipe = (phase: 'start' | 'end', dx: number) => {
     if (stage === null) return;
     if (phase === 'start') {
