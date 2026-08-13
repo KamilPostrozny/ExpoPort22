@@ -3,7 +3,7 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { router, Stack } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -678,6 +678,29 @@ export default function SessionScreen() {
    *  2026-08-13, "flickeringly show up"). A shared value through the same seat term the swipe
    *  join uses cannot. */
   const joinSV = useSharedValue(0);
+  /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
+  const panBridge = useMemo(
+    () => ({
+      swipeX,
+      swipeVX,
+      prog,
+      dragX,
+      join: joinSV,
+      zoomReady: zoomReadySV,
+      zoomBase: zoomBaseSV,
+      zoomFromX: zoomFromXSV,
+      zoomFromY: zoomFromYSV,
+      zoomFromSet: zoomFromSetSV,
+      dragging: draggingSV,
+      rowLive: rowLiveSV,
+      rowPos: rowPosSV,
+      rowCount: rowCountSV,
+      stage: stageSV,
+    }),
+    [],
+  );
+  /* eslint-enable react-hooks/exhaustive-deps */
+
   /** The grab, one JS call per gesture: the open's one-off costs. Everything per-frame — prog,
    *  dragX, the settle latch — runs in the bar's worklet against the shared values above. */
   const onZoomGrab = (dx: number, dy: number) => {
@@ -2018,24 +2041,10 @@ export default function SessionScreen() {
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? onBarSwipe : undefined}
         // The pan's per-frame writes happen on the UI thread against these (perf: the JS thread
-        // stalls 40-300ms under load and a runOnJS pan hitched with it).
-        panSV={{
-          swipeX,
-          swipeVX,
-          prog,
-          dragX,
-          join: joinSV,
-          zoomReady: zoomReadySV,
-          zoomBase: zoomBaseSV,
-          zoomFromX: zoomFromXSV,
-          zoomFromY: zoomFromYSV,
-          zoomFromSet: zoomFromSetSV,
-          dragging: draggingSV,
-          rowLive: rowLiveSV,
-          rowPos: rowPosSV,
-          rowCount: rowCountSV,
-          stage: stageSV,
-        }}
+        // stalls 40-300ms under load and a runOnJS pan hitched with it). A STABLE object: the
+        // bar memoizes its gesture on it, and an inline literal re-serialized the worklets and
+        // re-attached the recognizer on every render — mid-gesture (user: "hitching even worse").
+        panSV={panBridge}
         pills={pillsProp}
       />
       </Animated.View>

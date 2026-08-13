@@ -22,7 +22,7 @@
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   Platform,
@@ -492,8 +492,41 @@ export default function KeyBar(props: KeyBarProps) {
    *  tests keep the raw translation: the lift is measured from touch-down (its 24pt is the budget),
    *  and the zoom re-origins for itself at the frame it arms (the screen's `zoomFrom`). */
   const originX = useSharedValue(0);
-  const dismissKeys = () => Keyboard.dismiss();
-  const pan = Gesture.Pan()
+  /** Stable JS trampolines: the gesture is memoized ONCE, so its worklets must capture functions
+   *  whose identity never changes — the latest props are read through a ref at call time. An
+   *  un-memoized gesture re-serialized its worklets and re-attached the recognizer on every
+   *  render, mid-gesture (user: "hitching even worse" after the UI-thread move). */
+  const cbRef = useRef({
+    onZoomGrab: props.onZoomGrab,
+    onZoomEnd: props.onZoomEnd,
+    onAirSettled: props.onAirSettled,
+    onBarSwipe: props.onBarSwipe,
+  });
+  cbRef.current = {
+    onZoomGrab: props.onZoomGrab,
+    onZoomEnd: props.onZoomEnd,
+    onAirSettled: props.onAirSettled,
+    onBarSwipe: props.onBarSwipe,
+  };
+  const jsZoomGrab = useCallback((dx: number, dy: number) => cbRef.current.onZoomGrab?.(dx, dy), []);
+  const jsZoomEnd = useCallback(
+    (dx: number, dy: number, vx: number, vy: number) => cbRef.current.onZoomEnd?.(dx, dy, vx, vy),
+    [],
+  );
+  const jsAirSettled = useCallback(() => cbRef.current.onAirSettled?.(), []);
+  const jsBarSwipe = useCallback(
+    (phase: 'start' | 'end', dx: number) => cbRef.current.onBarSwipe?.(phase, dx),
+    [],
+  );
+  const dismissKeys = useCallback(() => Keyboard.dismiss(), []);
+  /** `showTabs` for the worklet without becoming a gesture dependency. */
+  const showTabsSV = useSharedValue(props.showTabs ? 1 : 0);
+  useEffect(() => {
+    showTabsSV.value = props.showTabs ? 1 : 0;
+  }, [props.showTabs, showTabsSV]);
+  const panSV = props.panSV;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- every capture is identity-stable
+  const pan = useMemo(() => Gesture.Pan()
     .maxPointers(1)
     .onBegin(() => {
       'worklet';
@@ -513,9 +546,9 @@ export default function KeyBar(props: KeyBarProps) {
       if (grabbed.value === 0) {
         if (!barGrabbed(tx, ty)) return;
         grabbed.value = 1;
-        if (props.showTabs && props.onZoomGrab) runOnJS(props.onZoomGrab)(tx, ty);
+        if (showTabsSV.value === 1) runOnJS(jsZoomGrab)(tx, ty);
       }
-      if (sv !== undefined && props.showTabs && sv.dragging.value === 1 && sv.zoomReady.value === 1) {
+      if (sv !== undefined && showTabsSV.value === 1 && sv.dragging.value === 1 && sv.zoomReady.value === 1) {
         if (sv.zoomFromSet.value === 0) {
           sv.zoomFromSet.value = 1;
           sv.zoomFromX.value = tx;
@@ -538,7 +571,7 @@ export default function KeyBar(props: KeyBarProps) {
         ) {
           settled.value = 1;
           sv.join.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
-          if (props.onAirSettled) runOnJS(props.onAirSettled)();
+          runOnJS(jsAirSettled)();
         }
       }
       // The keys get out of the way once the card is visibly off the bar — not at the slop, which
@@ -553,7 +586,7 @@ export default function KeyBar(props: KeyBarProps) {
         if (!rowJoins(tx, ty)) return;
         held.value = 1;
         originX.value = tx;
-        if (props.onBarSwipe) runOnJS(props.onBarSwipe)('start', 0);
+        runOnJS(jsBarSwipe)('start', 0);
         return;
       }
       if (sv !== undefined) {
@@ -572,14 +605,14 @@ export default function KeyBar(props: KeyBarProps) {
       'worklet';
       // Both axes report, in this order, and the screen arbitrates: a release that commits to
       // the grid ends the page swipe itself, so the second call finds nothing live to decide.
-      if (grabbed.value === 1 && props.showTabs && props.onZoomEnd)
-        runOnJS(props.onZoomEnd)(e.translationX, e.translationY, e.velocityX, e.velocityY);
+      if (grabbed.value === 1 && showTabsSV.value === 1)
+        runOnJS(jsZoomEnd)(e.translationX, e.translationY, e.velocityX, e.velocityY);
       grabbed.value = 0;
       if (held.value === 1) {
         held.value = 0;
-        if (props.onBarSwipe) runOnJS(props.onBarSwipe)('end', e.translationX - originX.value);
+        runOnJS(jsBarSwipe)('end', e.translationX - originX.value);
       }
-    });
+    }), [panSV]);
 
   const keyLabel = { color: theme.foreground, fontFamily: MONO, fontSize: 14 };
 
