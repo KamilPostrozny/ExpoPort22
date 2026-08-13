@@ -70,6 +70,10 @@ export type Card = { win: TmuxWindow; snap: Snap | null };
  *  50k-line scrollback capture never becomes 50k <Text> nodes. */
 const MAX_LINES = 44;
 
+/** Captures in flight at once — see the burst comment in `refresh`. Four leaves headroom under a
+ *  default MaxSessions of 10 for the PTY, the poll and whatever else the session is doing. */
+const CAPTURE_POOL = 4;
+
 
 /**
  * The switcher's data: the window list (kept warm while `enabled`, so the first zoom-out knows
@@ -111,22 +115,54 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
       const wins = await listWindows();
       if (seq.current !== mine) return;
       if (withSnapshots) {
-        const caps = await Promise.all(
-          wins.map((win) =>
-            capturePane(win.index)
-              .then((text) => ({ lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width }))
-              .catch(() => null), // window died between list and capture: it keeps its last snapshot
-          ),
-        );
-        if (seq.current !== mine) return;
-        const into = frozenRef.current ? pending.current : shown.current;
+        // A few at a time, not one channel per window all at once: every capture is its own exec
+        // channel, sshd's MaxSessions is 10 per connection by default, and this session already
+        // holds the shell's PTY and the poll. A 20-tab grid firing 20 at once came back with only
+        // the active card's content — the one `refreshCard` fills with a single capture — and
+        // stayed that way, because every poll repeated the same burst (device, 2026-08-13).
+        // ponytail: fixed pool, no queue; widen it if a big session ever feels slow to fill.
+        const caps: (Snap | null)[] = [];
+        let failure: unknown = null;
+        for (let i = 0; i < wins.length; i += CAPTURE_POOL) {
+          const batch = await Promise.all(
+            wins.slice(i, i + CAPTURE_POOL).map((win) =>
+              capturePane(win.index)
+                .then((text) => ({ lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width }))
+                // window died between list and capture: it keeps its last snapshot
+                .catch((error) => {
+                  failure ??= error;
+                  return null;
+                }),
+            ),
+          );
+          if (seq.current !== mine) return;
+          caps.push(...batch);
+        }
+        // Silent per window, once per refresh here: a burst that fails wholesale is exactly what
+        // this poll cannot show, and a blank card says nothing about why.
+        if (failure !== null)
+          console.log(
+            '[switcher]',
+            caps.filter((snap) => snap === null).length,
+            'of',
+            wins.length,
+            'captures failed:',
+            failure,
+          );
         caps.forEach((snap, i) => {
           if (snap === null) return;
           // The active window's card is the one the zoom flies into, and the terminal surface
           // covers exactly that slot for the whole flight — so its content can be replaced now,
           // unseen, and the crossfade at the end lands on the pane the terminal was showing
           // rather than on whatever the card held before. Every other card is in plain sight.
-          (wins[i].active ? shown.current : into).set(wins[i].id, snap);
+          //
+          // …but only a card that HAS content has content to be tripped over. Freezing protects
+          // against a rewrite mid-motion; a window's FIRST snapshot rewrites nothing, and holding
+          // it back is what left cold-start cards blank: the one refresh that fills them fires at
+          // connect, so a grid opened right after it lands mid-flight, queues every non-active
+          // window into `pending`, and the lift below throws that queue away (user, 2026-08-13).
+          const held = frozenRef.current && !wins[i].active && shown.current.has(wins[i].id);
+          (held ? pending.current : shown.current).set(wins[i].id, snap);
         });
       }
       // A window that is gone takes its snapshot with it — tmux ids never come back, so anything
