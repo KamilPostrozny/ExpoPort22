@@ -494,6 +494,25 @@ export default function SessionScreen() {
   const nq = search.on ? normalizeQuery(search.q) : '';
   const visibleCards =
     nq === '' ? cards : cards.filter((c) => windowSurvives(c.win, nq, hits[c.win.id]));
+  /**
+   * The list the GRID draws, frozen for the length of a hop.
+   *
+   * `memo(SwitcherInner)` is what makes the permanently-mounted grid free, and the commit's
+   * optimistic `active` flip is the one thing that reliably breaks it: it rebuilds every card
+   * object, so `visibleCards` changes identity on the exact frame `slideTo` starts, and the whole
+   * grid — one WindowCard per window, each re-running `snapshotType` and a path split — re-renders
+   * into the first frame of the animation. The flip is for the NEXT grid open; nothing is looking
+   * at the grid during a page slide (it sits at opacity 0 until prog passes 0.75).
+   *
+   * This is the same rule `frozen` already states — nothing may change while something is moving —
+   * applied to the one path that bypasses it. Gated on `pageSwipe` rather than `frozen` on purpose:
+   * the zoom phases, a grid open and `birth` all have `pageSwipe === null`, so a newly born card
+   * still appears at once. Written during render like `cardsRef`/`searchRef` above, and
+   * `setPageSwipe(null)` in `clearBarSwipe` is itself a render, so the grid catches up at the
+   * landing with no effect of its own.
+   */
+  const gridCards = useRef(visibleCards);
+  if (pageSwipe === null) gridCards.current = visibleCards;
 
   const disarmSearch = () => {
     console.log('[search] disarmed');
@@ -1918,7 +1937,7 @@ export default function SessionScreen() {
           // The flight crops its top chrome away (`cropTop`), so what is left above the first row
           // — on both sides of the crossfade — is the webview's own inset and nothing else.
           padTop={padTop}
-          cards={visibleCards}
+          cards={gridCards.current}
           total={cards.length}
           query={search.on ? search.q : ''}
           hits={hits}
