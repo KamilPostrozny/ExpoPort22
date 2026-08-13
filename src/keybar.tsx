@@ -72,6 +72,7 @@ import {
   barGrabbed,
   KEYS_DROP_DY,
   rowJoins,
+  ROW_MAX_PROG,
   controlByte,
   CARET_SETTLE_MS,
   CARET_STEP_MAX,
@@ -600,19 +601,33 @@ function KeyBarInner(props: KeyBarProps) {
           Math.abs(e.velocityX) < 90
         ) {
           settled.value = 1;
-          // Visible AND seated, both from here. The row used to be mounted by an `airSettled`
-          // render, and when it became permanent-and-shown-by-opacity (a91809f) only the page
-          // swipe's half of that condition was carried over — `rowVis` is set at `onBarSwipe`
-          // 'start' and nowhere else. So a held card sprang this join against an invisible row,
-          // and the first sideways move revealed it already seated instead of bouncing in
-          // (user, 2026-08-13). The spring is what the eye reads; the opacity just has to be on
-          // before it runs.
-          // Revealed and marked held in the SAME frame — see `heldAir`. The JS hop this used to
-          // make said the same thing a commit later, which was long enough to see the page it is
-          // meant to suppress.
-          sv.rowVis.value = 1;
           sv.heldAir.value = 1;
-          sv.join.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
+        }
+        // The neighbours around a held card, and the only thing that draws them: the hand has
+        // stopped (`heldAir`) AND the card is low — inside the bottom 30% of the pull. Climb past
+        // that and they leave again; it is one card up there, on its way to the grid alone (user,
+        // 2026-08-14). Reversible on purpose, because the pull itself is: up, and back down.
+        //
+        // Visible AND seated, both from here. The row used to be mounted by an `airSettled`
+        // render, and when it became permanent-and-shown-by-opacity (a91809f) only the page
+        // swipe's half of that condition was carried over — `rowVis` is set at `onBarSwipe`
+        // 'start' and nowhere else. So a held card sprang this join against an invisible row,
+        // and the first sideways move revealed it already seated instead of bouncing in
+        // (user, 2026-08-13). The spring is what the eye reads; the opacity just has to be on
+        // before it runs. Revealed in the SAME frame as `heldAir` — the JS hop this used to make
+        // said the same thing a commit later, long enough to see the page it is meant to suppress.
+        //
+        // Once the page swipe is actually running (`held`) the row belongs to it, and no amount
+        // of climbing takes it back: the finger is already carrying pages sideways.
+        if (held.value === 0 && sv.heldAir.value === 1) {
+          const low = sv.prog.value <= ROW_MAX_PROG ? 1 : 0;
+          if (low !== sv.rowVis.value) {
+            sv.rowVis.value = low;
+            sv.join.value =
+              low === 1
+                ? withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true })
+                : 0;
+          }
         }
       }
       // The keys get out of the way once the card is visibly off the bar — not at the slop, which
@@ -626,7 +641,7 @@ function KeyBarInner(props: KeyBarProps) {
       // latch a few lines up) and stopped inside the bottom 30% of the pull. Higher than that the
       // card is on its way to the grid alone (user, 2026-08-14).
       if (held.value === 0) {
-        if (!rowJoins(tx, ty, sv?.heldAir.value === 1, sv?.prog.value ?? 0)) return;
+        if (!rowJoins(tx, sv?.prog.value ?? 0, sv?.heldAir.value === 1)) return;
         held.value = 1;
         originX.value = tx;
         runOnJS(jsBarSwipe)('start', 0, sv?.heldAir.value === 1);

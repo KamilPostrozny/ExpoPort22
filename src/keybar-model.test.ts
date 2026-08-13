@@ -16,6 +16,7 @@ import {
   barDismisses,
   barGrabbed,
   rowJoins,
+  ROW_AIR_PROG,
   ROW_MAX_PROG,
   controlByte,
   ctrlTap,
@@ -190,17 +191,20 @@ test('the grab is either axis — from there both are live and neither is a deci
 });
 
 test('the row joins at the slop on the bar, but wants intent in the air', () => {
-  expect(rowJoins(5, 0, false, 0)).toBe(false);
-  expect(rowJoins(11, 0, false, 0)).toBe(true);
-  expect(rowJoins(-11, -25, false, 0)).toBe(true); // the flat hop's own arc is still "on the bar"
-  expect(rowJoins(20, -120, true, 0.1)).toBe(false); // a pull's incidental drift joins nothing
-  expect(rowJoins(49, -120, true, 0.1)).toBe(true); // deliberate sideways while held: it arrives
+  expect(rowJoins(5, 0, false)).toBe(false);
+  expect(rowJoins(11, 0, false)).toBe(true);
+  // The flat hop is on the bar however much its own arc lifts: the arc is what `prog`'s dead zone
+  // discounts, and a hop reads as zero there — it must never wait for a settle it will not make.
+  expect(rowJoins(-11, 0, false)).toBe(true);
+  expect(rowJoins(11, ROW_AIR_PROG, false)).toBe(true);
+  expect(rowJoins(20, 0.1, true)).toBe(false); // a pull's incidental drift joins nothing
+  expect(rowJoins(49, 0.1, true)).toBe(true); // deliberate sideways while held: it arrives
 });
 
 test('a card still climbing, or held high, keeps its neighbours away', () => {
-  expect(rowJoins(60, -120, false, 0.1)).toBe(false); // the hand has not stopped: no row
-  expect(rowJoins(60, -120, true, ROW_MAX_PROG)).toBe(true); // the last of the bottom 30%
-  expect(rowJoins(60, -120, true, ROW_MAX_PROG + 0.01)).toBe(false); // above it: one card, to the grid
+  expect(rowJoins(60, 0.1, false)).toBe(false); // the hand has not stopped: no row
+  expect(rowJoins(60, ROW_MAX_PROG, true)).toBe(true); // the last of the bottom 30%
+  expect(rowJoins(60, ROW_MAX_PROG + 0.01, true)).toBe(false); // above it: one card, to the grid
 });
 
 test('nothing about the vertical is judged mid-gesture any more', () => {

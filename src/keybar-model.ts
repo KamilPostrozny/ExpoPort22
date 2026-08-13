@@ -172,12 +172,17 @@ export function barGrabbed(dx: number, dy: number): boolean {
   return Math.abs(dx) > BAR_AXIS_SLOP || Math.abs(dy) > BAR_AXIS_SLOP;
 }
 
-/** Upward travel past which the card counts as airborne, and the sideways travel that earns the
- *  page row up there. On the bar the row joins at the slop — a hop should feel instant — but a
- *  deliberate pull straight up drifts 10–20pt sideways all by itself, and joining on that put
- *  neighbour cards around a card nobody was swiping (movement 3, screenshot). */
-export const ROW_AIR_DY = 30;
+/** The sideways travel that earns the page row once the card is off the bar: a deliberate pull
+ *  straight up drifts 10–20pt sideways all by itself, and joining on that put neighbour cards
+ *  around a card nobody was swiping (movement 3, screenshot). */
 export const ROW_AIR_DX = 48;
+
+/** Zoom progress below which the card is still ON THE BAR, and the row behaves as it always has.
+ *  Not raw `dy`: a flat hop's own arc crosses 30pt of upward travel by itself (2026-08-12, ten
+ *  hops at -24…-26) and a raw-dy boundary threw those hops into the air branch, where they wait
+ *  for a settle a hop never makes — no neighbours at all (user, 2026-08-14). `prog` is the arc
+ *  already discounted: its dead zone grows with |dx| precisely to read a sideways swipe as zero. */
+export const ROW_AIR_PROG = 0.05;
 
 /** How far up the card may be and still gather neighbours: the bottom 30% of the pull. Past it
  *  the card is a single tab on its way to the grid, and neighbours around it are just clutter in
@@ -188,9 +193,9 @@ export const ROW_MAX_PROG = 0.3;
  *  deliberate travel AND a card that is being held — the hand stopped climbing (`held`, the
  *  settle latch) and stopped low (`prog` inside `ROW_MAX_PROG`). Still climbing, or already high,
  *  means one card and no row. */
-export function rowJoins(dx: number, dy: number, held: boolean, prog: number): boolean {
+export function rowJoins(dx: number, prog: number, held: boolean): boolean {
   'worklet';
-  if (-dy <= ROW_AIR_DY) return Math.abs(dx) > BAR_AXIS_SLOP;
+  if (prog <= ROW_AIR_PROG) return Math.abs(dx) > BAR_AXIS_SLOP;
   return held && prog <= ROW_MAX_PROG && Math.abs(dx) > ROW_AIR_DX;
 }
 
