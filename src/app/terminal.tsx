@@ -1,4 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
+import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { router, Stack } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -27,6 +28,7 @@ import Animated, {
   SlideOutLeft,
   SlideOutRight,
   runOnJS,
+  useAnimatedProps,
   useAnimatedStyle,
   type AnimatedStyle,
   useFrameCallback,
@@ -1380,7 +1382,13 @@ export default function SessionScreen() {
    *  rides the same `prog` the flight animates. It also keeps the grid out of the gap between
    *  page cards during a plain hop, where prog is 0 and this is 0. */
   const gridInStyle = useAnimatedStyle(() => ({
-    opacity: Math.min(Math.max((prog.value - 0.5) / 0.2, 0), 1),
+    opacity: Math.min(Math.max((prog.value - 0.6) / 0.2, 0), 1),
+  }));
+  /** …and it arrives BLURRED, sharpening only as the card lands — Safari's sequencing exactly
+   *  (user, 2026-08-13, two reference screenshots): the tabs behind a still-travelling card are
+   *  legible as shapes, not content. Blur intensity is travel, like everything else. */
+  const gridBlurProps = useAnimatedProps(() => ({
+    intensity: 30 * (1 - Math.min(Math.max((prog.value - 0.8) / 0.2, 0), 1)),
   }));
 
   /** The container every card rides: one scale, one flight, one place. Its height is the stage's
@@ -1553,6 +1561,12 @@ export default function SessionScreen() {
           gridRef={gridRef}
           zoomId={zoomId}
           fade={alpha}
+        />
+        <AnimatedBlurView
+          pointerEvents="none"
+          animatedProps={gridBlurProps}
+          tint="dark"
+          style={StyleSheet.absoluteFill}
         />
         </Animated.View>
       )}
@@ -2102,6 +2116,8 @@ function PageContent({
 
 /** §7 structured-test trace (TEMPORARY): a layer announcing its own lifetime — "over each
  *  other" and "flickering" are mount/unmount questions, invisible in every other log. */
+const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
+
 function MountProbe({ name }: { name: string }) {
   useEffect(() => {
     console.log('[trace] +', name);
