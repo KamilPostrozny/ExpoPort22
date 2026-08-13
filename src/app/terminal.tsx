@@ -1422,6 +1422,7 @@ export default function SessionScreen() {
       if (GESTURE_LOG)
         console.log(
           '[barswipe] start at', pos, 'of', windows.length,
+          air ? '(held: no new-tab slot)' : `(flat: ${slots} slots)`,
           'snaps', cards.map((c) => (c.snap ? '#' : '.')).join(''),
         );
       setPageSwipe({
