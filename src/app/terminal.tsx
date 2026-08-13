@@ -23,8 +23,6 @@ import Animated, {
   cancelAnimation,
   Easing,
   FadeOut,
-  SlideOutLeft,
-  SlideOutRight,
   runOnJS,
   useAnimatedStyle,
   type AnimatedStyle,
@@ -702,6 +700,11 @@ export default function SessionScreen() {
    *  2026-08-13, "flickeringly show up"). A shared value through the same seat term the swipe
    *  join uses cannot. */
   const joinSV = useSharedValue(0);
+  /** Is the page row on screen? Opacity, not mounting: the cards stay mounted for the life of the
+   *  terminal view because each is a snapshot tree of Text runs, and building one costs 53-93ms of
+   *  React on the JS thread — the hitch at the start of every swipe the original code was written
+   *  to avoid, which mounting them per gesture brought back (perf, 2026-08-13). */
+  const rowVisSV = useSharedValue(0);
 
   /** The grab, one JS call per gesture: the open's one-off costs. Everything per-frame — prog,
    *  dragX, the settle latch — runs in the bar's worklet against the shared values above. */
@@ -787,7 +790,12 @@ export default function SessionScreen() {
       draggingSV.value = 0;
       airSettledRef.current = false;
       setAirSettled(false);
-      joinSV.value = 0;
+      // The row goes back out to the sides so the card flies to the grid alone — unless a hop is
+      // landing, whose own clear cuts it (see `clearBarSwipe`).
+      if (swipeInfo.current?.live !== true) {
+        joinSV.value = withTiming(0, { duration: 160 });
+        rowVisSV.value = withTiming(0, { duration: 160 });
+      }
       // The hop is asked FIRST: with the card held in the air `prog` sits past ZOOM_COMMIT the
       // whole time, so asking the grid first meant every release went to the grid and a sideways
       // hop could never win (user, 2026-08-13). The grid takes the release only when the
@@ -1104,6 +1112,9 @@ export default function SessionScreen() {
     selectSeq.current++; // supersedes a settle's redraw-wait, so it cannot clear a later swipe
     swipeInfo.current = null;
     rowLiveSV.value = 0;
+    // A cut, not a fade: the landed card and the live terminal under it are the same picture.
+    rowVisSV.value = 0;
+    joinSV.value = 0;
     setPageSwipe(null);
     swipeX.value = 0;
     roundSV.value = 0; // x is already 0 here, so the travel factor has faded the edge out too
@@ -1186,6 +1197,7 @@ export default function SessionScreen() {
       zoomFromSet: zoomFromSetSV,
       dragging: draggingSV,
       rowLive: rowLiveSV,
+      rowVis: rowVisSV,
       rowPos: rowPosSV,
       rowCount: rowCountSV,
       stage: stageSV,
@@ -1220,6 +1232,7 @@ export default function SessionScreen() {
       perfStart();
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
       rowLiveSV.value = 1;
+      rowVisSV.value = 1;
       rowPosSV.value = pos;
       rowCountSV.value = windows.length + 1;
       setOpen('none');
@@ -1505,6 +1518,7 @@ export default function SessionScreen() {
       return {
         height: f.height,
         borderRadius: f.radius,
+        opacity: rowVisSV.value,
         transform: [{ translateX: side * (pitch + 44 * (1 - seat)) }],
       };
     });
@@ -1979,14 +1993,11 @@ export default function SessionScreen() {
           2026-08-13) — but a hop's landing must stay an instant cut, because the landed card sits
           exactly over the settle overlay's identical picture, and sliding it away would show the
           same tab twice, one peeling off the other. */}
-      {stage !== null && showTabs && connected &&
-        (pageSwipe !== null || airSettled) &&
-        (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
+      {stage !== null && showTabs && connected && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" exiting={pageSwipe === null ? SlideOutLeft.duration(160) : pageSwipe.phase === 'settle' ? FadeOut.duration(150) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
               </Animated.View>
               {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
@@ -2001,9 +2012,8 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" exiting={pageSwipe === null ? SlideOutRight.duration(160) : pageSwipe.phase === 'settle' ? FadeOut.duration(150) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
               </Animated.View>
               {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
@@ -2245,16 +2255,6 @@ function PageContent({
       />
     </View>
   );
-}
-
-/** §7 structured-test trace (TEMPORARY): a layer announcing its own lifetime — "over each
- *  other" and "flickering" are mount/unmount questions, invisible in every other log. */
-function MountProbe({ name }: { name: string }) {
-  useEffect(() => {
-    console.log('[trace] +', name);
-    return () => console.log('[trace] -', name);
-  }, [name]);
-  return null;
 }
 
 /** One neighbouring window's page. The pitch, the swipe offset and the zoom all live on the card

@@ -145,6 +145,7 @@ export type KeyBarProps = {
     zoomFromSet: SharedValue<number>;
     dragging: SharedValue<number>;
     rowLive: SharedValue<number>;
+    rowVis: SharedValue<number>;
     rowPos: SharedValue<number>;
     rowCount: SharedValue<number>;
     stage: SharedValue<{ w: number; h: number }>;
