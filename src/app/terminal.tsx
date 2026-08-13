@@ -362,6 +362,11 @@ export default function SessionScreen() {
     frozen,
   );
 
+  /** The cards as of this render, for the deferred neighbour refresh — a `setTimeout` closure
+   *  would otherwise hold the list from before the hop. */
+  const cardsRef = useRef(cards);
+  cardsRef.current = cards;
+
   /* --- T14: one search, shared by the grid and the terminal view --- *
    *
    * `q`/`on` are the whole armed-or-disarmed state: the switcher's field and the terminal's bar
@@ -1083,10 +1088,19 @@ export default function SessionScreen() {
     // meant to serve (user, 2026-08-10). Nothing on screen is waiting for it. Skipped when this
     // clear IS a swipe's first frame (the settle yielding to an impatient re-swipe) — exactly
     // that stutter; the cache stays one hop stale and the next clear refreshes it.
-    // A beat AFTER the landing, not on it: the burst is ten execs and ten parses on a JS thread
-    // that also has the settle's own commits to run — at 19-30fps every gesture transition was
-    // arriving 50-150ms late (perf monitor, 2026-08-13).
-    if (!skipRefresh) setTimeout(() => void refresh(true), 350);
+    // Only the two windows a NEXT swipe can reach, and a beat after the landing. This used to
+    // re-capture and re-parse every pane in the session: with ten tabs that is ten execs and ten
+    // ANSI parses on the JS thread after every single hop — the 150-213ms stall the perf
+    // heartbeat caught next to each commit, which is what a fast repeated swipe felt like
+    // (2026-08-13). The rest of the grid is refreshed when the grid itself opens.
+    if (!skipRefresh)
+      setTimeout(() => {
+        const at = activePosIn(cardsRef.current);
+        for (const side of [-1, 1] as const) {
+          const win = cardsRef.current[at + side]?.win;
+          if (win) void refreshCard(win);
+        }
+      }, 350);
     selectSeq.current++; // supersedes a settle's redraw-wait, so it cannot clear a later swipe
     swipeInfo.current = null;
     rowLiveSV.value = 0;
