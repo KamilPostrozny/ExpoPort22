@@ -1083,7 +1083,10 @@ export default function SessionScreen() {
     // meant to serve (user, 2026-08-10). Nothing on screen is waiting for it. Skipped when this
     // clear IS a swipe's first frame (the settle yielding to an impatient re-swipe) — exactly
     // that stutter; the cache stays one hop stale and the next clear refreshes it.
-    if (!skipRefresh) void refresh(true);
+    // A beat AFTER the landing, not on it: the burst is ten execs and ten parses on a JS thread
+    // that also has the settle's own commits to run — at 19-30fps every gesture transition was
+    // arriving 50-150ms late (perf monitor, 2026-08-13).
+    if (!skipRefresh) setTimeout(() => void refresh(true), 350);
     selectSeq.current++; // supersedes a settle's redraw-wait, so it cannot clear a later swipe
     swipeInfo.current = null;
     rowLiveSV.value = 0;

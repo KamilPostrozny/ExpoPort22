@@ -71,7 +71,12 @@ function logged(module: ExpoSSHModule): ExpoSSHModule {
         if (!(result instanceof Promise)) return result;
         return result.then(
           (resolved) => {
-            console.log(`[ssh] ${property} ->`, resolved);
+            // Through `brief` like the arguments: a capture-pane result is multi-KB of ANSI,
+            // ten of them arrive per poll, and each console.log serializes through Metro ON the
+            // JS thread — which the perf monitor showed pinned at 19-30fps while the UI ran 60,
+            // making every gesture TRANSITION (row mount, slide start, settle) land 50-150ms
+            // late: the "2-3 states instead of an animation" (2026-08-13).
+            console.log(`[ssh] ${property} ->`, brief(resolved));
             return resolved;
           },
           (error) => {
@@ -89,7 +94,9 @@ if (LOG) {
   // Decoded, because base64 tells you nothing at a glance, then JSON-quoted so an escape
   // sequence prints as \u001b[2J instead of repainting the terminal you are reading.
   native.addListener('onShellData', ({ data }) =>
-    console.log('[ssh] onShellData', JSON.stringify(atob(data))),
+    // Decoded then briefed — a redraw burst is tens of KB, and logging it whole is JS-thread
+    // time taken from the gestures (see `->` above).
+    console.log('[ssh] onShellData', brief(JSON.stringify(atob(data)))),
   );
   native.addListener('onShellClose', () => console.log('[ssh] onShellClose'));
 }
