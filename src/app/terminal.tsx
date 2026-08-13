@@ -540,7 +540,19 @@ export default function SessionScreen() {
    *  made the SSH tap the thing we were measuring. A hop emits ~10 of them between the harness,
    *  the trace and §7's own lines, which is JS-thread time inside the gesture being measured.
    *  Flip on to debug; off to measure or to use the app. */
-  const GESTURE_LOG = false;
+  const GESTURE_LOG = true;
+
+  /* §7 probe (TEMPORARY): how much React does per gesture. Guessing at JS costs one at a time
+   * has flattened out at ~30fps; this counts the screen's renders and the wall time its bodies
+   * take, so the next cut is chosen from a number. */
+  const renderN = useRef(0);
+  const renderMs = useRef(0);
+  const renderT0 = performance.now();
+  renderN.current += 1;
+  useEffect(() => {
+    renderMs.current += performance.now() - renderT0;
+  });
+  const renderMark = useRef({ n: 0, ms: 0 });
 
   /* --- §7 perf harness (TEMPORARY, 2026-08-13): "measure that every animation is actually
    * happening without dropped frames" (user). `perfOn` spans a gesture from its first event to
@@ -565,6 +577,7 @@ export default function SessionScreen() {
   const perfStart = (fresh = false) => {
     if (perfOn.value === 1 && !fresh) return;
     perfBuf.value = { n: 0, d17: 0, d25: 0, worst: 0 };
+    renderMark.current = { n: renderN.current, ms: renderMs.current };
     evN.value = 0;
     evGapMax.value = 0;
     evPrevT.value = 0;
@@ -580,7 +593,8 @@ export default function SessionScreen() {
     if (b.n > 5 && GESTURE_LOG)
       console.log(
         `[perf] ${label}: ${b.n} frames, ${b.d17} >17ms, ${b.d25} >25ms, worst ${Math.round(b.worst)}ms | ` +
-          `ev ${evN.value} maxgap ${Math.round(evGapMax.value)}ms | sty ${styN.value} maxgap ${Math.round(styGapMax.value)}ms`,
+          `ev ${evN.value} maxgap ${Math.round(evGapMax.value)}ms | sty ${styN.value} maxgap ${Math.round(styGapMax.value)}ms | ` +
+          `renders ${renderN.current - renderMark.current.n} in ${Math.round(renderMs.current - renderMark.current.ms)}ms`,
       );
   };
   useEffect(() => {
