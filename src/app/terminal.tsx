@@ -27,7 +27,6 @@ import Animated, {
   type AnimatedStyle,
   type SharedValue,
   useSharedValue,
-  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -602,11 +601,6 @@ export default function SessionScreen() {
   const PHASE_WATCHDOG_MS = 1500;
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
-  /** The birth entrance (see `birth`). Longer than the zooms, not shorter: those two cross-fade
-   *  between two pictures of the same thing and can afford to be brisk, while this one comes from
-   *  nothing at all — at 260ms it read as the shell being switched on rather than arriving (user,
-   *  2026-08-13). An ease-IN-out, so it leaves the dark gently instead of jumping off it. */
-  const BIRTH_IN = { duration: 440, easing: Easing.inOut(Easing.quad) };
   /** Every console.log serializes through Metro's socket ON the JS thread — the same cost that
    *  made the SSH tap the thing we were measuring. A hop emits ~10 of them between the harness,
    *  the trace and §7's own lines, which is JS-thread time inside the gesture being measured.
@@ -815,23 +809,6 @@ export default function SessionScreen() {
    *  the release is dropped, the render lands on `drag`, and nothing is left to end it. That is a
    *  frozen app (user, 2026-08-11), and it is the same shape as the two before it. */
   const dragging = useRef(false);
-  /**
-   * The new terminal's entrance, 0→1: a window that was born by a swipe has no page to slide in
-   * from, so it comes up out of the backdrop where the swipe left off (user, 2026-08-13). Drives
-   * the card's opacity and, as its complement, a blur over it — so the shell arrives soft and
-   * sharpens, rather than being switched on.
-   *
-   * 1 at rest, and every other landing leaves it there: a hop between existing windows is a cut,
-   * deliberately, because the card that landed and the terminal under it are the same picture.
-   */
-  const birth = useSharedValue(1);
-  /** Is that entrance running? React's half — it mounts the blur, which is a UIVisualEffectView and
-   *  therefore must not exist a frame longer than it is seen (the grid's own blur, and the note
-   *  there). Set at the landing, cleared by the animation's own callback. */
-  const [birthing, setBirthing] = useState(false);
-  /** Did the swipe just committed to birth a window? Read by `clearBarSwipe`, which is where every
-   *  landing — cut or entrance — ends up. */
-  const birthLanding = useRef(false);
   /** The held join's approach, 0→1 on a clamped spring the moment the hand settles. A Reanimated
    *  `entering` did this job and flickered: layout animations under a scaled, translated parent
    *  paint their first frame at the final position before jumping to the start (user,
@@ -1348,38 +1325,6 @@ export default function SessionScreen() {
     setPageSwipe(null);
     swipeX.value = 0;
     roundSV.value = 0; // x is already 0 here, so the travel factor has faded the edge out too
-    // A birth lands here too, and it is the one landing with nothing underneath it: every other
-    // hop cuts because the page that slid in and the terminal beneath are the same picture, and
-    // this slide had no page at all. So the stage comes back from zero — under a blur, which is
-    // fixed and fades by OPACITY, never by intensity (the grid's entrance, and the note there).
-    // Set on this same call, before the paint that puts the card back at x=0: the reset above is
-    // a cut to somewhere invisible.
-    if (birthLanding.current) {
-      birthLanding.current = false;
-      // Ungated, like the birth's own failure line above it: a window being created is rare, and
-      // this is the one line that says the entrance ran AND which build is running it — the
-      // duration is the version stamp. Two rounds were spent guessing at whether the phone had
-      // the code or the code had a bug (2026-08-13); it was the bug, and this is what would have
-      // said so on the first swipe.
-      console.log('[birth] entrance', BIRTH_IN.duration + 'ms');
-      setBirthing(true);
-      // ONE assignment, and that is the whole point of the sequence. Written as `birth.value = 0`
-      // followed by `birth.value = withTiming(1, …)` — the obvious way — the second assignment
-      // replaces the first before either reaches the UI thread, so the animation began at 1 and
-      // ran to 1: no fade, and `birth >= 1` throughout, which also left both accent gates open.
-      // That is exactly what the device showed — "it just showed up, briefly with the blue
-      // outline" (user, 2026-08-13) — and it was one bug wearing two faces, not a duration to
-      // tune. A zero-length first step cannot be lost this way.
-      birth.value = withSequence(
-        withTiming(0, { duration: 0 }),
-        withTiming(1, BIRTH_IN, (done) => {
-          // Guarded: a second birth landing inside this one REPLACES this animation and fires this
-          // callback with false, and unmounting the blur there would strip it off the entrance
-          // that is still running. Nothing cancels `birth`, so the last one always finishes.
-          if (done) runOnJS(setBirthing)(false);
-        }),
-      );
-    }
   };
 
   const settleBarSwipe = () => {
@@ -1567,14 +1512,10 @@ export default function SessionScreen() {
         // the halo all point at the wrong tab until something re-lists.
         // `refresh(false)` is list-only: no capture burst on the JS thread, and the fresh shell
         // has nothing to snapshot yet. Rare by nature — this is a window being created, not a hop.
-        else {
-          // Nothing slid in behind this one, so nothing is covering the stage when the motion
-          // stops: the landing is an entrance, not a cut (see `birth`).
-          birthLanding.current = true;
+        else
           newWindow()
             .then(() => refresh(false))
             .catch((error) => console.log('[barswipe] new window failed:', error));
-        }
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
         slideTo((info.pos - target) * pagePitch(stage.w), settleBarSwipe);
       }
@@ -1944,11 +1885,6 @@ export default function SessionScreen() {
   const gridBlurStyle = useAnimatedStyle(() => ({
     opacity: 1 - flight.value,
   }));
-  /** The birth's blur, on the same principle and for the same reason: fixed intensity, animated
-   *  opacity. It is the complement of the card's own fade, and it sits OUTSIDE the box rather
-   *  than in it — inside, the card's rising opacity would multiply the blur away exactly when the
-   *  blur is meant to be doing its work, and the shell would simply fade up sharp. */
-  const birthBlurStyle = useAnimatedStyle(() => ({ opacity: 1 - birth.value }));
 
   /** The container every card rides: one scale, one flight, one place. Its height is the stage's
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
@@ -1956,9 +1892,7 @@ export default function SessionScreen() {
   const boxStyle = useAnimatedStyle(() => {
     const b = zoomBox(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     return {
-      // `birth` is 1 for everything that is not a window arriving out of the backdrop, so this
-      // multiply is the identity on every other path through here.
-      opacity: alpha.value * birth.value,
+      opacity: alpha.value,
       transform: [
         // The row moves as one, always: the box IS the swipe. The page/card handover that used
         // to live here (cardCarry) existed for a bar that no longer rides inside the card, and
@@ -2309,8 +2243,8 @@ export default function SessionScreen() {
               band, the release and the pill strip all count it, and committing onto it births a
               window — but it is not a page, and it used to slide in as one: an empty pane the
               width of the screen, pretending to be a window that did not exist. Nothing comes in
-              from that side now; the swipe uncovers the backdrop, and the new terminal arrives as
-              itself once the motion is over (see `birth`, user 2026-08-13). */}
+              from that side now; the swipe uncovers the backdrop, and the new terminal is simply
+              there when the slide lands — the same cut every other hop makes (user, 2026-08-13). */}
           {anchor < cards.length - 1 && (
             <Animated.View pointerEvents="none" style={[
                 styles.stageWrapper,
@@ -2334,16 +2268,6 @@ export default function SessionScreen() {
       )}
 
       </Animated.View>
-
-      {/* The birth's blur (see `birth`). Over the box, not inside it, and mounted only for the
-          260ms it is seen: a UIVisualEffectView costs GPU for as long as it exists, whatever its
-          opacity — the lesson the grid's own blur is annotated with, and the reason this is not
-          simply left standing at zero. */}
-      {birthing && (
-        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, birthBlurStyle]}>
-          <BlurView intensity={40} tint={theme.isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
-        </Animated.View>
-      )}
 
       {/* Everything from here down is SCREEN-STATIC chrome, deliberately outside the box the
           cards ride in: the box carries the swipe itself now (no page/card handover — see
