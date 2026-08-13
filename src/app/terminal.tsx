@@ -1503,16 +1503,15 @@ export default function SessionScreen() {
         ]}>
 
       {/* The live card: the clipped, rounded, ringed terminal surface. Identity at rest — at which
-          point it is the screen — and the thing the ring belongs to at every other.
-
-          No ground of its own, deliberately. At rest this box does not move: the page slides INSIDE
-          it (`cardCarry`), so a background here stays spread across the whole stage while the page
-          vacates half of it — an opaque sheet exactly where the arriving card is meant to show
-          through, which is the neighbour that kept going missing (user, 2026-08-13, twice). The
-          page paints its own ground, the bar band included, so nothing here needs to. */}
+          point it is the screen — and the thing the ring belongs to at every other. Its ground is
+          safe again now the neighbours are drawn IN FRONT (an arriving card covers it rather than
+          hiding behind it), and the flight needs it: the crop view's keyboard-pad band is bare
+          otherwise, a see-through strip along the held card's bottom. */}
       <Animated.View
         style={[
-          stage === null ? styles.screen : [styles.stageWrapper, { width: stage.w }],
+          stage === null
+            ? styles.screen
+            : [styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }],
           stage !== null && wrapperStyle,
         ]}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
@@ -1758,8 +1757,12 @@ export default function SessionScreen() {
       )}
 
       </View>
+      </Animated.View>
 
-      {/* the transition's accent ring, clipping and scaling with the card it belongs to */}
+      {/* The transition's accent ring — absoluteFill of the CARD, deliberately outside the crop
+          view. Inside it the ring rode the crop's upward translate: its top line left through the
+          wrapper's clip and its bottom line hovered above the card's true edge, with the page's
+          square keyboard-cut corners poking out beneath (movement 3, screenshot). */}
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
@@ -1915,8 +1918,6 @@ export default function SessionScreen() {
           )}
         </View>
       )}
-      </Animated.View>
-
       </Animated.View>
       </View>
 
