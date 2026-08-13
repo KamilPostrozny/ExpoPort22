@@ -857,14 +857,22 @@ function WindowCard({
 
   return (
     <GestureDetector gesture={gesture}>
+      {/* Two views, and the split is the point: the mount/unmount fade belongs on the OUTER one,
+          the per-frame style on the inner. Reanimated warned about this and it was right —
+          "Property opacity of AnimatedComponent(View) may be overwritten by a layout animation".
+          `style` writes an opacity that is load-bearing (it is what keeps the card solid the
+          moment the flying surface starts fading, so the two never sum to less than one — the
+          flash at the landing, 2026-08-11), and FadeIn/FadeOut drive the same property on the
+          same view. Whichever wrote last won. Separated, the fade owns the outer view's opacity
+          and the crossfade owns the inner's, and neither can overwrite the other.
+
+          Position stays outside and the transform stays inside: a transform does not affect
+          layout, so the card sits where it always did. */}
       <Animated.View
         entering={FadeIn.duration(200)}
         exiting={FadeOut.duration(160)}
-        style={[
-          styles.card,
-          { position: 'absolute', left: 0, top: 0, width: slot.w, zIndex: dragged ? 10 : 1 },
-          style,
-        ]}>
+        style={{ position: 'absolute', left: 0, top: 0, width: slot.w, zIndex: dragged ? 10 : 1 }}>
+      <Animated.View style={[styles.card, style]}>
         <View
           style={[
             styles.shot,
@@ -903,6 +911,7 @@ function WindowCard({
           theme={theme}
           style={[styles.sub, { color: theme.muted }]}
         />
+      </Animated.View>
       </Animated.View>
     </GestureDetector>
   );
