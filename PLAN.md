@@ -572,8 +572,33 @@ model: a card pulled a little off the bar still pages between windows, and the p
 start at any point in the pull up. Only the release picks, in the screen, which is the side that
 knows the zoom progress: it commits to the grid and sets `gridTookIt`, and the horizontal's own
 'end' — the next call in — reads that and springs home deciding nothing. The zoom's own sideways
-drift freezes at the grab, so exactly one thing is carrying x at any moment. Only the *terminal area* slides — the bar stays put under the
-pills, which is why the page wrapper sits inside the stage rather than being the stage. After a
+drift freezes at the grab, so exactly one thing is carrying x at any moment.
+
+The lift's threshold is **a cone, not a half-plane** (2026-08-12, device log): a bar at the bottom
+of the phone is swiped with a thumb, the thumb pivots, and the opening 25pt of an ordinary flat hop
+are upward at -600…-900pt/s — ten in a row, so neither "up beat sideways" nor "it was thrown up"
+can tell that arc from a pull. Straight up still lifts at `BAR_SWIPE_FIRE`; every point of sideways
+travel buys 1.5 more points of up; past `LIFT_FLICK_DX` the cone is unreachable and only a real
+throw gets out. Those ten measurements are the fixtures in `keybar-model.test.ts`.
+
+A **held card does not fly while it is held** (2026-08-13, Safari screenshot): `holdFrame` is the
+stage scaled about its own centre — uncropped, so `zoomFrame`'s clip stays open and it is the whole
+screen made small — and `aimFrame` blends hold→slot on `flight`, which only the bar drag takes off
+1 and only `commitOpen` puts back. Aiming at the grid slot from the first frame of the pull was
+what made the gesture read as one step: the card was already halfway into a corner while the finger
+still had it, with nowhere left to push it sideways.
+
+Which leaves *what moves*. Only the terminal area slides at rest — the bar stays put under the
+pills, which is why the page wrapper sits inside the stage rather than being the stage — but a
+lifted card has an outline, and an outline that holds still while its content slides inside it is a
+window, not a card. `cardCarry` hands the offset from the page to the card over the first tenth of
+the lift; both draw it at the same place on screen, so the handover is invisible. For the same
+reason the neighbouring pages are **siblings of the wrapper**, each wearing its own copy of the
+zoom a pitch to the side: as children they shared its clip and its ring, and a row of cards came
+out as one frame with pages sliding about in it. They sit *after* the wrapper (which paints an
+opaque stage-wide ground — underneath it, an arriving page simply never appeared) and only while
+the card is in a hand (`closed` or `drag`), or a committed release takes them into the grid one
+pitch behind it: tabs arriving in pairs. After a
 commit the slide lands on the snapshot, a **settle overlay** holds that snapshot ~350ms while
 tmux's redraw reaches the PTY, then drops (ponytail: fixed hold; dropping on first shell data is
 the upgrade). **Suspended is tracked, not observed**: the poll cannot tell "stopped" from
