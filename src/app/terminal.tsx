@@ -1029,7 +1029,13 @@ export default function SessionScreen() {
       gridTookIt.current = false;
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
       setOpen('none');
-      console.log('[barswipe] start at', pos, 'of', windows.length);
+      // §7: "the neighbour did not render" and "the neighbour rendered with nothing in it" look
+      // identical on a dark theme — an empty page card is the background colour. Only the cache
+      // can tell them apart (user, 2026-08-13, three screenshots of an empty half-screen).
+      console.log(
+        '[barswipe] start at', pos, 'of', windows.length,
+        'snaps', cards.map((c) => (c.snap ? '#' : '.')).join(''),
+      );
       setPageSwipe({
         names: [...windows.map((w) => w.name), NEW_TAB_NAME],
         pos,
