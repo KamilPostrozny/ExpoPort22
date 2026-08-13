@@ -23,8 +23,6 @@ import Animated, {
   cancelAnimation,
   Easing,
   FadeOut,
-  SlideInLeft,
-  SlideInRight,
   SlideOutLeft,
   SlideOutRight,
   runOnJS,
@@ -33,6 +31,7 @@ import Animated, {
   type AnimatedStyle,
   useFrameCallback,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -610,6 +609,12 @@ export default function SessionScreen() {
    *  gesture; a release clears it. */
   const [airSettled, setAirSettled] = useState(false);
   const airSettledRef = useRef(false);
+  /** The held join's approach, 0→1 on a clamped spring the moment the hand settles. A Reanimated
+   *  `entering` did this job and flickered: layout animations under a scaled, translated parent
+   *  paint their first frame at the final position before jumping to the start (user,
+   *  2026-08-13, "flickeringly show up"). A shared value through the same seat term the swipe
+   *  join uses cannot. */
+  const joinSV = useSharedValue(0);
   const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number, vx = 0, vy = 0) => {
     if (stage === null) return;
     // Where the phase IS consulted it comes off the ref, not the render: a pan reports every frame,
@@ -681,11 +686,13 @@ export default function SessionScreen() {
       if (!airSettledRef.current && prog.value > 0.02 && Math.abs(vy) < 90 && Math.abs(vx) < 90) {
         airSettledRef.current = true;
         setAirSettled(true);
+        joinSV.value = withSpring(1, { damping: 26, stiffness: 110, overshootClamping: true });
       }
     } else if (dragging.current) {
       dragging.current = false;
       airSettledRef.current = false;
       setAirSettled(false);
+      joinSV.value = 0;
       // The hop is asked FIRST: with the card held in the air `prog` sits past ZOOM_COMMIT the
       // whole time, so asking the grid first meant every release went to the grid and a sideways
       // hop could never win (user, 2026-08-13). The grid takes the release only when the
@@ -1345,7 +1352,7 @@ export default function SessionScreen() {
       // 70pt — slow and firm, and it can never lag the swipe or pop (user, 2026-08-13, after
       // instant read as harsh and every timed entrance was either too quick or too slow). A held
       // join seats immediately; its entrance is the clamped spring on the mount instead.
-      const seat = airSettled ? 1 : Math.min(Math.abs(swipeX.value) / 70, 1);
+      const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / 70, 1));
       return {
         height: f.height,
         borderRadius: f.radius,
@@ -1843,7 +1850,7 @@ export default function SessionScreen() {
         (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInLeft.springify().damping(26).stiffness(110).overshootClamping(1) : undefined} exiting={pageSwipe === null ? SlideOutLeft.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" exiting={pageSwipe === null ? SlideOutLeft.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
@@ -1860,7 +1867,7 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInRight.springify().damping(26).stiffness(110).overshootClamping(1) : undefined} exiting={pageSwipe === null ? SlideOutRight.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" exiting={pageSwipe === null ? SlideOutRight.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
