@@ -1402,8 +1402,15 @@ export default function SessionScreen() {
   }));
 
   const cropTop = notchPad + searchRowH;
+  // The chrome crop follows the FLIGHT, not the progress: a grid card is the page cropped past
+  // the status bar, but a card in the hand is the whole screen made small — `holdFrame` is
+  // uncropped by construction, and cropping on `prog` alone slid the content up inside the held
+  // card while the hold's clip (deliberately) never closed: a grown forehead above, an exposed
+  // band below with the page's own rounded corners floating inside the ring (movement 3,
+  // screenshot). `prog * flight` is zero for the whole hold and exactly the old value on every
+  // flight to the grid, where the two ramp together.
   const cropStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: -cropTop * prog.value }],
+    transform: [{ translateY: -cropTop * prog.value * flight.value }],
   }));
 
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
