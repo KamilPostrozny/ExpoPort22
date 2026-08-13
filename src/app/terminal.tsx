@@ -27,6 +27,7 @@ import Animated, {
   type AnimatedStyle,
   type SharedValue,
   useSharedValue,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1356,13 +1357,22 @@ export default function SessionScreen() {
     if (birthLanding.current) {
       birthLanding.current = false;
       setBirthing(true);
-      birth.value = 0;
-      birth.value = withTiming(1, BIRTH_IN, (done) => {
-        // Guarded: a second birth landing inside this one REPLACES this animation and fires this
-        // callback with false, and unmounting the blur there would strip it off the entrance that
-        // is still running. Nothing cancels `birth`, so the last one always finishes and clears.
-        if (done) runOnJS(setBirthing)(false);
-      });
+      // ONE assignment, and that is the whole point of the sequence. Written as `birth.value = 0`
+      // followed by `birth.value = withTiming(1, …)` — the obvious way — the second assignment
+      // replaces the first before either reaches the UI thread, so the animation began at 1 and
+      // ran to 1: no fade, and `birth >= 1` throughout, which also left both accent gates open.
+      // That is exactly what the device showed — "it just showed up, briefly with the blue
+      // outline" (user, 2026-08-13) — and it was one bug wearing two faces, not a duration to
+      // tune. A zero-length first step cannot be lost this way.
+      birth.value = withSequence(
+        withTiming(0, { duration: 0 }),
+        withTiming(1, BIRTH_IN, (done) => {
+          // Guarded: a second birth landing inside this one REPLACES this animation and fires this
+          // callback with false, and unmounting the blur there would strip it off the entrance
+          // that is still running. Nothing cancels `birth`, so the last one always finishes.
+          if (done) runOnJS(setBirthing)(false);
+        }),
+      );
     }
   };
 
