@@ -231,6 +231,35 @@ export function aimFrame(hold: Frame, slot: Frame, t: number): Frame {
   };
 }
 
+/**
+ * The zoom as a *container* transform: the same scale and the same landing place, for a box that
+ * keeps the stage's full height and lets its children do their own cropping.
+ *
+ * This exists so the card and the pages beside it cannot disagree. Giving each its own copy of
+ * `zoomFrame` meant two transforms that had to arrive at the same scale by arithmetic, and they
+ * did not — a neighbour drew unscaled beside a card at 0.62, or at 0.62² when the tree put the
+ * zoom on both (user, 2026-08-13, three screenshots). One transform on the container they share
+ * cannot be inconsistent with itself; the children then only carry their pitch.
+ *
+ * The compensation is against `stage.h` rather than the clipped height, because that IS this box's
+ * height — a child pinned at its top still lands on `slot.y`, and a child of `zoomFrame`'s height
+ * still covers `slot.h` once scaled.
+ */
+export function zoomBox(
+  t: number,
+  dx: number,
+  slot: Frame,
+  stage: { w: number; h: number },
+): { scale: number; translateX: number; translateY: number } {
+  'worklet';
+  const scale = 1 + (slot.w / stage.w - 1) * t;
+  return {
+    scale,
+    translateX: slot.x * t + dx * 0.6 - (stage.w * (1 - scale)) / 2,
+    translateY: slot.y * t - (stage.h * (1 - scale)) / 2,
+  };
+}
+
 export type ZoomFrame = {
   /** Scale about the wrapper's centre. */
   scale: number;

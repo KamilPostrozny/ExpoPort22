@@ -164,7 +164,7 @@ export const BAR_SWIPE_FIRE = 24;
  *  Left at 900 the throw had to be thrown implausibly hard: a real mid-swipe flick came in at -904
  *  against a -900 bar, and mostly did not fire at all (user, 2026-08-13). The distance gate is
  *  what separates the two, so the speed only has to say "thrown". */
-export const BAR_LIFT_VY = 600;
+export const BAR_LIFT_VY = 500;
 
 /** How much extra upward travel each point of sideways travel costs the lift. The pull-up test is
  *  a cone, not a half-plane: dead straight it fires at `BAR_SWIPE_FIRE`, and the further sideways
@@ -203,12 +203,18 @@ export function barGrabbed(dx: number): boolean {
  * than it was — but every point of sideways travel buys `LIFT_CONE` more points of up, and the
  * arc's own dx is what disqualifies it. Past `LIFT_FLICK_DX` the cone is unreachable by design:
  * a swipe that far along is committed, and the only way out of it is to throw the card, hard
- * (`BAR_LIFT_VY`) and with the horizontal no longer winning — which is what a flick up out of a
- * running swipe looks like, and which the arc cannot reach because it never gets that far sideways.
+ * (`BAR_LIFT_VY`). Nothing is asked of the horizontal: mid-swipe the finger is still travelling
+ * sideways at speed, and requiring the vertical to beat it is what made the flick refuse to fire
+ * at all (user, 2026-08-13, twice) — the one throw that worked had all but stopped first. The
+ * distance gate is what keeps the arc out, so the speed is free to mean only "thrown upward".
+ *
+ * Being generous here is cheap in a way it would not have been before the axes merged: a lift the
+ * finger did not mean still releases through `zoomCommits`, which springs the card back and lets
+ * the horizontal decide its hop as usual. The cost of a false lift is a shrug, not a lost swipe.
  */
 export function barLifts(dx: number, dy: number, vx: number, vy: number): boolean {
   if (-dy >= BAR_SWIPE_FIRE + LIFT_CONE * Math.abs(dx)) return true;
-  return Math.abs(dx) > LIFT_FLICK_DX && vy <= -BAR_LIFT_VY && Math.abs(vy) > Math.abs(vx);
+  return Math.abs(dx) > LIFT_FLICK_DX && vy <= -BAR_LIFT_VY;
 }
 
 /** The other vertical exit: a swipe down puts the keyboard away (§4.4). Same travel test as the

@@ -215,8 +215,10 @@ test('past the cone only a real throw lifts', () => {
   // 200pt along: the cone is unreachable there by design, so speed is the only way out.
   expect(barLifts(-200, -30, -100, -1400)).toBe(true);
   expect(barLifts(-200, -30, -100, -904)).toBe(true); // the device's own flick, which used to miss
-  expect(barLifts(-200, -30, -100, -400)).toBe(false); // drifting up, not thrown
-  expect(barLifts(-200, -30, -800, -700)).toBe(false); // still travelling sideways faster
+  // Thrown up while STILL travelling sideways hard — the ordinary way to flick mid-swipe, and
+  // what a vy-beats-vx test refused (user, 2026-08-13).
+  expect(barLifts(-200, -30, -900, -700)).toBe(true);
+  expect(barLifts(-200, -30, -100, -300)).toBe(false); // drifting up, not thrown
   expect(barLifts(-40, -30, -100, -1400)).toBe(false); // not far enough along to be a throw
 });
 

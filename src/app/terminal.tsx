@@ -88,6 +88,7 @@ import {
   slotFrame,
   snapshotType,
   termPad,
+  zoomBox,
   zoomFrame,
   zoomProgress,
   type Frame,
@@ -1286,15 +1287,13 @@ export default function SessionScreen() {
   };
 
   /**
-   * A neighbouring page's own card. It is a SIBLING of the stage wrapper, not a child of it, and
-   * that is the whole point: as a child it shared the wrapper's clip and its ring, so a lifted
-   * swipe drew one outline with pages sliding about inside it instead of a row of cards (user,
-   * 2026-08-13, screenshot). Wearing its own copy of the zoom means it shrinks, rounds and crops
-   * exactly like the live card, a page-pitch to one side.
+   * A neighbouring page's card, INSIDE the zoomed container with the live one. It carries nothing
+   * but its pitch and the crop — the scale and the flight are the container's, which is the only
+   * way two cards are guaranteed to agree (see `zoomBox`).
    *
-   * The offset is multiplied by the scale because these transforms are in the parent's units,
-   * while the pitch is stage units — which is also why this comes out identical to the inner
-   * slide it replaces at rest, where the scale is 1.
+   * The swipe offset it carries is the half `cardCarry` leaves it: at rest the pages slide and the
+   * container is identity, lifted the container slides and the pages sit still in it. The live
+   * page's own `termSlideStyle` is the same expression, which is what keeps the row rigid.
    */
   const usePageCardStyle = (side: -1 | 1) =>
     useAnimatedStyle(() => {
@@ -1303,16 +1302,28 @@ export default function SessionScreen() {
       return {
         height: f.height,
         borderRadius: f.radius,
-        opacity: alpha.value,
-        transform: [
-          { translateX: f.translateX + (side * pitch + swipeX.value) * f.scale },
-          { translateY: f.translateY },
-          { scale: f.scale },
-        ],
+        transform: [{ translateX: side * pitch + swipeX.value * (1 - cardCarry(prog.value)) }],
       };
     });
   const prevCardStyle = usePageCardStyle(-1);
   const nextCardStyle = usePageCardStyle(1);
+
+  /** The container every card rides: one scale, one flight, one place. Its height is the stage's
+   *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
+   *  side without a clip cutting them off. */
+  const boxStyle = useAnimatedStyle(() => {
+    const b = zoomBox(prog.value, dragX.value, aim(), stageSV.value);
+    return {
+      opacity: alpha.value,
+      transform: [
+        // The row moves as one once the card has lifted (`cardCarry`); at rest the pages inside
+        // move instead, and this is identity.
+        { translateX: b.translateX + swipeX.value * cardCarry(prog.value) * b.scale },
+        { translateY: b.translateY },
+        { scale: b.scale },
+      ],
+    };
+  });
 
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
@@ -1325,14 +1336,6 @@ export default function SessionScreen() {
       // and a card's bottom rounds in on the same beat as its top (user, 2026-08-11). The square
       // cut lives on the page inside it — see `kbSquare`.
       borderRadius: f.radius,
-      opacity: alpha.value,
-      transform: [
-        // The card carries the page offset itself once it has lifted (`cardCarry`) — at rest the
-        // page slides inside it instead, which is the same picture and the tested behaviour.
-        { translateX: f.translateX + swipeX.value * cardCarry(prog.value) * f.scale },
-        { translateY: f.translateY },
-        { scale: f.scale },
-      ],
     };
   });
 
@@ -1437,27 +1440,33 @@ export default function SessionScreen() {
         />
       )}
 
-      {/* The neighbouring windows, each its own card beside the live one — a page-pitch away and
-          wearing its own copy of the zoom, so a swipe reads as a row of cards moving rather than
-          as content sliding about inside one frame.
+      {/* The zoomed container: one scale, one flight, holding the live card and — once a swipe is
+          actually running — the pages either side of it. It keeps the stage's full height and does
+          NOT clip, so a card a pitch away is not cut off; each card inside crops itself. */}
+      <Animated.View
+        // `closing` is touchable too: the bar rides inside this, so a dead subtree is a bar that
+        // ignores the finger — and the phase outlives the motion by the tail of its ease-out,
+        // which is a terminal that looks landed and will not swipe (user, 2026-08-11).
+        // The gesture picks the flight up from where it is (see `onSwitcherDrag`).
+        pointerEvents={sw === 'closed' || sw === 'closing' || sw === 'drag' ? 'auto' : 'none'}
+        style={[
+          stage === null ? styles.screen : [styles.zoomBox, { width: stage.w, height: stage.h }],
+          stage !== null && boxStyle,
+        ]}>
 
-          BEHIND the wrapper, and outside it. Outside because a child shares the wrapper's clip and
-          its ring — the outline you hold with pages moving in it — and would take the zoom twice
-          over, which drew the neighbour at HOLD_SCALE² beside a card at HOLD_SCALE (user,
-          2026-08-13, screenshot). Behind because the key bar rides inside the wrapper: in front,
-          these would cover it and the name pills with it. That works only because the wrapper no
-          longer paints a ground of its own (see there) — the live page paints its own, so what
-          shows through beside it is these.
+      {/* The neighbouring windows, a page-pitch to either side. They JOIN when the swipe does, not
+          when the card lifts: a card held up on its own has no row around it until the finger
+          actually starts moving sideways (user, 2026-08-13) — which is exactly `pageSwipe`, the
+          state a horizontal swipe creates. Drawn before the live card so it and its bar stay on
+          top; they never overlap it anyway, being a pitch away.
 
-          And only while the card is in a hand — `closed` for an ordinary hop, `drag` for a lifted
-          one. Once the release commits, the switcher owns the screen and these would fly along
-          beside the card into the grid, one pitch behind it: tabs arriving in pairs (user,
-          2026-08-13, screenshot). */}
-      {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' &&
+          Gone once the release commits, or they would fly into the grid one pitch behind the card:
+          tabs arriving in pairs (user, 2026-08-13, screenshot). */}
+      {stage !== null && showTabs && connected && pageSwipe !== null && pageSwipe.phase !== 'settle' &&
         (sw === 'closed' || sw === 'drag') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
               </Animated.View>
@@ -1466,7 +1475,7 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
               </Animated.View>
@@ -1475,23 +1484,13 @@ export default function SessionScreen() {
         </>
       )}
 
-      {/* The stage wrapper the zoom animates: at rest an invisible identity, mid-transition the
-          clipped, scaled, ringed terminal surface riding into its card slot. */}
+      {/* The live card: the clipped, rounded, ringed terminal surface. Identity at rest — at which
+          point it is the screen — and the thing the ring belongs to at every other. */}
       <Animated.View
-        // `closing` is touchable too: the bar rides inside this wrapper, so a dead subtree is a
-        // bar that ignores the finger — and the phase outlives the motion by the tail of its
-        // ease-out, which is a terminal that looks landed and will not swipe (user, 2026-08-11).
-        // The gesture picks the flight up from where it is (see `onSwitcherDrag`).
-        pointerEvents={sw === 'closed' || sw === 'closing' || sw === 'drag' ? 'auto' : 'none'}
         style={[
           stage === null
             ? styles.screen
-            // No ground of its own. It used to paint the theme background across the whole stage,
-            // which is invisible at rest — the page inside covers every point of it, the bar band
-            // included (`termSlide` runs under the bar) — but it is an opaque slab in front of the
-            // neighbouring cards, and they sit behind this so the bar inside it can stay on top.
-            // A page that slid in behind that slab simply never appeared (user, 2026-08-13).
-            : [styles.stageWrapper, { width: stage.w }],
+            : [styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }],
           stage !== null && wrapperStyle,
         ]}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
@@ -1847,11 +1846,12 @@ export default function SessionScreen() {
       )}
       </Animated.View>
 
-      {/* the transition's accent ring, clipping and scaling with the wrapper */}
+      {/* the transition's accent ring, clipping and scaling with the card it belongs to */}
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
       />
+      </Animated.View>
       </Animated.View>
       </View>
 
@@ -2113,6 +2113,9 @@ const styles = StyleSheet.create({
   },
   searchDone: { fontSize: 15, paddingHorizontal: 2 },
   stageWrapper: { position: 'absolute', top: 0, left: 0, overflow: 'hidden' },
+  /** The shared zoom container — deliberately NOT clipping: the cards beside the live one live a
+   *  pitch outside it and each brings its own crop. */
+  zoomBox: { position: 'absolute', top: 0, left: 0 },
   terminal: { flex: 1 },
   termArea: { flex: 1 },
   termSlide: { flex: 1, overflow: 'hidden' },

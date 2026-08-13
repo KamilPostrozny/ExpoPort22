@@ -25,6 +25,7 @@ import {
   swipeOpacity,
   targetSlot,
   termPad,
+  zoomBox,
   zoomFrame,
   zoomProgress,
 } from '@/switcher-model';
@@ -159,6 +160,24 @@ test('the aim leaves the hold pose only as the release flies it to the slot', ()
   const half = aimFrame(hold, slot, 0.5);
   expect(half.x).toBeCloseTo((hold.x + slot.x) / 2);
   expect(half.w).toBeCloseTo((hold.w + slot.w) / 2);
+});
+
+test('the shared container lands its children exactly where zoomFrame would', () => {
+  const stage = { w: 402, h: 874 };
+  const slot = slotFrame(3, 402);
+  for (const t of [0, 0.3, 0.62, 1]) {
+    const b = zoomBox(t, 0, slot, stage);
+    const f = zoomFrame(t, 0, slot, stage);
+    expect(b.scale).toBeCloseTo(f.scale);
+    // A card pinned at the container's top-left lands on the same screen point either way: the
+    // box compensates against the stage's height, the frame against its own clipped one.
+    expect(b.translateX + (stage.w * (1 - b.scale)) / 2).toBeCloseTo(
+      f.translateX + (stage.w * (1 - f.scale)) / 2,
+    );
+    expect(b.translateY + (stage.h * (1 - b.scale)) / 2).toBeCloseTo(
+      f.translateY + (f.height * (1 - f.scale)) / 2,
+    );
+  }
 });
 
 test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
