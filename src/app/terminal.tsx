@@ -25,7 +25,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   type AnimatedStyle,
-  useFrameCallback,
+  type SharedValue,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
@@ -235,7 +235,13 @@ export default function SessionScreen() {
 
   // The terminal attaches itself on every boot (see `onBoot`), so all this has to do is let go when
   // the screen goes away.
-  useEffect(() => () => detach.current?.(), []);
+  useEffect(
+    () => () => {
+      detach.current?.();
+      clearTimeout(warmTimer.current ?? undefined);
+    },
+    [],
+  );
 
   // The TOFU prompt (§4.1). Keyed on the fingerprint rather than the session object so it is raised
   // once per unknown key, not once per re-render that happens to be in `connecting`.
@@ -393,7 +399,9 @@ export default function SessionScreen() {
             );
           lastFit.current = { cols, rows, top: topInset };
           if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
-            console.log('[terminal] size held, not sent:', cols, '×', rows);
+            // Gated: this branch's condition is "a zoom is in flight", so it only ever logged
+            // DURING a gesture — a Metro socket write on the JS thread per refit, animating.
+            if (GESTURE_LOG) console.log('[terminal] size held, not sent:', cols, '×', rows);
             return;
           }
           if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
@@ -405,7 +413,10 @@ export default function SessionScreen() {
           detach.current?.();
           detach.current = attachTerminal((base64) => {
             dataSeq.current++; // "has the host redrawn yet" — see `afterHostRedraw`
-            probe(`byte ${base64.length}b`);
+            // `probe` bails on GESTURE_LOG, but the argument is built before the call: one
+            // template literal per chunk off the PTY, and a tmux redraw after a switch is hundreds
+            // of chunks — allocating on the JS thread inside the flight that switch is animating.
+            if (GESTURE_LOG) probe(`byte ${base64.length}b`);
             terminal.current?.write(base64);
           });
         },
@@ -584,23 +595,14 @@ export default function SessionScreen() {
     console.log(`[probe] +${dt}ms ${what}`);
   };
 
-  /* The events all land outside the flight and it still hitches, so the next question is not WHAT
-   * happened but WHEN a frame was missed. This runs on the UI thread — the one actually drawing
-   * the zoom — and reports any frame that took longer than two, with the progress it happened at.
-   * Early means the flight's own first frames, late means the crossfade and the landing; the
-   * number says how many frames went. Temporary, with the rest of the probe. */
-  const dropped = (ms: number, at: number) =>
-    console.log(`[probe] FRAME ${ms.toFixed(0)}ms at prog ${at.toFixed(2)}`);
-  useFrameCallback((frame) => {
-    'worklet';
-    const t = prog.value;
-    if (t <= 0 || t >= 1) return; // nothing is flying
-    const dt = frame.timeSincePreviousFrame ?? 0;
-    // 12, not 26: on a 120Hz panel a frame is 8.3ms, so a single missed frame is ~16.6 — under the
-    // old threshold, which is why the probe only ever caught the 3-and-4-frame stalls at the ends
-    // and stayed silent through the one being reported in the middle (user, 2026-08-11).
-    if (dt > 12) runOnJS(dropped)(dt, t);
-  });
+  /* The frame-drop probe used to live here: a useFrameCallback that logged any frame over 12ms.
+   * It went the way of the rest of the harness (07430ef), which missed it — it was never behind
+   * GESTURE_LOG, so it was measuring with the instrument's own weight on the scale. On a panel
+   * asking for 120Hz almost every flight frame cleared 12ms, and each one cost a runOnJS hop plus
+   * a console.log serialized through Metro's socket ON the JS thread — which made the next frame
+   * slower, which logged again. The callback also never stopped: registered on every render (its
+   * effect keys on the callback's identity) and looping on the UI thread's rAF for the life of the
+   * screen, flight or no flight. Frame timing is what Instruments is for. */
 
   const commitOpen = () => {
     setSw('opening');
@@ -1029,6 +1031,58 @@ export default function SessionScreen() {
       });
   };
 
+  /* The grid's handlers, through a ref — the same trampoline the terminal's DOM props take above
+   * (`termH`/`tv_*`), and for a sharper version of the same reason.
+   *
+   * `Switcher` is `memo(SwitcherInner)`, added because this screen re-renders on every phase of
+   * every gesture. The memo was inert: eight of its props were a fresh identity on every render
+   * (four inline arrows in the JSX, four plain consts in this body), so its shallow compare never
+   * passed once. Every phase flip of every swipe therefore walked the whole grid — SwitcherInner
+   * plus one WindowCard per window, each re-running `snapshotType` and a path split and rebuilding
+   * its element tree — on the JS thread, inside the gesture. (The `Snapshot` trees themselves were
+   * always spared; they are memoised on `card.snap`.) React Compiler cannot rescue this: the
+   * screen bails out of compilation entirely, and so does SwitcherInner (verified by running the
+   * plugin over both files).
+   *
+   * Written during render, like `swRef`/`cardsRef`/`searchRef` above: a handler assigned in an
+   * effect would serve the previous render's closure to a tap that lands before it runs.
+   */
+  const swH = useRef<Record<string, (...args: any[]) => any>>({});
+  swH.current = {
+    onQuery: (q: string) => setSearch({ q, on: true }),
+    onClearSearch: disarmSearch,
+    onSelect: selectCard,
+    onKill: killCard,
+    onNew: birthCard,
+    onDone: () => closeTo(activePos()),
+    onMove: async ({ from, to }: { from: number; to: number }) => {
+      // A rapid re-drag can race the previous move's renumbering and send a stale index —
+      // the re-list below is the truth either way. TODO: target windows by `@id` in every
+      // tmux command (move/select/kill/capture) so a stale index can't touch the wrong
+      // window at all; that is a tmux-model change with its own tests.
+      try {
+        await moveWindow(from, to);
+      } catch (error) {
+        console.log('[switcher] move failed:', error);
+      }
+      await refresh(true); // landing indices are tmux's call (renumbering) — re-list
+    },
+    onScrollY: (y: number) => {
+      scrollY.current = y;
+    },
+  };
+  const sw_onQuery = useCallback((...a: any[]) => swH.current.onQuery(...a), []);
+  const sw_onClearSearch = useCallback((...a: any[]) => swH.current.onClearSearch(...a), []);
+  const sw_onSelect = useCallback((...a: any[]) => swH.current.onSelect(...a), []);
+  const sw_onKill = useCallback((...a: any[]) => swH.current.onKill(...a), []);
+  const sw_onNew = useCallback((...a: any[]) => swH.current.onNew(...a), []);
+  const sw_onDone = useCallback((...a: any[]) => swH.current.onDone(...a), []);
+  /** `async`, unlike its siblings: the card drag does `onMove(args).finally(…)` to clear its
+   *  optimistic order (switcher.tsx), so a trampoline that dropped the promise would throw there
+   *  and strand the grid in that order for good. */
+  const sw_onMove = useCallback(async (...a: any[]) => swH.current.onMove(...a), []);
+  const sw_onScrollY = useCallback((...a: any[]) => swH.current.onScrollY(...a), []);
+
   // A transitional phase makes the grid non-interactive and the stage an animation, so a phase
   // that never resolves is an app that has frozen — which it has done twice today, from two
   // different missed callbacks (user, 2026-08-11). Rather than trusting the next one not to,
@@ -1123,6 +1177,8 @@ export default function SessionScreen() {
   const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
     null,
   );
+  /** The pending neighbour-cache warm (see `clearBarSwipe`) — so a new swipe can call it off. */
+  const warmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Bytes off the shell, counted. A one-shot watch cannot answer "has anything arrived since the
    *  commit?" — it only answers "did something arrive while I happened to be armed", and the two
    *  differ exactly when the answer matters (see `afterHostRedraw`). */
@@ -1157,8 +1213,14 @@ export default function SessionScreen() {
     // ANSI parses on the JS thread after every single hop — the 150-213ms stall the perf
     // heartbeat caught next to each commit, which is what a fast repeated swipe felt like
     // (2026-08-13). The rest of the grid is refreshed when the grid itself opens.
+    // Held on a handle, and every swipe's start cancels it (see `onBarSwipe`). Unhandled, each hop
+    // left a timer nothing could stop: `skipRefresh` only declines to arm a NEW one. Hopping at any
+    // normal rate then landed the *previous* hop's two captures — two SSH execs, two `parseAnsi`
+    // over a full pane, two `setCards` — squarely inside the next swipe's drag, on the JS thread,
+    // which is exactly the "simplest swipe is laggy" report (perf, 2026-08-13).
+    clearTimeout(warmTimer.current ?? undefined);
     if (!skipRefresh)
-      setTimeout(() => {
+      warmTimer.current = setTimeout(() => {
         const at = activePosIn(cardsRef.current);
         for (const side of [-1, 1] as const) {
           const win = cardsRef.current[at + side]?.win;
@@ -1270,6 +1332,11 @@ export default function SessionScreen() {
       // has left the bar, and the finger may only decide that a hundred points into the pull up
       // (user, 2026-08-12). Off the ref, not the render: mid-gesture the render is a frame behind.
       if ((swRef.current !== 'closed' && swRef.current !== 'drag') || !connected) return;
+      // The last hop's cache warm has 350ms to land and this finger did not wait for it: two execs
+      // and two ANSI parses inside the drag are the stutter it exists to prevent. Dropped, not
+      // deferred — the next `clearBarSwipe` arms a fresher one over newer neighbours anyway.
+      clearTimeout(warmTimer.current ?? undefined);
+      warmTimer.current = null;
       if (swipeInfo.current !== null) {
         // Mid-settle re-swipe: the hold exists to hide a refit, but making the finger WAIT for
         // it read as lag — rapid back-and-forth hopping used to be instant (user, 2026-08-11).
@@ -1427,6 +1494,35 @@ export default function SessionScreen() {
     send(bytes);
   };
 
+  /** The key bar's handlers, same trampoline and same reason — `KeyBar` is memoised now, and its
+   *  props were nine fresh closures a render. `open`/`onOpenChange` are already stable (a state
+   *  value and its setter) and `panSV` is built once, so with these the bar only re-renders when
+   *  something it actually draws has changed. Declared down here, not with the grid's: `sendKeys`
+   *  and `onBarSwipe` are `const`s above, and reading them from a block placed earlier is a
+   *  temporal-dead-zone throw on the first render. */
+  const kbH = useRef<Record<string, (...args: any[]) => any>>({});
+  kbH.current = {
+    sendBytes: sendKeys,
+    onHeight: (h: number) => {
+      if (h !== barHeight) probe(`barHeight ${barHeight.toFixed(0)} → ${h.toFixed(0)}`);
+      setBarHeight(h);
+    },
+    onTabsTap: openSwitcher,
+    onZoomGrab,
+    onZoomArm,
+    onZoomEnd,
+    onAirSettled,
+    onBarSwipe,
+  };
+  const kb_sendBytes = useCallback((...a: any[]) => kbH.current.sendBytes(...a), []);
+  const kb_onHeight = useCallback((...a: any[]) => kbH.current.onHeight(...a), []);
+  const kb_onTabsTap = useCallback((...a: any[]) => kbH.current.onTabsTap(...a), []);
+  const kb_onZoomGrab = useCallback((...a: any[]) => kbH.current.onZoomGrab(...a), []);
+  const kb_onZoomArm = useCallback((...a: any[]) => kbH.current.onZoomArm(...a), []);
+  const kb_onZoomEnd = useCallback((...a: any[]) => kbH.current.onZoomEnd(...a), []);
+  const kb_onAirSettled = useCallback((...a: any[]) => kbH.current.onAirSettled(...a), []);
+  const kb_onBarSwipe = useCallback((...a: any[]) => kbH.current.onBarSwipe(...a), []);
+
   const onRibbonCap = (cap: Cap) => {
     console.log('[ribbon] cap', cap.label);
     if (cap.action === 'attach') {
@@ -1462,7 +1558,14 @@ export default function SessionScreen() {
 
   /** The bar-swipe morph inputs the name pills ride. See KeyBarProps.pills for why it exists at
    *  rest too. */
-  const pillsProp =
+  /* Memoised so `KeyBar`'s memo can bite: rebuilt every render, this object alone re-rendered the
+   * whole bar — pills, glass and all — on every keyboard step, ribbon poll and phase flip, none of
+   * which change a pill. The deps are what the pills actually draw from; `pillsSettled` and
+   * `swipeX` are shared values and stable by construction. */
+  /* eslint-disable-next-line react-hooks/exhaustive-deps -- activePosIn is a per-render closure
+     over `tmux.windowIndex`, which is in the deps below. */
+  const pillsProp = useMemo(
+    () =>
     showTabs && connected && stage !== null
       ? {
           names: pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME],
@@ -1481,7 +1584,9 @@ export default function SessionScreen() {
           // this flips two opacities.
           live: pageSwipe !== null && pageSwipe.phase !== 'settle',
         }
-      : null;
+      : null,
+    [showTabs, connected, stage, pageSwipe, cards, tmux.windowIndex],
+  );
 
   /* --- the pane's insets ---
    *
@@ -1535,16 +1640,11 @@ export default function SessionScreen() {
    *  home strip and the keyboard's overlap, because that layer's bottom is the window's. */
   const popBase = barHeight + 6 + keyboardPad + insets.bottom;
 
-  /** What the surface is aimed at this frame — the hold pose under the finger, the slot once
-   *  released, interpolated by `flight` (see `aimFrame`). Every style that draws the zoom reads
-   *  the aim rather than the slot, so the card, its ring and its neighbours agree by construction. */
-  const aim = () => {
-    'worklet';
-    // Held: slot-SIZED by the pull's reach, screen-centred (`heldFrame`). Released: the flight
-    // carries whatever pose the hold reached into the real slot.
-    const held = heldFrame(stageSV.value, slotSV.value, HOLD_REACH * prog.value);
-    return aimFrame(held, slotSV.value, flight.value);
-  };
+  /** The four shared values `aimAt` reads, as one stable object — see `aimAt` (module scope, below)
+   *  for why the aim is not a closure over them. Built once. */
+  /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
+  const aimSV = useMemo(() => ({ stage: stageSV, slot: slotSV, prog, flight }), []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   /**
    * A neighbouring page's card, INSIDE the zoomed container with the live one. It carries nothing
@@ -1577,7 +1677,7 @@ export default function SessionScreen() {
    *  (movement 3, screenshot). Shared by the live page, its edge, and the neighbours. */
   const cardRadiiStyle = useAnimatedStyle(() => {
     'worklet';
-    const r = zoomFrame(prog.value, dragX.value, aim(), stageSV.value).radius;
+    const r = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value).radius;
     const rb = kbSquare ? 0 : r;
     return {
       borderTopLeftRadius: r,
@@ -1602,7 +1702,7 @@ export default function SessionScreen() {
    * laggy"). At rest the static styles below stand in, and the gesture animates transforms only.
    */
   const cardClipStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
+    const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     const rb = kbSquare ? 0 : f.radius;
     return {
       height: f.height,
@@ -1636,7 +1736,7 @@ export default function SessionScreen() {
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
    *  side without a clip cutting them off. */
   const boxStyle = useAnimatedStyle(() => {
-    const b = zoomBox(prog.value, dragX.value, aim(), stageSV.value);
+    const b = zoomBox(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     return {
       opacity: alpha.value,
       transform: [
@@ -1699,7 +1799,7 @@ export default function SessionScreen() {
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
   // with it; border width divided by scale so it reads ~3pt on screen throughout.
   const ringStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
+    const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
@@ -1755,28 +1855,15 @@ export default function SessionScreen() {
           total={cards.length}
           query={search.on ? search.q : ''}
           hits={hits}
-          onQuery={(q) => setSearch({ q, on: true })}
-          onClearSearch={disarmSearch}
+          onQuery={sw_onQuery}
+          onClearSearch={sw_onClearSearch}
           interactive={sw === 'open'}
-          onSelect={selectCard}
-          onKill={killCard}
-          onNew={birthCard}
-          onDone={() => closeTo(activePos())}
-          onMove={async ({ from, to }) => {
-            // A rapid re-drag can race the previous move's renumbering and send a stale index —
-            // the re-list below is the truth either way. TODO: target windows by `@id` in every
-            // tmux command (move/select/kill/capture) so a stale index can't touch the wrong
-            // window at all; that is a tmux-model change with its own tests.
-            try {
-              await moveWindow(from, to);
-            } catch (error) {
-              console.log('[switcher] move failed:', error);
-            }
-            await refresh(true); // landing indices are tmux's call (renumbering) — re-list
-          }}
-          onScrollY={(y) => {
-            scrollY.current = y;
-          }}
+          onSelect={sw_onSelect}
+          onKill={sw_onKill}
+          onNew={sw_onNew}
+          onDone={sw_onDone}
+          onMove={sw_onMove}
+          onScrollY={sw_onScrollY}
           gridRef={gridRef}
           zoomId={zoomId}
           fade={alpha}
@@ -2031,27 +2118,24 @@ export default function SessionScreen() {
         theme={theme}
         decckm={modes.decckm}
         bracketedPaste={modes.bracketedPaste}
-        sendBytes={sendKeys}
+        sendBytes={kb_sendBytes}
         open={open}
         onOpenChange={setOpen}
-        onHeight={(h) => {
-          if (h !== barHeight) probe(`barHeight ${barHeight.toFixed(0)} → ${h.toFixed(0)}`);
-          setBarHeight(h);
-        }}
+        onHeight={kb_onHeight}
         focusSignal={focusSignal}
         sending={sending}
         // §4.5: tabs are reachable only with tmux present AND the config applied AND a client
         // attached. False no longer removes the button — it greys it, and the tap explains itself
         // (`tabsHint`, user 2026-08-12).
         showTabs={showTabs}
-        onTabsTap={openSwitcher}
-        onZoomGrab={onZoomGrab}
-        onZoomArm={onZoomArm}
-        onZoomEnd={onZoomEnd}
-        onAirSettled={onAirSettled}
+        onTabsTap={kb_onTabsTap}
+        onZoomGrab={kb_onZoomGrab}
+        onZoomArm={kb_onZoomArm}
+        onZoomEnd={kb_onZoomEnd}
+        onAirSettled={kb_onAirSettled}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
-        onBarSwipe={showTabs ? onBarSwipe : undefined}
+        onBarSwipe={showTabs ? kb_onBarSwipe : undefined}
         // The pan's per-frame writes happen on the UI thread against these (perf: the JS thread
         // stalls 40-300ms under load and a runOnJS pan hitched with it). A STABLE object: the
         // bar memoizes its gesture on it, and an inline literal re-serialized the worklets and
@@ -2164,6 +2248,33 @@ export default function SessionScreen() {
       )}
     </View>
   );
+}
+
+/**
+ * What the surface is aimed at this frame — the hold pose under the finger, the slot once
+ * released, interpolated by `flight` (see `aimFrame`). Every style that draws the zoom reads the
+ * aim rather than the slot, so the card, its ring and its neighbours agree by construction.
+ *
+ * At MODULE scope, taking its shared values as an argument, because it is captured by four
+ * `useAnimatedStyle` worklets. Reanimated derives a mapper's dependencies from its worklet's
+ * closure (`Object.values(updater.__closure)`), and the plugin mints a new function object for a
+ * worklet declared in a component body on every render — so an `aim` living inside the component
+ * changed the deps of `boxStyle`, `cardClipStyle`, `cardRadiiStyle` and `ringStyle` every render,
+ * and Reanimated stopped and re-serialized all four mappers each time. That is mapper churn on the
+ * very styles driving the flight, on every one of a gesture's renders (perf, 2026-08-13). Module
+ * scope is one identity for the life of the app, and the shared values it is handed are stable too.
+ */
+function aimAt(sv: {
+  stage: SharedValue<{ w: number; h: number }>;
+  slot: SharedValue<Frame>;
+  prog: SharedValue<number>;
+  flight: SharedValue<number>;
+}): Frame {
+  'worklet';
+  // Held: slot-SIZED by the pull's reach, screen-centred (`heldFrame`). Released: the flight
+  // carries whatever pose the hold reached into the real slot.
+  const held = heldFrame(sv.stage.value, sv.slot.value, HOLD_REACH * sv.prog.value);
+  return aimFrame(held, sv.slot.value, sv.flight.value);
 }
 
 /* --- T11: the page-slide's cards --- */

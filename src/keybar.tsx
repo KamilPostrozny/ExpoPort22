@@ -22,7 +22,7 @@
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   Platform,
@@ -303,7 +303,7 @@ function Key({
  */
 const PAD = ' '.repeat(512);
 
-export default function KeyBar(props: KeyBarProps) {
+function KeyBarInner(props: KeyBarProps) {
   const { theme, open, onOpenChange } = props;
   const input = useRef<TextInput>(null);
   /** What the (uncontrolled) TextInput last held — the other half of `diffInput`. */
@@ -824,6 +824,20 @@ export default function KeyBar(props: KeyBarProps) {
     </View>
   );
 }
+
+/**
+ * The bar re-rendered on every render of the terminal screen — which is every phase of every
+ * gesture, every keyboard step, every ~2s tmux poll — and it is not a small tree: three `Glass`
+ * BlurViews, the chord strip, the keys with their SymbolViews, the TextInput, and one `NamePill`
+ * per window (two `useAnimatedStyle` hooks and another BlurView each), all deliberately mounted at
+ * rest so a swipe never pays to build them. None of that changes unless a prop does, so: memo.
+ *
+ * It only bites because the screen hands over stable identities — every handler through a ref
+ * trampoline and `pills` through a `useMemo` (see the `kbH`/`kb_*` block there). React Compiler
+ * would have done this unasked, but this component bails out of compilation (verified by running
+ * the plugin over the file), so it is done by hand.
+ */
+export default memo(KeyBarInner);
 
 /* --- the name pills (§4.4: they replace the keys during a bar swipe) --- */
 
