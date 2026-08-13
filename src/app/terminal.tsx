@@ -686,7 +686,7 @@ export default function SessionScreen() {
       if (!airSettledRef.current && prog.value > 0.02 && Math.abs(vy) < 90 && Math.abs(vx) < 90) {
         airSettledRef.current = true;
         setAirSettled(true);
-        joinSV.value = withSpring(1, { damping: 26, stiffness: 110, overshootClamping: true });
+        joinSV.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
       }
     } else if (dragging.current) {
       dragging.current = false;
@@ -1349,10 +1349,10 @@ export default function SessionScreen() {
       const pitch = stageSV.value.w * (1 + PAGE_GAP);
       // The swipe join's approach, locked to the TRAVEL rather than a clock: the card starts a
       // little beyond its pitch and closes in as the finger uncovers the gap, fully seated by
-      // 70pt — slow and firm, and it can never lag the swipe or pop (user, 2026-08-13, after
+      // 130pt — slow and firm, and it can never lag the swipe or pop (user, 2026-08-13, after
       // instant read as harsh and every timed entrance was either too quick or too slow). A held
       // join seats immediately; its entrance is the clamped spring on the mount instead.
-      const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / 70, 1));
+      const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / 130, 1));
       return {
         height: f.height,
         borderRadius: f.radius,
