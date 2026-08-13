@@ -658,6 +658,15 @@ export default function SessionScreen() {
       cancelAnimation(dragX);
       dragX.value = 0;
       flight.value = 1; // normally the flight's own completion resets the aim — there is none
+      // …and nothing is owed the keyboard either. `keysWereUp` is the promise that an overlay
+      // which TOOK the keys gives them back, but on this path no overlay ever opened: `sw` never
+      // left `closed` (the arm needs prog > 0.01). What can have happened is the other vertical
+      // exit — a swipe DOWN, which is the gesture whose whole purpose is to put the keys away
+      // (`barDismisses`). Both axes are one pan, so the dismiss and this release are the same
+      // gesture, and honouring the promise here raised the keyboard again the instant it had
+      // gone: swipe down, keyboard bounces back up (user, 2026-08-13). A finger that barely moved
+      // dismissed nothing, so clearing this costs that case nothing to give back.
+      keysWereUp.current = false;
       finishClose();
       return;
     }
@@ -2036,6 +2045,19 @@ export default function SessionScreen() {
             // The remainder makes the box an exact multiple of the cell, so the webview's own
             // top inset stays ~0 and the first row never moves — see rowRemainder.
             paddingBottom: padBottom + barPad + rowRemainder,
+            // The resting corner, stated rather than left to the absence of one. `cardRadiiStyle`
+            // is attached only while the zoom is live, and a Reanimated style that goes away does
+            // not put back what it wrote — the view keeps the last radius the worklet gave it. So
+            // the rounded corner from a gesture stayed on the page afterwards, and with the
+            // keyboard up it sat in plain sight at the top of the keys, where `kbSquare` wants it
+            // square (user, 2026-08-13). These are exactly what the worklet itself computes at
+            // rest — `zoomFrame`'s radius at t=0 is `SCREEN_R * stage.w`, which is `pageRadius`,
+            // and `pageRB` applies the same `kbSquare` — so nothing moves when the two swap; the
+            // difference is that now there is something to swap BACK to.
+            borderTopLeftRadius: pageR,
+            borderTopRightRadius: pageR,
+            borderBottomLeftRadius: pageRB,
+            borderBottomRightRadius: pageRB,
           },
           zoomActive && cardRadiiStyle,
         ]}>
