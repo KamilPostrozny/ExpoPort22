@@ -98,16 +98,27 @@ function logged(module: ExpoSSHModule): ExpoSSHModule {
   });
 }
 
+// Disposed and re-registered on every Fast Refresh pass, for the reason `src/session.ts` spells
+// out: module-scope listeners stack across reloads, and a stacked log tap is a JS thread that
+// dies slowly over a session.
+type Sub = { remove: () => void };
+const HMR = globalThis as unknown as { __port22SshLogSubs?: Sub[] };
+HMR.__port22SshLogSubs?.forEach((sub) => sub.remove());
+HMR.__port22SshLogSubs = [];
+
 if (LOG) {
-  native.addListener('onHostKey', (event) => console.log('[ssh] onHostKey', event));
+  const keep = (sub: unknown) => HMR.__port22SshLogSubs?.push(sub as Sub);
+  keep(native.addListener('onHostKey', (event) => console.log('[ssh] onHostKey', event)));
   // Decoded, because base64 tells you nothing at a glance, then JSON-quoted so an escape
   // sequence prints as \u001b[2J instead of repainting the terminal you are reading.
-  native.addListener('onShellData', ({ data }) =>
-    // Decoded then briefed — a redraw burst is tens of KB, and logging it whole is JS-thread
-    // time taken from the gestures (see `->` above).
-    console.log('[ssh] onShellData', brief(JSON.stringify(atob(data)))),
+  keep(
+    native.addListener('onShellData', ({ data }) =>
+      // Decoded then briefed — a redraw burst is tens of KB, and logging it whole is JS-thread
+      // time taken from the gestures (see `->` above).
+      console.log('[ssh] onShellData', brief(JSON.stringify(atob(data)))),
+    ),
   );
-  native.addListener('onShellClose', () => console.log('[ssh] onShellClose'));
+  keep(native.addListener('onShellClose', () => console.log('[ssh] onShellClose')));
 }
 
 export default logged(native);

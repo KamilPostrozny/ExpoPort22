@@ -219,14 +219,30 @@ function emit(base64: string) {
   sink?.(base64);
 }
 
-ExpoSSH.addListener('onShellData', ({ data }) => emit(data));
+/**
+ * Module-scope listeners are registered ONCE per app run — but Fast Refresh re-evaluates a module
+ * on every edit, and each pass added another set. After a long session (52 reloads, 2026-08-13)
+ * every shell chunk was being handled dozens of times over: dozens of history pushes and dozens
+ * of writes into the webview per byte, which is a JS thread at 8fps and a gesture that shows two
+ * or three states instead of an animation. The subscriptions are kept and disposed before
+ * re-registering, so a reload replaces them instead of stacking.
+ */
+type Sub = { remove: () => void };
+const HMR = globalThis as unknown as { __port22Subs?: Sub[] };
+HMR.__port22Subs?.forEach((sub) => sub.remove());
+HMR.__port22Subs = [];
+const listen = <T>(event: string, handler: (payload: T) => void) => {
+  HMR.__port22Subs?.push(ExpoSSH.addListener(event as never, handler as never) as unknown as Sub);
+};
 
-ExpoSSH.addListener('onShellClose', () => {
+listen<{ data: string }>('onShellData', ({ data }) => emit(data));
+
+listen('onShellClose', () => {
   shellOpen = false;
   if (state.status === 'connected') set({ status: 'disconnected' });
 });
 
-ExpoSSH.addListener('onHostKey', async (hostKey) => {
+listen<HostKeyEvent>('onHostKey', async (hostKey) => {
   const where = endpoint(getSettings());
   const verdict = hostKeyVerdict(await pinnedHostKey(where), hostKey.key);
   console.log('[session] host key', verdict, hostKey.fingerprint);
