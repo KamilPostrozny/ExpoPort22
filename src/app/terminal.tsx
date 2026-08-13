@@ -437,19 +437,23 @@ export default function SessionScreen() {
    * the report prints at the settle. A separate 100ms heartbeat exposes JS-thread stalls, which
    * is where a runOnJS pan handler would hitch. --- */
   const perfOn = useSharedValue(0);
-  const perfBuf = useSharedValue({ n: 0, drops: 0, worst: 0 });
+  const perfBuf = useSharedValue({ n: 0, d17: 0, d25: 0, worst: 0 });
   useFrameCallback((fi) => {
     if (perfOn.value === 0) return;
     const dt = fi.timeSincePreviousFrame ?? 0;
     if (dt <= 0) return;
     const b = perfBuf.value;
     b.n += 1;
-    if (dt > 20) b.drops += 1;
+    // The display is 120Hz: a healthy gap is ~8ms, 17+ is a missed pair (visible at speed),
+    // 25+ is a missed 60Hz frame (visible always). The first cut counted only >20ms and called
+    // fast-swipe jank "clean" (user, 2026-08-13).
+    if (dt > 17) b.d17 += 1;
+    if (dt > 25) b.d25 += 1;
     if (dt > b.worst) b.worst = dt;
   });
-  const perfStart = () => {
-    if (perfOn.value === 1) return;
-    perfBuf.value = { n: 0, drops: 0, worst: 0 };
+  const perfStart = (fresh = false) => {
+    if (perfOn.value === 1 && !fresh) return;
+    perfBuf.value = { n: 0, d17: 0, d25: 0, worst: 0 };
     perfOn.value = 1;
   };
   const perfEnd = (label: string) => {
@@ -458,7 +462,7 @@ export default function SessionScreen() {
     const b = perfBuf.value;
     if (b.n > 5)
       console.log(
-        `[perf] ${label}: ${b.n} frames, ${b.drops} dropped (>20ms), worst ${Math.round(b.worst)}ms`,
+        `[perf] ${label}: ${b.n} frames, ${b.d17} >17ms, ${b.d25} >25ms, worst ${Math.round(b.worst)}ms`,
       );
   };
   useEffect(() => {
@@ -757,6 +761,8 @@ export default function SessionScreen() {
   const onZoomEnd = (dx: number, dy: number, vx: number, vy: number) => {
     if (stage === null) return;
     if (dragging.current) {
+      perfEnd('zoom-drag');
+      perfStart(true);
       dragging.current = false;
       draggingSV.value = 0;
       airSettledRef.current = false;
@@ -1055,7 +1061,7 @@ export default function SessionScreen() {
   };
 
   const clearBarSwipe = (skipRefresh = false) => {
-    perfEnd('hop');
+    perfEnd('hop-settle');
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
     // start of this one: a capture per window is an exec burst and a parse of every answer, and
     // on the JS thread at the instant the finger goes down that is a stutter in the slide it is
@@ -1199,6 +1205,8 @@ export default function SessionScreen() {
     } else {
       const info = swipeInfo.current;
       if (!info?.live) return;
+      perfEnd('hop-drag');
+      perfStart(true);
       // The same release lifted the card into the grid: this axis yields (see `onSwitcherDrag`).
       // The refresh is skipped — a capture per window on the JS thread is the stutter
       // `clearBarSwipe` describes, and here it would land inside the flight.
