@@ -567,11 +567,9 @@ export default function SessionScreen() {
     );
   };
 
-  // The bar-swipe-up drag-follow (prototype `zoomFollow`): progress tracks the finger, release
-  // past the threshold — or a flick that never got that far — commits, anything less springs back.
-  /** Touch-down of the current zoom drag, for `zoomCommits`' flick window. The horizontal hop
-   *  keeps its own in `swipeInfo.t0` for the same reason: the pan reports travel, not time. */
-  const zoomT0 = useRef(0);
+  // The drag-follow (prototype `zoomFollow`): progress tracks the finger from the GRAB, with
+  // nothing in between — up, back down, up again — and only the release decides, on how far it
+  // got or how fast it was thrown (`zoomCommits`).
   /** Has the open's one-off cost landed (two frames, as in `openSwitcher`)? Until it has, the
    *  drag is set-up only and nothing moves. */
   const zoomReady = useRef(false);
@@ -585,7 +583,7 @@ export default function SessionScreen() {
    *  the release is dropped, the render lands on `drag`, and nothing is left to end it. That is a
    *  frozen app (user, 2026-08-11), and it is the same shape as the two before it. */
   const dragging = useRef(false);
-  const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number) => {
+  const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number, vx = 0, vy = 0) => {
     if (stage === null) return;
     // Where the phase IS consulted it comes off the ref, not the render: a pan reports every frame,
     // and through a closure a render behind, "already dragging" still looks like "closed" — the
@@ -601,7 +599,6 @@ export default function SessionScreen() {
         // at this point and iOS reports the frame a beat later, so this is still the pre-drag
         // truth — and it is what decides whether the keys come back on the way out.
         keysWereUp.current = keyboardPad > 0;
-        zoomT0.current = Date.now();
         const pos = activePos();
         setZoomId(idAt(pos));
         slotSV.value = zoomSlot(pos);
@@ -643,7 +640,6 @@ export default function SessionScreen() {
         cancelAnimation(alpha);
         alpha.value = 1;
         zoomBase.current = prog.value;
-        zoomT0.current = Date.now();
         zoomFrom.current = { x: dx, y: dy };
         zoomReady.current = true;
         setSw('drag');
@@ -655,7 +651,7 @@ export default function SessionScreen() {
       dragX.value = dx - zoomFrom.current.x;
     } else if (dragging.current) {
       dragging.current = false;
-      if (zoomCommits(dy, Date.now() - zoomT0.current, prog.value)) {
+      if (zoomCommits(prog.value, vx, vy)) {
         // The grid outranks the hop: the card flying into the grid is the one that was under the
         // finger, so a page swipe still open under this release must decide nothing. It is told by
         // this flag rather than by a call, because the bar reports the two axes in order and the

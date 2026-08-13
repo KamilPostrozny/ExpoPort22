@@ -66,7 +66,8 @@ import {
   applyCtrl,
   barDismisses,
   barGrabbed,
-  barLifts,
+  KEYS_DROP_DY,
+  rowJoins,
   controlByte,
   CARET_SETTLE_MS,
   CARET_STEP_MAX,
@@ -114,10 +115,10 @@ export type KeyBarProps = {
   onTabsTap?: () => void;
   /** T10: bar swipe ↑ is the drag into the switcher — the prototype's `zoomFollow` — whatever the
    *  keyboard is doing (user, 2026-08-11: the gesture is one thing, always). Fired per move with
-   *  the pan's translation from the moment the held card lifts (`barLifts`), then once with 'end'
-   *  on release; the screen turns dy into zoom progress and decides commit-or-spring-back. Only
-   *  wired while `showTabs`. */
-  onSwitcherDrag?: (phase: 'move' | 'end', dx: number, dy: number) => void;
+   *  the pan's translation from the GRAB onwards — there is no threshold between a swipe and the
+   *  switcher, so the card follows the finger up and back down the whole time — then once with
+   *  'end' and the release velocity, which is what decides a flick. Only wired while `showTabs`. */
+  onSwitcherDrag?: (phase: 'move' | 'end', dx: number, dy: number, vx?: number, vy?: number) => void;
   /** T11: bar swipe ↔ is the page-slide window hop. Raw gesture only — 'start' once when the pan
    *  leaves the slop, 'move' per frame with the pan's translation, 'end' on release. Fires whether
    *  or not the card has been lifted into the switcher: the two axes run together. The screen owns
@@ -474,43 +475,30 @@ export default function KeyBar(props: KeyBarProps) {
       dismissed.current = false;
     })
     .onUpdate((e) => {
-      // The lift, asked every frame until it happens — from a standing start OR out of a swipe
-      // already sideways. Where there is no switcher to lift into (no tmux) the gesture stays on
-      // the ground, like the button.
-      if (
-        !zooming.current &&
-        props.showTabs &&
-        props.onSwitcherDrag &&
-        barLifts(e.translationX, e.translationY, e.velocityX, e.velocityY)
-      ) {
+      // The grab. From here the card is in hand and BOTH axes are simply live — there is no lift
+      // to earn and no threshold in the way of the vertical, so it can go up, come back down and
+      // go up again, and the card follows the whole time (user, 2026-08-13). Where there is no
+      // switcher to pull into (no tmux) the vertical is silence, like the button.
+      if (!zooming.current) {
+        if (!barGrabbed(e.translationX, e.translationY)) return;
         zooming.current = true;
-        // §7: the lift is a judgement call made from four numbers on a moving finger, and no other
-        // log can show which of them decided it — a false lift and a real one look identical from
-        // the switcher's side (device, 2026-08-12: every sideways hop was arming the zoom).
-        console.log(
-          `[barswipe] lift dx ${e.translationX.toFixed(0)} dy ${e.translationY.toFixed(0)} ` +
-            `vx ${e.velocityX.toFixed(0)} vy ${e.velocityY.toFixed(0)}`,
-        );
-        Keyboard.dismiss(); // the prototype drops the keyboard the moment the grab lifts
       }
-      if (zooming.current) {
-        // The lift takes the vertical and nothing else. Its own horizontal drift is frozen at the
-        // grab (`originX`) once the pages are carrying x, because two things moving the card at
-        // once is a card travelling twice as far as the finger — but it stays live before the
-        // grab, which is the ±10pt of tilt a straight pull up has always had.
-        props.onSwitcherDrag?.('move', held.current ? originX.current : e.translationX, e.translationY);
-      } else if (!dismissed.current && barDismisses(e.translationX, e.translationY)) {
-        // Down puts the keys away and the swipe carries on: the page stays in hand, and a hop the
-        // same finger decides a moment later is still one gesture.
+      if (props.showTabs && props.onSwitcherDrag) {
+        // The vertical, every frame. The zoom's own horizontal drift is frozen at the row's grab
+        // (`originX`), because two things moving the card at once is a card travelling twice as
+        // far as the finger — before that it is the ±10pt of tilt a straight pull has always had.
+        props.onSwitcherDrag('move', held.current ? originX.current : e.translationX, e.translationY);
+      }
+      // The keys get out of the way once the card is visibly off the bar — not at the slop, which
+      // the opening arc of a flat hop passes through on its own (see `KEYS_DROP_DY`).
+      if (!dismissed.current && (e.translationY <= -KEYS_DROP_DY || barDismisses(e.translationX, e.translationY))) {
         dismissed.current = true;
         Keyboard.dismiss();
       }
-      // The horizontal, alive the WHOLE gesture — lifted or not. Safari's card can be swiped
-      // between tabs while it is already off the bottom of the screen, and the swipe can start
-      // at any point in the pull up (user, 2026-08-12); an axis that goes quiet the moment the
-      // card leaves the bar is the deliberateness that was missing.
+      // The row joins when the finger actually goes sideways, whenever that is — from a standing
+      // start, or a hundred points into a pull up.
       if (!held.current) {
-        if (!barGrabbed(e.translationX)) return;
+        if (!rowJoins(e.translationX)) return;
         held.current = true;
         originX.current = e.translationX;
         props.onBarSwipe?.('start', 0);
@@ -530,7 +518,14 @@ export default function KeyBar(props: KeyBarProps) {
       // over there.
       if (zooming.current) {
         zooming.current = false;
-        props.onSwitcherDrag?.('end', held.current ? originX.current : e.translationX, e.translationY);
+        // The release's SPEED decides the flick, so it goes with it — see `zoomCommits`.
+        props.onSwitcherDrag?.(
+          'end',
+          held.current ? originX.current : e.translationX,
+          e.translationY,
+          e.velocityX,
+          e.velocityY,
+        );
       }
       if (held.current) {
         held.current = false;

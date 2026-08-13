@@ -18,6 +18,7 @@ import {
   rubber,
   swipeTarget,
   zoomCommits,
+  ZOOM_FLICK_VY,
 } from '@/barswipe-model';
 import { ZOOM_COMMIT } from '@/switcher-model';
 
@@ -62,16 +63,18 @@ test('a phantom slot past the last window is reachable, and does not rubber-band
   expect(rubber(50, 0, REAL + 1)).toBe(50 / 3); // and still bands there
 });
 
-test('zoomCommits: a quarter dragged, or a slight swipe up', () => {
-  // The slow drag, unchanged: a quarter of the way into the card and let go.
-  expect(zoomCommits(-200, 900, ZOOM_COMMIT + 0.01)).toBe(true);
-  expect(zoomCommits(-200, 900, ZOOM_COMMIT)).toBe(false);
-  // The flick: barely more travel than the 24pt that classified the swipe at all, let go fast.
-  expect(zoomCommits(-(FLICK_PX + 1), 150, 0)).toBe(true);
-  expect(zoomCommits(-(FLICK_PX + 1), FLICK_MS + 50, 0)).toBe(false); // same travel, dawdled
-  expect(zoomCommits(-(FLICK_PX - 1), 150, 0)).toBe(false); // fast, but it never left the bar
+test('zoomCommits: a quarter pulled, or thrown upward at the release', () => {
+  // The pull, unchanged: a quarter of the way into the card and let go.
+  expect(zoomCommits(ZOOM_COMMIT + 0.01, 0, 0)).toBe(true);
+  expect(zoomCommits(ZOOM_COMMIT, 0, 0)).toBe(false);
+  // The flick, now asked of the release's speed rather than its travel — travel could never tell
+  // a flick from the arc a thumb draws through a flat hop (device, 2026-08-12).
+  expect(zoomCommits(0, 0, -(ZOOM_FLICK_VY + 1))).toBe(true);
+  expect(zoomCommits(0, 0, -(ZOOM_FLICK_VY - 1))).toBe(false); // upward, not thrown
+  // A flat hop's release: travelling sideways, barely upward at all.
+  expect(zoomCommits(0, -1800, -800)).toBe(false);
   // Down is not up, however fast — the keyboard drop and the grab are the same gesture, mirrored.
-  expect(zoomCommits(FLICK_PX + 50, 100, 0)).toBe(false);
+  expect(zoomCommits(0, 0, 1800)).toBe(false);
 });
 
 /* --- page geometry (prototype: 402-wide pages, 28 gap → 430 pitch) --- */

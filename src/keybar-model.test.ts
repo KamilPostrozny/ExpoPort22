@@ -15,13 +15,14 @@ import {
   caretKeys,
   barDismisses,
   barGrabbed,
-  barLifts,
+  rowJoins,
   controlByte,
   ctrlTap,
   diffInput,
   navKey,
   pasteBytes,
 } from '@/keybar-model';
+import * as model from '@/keybar-model';
 import { TAP_MS, arrowKey, isTwoFingerTap } from '@/scroll-model';
 
 /* --- Ctrl state machine --- */
@@ -179,47 +180,25 @@ test('a settled delta of several characters is still travel', () => {
   expect(CARET_STEP_MAX).toBeGreaterThan(1); // room for a coalesced pair of real steps
 });
 
-/* --- the bar grab and its two exits --- */
+/* --- the bar grab: one gesture, both axes live --- */
 
-test('the page comes into hand on horizontal travel alone', () => {
-  expect(barGrabbed(5)).toBe(false);
-  expect(barGrabbed(11)).toBe(true);
-  expect(barGrabbed(-11)).toBe(true);
+test('the grab is either axis — from there both are live and neither is a decision', () => {
+  expect(barGrabbed(5, 5)).toBe(false);
+  expect(barGrabbed(11, 0)).toBe(true);
+  expect(barGrabbed(0, -11)).toBe(true); // a pull straight up is a grab too
 });
 
-test('a pull straight up lifts at the fire threshold, a shallow one waits', () => {
-  expect(barLifts(0, -30, 0, -50)).toBe(true);
-  expect(barLifts(0, -24, 0, -50)).toBe(true);
-  expect(barLifts(0, -15, 0, -50)).toBe(false);
+test('the row waits for real sideways travel', () => {
+  expect(rowJoins(5)).toBe(false);
+  expect(rowJoins(11)).toBe(true);
+  expect(rowJoins(-11)).toBe(true);
 });
 
-test('the thumb arc that opens every flat swipe does NOT lift', () => {
-  // Measured on device (2026-08-12), ten flat hops in a row: the bar sits at the bottom, the
-  // thumb pivots, and the swipe's first 25pt are upward at -600…-900pt/s. Every one of these
-  // lifted under the old "up beat sideways" test, which is the bug this cone exists for.
-  expect(barLifts(-19, -26, -272, -344)).toBe(false);
-  expect(barLifts(15, -24, 368, -600)).toBe(false);
-  expect(barLifts(19, -26, 552, -792)).toBe(false);
-  expect(barLifts(10, -26, 200, -463)).toBe(false);
-  expect(barLifts(8, -15, 472, -784)).toBe(false); // the flick rule must not catch it either
-  expect(barLifts(-13, -26, -328, -712)).toBe(false);
-});
-
-test('the cone widens with sideways travel', () => {
-  expect(barLifts(4, -32, 0, -300)).toBe(true); // 24 + 1.5*4 = 30 ≤ 32
-  expect(barLifts(4, -28, 0, -300)).toBe(false); // …but 28 is not
-  expect(barLifts(40, -60, 0, -300)).toBe(false); // 40 sideways wants 84 of up
-});
-
-test('past the cone only a real throw lifts', () => {
-  // 200pt along: the cone is unreachable there by design, so speed is the only way out.
-  expect(barLifts(-200, -30, -100, -1400)).toBe(true);
-  expect(barLifts(-200, -30, -100, -904)).toBe(true); // the device's own flick, which used to miss
-  // Thrown up while STILL travelling sideways hard — the ordinary way to flick mid-swipe, and
-  // what a vy-beats-vx test refused (user, 2026-08-13).
-  expect(barLifts(-200, -30, -900, -700)).toBe(true);
-  expect(barLifts(-200, -30, -100, -300)).toBe(false); // drifting up, not thrown
-  expect(barLifts(-40, -30, -100, -1400)).toBe(false); // not far enough along to be a throw
+test('nothing about the vertical is judged mid-gesture any more', () => {
+  // The whole point of the rewrite: no cone, no flick test, no threshold between a swipe and the
+  // switcher (user, 2026-08-13). The card follows the finger up and back down; only the release
+  // decides, in `zoomCommits`. This test exists to fail if a mid-gesture gate creeps back in.
+  expect(Object.keys(model).filter((k) => /lift/i.test(k))).toEqual([]);
 });
 
 test('down dismisses the keyboard, a sagging sideways swipe does not', () => {

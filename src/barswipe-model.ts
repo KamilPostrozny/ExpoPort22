@@ -53,19 +53,23 @@ export function swipeTarget(dx: number, dtMs: number, pos: number, count: number
   return pos;
 }
 
+/** Upward speed at the release, pt/s, that sends the card to the grid whatever the travel was. */
+export const ZOOM_FLICK_VY = 700;
+
 /**
- * The vertical release, the same question one axis over: does this swipe up open the switcher, or
- * spring the terminal back? `prog` past `ZOOM_COMMIT` is the slow drag — pull the surface a
- * quarter of the way into its card and let go. The flick is the other way in: a slight swipe up
- * off the bar sends the tab to the grid without dragging it there (user, 2026-08-10), and it is
- * the same finger on the same bar as the horizontal hop, so it is the same 30pt-under-250ms.
+ * The vertical release: does letting go open the switcher, or spring the terminal back?
  *
- * `dy` is the pan's translation — negative is up — so a downward release can never commit no
- * matter how fast it was, and neither can the 24pt the gesture spends being classified at all
- * (`BAR_SWIPE_FIRE`), which is where `FLICK_PX`'s extra 6pt of travel is spent.
+ * Two ways, and now they are the ONLY vertical decision in the gesture — nothing is judged while
+ * the finger is down any more, because the card follows it up and back down with no threshold in
+ * between (user, 2026-08-13). `prog` past `ZOOM_COMMIT` is the pull: a quarter of the way into the
+ * card and let go. The flick is a slight swipe up off the bar that sends the tab to the grid
+ * without dragging it there (user, 2026-08-10) — and it is asked of the SPEED at the release, not
+ * of the travel, because travel cannot tell an upward flick from the arc a thumb draws through an
+ * ordinary flat swipe (2026-08-12: ten hops crossing -24…-26). At the release those two look
+ * nothing alike: a flick is going up faster than it is going sideways, and a hop is not going up.
  */
-export function zoomCommits(dy: number, dtMs: number, prog: number): boolean {
-  return prog > ZOOM_COMMIT || (-dy > FLICK_PX && dtMs < FLICK_MS);
+export function zoomCommits(prog: number, vx: number, vy: number): boolean {
+  return prog > ZOOM_COMMIT || (vy <= -ZOOM_FLICK_VY && Math.abs(vy) > Math.abs(vx));
 }
 
 /** The release slide's speed, pt per ms — the duration scales with the distance left, so an
