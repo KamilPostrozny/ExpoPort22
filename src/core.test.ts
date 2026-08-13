@@ -17,33 +17,78 @@ mock.module('expo-secure-store', () => ({
   deleteItemAsync: async () => {},
 }));
 
-const { THEMES, resolveTheme } = await import('@/theme');
-const { DEFAULTS, clampFontSize, decode, endpoint, startupLine, usesTmux, validate } =
-  await import('@/settings');
+const { flavors } = await import('@catppuccin/palette');
+const { DARK_THEMES, LIGHT_THEMES, THEMES, resolveTheme } = await import('@/theme');
+const {
+  DEFAULTS,
+  clampFontSize,
+  decode,
+  endpoint,
+  startupLine,
+  themeNameFor,
+  usesTmux,
+  validate,
+} = await import('@/settings');
 const { isHttpLink, parseOsc52 } = await import('@/terminal-protocol');
 const { hostKeyVerdict } = await import('@/host-keys');
 
+const cat = (flavour: 'mocha' | 'latte', colour: string) =>
+  (flavors[flavour].colors as Record<string, { hex: string }>)[colour].hex;
+
 test('ANSI black and white swap ends between a light and a dark flavour', () => {
-  const mocha = THEMES.mocha;
-  const latte = THEMES.latte;
-  expect(mocha.ansi[0]).toBe(mocha.palette.surface1); // dark: black is the light-ward step
-  expect(mocha.ansi[7]).toBe(mocha.palette.subtext1);
-  expect(latte.ansi[0]).toBe(latte.palette.subtext1); // light: and the other way round
-  expect(latte.ansi[7]).toBe(latte.palette.surface2);
-  expect(mocha.ansi).toHaveLength(16);
+  expect(THEMES.mocha.ansi[0]).toBe(cat('mocha', 'surface1')); // dark: black is the light-ward step
+  expect(THEMES.mocha.ansi[7]).toBe(cat('mocha', 'subtext1'));
+  expect(THEMES.latte.ansi[0]).toBe(cat('latte', 'subtext1')); // light: and the other way round
+  expect(THEMES.latte.ansi[7]).toBe(cat('latte', 'surface2'));
 });
 
 test('border and placeholder step up on a light flavour only', () => {
-  expect(THEMES.mocha.border).toBe(THEMES.mocha.palette.overlay0);
-  expect(THEMES.latte.border).toBe(THEMES.latte.palette.overlay1);
-  expect(THEMES.mocha.placeholder).toBe(THEMES.mocha.palette.overlay1);
-  expect(THEMES.latte.placeholder).toBe(THEMES.latte.palette.overlay2);
+  expect(THEMES.mocha.border).toBe(cat('mocha', 'overlay0'));
+  expect(THEMES.latte.border).toBe(cat('latte', 'overlay1'));
+  expect(THEMES.mocha.placeholder).toBe(cat('mocha', 'overlay1'));
+  expect(THEMES.latte.placeholder).toBe(cat('latte', 'overlay2'));
 });
 
-test('auto follows the system, an explicit flavour does not', () => {
-  expect(resolveTheme('auto', true).name).toBe('mocha');
-  expect(resolveTheme('auto', false).name).toBe('latte');
-  expect(resolveTheme('frappe', false).name).toBe('frappe');
+test('every installed theme is a complete one', () => {
+  expect(DARK_THEMES.length).toBeGreaterThan(LIGHT_THEMES.length); // not every scheme has both cuts
+  for (const t of [...DARK_THEMES, ...LIGHT_THEMES]) {
+    expect(t.ansi).toHaveLength(16);
+    // A missing role reaches the screen as a transparent view, which reads as "the terminal shows
+    // through the sheet" rather than as an error — so the shape is checked, not eyeballed.
+    for (const [role, value] of Object.entries(t)) {
+      if (role === 'ansi' || role === 'dots') continue;
+      expect(typeof value).not.toBe('undefined');
+    }
+    for (const dot of Object.values(t.dots)) expect(dot).toMatch(/^#[0-9a-f]{6}$/i);
+    // Not a grey. This is what pins the chrome roles to the normal ANSI half: Solarized keeps its
+    // base tones in the bright half, so reading `accent` out of slot 12 there gives #839496 and
+    // `warning` out of slot 11 gives a blue-grey — a grey confirm button and a grey warning.
+    for (const role of [t.accent, t.accentAlternate, t.danger, t.warning, t.dots.green]) {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(role.slice(i, i + 2), 16));
+      expect((Math.max(r, g, b) - Math.min(r, g, b)) / Math.max(r, g, b)).toBeGreaterThan(0.14);
+    }
+    expect(t.colorSchemeNotification).toBe(t.isDark ? '\x1b[?997;1n' : '\x1b[?997;2n');
+  }
+});
+
+test('following the system picks per appearance, ignoring it picks once', () => {
+  const s = { ...DEFAULTS, followSystem: true, themeDark: 'nord', themeLight: 'ayu-light' };
+  expect(themeNameFor(s, true)).toBe('nord');
+  expect(themeNameFor(s, false)).toBe('ayu-light');
+  expect(themeNameFor({ ...s, followSystem: false, theme: 'dracula' }, true)).toBe('dracula');
+  expect(themeNameFor({ ...s, followSystem: false, theme: 'dracula' }, false)).toBe('dracula');
+});
+
+test('an unknown theme name falls back rather than rendering nothing', () => {
+  expect(resolveTheme('a-scheme-that-was-removed').name).toBe('mocha');
+  expect(resolveTheme('gruvbox-dark-medium').label).toBe('Gruvbox Dark');
+});
+
+test('the old single-field theme setting upgrades to the switch', () => {
+  expect(decode({ theme: 'auto' }).followSystem).toBe(true);
+  expect(decode({ theme: 'auto' }).theme).toBe(DEFAULTS.theme);
+  expect(decode({ theme: 'frappe' })).toMatchObject({ followSystem: false, theme: 'frappe' });
+  expect(decode({ theme: 'no-such-theme' }).followSystem).toBe(true);
 });
 
 test('a theme flip notifies the host with the right DECSET 2031 code', () => {
@@ -58,6 +103,7 @@ test('decode fills gaps, rejects wrong types, and drops unknown keys', () => {
   expect(decode({ host: 'box', keyRow: ['gone'] })).toEqual({ ...DEFAULTS, host: 'box' });
   expect(decode({ theme: 'frappe', fontSize: 99 })).toEqual({
     ...DEFAULTS,
+    followSystem: false, // a named theme in the old field is a user who had opted out of auto
     theme: 'frappe',
     fontSize: 32,
   });

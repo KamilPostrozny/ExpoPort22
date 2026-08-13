@@ -1,9 +1,14 @@
 /**
  * The Settings quick sheet (§4.8), per the prototype: grabber, swipe-dismiss, no Done button —
- * over the live terminal, so a flavour tap restyles the session behind it while it is still up.
- * Sections: APPEARANCE (Auto + the four flavours with swatch rows and a check, the font-size
- * stepper), TMUX (the comfort-settings opt-out, on a tmux session only), SESSION (Disconnect in
- * accent, Forget host key in red behind a confirm).
+ * over the live terminal, so a theme tap restyles the session behind it while it is still up.
+ * Sections: APPEARANCE (the follow-the-system switch and the font-size stepper, then the theme
+ * lists the switch decides between), TMUX (the comfort-settings opt-out, on a tmux session only),
+ * SESSION (Disconnect in accent, Forget host key in red behind a confirm).
+ *
+ * The switch comes before the lists rather than sitting inside them because it changes what the
+ * lists *are*: following the system asks for two answers, one per appearance, and most schemes
+ * ship only one cut — so the alternative, one list with a leading "Auto" row, would be asking the
+ * system to flip between a light Gruvbox that does not exist and the dark one that does.
  *
  * What is deliberately NOT here: host, port, username, startup command — those live on the Setup
  * screen only, and §4.8 hides them while connected. The prototype's "All settings" row led to a
@@ -20,8 +25,18 @@
 
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
-import { useEffect } from 'react';
-import { Alert, Modal, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import {
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
@@ -42,7 +57,14 @@ import {
   useSettings,
   usesTmux,
 } from '@/settings';
-import { FLAVOURS, MONO, THEMES, type Theme, type ThemeChoice } from '@/theme';
+import {
+  ALL_THEMES,
+  DARK_THEMES,
+  LIGHT_THEMES,
+  MONO,
+  type Theme,
+  type ThemeName,
+} from '@/theme';
 
 /** How far offscreen the sheet starts and returns to — comfortably past its own height. */
 const TRAVEL = 620;
@@ -57,18 +79,9 @@ const SLIDE = { duration: 340, easing: Easing.bezier(0.32, 0.72, 0.3, 1) };
 const HAIRLINE = 'rgba(127,132,156,0.3)';
 const STEPPER_TINT = 'rgba(127,132,156,0.25)';
 
-/** The swatch strip's six chips, in the prototype's order. Read from each flavour's own palette. */
-const SWATCHES = ['red', 'green', 'yellow', 'blue', 'pink', 'teal'] as const;
-
-/** Auto first (PLAN §4.8), then the prototype's flavour order. */
-const CHOICES: ThemeChoice[] = ['auto', ...FLAVOURS];
-const LABELS: Record<string, string> = {
-  auto: 'Auto',
-  latte: 'Latte',
-  frappe: 'Frappé',
-  macchiato: 'Macchiato',
-  mocha: 'Mocha',
-};
+/** The swatch strip's six chips, in the prototype's order — now ANSI slots rather than Catppuccin
+ *  names, because those six are the one thing every scheme is guaranteed to have. */
+const SWATCHES = [1, 2, 3, 4, 5, 6];
 
 export default function SettingsSheet({
   theme,
@@ -83,6 +96,11 @@ export default function SettingsSheet({
   const settings = useSettings();
   const insets = useSafeAreaInsets();
   const ty = useSharedValue(TRAVEL);
+  const scrollRef = useRef<ScrollView>(null);
+  /** The theme lists make the sheet taller than the screen, so it scrolls — and a scroll and a
+   *  swipe-dismiss are the same finger. The sheet only rides the finger from the top of the list;
+   *  below that the list keeps the gesture. */
+  const atTop = useRef(true);
   useEffect(() => {
     ty.value = withTiming(0, SLIDE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,20 +116,29 @@ export default function SettingsSheet({
   // release decision — distance or flick — is input-model's, tested.
   const pan = Gesture.Pan()
     .runOnJS(true)
+    // RNGH types the argument as a component ref; a ScrollView ref is what it actually wants, and
+    // without this the pan wins the arbitration outright and the list never scrolls.
+    .simultaneousWithExternalGesture(scrollRef as unknown as React.RefObject<React.ComponentType>)
     .onUpdate((e) => {
-      ty.value = Math.max(0, e.translationY);
+      if (atTop.current) ty.value = Math.max(0, e.translationY);
     })
     .onEnd((e) => {
-      if (sheetShouldDismiss(e.translationY, e.velocityY)) close();
+      if (atTop.current && sheetShouldDismiss(e.translationY, e.velocityY)) close();
       else ty.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
     });
 
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: ty.value }] }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: 1 - ty.value / TRAVEL }));
 
-  const pickFlavour = (choice: ThemeChoice) => {
-    console.log('[settings] theme →', choice);
-    updateSettings({ theme: choice }); // §4.8: restyles the live session, no reconnect
+  /** §4.8: restyles the live session, no reconnect. */
+  const pickTheme = (field: 'theme' | 'themeDark' | 'themeLight', name: ThemeName) => {
+    console.log(`[settings] ${field} →`, name);
+    updateSettings({ [field]: name });
+  };
+
+  const toggleFollow = (on: boolean) => {
+    console.log('[settings] followSystem →', on);
+    updateSettings({ followSystem: on });
   };
 
   const stepFont = (delta: number) => {
@@ -157,6 +184,40 @@ export default function SettingsSheet({
     />
   );
 
+  const themeList = (
+    title: string,
+    list: Theme[],
+    field: 'theme' | 'themeDark' | 'themeLight',
+  ) => (
+    <>
+      <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>{title}</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface }]}>
+        {list.map((t, i) => (
+          <Pressable
+            key={t.name}
+            onPress={() => pickTheme(field, t.name)}
+            style={({ pressed }) => [
+              styles.row,
+              i > 0 && styles.rowLine,
+              pressed && { backgroundColor: STEPPER_TINT },
+            ]}>
+            <Text style={[styles.label, { color: theme.foreground }]} numberOfLines={1}>
+              {t.label}
+            </Text>
+            {/* The scheme's own background under its own six hues: the row is a sample of the
+                terminal it would produce, which is the only thing a name like "Kanagawa" is not. */}
+            <View style={[styles.swatch, { backgroundColor: t.background }]}>
+              {SWATCHES.map((slot) => (
+                <View key={slot} style={[styles.chip, { backgroundColor: t.ansi[slot] }]} />
+              ))}
+            </View>
+            <View style={styles.checkSlot}>{settings[field] === t.name && check}</View>
+          </Pressable>
+        ))}
+      </View>
+    </>
+  );
+
   return (
     <Modal transparent statusBarTranslucent animationType="none" onRequestClose={close}>
       {/* RNGH needs its own root inside a Modal's native window. */}
@@ -177,91 +238,94 @@ export default function SettingsSheet({
               <View style={[styles.grabber, { backgroundColor: theme.border }]} />
             </Pressable>
 
-            <Text style={[styles.header, { color: theme.muted }]}>APPEARANCE</Text>
-            <View style={[styles.card, { backgroundColor: theme.surface }]}>
-              {CHOICES.map((choice, i) => (
-                <Pressable
-                  key={choice}
-                  onPress={() => pickFlavour(choice)}
-                  style={({ pressed }) => [
-                    styles.row,
-                    i > 0 && styles.rowLine,
-                    pressed && { backgroundColor: STEPPER_TINT },
-                  ]}>
-                  <Text style={[styles.label, { color: theme.foreground }]}>{LABELS[choice]}</Text>
-                  {choice === 'auto' ? (
-                    <Text style={[styles.value, { color: theme.muted }]}>follows system</Text>
-                  ) : (
-                    <View style={[styles.swatch, { backgroundColor: THEMES[choice].palette.base }]}>
-                      {SWATCHES.map((slot) => (
-                        <View
-                          key={slot}
-                          style={[styles.chip, { backgroundColor: THEMES[choice].palette[slot] }]}
-                        />
-                      ))}
-                    </View>
-                  )}
-                  <View style={styles.checkSlot}>{settings.theme === choice && check}</View>
-                </Pressable>
-              ))}
-              <View style={[styles.row, styles.rowLine]}>
-                <Text style={[styles.label, { color: theme.foreground }]}>Font size</Text>
-                <Text style={[styles.value, { color: theme.muted }]}>{settings.fontSize} pt</Text>
-                <View style={styles.stepper}>
-                  <Pressable
-                    onPress={() => stepFont(-1)}
-                    style={({ pressed }) => [styles.stepKey, pressed && { opacity: 0.5 }]}>
-                    <Text style={[styles.stepGlyph, { color: theme.foreground }]}>−</Text>
-                  </Pressable>
-                  <View style={styles.stepDivider} />
-                  <Pressable
-                    onPress={() => stepFont(1)}
-                    style={({ pressed }) => [styles.stepKey, pressed && { opacity: 0.5 }]}>
-                    <Text style={[styles.stepGlyph, { color: theme.foreground }]}>+</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-
-            {/* Only on a tmux session: on any other the toggle governs nothing, and a row that
-                explains why it is inert is worse than no row. */}
-            {usesTmux(settings) && (
-              <>
-                <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>TMUX</Text>
-                <View style={[styles.card, styles.row, { backgroundColor: theme.surface }]}>
-                  <Text style={[styles.label, { color: theme.foreground }]}>Comfort settings</Text>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.scroll}
+              bounces={false}
+              scrollEventThrottle={16}
+              onScroll={(e) => {
+                atTop.current = e.nativeEvent.contentOffset.y <= 0;
+              }}>
+              <Text style={[styles.header, { color: theme.muted }]}>APPEARANCE</Text>
+              <View style={[styles.card, { backgroundColor: theme.surface }]}>
+                <View style={styles.row}>
+                  <Text style={[styles.label, { color: theme.foreground }]}>Follow system</Text>
                   <Switch
-                    value={settings.tmuxExtras}
-                    onValueChange={toggleExtras}
+                    value={settings.followSystem}
+                    onValueChange={toggleFollow}
                     trackColor={{ true: theme.accent }}
                   />
                 </View>
-                <Text style={[styles.note, { color: theme.placeholder }]}>
-                  Colours, no status bar, deeper scrollback. Applies on the next connect.
-                </Text>
-              </>
-            )}
+                <View style={[styles.row, styles.rowLine]}>
+                  <Text style={[styles.label, { color: theme.foreground }]}>Font size</Text>
+                  <Text style={[styles.value, { color: theme.muted }]}>{settings.fontSize} pt</Text>
+                  <View style={styles.stepper}>
+                    <Pressable
+                      onPress={() => stepFont(-1)}
+                      style={({ pressed }) => [styles.stepKey, pressed && { opacity: 0.5 }]}>
+                      <Text style={[styles.stepGlyph, { color: theme.foreground }]}>−</Text>
+                    </Pressable>
+                    <View style={styles.stepDivider} />
+                    <Pressable
+                      onPress={() => stepFont(1)}
+                      style={({ pressed }) => [styles.stepKey, pressed && { opacity: 0.5 }]}>
+                      <Text style={[styles.stepGlyph, { color: theme.foreground }]}>+</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
 
-            <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>SESSION</Text>
-            <View style={[styles.card, { backgroundColor: theme.surface }]}>
-              <Pressable
-                onPress={onDisconnect}
-                style={({ pressed }) => [
-                  styles.actionRow,
-                  pressed && { backgroundColor: STEPPER_TINT },
-                ]}>
-                <Text style={[styles.label, { color: theme.accent }]}>Disconnect</Text>
-              </Pressable>
-              <Pressable
-                onPress={forget}
-                style={({ pressed }) => [
-                  styles.actionRow,
-                  styles.rowLine,
-                  pressed && { backgroundColor: STEPPER_TINT },
-                ]}>
-                <Text style={[styles.label, { color: theme.danger }]}>Forget host key</Text>
-              </Pressable>
-            </View>
+              {settings.followSystem ? (
+                <>
+                  {themeList('WHEN THE SYSTEM IS DARK', DARK_THEMES, 'themeDark')}
+                  {themeList('WHEN THE SYSTEM IS LIGHT', LIGHT_THEMES, 'themeLight')}
+                </>
+              ) : (
+                themeList('THEME', ALL_THEMES, 'theme')
+              )}
+
+              {/* Only on a tmux session: on any other the toggle governs nothing, and a row that
+                  explains why it is inert is worse than no row. */}
+              {usesTmux(settings) && (
+                <>
+                  <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>
+                    TMUX
+                  </Text>
+                  <View style={[styles.card, styles.row, { backgroundColor: theme.surface }]}>
+                    <Text style={[styles.label, { color: theme.foreground }]}>Comfort settings</Text>
+                    <Switch
+                      value={settings.tmuxExtras}
+                      onValueChange={toggleExtras}
+                      trackColor={{ true: theme.accent }}
+                    />
+                  </View>
+                  <Text style={[styles.note, { color: theme.placeholder }]}>
+                    Colours, no status bar, deeper scrollback. Applies on the next connect.
+                  </Text>
+                </>
+              )}
+
+              <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>SESSION</Text>
+              <View style={[styles.card, { backgroundColor: theme.surface }]}>
+                <Pressable
+                  onPress={onDisconnect}
+                  style={({ pressed }) => [
+                    styles.actionRow,
+                    pressed && { backgroundColor: STEPPER_TINT },
+                  ]}>
+                  <Text style={[styles.label, { color: theme.accent }]}>Disconnect</Text>
+                </Pressable>
+                <Pressable
+                  onPress={forget}
+                  style={({ pressed }) => [
+                    styles.actionRow,
+                    styles.rowLine,
+                    pressed && { backgroundColor: STEPPER_TINT },
+                  ]}>
+                  <Text style={[styles.label, { color: theme.danger }]}>Forget host key</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
           </Animated.View>
         </GestureDetector>
       </GestureHandlerRootView>
@@ -281,8 +345,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: SHEET_RADIUS,
     paddingHorizontal: 20,
     paddingTop: 8,
+    // Twenty-six theme rows are taller than any phone, so the sheet stops short of the status bar
+    // and the list inside it scrolls.
+    maxHeight: '88%',
     boxShadow: '0 -12px 40px rgba(0,0,0,0.45)',
   },
+  scroll: { flexShrink: 1 },
   grabberZone: { alignItems: 'center', paddingBottom: 12 },
   grabber: { width: 36, height: 5, borderRadius: 3 },
   header: {

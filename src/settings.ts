@@ -10,8 +10,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
 
-import type { ThemeChoice } from '@/theme';
-import { THEME_CHOICES } from '@/theme';
+import type { ThemeName } from '@/theme';
+import { DEFAULT_DARK, DEFAULT_LIGHT, isThemeName } from '@/theme';
 import { shellQuote } from '@/tmux-model';
 
 const STORAGE_KEY = 'port22.settings.v1';
@@ -59,7 +59,19 @@ export type Settings = {
   /** `custom` mode's line, sent once the shell is up. `null` means send nothing. */
   startupCommand: string | null;
   fontSize: number;
-  theme: ThemeChoice;
+  /**
+   * Two ways to answer the appearance question, and the first one decides which of the other
+   * fields is live. Following the system means picking twice — a scheme for dark, a scheme for
+   * light — because most schemes exist in only one cut, so "Gruvbox" is not an answer the system
+   * can flip. Not following means one scheme out of all of them, and the system is ignored.
+   *
+   * All three are kept while only one is read, so turning the switch back on returns the pair the
+   * user had rather than a default.
+   */
+  followSystem: boolean;
+  theme: ThemeName;
+  themeDark: ThemeName;
+  themeLight: ThemeName;
   /** The second half of the pushed conf (§4.5): the comforts, as against the options a feature of
    *  ours stops working without. On by default, and opt-out rather than opt-in because they are
    *  what the app feels like when it is set up right. What they are is in `generateConf`. */
@@ -78,7 +90,10 @@ export const DEFAULTS: Settings = {
   knownSessions: [],
   startupCommand: null,
   fontSize: 13,
-  theme: 'auto',
+  followSystem: true,
+  theme: DEFAULT_DARK,
+  themeDark: DEFAULT_DARK,
+  themeLight: DEFAULT_LIGHT,
   tmuxExtras: true,
   lastUploadDir: null,
 };
@@ -108,9 +123,13 @@ export function decode(raw: unknown): Settings {
       : [],
     startupCommand,
     fontSize: clampFontSize(num(o.fontSize, DEFAULTS.fontSize)),
-    theme: THEME_CHOICES.includes(o.theme as ThemeChoice)
-      ? (o.theme as ThemeChoice)
-      : DEFAULTS.theme,
+    // Settings written before the switch existed carry one field, whose `'auto'` is exactly what
+    // the switch now means — so an upgrade keeps the appearance the user had without asking.
+    followSystem:
+      typeof o.followSystem === 'boolean' ? o.followSystem : !isThemeName(o.theme),
+    theme: isThemeName(o.theme) ? o.theme : DEFAULTS.theme,
+    themeDark: isThemeName(o.themeDark) ? o.themeDark : DEFAULTS.themeDark,
+    themeLight: isThemeName(o.themeLight) ? o.themeLight : DEFAULTS.themeLight,
     tmuxExtras: typeof o.tmuxExtras === 'boolean' ? o.tmuxExtras : DEFAULTS.tmuxExtras,
     lastUploadDir: typeof o.lastUploadDir === 'string' ? o.lastUploadDir : null,
   };
@@ -149,6 +168,12 @@ export function startupLine(s: Settings): string | null {
 export function usesTmux(s: Settings): boolean {
   if (s.startMode === 'session' || s.startMode === 'attach') return true;
   return s.startMode === 'custom' && /\btmux\b/.test(s.startupCommand ?? '');
+}
+
+/** Which of the three theme fields is live, given what the system is currently showing. */
+export function themeNameFor(s: Settings, systemIsDark: boolean): ThemeName {
+  if (!s.followSystem) return s.theme;
+  return systemIsDark ? s.themeDark : s.themeLight;
 }
 
 export function clampFontSize(size: number): number {

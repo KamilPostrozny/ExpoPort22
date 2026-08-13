@@ -11,6 +11,8 @@
  * PTY, so `/clear\r` is "type /clear and press Return".
  */
 
+import type { DotName } from '@/theme';
+
 export type RecipeId = 'running' | 'suspended' | 'vim' | 'pager' | 'htop' | 'agent';
 
 export type Cap = {
@@ -41,9 +43,9 @@ export type Recipe = {
    *  recipes (running/suspended), which match by state, not name. */
   names: string[];
   caps: Cap[];
-  /** The handle's (and dot's) colour, as a Catppuccin palette key — one colour per class of
-   *  process (prototype `dotFor`). */
-  dot: 'green' | 'overlay0' | 'mauve' | 'blue' | 'yellow' | 'peach';
+  /** The handle's (and dot's) colour, as a theme dot role — one colour per class of process
+   *  (prototype `dotFor`). */
+  dot: DotName;
   /** The handle breathes (prototype `p22edge`) while the process is live — running jobs and
    *  agents; a stopped job or a TUI sitting there earns a still handle. */
   pulse: boolean;
@@ -62,7 +64,7 @@ export const RECIPES: Record<RecipeId, Recipe> = {
   },
   suspended: {
     names: [],
-    dot: 'overlay0',
+    dot: 'grey',
     pulse: false,
     caps: [
       { label: 'kill', caption: 'force', action: 'kill', danger: true },

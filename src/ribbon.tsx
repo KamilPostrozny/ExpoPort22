@@ -81,7 +81,7 @@ export function RibbonHandle({ theme, recipe, bottom, onOpen }: RibbonHandleProp
     <GestureDetector gesture={swipeOpen}>
       <Pressable onPress={onOpen} style={[styles.handleTouch, { bottom }]}>
         <Animated.View
-          style={[styles.handleTab, { backgroundColor: theme.palette[data.dot] }, breathStyle]}
+          style={[styles.handleTab, { backgroundColor: theme.dots[data.dot] }, breathStyle]}
         />
       </Pressable>
     </GestureDetector>
@@ -110,7 +110,7 @@ export function RibbonPanel(props: RibbonPanelProps) {
   const { theme, recipe, busy } = props;
   const data = RECIPES[recipe.id];
   const running = recipe.id === 'running';
-  const dotColor = theme.palette[data.dot];
+  const dotColor = theme.dots[data.dot];
 
   // The running timer: re-render once a second while the label carries elapsed time.
   const [, setBeat] = useState(0);
@@ -171,7 +171,7 @@ export function RibbonPanel(props: RibbonPanelProps) {
           // whatever the pane is showing, and the shadow is what keeps it legible there.
           style={[
             styles.header,
-            { color: theme.muted, textShadowColor: rgba(theme.palette.crust, 0.9) },
+            { color: theme.muted, textShadowColor: rgba(theme.scrim, 0.9) },
           ]}>
           {c.header}
         </Text>
