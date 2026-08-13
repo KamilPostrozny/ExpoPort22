@@ -179,11 +179,19 @@ export function barGrabbed(dx: number, dy: number): boolean {
 export const ROW_AIR_DY = 30;
 export const ROW_AIR_DX = 48;
 
-/** Horizontal travel that earns the page row (see `barGrabbed`): the slop on the bar, deliberate
- *  travel in the air. */
-export function rowJoins(dx: number, dy: number): boolean {
+/** How far up the card may be and still gather neighbours: the bottom 30% of the pull. Past it
+ *  the card is a single tab on its way to the grid, and neighbours around it are just clutter in
+ *  the flight path (user, 2026-08-14). */
+export const ROW_MAX_PROG = 0.3;
+
+/** Horizontal travel that earns the page row (see `barGrabbed`): the slop on the bar; in the air,
+ *  deliberate travel AND a card that is being held — the hand stopped climbing (`held`, the
+ *  settle latch) and stopped low (`prog` inside `ROW_MAX_PROG`). Still climbing, or already high,
+ *  means one card and no row. */
+export function rowJoins(dx: number, dy: number, held: boolean, prog: number): boolean {
   'worklet';
-  return Math.abs(dx) > (-dy > ROW_AIR_DY ? ROW_AIR_DX : BAR_AXIS_SLOP);
+  if (-dy <= ROW_AIR_DY) return Math.abs(dx) > BAR_AXIS_SLOP;
+  return held && prog <= ROW_MAX_PROG && Math.abs(dx) > ROW_AIR_DX;
 }
 
 /** Upward travel at which the keyboard gets out of the way. Not the slop: the opening of an

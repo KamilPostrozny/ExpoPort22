@@ -621,10 +621,12 @@ function KeyBarInner(props: KeyBarProps) {
         dismissed.value = 1;
         runOnJS(dismissKeys)();
       }
-      // The row joins when the finger actually goes sideways, whenever that is — from a standing
-      // start, or a hundred points into a pull up.
+      // The row joins when the finger actually goes sideways — from a standing start on the bar,
+      // or from a card held low in the air: the climb has to have STOPPED (`heldAir`, the settle
+      // latch a few lines up) and stopped inside the bottom 30% of the pull. Higher than that the
+      // card is on its way to the grid alone (user, 2026-08-14).
       if (held.value === 0) {
-        if (!rowJoins(tx, ty)) return;
+        if (!rowJoins(tx, ty, sv?.heldAir.value === 1, sv?.prog.value ?? 0)) return;
         held.value = 1;
         originX.value = tx;
         runOnJS(jsBarSwipe)('start', 0, sv?.heldAir.value === 1);
