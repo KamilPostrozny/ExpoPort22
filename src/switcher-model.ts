@@ -195,20 +195,6 @@ export const ZOOM_COMMIT = 0.25;
  */
 export const HOLD_SCALE = 0.62;
 
-/**
- * How much of the page offset the CARD carries, rather than the page sliding inside it.
- *
- * At rest they are the same picture and the inner slide is right: the card IS the screen, there is
- * no outline for the content to slide within. The moment it lifts there is one, and a surface that
- * holds still while its content slides inside it is a window, not a card — the same defect the
- * neighbours had (user, 2026-08-13, screenshots). Both routes put the page at the identical place
- * on screen (the inner slide is scaled by the zoom, this one multiplies by the scale itself), so
- * the handover is invisible and only has to be quick.
- */
-export function cardCarry(prog: number): number {
-  'worklet';
-  return Math.min(prog / 0.1, 1);
-}
 
 /** The pose a held card settles into: the whole stage, scaled about its own centre. Nothing is
  *  cropped — `h` scales with `w`, so `zoomFrame`'s clip stays open and the card is the screen made

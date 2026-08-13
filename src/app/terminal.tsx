@@ -91,7 +91,6 @@ import {
   SEARCH_BAR_H,
   gridTop,
   aimFrame,
-  cardCarry,
   holdFrame,
   slotFrame,
   snapshotType,
@@ -1158,11 +1157,6 @@ export default function SessionScreen() {
   const kbSquare = keyboardPad > 0 && pageSwipe === null;
   const pageRB = kbSquare ? 0 : pageR;
   const roundR = 0.1 * (stage?.w ?? 390);
-  // The other half of `cardCarry`: the page slides inside the surface exactly as much as the card
-  // around it does not. The two are the same distance on screen, so nothing moves at the handover.
-  const termSlideStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: swipeX.value * (1 - cardCarry(prog.value)) }],
-  }));
   // The card's edge: in the dark flavours base and crust are nearly the same ink, so the gap
   // alone does not separate card from backdrop (user, 2026-08-11, screenshot) — the same
   // hairline the switcher's cards wear does. An overlay, NOT a real border: a border is part of
@@ -1337,9 +1331,7 @@ export default function SessionScreen() {
    * but its pitch and the crop — the scale and the flight are the container's, which is the only
    * way two cards are guaranteed to agree (see `zoomBox`).
    *
-   * The swipe offset it carries is the half `cardCarry` leaves it: at rest the pages slide and the
-   * container is identity, lifted the container slides and the pages sit still in it. The live
-   * page's own `termSlideStyle` is the same expression, which is what keeps the row rigid.
+   * The swipe offset lives on the container alone — the row is rigid by construction.
    */
   const usePageCardStyle = (side: -1 | 1) =>
     useAnimatedStyle(() => {
@@ -1354,9 +1346,7 @@ export default function SessionScreen() {
       return {
         height: f.height,
         borderRadius: f.radius,
-        transform: [
-          { translateX: side * (pitch + 44 * (1 - seat)) + swipeX.value * (1 - cardCarry(prog.value)) },
-        ],
+        transform: [{ translateX: side * (pitch + 44 * (1 - seat)) }],
       };
     });
   /** The card face's corners, riding the SAME `f.radius` the ring draws — the page wore its
@@ -1399,9 +1389,11 @@ export default function SessionScreen() {
     return {
       opacity: alpha.value,
       transform: [
-        // The row moves as one once the card has lifted (`cardCarry`); at rest the pages inside
-        // move instead, and this is identity.
-        { translateX: b.translateX + swipeX.value * cardCarry(prog.value) * b.scale },
+        // The row moves as one, always: the box IS the swipe. The page/card handover that used
+        // to live here (cardCarry) existed for a bar that no longer rides inside the card, and
+        // its migrating offset was a scrim band visibly collapsing in the gap whenever a flick
+        // crossed a swipe (user, 2026-08-13, screenshot).
+        { translateX: b.translateX + swipeX.value * b.scale },
         { translateY: b.translateY },
         { scale: b.scale },
       ],
@@ -1428,7 +1420,7 @@ export default function SessionScreen() {
     const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
     runOnJS(logTrace)(
       `prog ${prog.value.toFixed(2)} flight ${flight.value.toFixed(2)} x ${swipeX.value.toFixed(0)} ` +
-        `drag ${dragX.value.toFixed(0)} a ${alpha.value.toFixed(2)} carry ${cardCarry(prog.value).toFixed(2)} ` +
+        `drag ${dragX.value.toFixed(0)} a ${alpha.value.toFixed(2)} ` +
         `scale ${f.scale.toFixed(2)} ring ${f.ringOpacity.toFixed(2)} round ${roundSV.value.toFixed(2)}`,
     );
   });
@@ -1692,7 +1684,6 @@ export default function SessionScreen() {
             // top inset stays ~0 and the first row never moves — see rowRemainder.
             paddingBottom: padBottom + barPad + rowRemainder,
           },
-          termSlideStyle,
           cardRadiiStyle,
         ]}>
       <TerminalView
@@ -1805,42 +1796,6 @@ export default function SessionScreen() {
       />
       </Animated.View>
 
-      {/* The settle overlay after a commit — holds the committed snapshot over the terminal until
-          tmux's redraw has landed. (The neighbour pages are siblings of the whole wrapper now, not
-          children of this crop: see `usePageCardStyle`.) */}
-      {pageSwipe?.phase === 'settle' && stage !== null && (
-        <Animated.View
-          pointerEvents="none"
-          // A dissolve, not a cut: the overlay holds the PRE-hop geometry (frozen insets) and
-          // the live pane under it has already refit — the ribbon genuinely trades ~3 rows — so
-          // an instant drop read as the terminal jumping at the end (user, 2026-08-11,
-          // screenshots either side of the settle).
-          exiting={FadeOut.duration(150)}
-          style={[
-            StyleSheet.absoluteFill,
-            styles.page,
-            { backgroundColor: theme.background, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
-          ]}>
-          <MountProbe name="settle" />
-          <PageContent
-            snap={pageSwipe.settled}
-            stageW={stage.w}
-            theme={theme}
-            cell={cell}
-            insets={pageSwipe.settleInsets ?? paneInsets}
-            liveCols={liveCols}
-          />
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              StyleSheet.absoluteFill,
-              styles.pageEdge,
-              { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
-              settleEdgeStyle,
-            ]}
-          />
-        </Animated.View>
-      )}
 
       </View>
       </Animated.View>
@@ -1901,6 +1856,50 @@ export default function SessionScreen() {
             </Animated.View>
           )}
         </>
+      )}
+
+      </Animated.View>
+
+      {/* Everything from here down is SCREEN-STATIC chrome, deliberately outside the box the
+          cards ride in: the box carries the swipe itself now (no page/card handover — see
+          cardCarry's removal), so anything inside it would slide with every hop. The settle
+          overlay is static for the same reason: it covers the stage while the box snaps home
+          beneath it. */}
+      {/* The settle overlay after a commit — holds the committed snapshot over the terminal until
+          tmux's redraw has landed. (The neighbour pages are siblings of the whole wrapper now, not
+          children of this crop: see `usePageCardStyle`.) */}
+      {pageSwipe?.phase === 'settle' && stage !== null && (
+        <Animated.View
+          pointerEvents="none"
+          // A dissolve, not a cut: the overlay holds the PRE-hop geometry (frozen insets) and
+          // the live pane under it has already refit — the ribbon genuinely trades ~3 rows — so
+          // an instant drop read as the terminal jumping at the end (user, 2026-08-11,
+          // screenshots either side of the settle).
+          exiting={FadeOut.duration(150)}
+          style={[
+            StyleSheet.absoluteFill,
+            styles.page,
+            { backgroundColor: theme.background, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
+          ]}>
+          <MountProbe name="settle" />
+          <PageContent
+            snap={pageSwipe.settled}
+            stageW={stage.w}
+            theme={theme}
+            cell={cell}
+            insets={pageSwipe.settleInsets ?? paneInsets}
+            liveCols={liveCols}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              styles.pageEdge,
+              { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
+              settleEdgeStyle,
+            ]}
+          />
+        </Animated.View>
       )}
 
       {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
@@ -2011,7 +2010,6 @@ export default function SessionScreen() {
           )}
         </View>
       )}
-      </Animated.View>
       </View>
 
       {pendingUpload !== null && (
