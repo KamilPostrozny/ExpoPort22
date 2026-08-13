@@ -519,6 +519,19 @@ export default function SessionScreen() {
   };
 
   const springBack = () => {
+    // A release with nothing to fly home from: the grab armed the zoom (it always does now — the
+    // vertical is live from the first frame) but the finger never actually pulled. Flying anyway
+    // round-tripped `sw` through `closing` for a frame, and the page row's render condition sat
+    // out that frame — both neighbour cards unmounting and remounting mid-slide, which is the
+    // flash on every plain hop (trace, 2026-08-13: `- card:next` one line after the commit,
+    // `+ card:next` two lines later).
+    if (prog.value < 0.005) {
+      cancelAnimation(dragX);
+      dragX.value = 0;
+      flight.value = 1; // normally the flight's own completion resets the aim — there is none
+      finishClose();
+      return;
+    }
     probe('fly');
     closeArmed.current = false;
     setSw('closing'); // already `closing` when `closeTo` armed it two frames ago; a drag release sets it here
@@ -1766,10 +1779,12 @@ export default function SessionScreen() {
           front costs nothing: they are a pitch away and never overlap it. The bar moved out with
           them, so it still draws over every card in the row rather than under the arriving one.
 
-          Gone once the release commits, or they would fly into the grid one pitch behind the card:
-          tabs arriving in pairs (user, 2026-08-13, screenshot). */}
+          Gone once the release commits to the GRID (`opening`), or they would fly in one pitch
+          behind the card: tabs arriving in pairs (user, 2026-08-13, screenshot). `closing` keeps
+          them: that is the spring back from a lift, the slide can still be live under it, and
+          sitting the phase out unmounted them mid-slide — the flash (trace, movement 1). */}
       {stage !== null && showTabs && connected && pageSwipe !== null && pageSwipe.phase !== 'settle' &&
-        (sw === 'closed' || sw === 'drag') && (
+        (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
         <>
           {anchor > 0 && (
             <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
