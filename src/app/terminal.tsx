@@ -22,7 +22,6 @@ import {
 import Animated, {
   cancelAnimation,
   Easing,
-  FadeOut,
   runOnJS,
   useAnimatedStyle,
   type AnimatedStyle,
@@ -692,7 +691,6 @@ export default function SessionScreen() {
    *  neighbours bounce in beside it (user, 2026-08-13): during a slow flick up they never join,
    *  and a card in the hand only grows its row once the hand pauses. Latched for the rest of the
    *  gesture; a release clears it. */
-  const [airSettled, setAirSettled] = useState(false);
   const airSettledRef = useRef(false);
   /** The held join's approach, 0→1 on a clamped spring the moment the hand settles. A Reanimated
    *  `entering` did this job and flickered: layout animations under a scaled, translated parent
@@ -778,7 +776,6 @@ export default function SessionScreen() {
    *  `joinSV` starts on the UI thread; this mounts the row). */
   const onAirSettled = () => {
     airSettledRef.current = true;
-    setAirSettled(true);
   };
 
   const onZoomEnd = (dx: number, dy: number, vx: number, vy: number) => {
@@ -789,7 +786,6 @@ export default function SessionScreen() {
       dragging.current = false;
       draggingSV.value = 0;
       airSettledRef.current = false;
-      setAirSettled(false);
       // The row goes back out to the sides so the card flies to the grid alone — unless a hop is
       // landing, whose own clear cuts it (see `clearBarSwipe`).
       if (swipeInfo.current?.live !== true) {
