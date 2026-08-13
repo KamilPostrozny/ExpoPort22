@@ -1880,9 +1880,15 @@ export default function SessionScreen() {
           zoomId={zoomId}
           fade={alpha}
         />
-        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, gridBlurStyle]}>
-          <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
-        </Animated.View>
+        {/* Mounted only while the zoom is live: a UIVisualEffectView re-renders its backdrop
+            continuously and does NOT stop costing GPU because a parent's opacity is zero — a
+            full-screen one sitting under everything that moves is a per-frame cost no CPU
+            counter sees (user, 2026-08-13: laggy inside the animation). */}
+        {zoomActive && (
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, gridBlurStyle]}>
+            <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+          </Animated.View>
+        )}
         </Animated.View>
       )}
 
