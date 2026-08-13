@@ -1493,36 +1493,6 @@ export default function SessionScreen() {
           stage !== null && boxStyle,
         ]}>
 
-      {/* The neighbouring windows, a page-pitch to either side. They JOIN when the swipe does, not
-          when the card lifts: a card held up on its own has no row around it until the finger
-          actually starts moving sideways (user, 2026-08-13) — which is exactly `pageSwipe`, the
-          state a horizontal swipe creates. Drawn before the live card so it and its bar stay on
-          top; they never overlap it anyway, being a pitch away.
-
-          Gone once the release commits, or they would fly into the grid one pitch behind the card:
-          tabs arriving in pairs (user, 2026-08-13, screenshot). */}
-      {stage !== null && showTabs && connected && pageSwipe !== null && pageSwipe.phase !== 'settle' &&
-        (sw === 'closed' || sw === 'drag') && (
-        <>
-          {anchor > 0 && (
-            <Animated.View pointerEvents="none" onLayout={(e) => console.log('[barswipe] prev layout', JSON.stringify(e.nativeEvent.layout))} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
-              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
-              </Animated.View>
-            </Animated.View>
-          )}
-          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
-              empty pane the shell about to be born will draw into. */}
-          {anchor < cards.length && (
-            <Animated.View pointerEvents="none" onLayout={(e) => console.log('[barswipe] next layout', JSON.stringify(e.nativeEvent.layout))} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
-              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
-              </Animated.View>
-            </Animated.View>
-          )}
-        </>
-      )}
-
       {/* The live card: the clipped, rounded, ringed terminal surface. Identity at rest — at which
           point it is the screen — and the thing the ring belongs to at every other.
 
@@ -1779,6 +1749,50 @@ export default function SessionScreen() {
 
       </View>
 
+      {/* the transition's accent ring, clipping and scaling with the card it belongs to */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
+      />
+      </Animated.View>
+
+      {/* The neighbouring windows, a page-pitch to either side. They JOIN when the swipe does, not
+          when the card lifts: a card held up on its own has no row around it until the finger
+          actually starts moving sideways (user, 2026-08-13) — which is exactly `pageSwipe`, the
+          state a horizontal swipe creates.
+
+          AFTER the live card, and outside it. Behind it they were laid out correctly — 420×912 at
+          the right offset, every number checked on device — and never drawn, because the live card
+          is a full-stage view in front of them (user, 2026-08-13, four screenshots and three
+          probes to establish that the geometry was never the problem). Outside it because a child
+          of the card shares its clip, which is the whole width of the card once it lifts. Being in
+          front costs nothing: they are a pitch away and never overlap it. The bar moved out with
+          them, so it still draws over every card in the row rather than under the arriving one.
+
+          Gone once the release commits, or they would fly into the grid one pitch behind the card:
+          tabs arriving in pairs (user, 2026-08-13, screenshot). */}
+      {stage !== null && showTabs && connected && pageSwipe !== null && pageSwipe.phase !== 'settle' &&
+        (sw === 'closed' || sw === 'drag') && (
+        <>
+          {anchor > 0 && (
+            <Animated.View pointerEvents="none" onLayout={(e) => console.log('[barswipe] prev layout', JSON.stringify(e.nativeEvent.layout))} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+              </Animated.View>
+            </Animated.View>
+          )}
+          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
+              empty pane the shell about to be born will draw into. */}
+          {anchor < cards.length && (
+            <Animated.View pointerEvents="none" onLayout={(e) => console.log('[barswipe] next layout', JSON.stringify(e.nativeEvent.layout))} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+              </Animated.View>
+            </Animated.View>
+          )}
+        </>
+      )}
+
       {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
           full window height under it. Its own glass pills carry no full-width ground, so the
           card's background (or the crust gap, mid-swipe) shows through around them. */}
@@ -1889,12 +1903,6 @@ export default function SessionScreen() {
       )}
       </Animated.View>
 
-      {/* the transition's accent ring, clipping and scaling with the card it belongs to */}
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
-      />
-      </Animated.View>
       </Animated.View>
       </View>
 
