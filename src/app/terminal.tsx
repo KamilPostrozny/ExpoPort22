@@ -26,7 +26,6 @@ import Animated, {
   SlideOutLeft,
   SlideOutRight,
   runOnJS,
-  useAnimatedProps,
   useAnimatedStyle,
   type AnimatedStyle,
   useFrameCallback,
@@ -1111,9 +1110,12 @@ export default function SessionScreen() {
   // under it, so the live terminal is back at rest by the time the overlay drops. An effect, not
   // the callback, so the reset paints strictly after the translated pages have unmounted.
   useEffect(() => {
-    if (pageSwipe?.phase === 'settle') swipeX.value = 0;
+    // After the row's unmount commit: the box snaps home and the live, already-redrawn terminal
+    // stands exactly where the landed card was — the same cut as before, minus the overlay whose
+    // mount was a 25-32ms Fabric commit at the end of every fast hop (perf, hop-settle window).
+    if (pageSwipe === null) swipeX.value = 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageSwipe?.phase]);
+  }, [pageSwipe]);
 
   /** The page slides home and the swipe is over, no hop. Both ways out that decide nothing: a
    *  release under the thresholds, and a release that committed to the grid instead — there the
@@ -1495,13 +1497,13 @@ export default function SessionScreen() {
   const gridInStyle = useAnimatedStyle(() => ({
     opacity: Math.min(Math.max((prog.value - 0.75) / 0.15, 0), 1),
   }));
-  /** …and it arrives BLURRED, sharpening only as the card lands — Safari's sequencing exactly
-   *  (user, 2026-08-13, two reference screenshots): the tabs behind a still-travelling card are
-   *  legible as shapes, not content. Blur intensity is travel, like everything else. */
-  const gridBlurProps = useAnimatedProps(() => ({
-    // Sharp only once the tab is LET GO: the blur rides the release's flight, not the pull —
-    // held at any depth, the grid stays blurred shapes (user, 2026-08-13).
-    intensity: 30 * (1 - flight.value),
+  /** …and it arrives BLURRED, sharpening only as the card lands — Safari's sequencing (user's
+   *  reference screenshots). The blur's INTENSITY is fixed and its OPACITY animates: animating
+   *  intensity rebuilds the blur effect every frame over a full screen of text, which is GPU
+   *  work no CPU-side frame counter sees — the "5fps, and your numbers do not show it" lag
+   *  (user, 2026-08-13). A fixed-effect view fading out is plain compositing. */
+  const gridBlurStyle = useAnimatedStyle(() => ({
+    opacity: 1 - flight.value,
   }));
 
   /** The container every card rides: one scale, one flight, one place. Its height is the stage's
@@ -1660,12 +1662,9 @@ export default function SessionScreen() {
           zoomId={zoomId}
           fade={alpha}
         />
-        <AnimatedBlurView
-          pointerEvents="none"
-          animatedProps={gridBlurProps}
-          tint="dark"
-          style={StyleSheet.absoluteFill}
-        />
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, gridBlurStyle]}>
+          <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+        </Animated.View>
         </Animated.View>
       )}
 
@@ -1936,11 +1935,11 @@ export default function SessionScreen() {
           exactly over the settle overlay's identical picture, and sliding it away would show the
           same tab twice, one peeling off the other. */}
       {stage !== null && showTabs && connected &&
-        ((pageSwipe !== null && pageSwipe.phase !== 'settle') || airSettled) &&
+        (pageSwipe !== null || airSettled) &&
         (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" exiting={pageSwipe === null ? SlideOutLeft.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" exiting={pageSwipe === null ? SlideOutLeft.duration(160) : pageSwipe.phase === 'settle' ? FadeOut.duration(150) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
@@ -1957,7 +1956,7 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" exiting={pageSwipe === null ? SlideOutRight.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" exiting={pageSwipe === null ? SlideOutRight.duration(160) : pageSwipe.phase === 'settle' ? FadeOut.duration(150) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
@@ -1981,42 +1980,6 @@ export default function SessionScreen() {
           cardCarry's removal), so anything inside it would slide with every hop. The settle
           overlay is static for the same reason: it covers the stage while the box snaps home
           beneath it. */}
-      {/* The settle overlay after a commit — holds the committed snapshot over the terminal until
-          tmux's redraw has landed. (The neighbour pages are siblings of the whole wrapper now, not
-          children of this crop: see `usePageCardStyle`.) */}
-      {pageSwipe?.phase === 'settle' && stage !== null && (
-        <Animated.View
-          pointerEvents="none"
-          // A dissolve, not a cut: the overlay holds the PRE-hop geometry (frozen insets) and
-          // the live pane under it has already refit — the ribbon genuinely trades ~3 rows — so
-          // an instant drop read as the terminal jumping at the end (user, 2026-08-11,
-          // screenshots either side of the settle).
-          exiting={FadeOut.duration(150)}
-          style={[
-            StyleSheet.absoluteFill,
-            styles.page,
-            { backgroundColor: theme.background, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
-          ]}>
-          <MountProbe name="settle" />
-          <PageContent
-            snap={pageSwipe.settled}
-            stageW={stage.w}
-            theme={theme}
-            cell={cell}
-            insets={pageSwipe.settleInsets ?? paneInsets}
-            liveCols={liveCols}
-          />
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              StyleSheet.absoluteFill,
-              styles.pageEdge,
-              { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
-              settleEdgeStyle,
-            ]}
-          />
-        </Animated.View>
-      )}
 
       {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
           full window height under it. Its own glass pills carry no full-width ground, so the
@@ -2241,8 +2204,6 @@ function PageContent({
 
 /** §7 structured-test trace (TEMPORARY): a layer announcing its own lifetime — "over each
  *  other" and "flickering" are mount/unmount questions, invisible in every other log. */
-const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
-
 function MountProbe({ name }: { name: string }) {
   useEffect(() => {
     console.log('[trace] +', name);
