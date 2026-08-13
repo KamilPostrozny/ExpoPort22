@@ -85,6 +85,16 @@ jobs:
 
       # One URL that is always the latest build. Delete-then-create rather than clobber-in-place, so
       # the tag points at the commit that was actually built.
+      # Before the release, not after: the IPA exists only on the runner, and a release API that
+      # answers HTTP 500 (it did, 2026-08-13) otherwise costs a fresh 15-minute build to get back
+      # a binary that had already been built successfully.
+      - name: Keep the IPA whatever the release API does
+        uses: actions/upload-artifact@v4
+        with:
+          name: Port22-${{ inputs.configuration || 'Debug' }}-ipa
+          path: Port22.ipa
+          retention-days: 7
+
       # Two rolling tags, not one: a Release build must not replace the dev client the daily loop
       # installs from, and a push to main must not replace a Release build somebody is mid-way
       # through testing. `dev` is the automatic one, `prod` only ever appears on a dispatch.
@@ -104,5 +114,16 @@ jobs:
             notes="Unsigned Debug dev-client build of ${GITHUB_SHA}. Rolling: every push to main replaces it. Needs \`bunx expo start --dev-client\` running. Install with \`xtool install\`."
           fi
           gh release delete "$tag" --yes --cleanup-tag || true
-          gh release create "$tag" Port22.ipa --prerelease --target "${GITHUB_SHA}" \
-            --title "$title" --notes "$notes"
+          # The delete and the create race: deleting the tag is not instant on GitHub's side, and
+          # creating one over it came back HTTP 500 (2026-08-13). Retry rather than throw away a
+          # build that succeeded — the artifact above is the backstop if even this gives up.
+          for attempt in 1 2 3; do
+            if gh release create "$tag" Port22.ipa --prerelease --target "${GITHUB_SHA}" \
+                 --title "$title" --notes "$notes"; then
+              exit 0
+            fi
+            echo "release create failed (attempt $attempt) — waiting"
+            sleep 15
+          done
+          echo "could not publish; the IPA is on this run as an artifact"
+          exit 1
