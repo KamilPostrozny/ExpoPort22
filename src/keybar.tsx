@@ -131,8 +131,12 @@ export type KeyBarProps = {
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
    *  the worklet. The screen owns the model: rubber band, thresholds, commit
-   *  (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
-  onBarSwipe?: (phase: 'start' | 'end', dx: number) => void;
+   *  (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux).
+   *
+   *  'start' also reports whether the card is HELD — the same `heldAir` latch the page row draws
+   *  itself from, so what the row shows and how far it reaches cannot disagree. A held card's row
+   *  stops at the last window: no new-tab page, and nothing past it to commit onto. */
+  onBarSwipe?: (phase: 'start' | 'end', dx: number, air?: boolean) => void;
   /** The gesture's shared values, owned by the screen: the worklet writes the hot path here. */
   panSV?: {
     swipeX: SharedValue<number>;
@@ -532,7 +536,8 @@ function KeyBarInner(props: KeyBarProps) {
   );
   const jsZoomArm = useCallback(() => cbRef.current.onZoomArm?.(), []);
   const jsBarSwipe = useCallback(
-    (phase: 'start' | 'end', dx: number) => cbRef.current.onBarSwipe?.(phase, dx),
+    (phase: 'start' | 'end', dx: number, air?: boolean) =>
+      cbRef.current.onBarSwipe?.(phase, dx, air),
     [],
   );
   const dismissKeys = useCallback(() => Keyboard.dismiss(), []);
@@ -622,7 +627,7 @@ function KeyBarInner(props: KeyBarProps) {
         if (!rowJoins(tx, ty)) return;
         held.value = 1;
         originX.value = tx;
-        runOnJS(jsBarSwipe)('start', 0);
+        runOnJS(jsBarSwipe)('start', 0, sv?.heldAir.value === 1);
         return;
       }
       if (sv !== undefined) {
