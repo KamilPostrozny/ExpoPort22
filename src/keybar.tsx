@@ -583,6 +583,14 @@ function KeyBarInner(props: KeyBarProps) {
           Math.abs(e.velocityX) < 90
         ) {
           settled.value = 1;
+          // Visible AND seated, both from here. The row used to be mounted by an `airSettled`
+          // render, and when it became permanent-and-shown-by-opacity (a91809f) only the page
+          // swipe's half of that condition was carried over — `rowVis` is set at `onBarSwipe`
+          // 'start' and nowhere else. So a held card sprang this join against an invisible row,
+          // and the first sideways move revealed it already seated instead of bouncing in
+          // (user, 2026-08-13). The spring is what the eye reads; the opacity just has to be on
+          // before it runs.
+          sv.rowVis.value = 1;
           sv.join.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
           runOnJS(jsAirSettled)();
         }

@@ -25,7 +25,6 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   type AnimatedStyle,
-  type SharedValue,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
@@ -1413,7 +1412,20 @@ export default function SessionScreen() {
           // the halo a list beat behind.
           setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
         }
-        else newWindow().catch((error) => console.log('[barswipe] new window failed:', error));
+        // …and re-list, exactly as the grid's ✚ does (`birthCard`). Committing onto the slot past
+        // the last tab BIRTHS a window, and nothing here ever told the card list about it: with
+        // the grid closed there is no poll running at all (`useSwitcherCards`'s interval is armed
+        // on `live`), so the new tab stayed missing until the grid was next opened AND its 2s beat
+        // came round — "tens of seconds" (user, 2026-08-13). Worse than a missing card: `tmux`
+        // has already switched to a window `cards` does not contain, so `activePosIn` finds
+        // neither the index nor the active flag and falls back to 0 — the anchor, the pills and
+        // the halo all point at the wrong tab until something re-lists.
+        // `refresh(false)` is list-only: no capture burst on the JS thread, and the fresh shell
+        // has nothing to snapshot yet. Rare by nature — this is a window being created, not a hop.
+        else
+          newWindow()
+            .then(() => refresh(false))
+            .catch((error) => console.log('[barswipe] new window failed:', error));
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
         slideTo((info.pos - target) * pagePitch(stage.w), settleBarSwipe);
       }
@@ -1640,11 +1652,36 @@ export default function SessionScreen() {
    *  home strip and the keyboard's overlap, because that layer's bottom is the window's. */
   const popBase = barHeight + 6 + keyboardPad + insets.bottom;
 
-  /** The four shared values `aimAt` reads, as one stable object — see `aimAt` (module scope, below)
-   *  for why the aim is not a closure over them. Built once. */
-  /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
-  const aimSV = useMemo(() => ({ stage: stageSV, slot: slotSV, prog, flight }), []);
-  /* eslint-enable react-hooks/exhaustive-deps */
+  /**
+   * What the surface is aimed at this frame — the hold pose under the finger, the slot once
+   * released, interpolated by `flight` (see `aimFrame`). Every style that draws the zoom reads the
+   * aim rather than the slot, so the card, its ring and its neighbours agree by construction.
+   *
+   * Deliberately a per-render closure, which makes it a changing dependency of the four mappers
+   * that call it (`boxStyle`, `cardClipStyle`, `cardRadiiStyle`, `ringStyle`) and restarts all
+   * four on every render. That churn was hoisted to module scope for exactly that reason — and the
+   * hoist put the keyboard-up page's rounded bottom corners back (user, 2026-08-13).
+   *
+   * Why: these mappers are attached CONDITIONALLY (`zoomActive && …`). A restarting mapper
+   * re-runs and rewrites its props the moment it is re-registered, so the accidental every-render
+   * restart was also what repainted the radius whenever the style attached. With stable
+   * dependencies the mapper only re-runs when a dependency or a shared value it reads changes —
+   * and `zoomActive` flipping true is neither, so the newly attached view kept the radius from the
+   * last gesture, rounded, under a raised keyboard where `kbSquare` wants it square.
+   *
+   * ponytail: the churn is a real per-render cost and this is a real fix for the wrong problem.
+   * The honest version is to stop conditioning the attachment on `zoomActive` (or to drive
+   * `kbSquare` through a shared value so the mapper re-runs on its own), but both change what
+   * 85b36ab measured — no layout or raster props written during a flat hop — so they want their
+   * own change and their own device walk, not a rider on this one.
+   */
+  const aim = () => {
+    'worklet';
+    // Held: slot-SIZED by the pull's reach, screen-centred (`heldFrame`). Released: the flight
+    // carries whatever pose the hold reached into the real slot.
+    const held = heldFrame(stageSV.value, slotSV.value, HOLD_REACH * prog.value);
+    return aimFrame(held, slotSV.value, flight.value);
+  };
 
   /**
    * A neighbouring page's card, INSIDE the zoomed container with the live one. It carries nothing
@@ -1677,7 +1714,7 @@ export default function SessionScreen() {
    *  (movement 3, screenshot). Shared by the live page, its edge, and the neighbours. */
   const cardRadiiStyle = useAnimatedStyle(() => {
     'worklet';
-    const r = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value).radius;
+    const r = zoomFrame(prog.value, dragX.value, aim(), stageSV.value).radius;
     const rb = kbSquare ? 0 : r;
     return {
       borderTopLeftRadius: r,
@@ -1702,7 +1739,7 @@ export default function SessionScreen() {
    * laggy"). At rest the static styles below stand in, and the gesture animates transforms only.
    */
   const cardClipStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
+    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
     const rb = kbSquare ? 0 : f.radius;
     return {
       height: f.height,
@@ -1736,7 +1773,7 @@ export default function SessionScreen() {
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
    *  side without a clip cutting them off. */
   const boxStyle = useAnimatedStyle(() => {
-    const b = zoomBox(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
+    const b = zoomBox(prog.value, dragX.value, aim(), stageSV.value);
     return {
       opacity: alpha.value,
       transform: [
@@ -1799,7 +1836,7 @@ export default function SessionScreen() {
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
   // with it; border width divided by scale so it reads ~3pt on screen throughout.
   const ringStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
+    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
@@ -2248,33 +2285,6 @@ export default function SessionScreen() {
       )}
     </View>
   );
-}
-
-/**
- * What the surface is aimed at this frame — the hold pose under the finger, the slot once
- * released, interpolated by `flight` (see `aimFrame`). Every style that draws the zoom reads the
- * aim rather than the slot, so the card, its ring and its neighbours agree by construction.
- *
- * At MODULE scope, taking its shared values as an argument, because it is captured by four
- * `useAnimatedStyle` worklets. Reanimated derives a mapper's dependencies from its worklet's
- * closure (`Object.values(updater.__closure)`), and the plugin mints a new function object for a
- * worklet declared in a component body on every render — so an `aim` living inside the component
- * changed the deps of `boxStyle`, `cardClipStyle`, `cardRadiiStyle` and `ringStyle` every render,
- * and Reanimated stopped and re-serialized all four mappers each time. That is mapper churn on the
- * very styles driving the flight, on every one of a gesture's renders (perf, 2026-08-13). Module
- * scope is one identity for the life of the app, and the shared values it is handed are stable too.
- */
-function aimAt(sv: {
-  stage: SharedValue<{ w: number; h: number }>;
-  slot: SharedValue<Frame>;
-  prog: SharedValue<number>;
-  flight: SharedValue<number>;
-}): Frame {
-  'worklet';
-  // Held: slot-SIZED by the pull's reach, screen-centred (`heldFrame`). Released: the flight
-  // carries whatever pose the hold reached into the real slot.
-  const held = heldFrame(sv.stage.value, sv.slot.value, HOLD_REACH * sv.prog.value);
-  return aimFrame(held, sv.slot.value, sv.flight.value);
 }
 
 /* --- T11: the page-slide's cards --- */
