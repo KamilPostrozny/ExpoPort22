@@ -1343,10 +1343,18 @@ export default function SessionScreen() {
     useAnimatedStyle(() => {
       const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
       const pitch = stageSV.value.w * (1 + PAGE_GAP);
+      // The swipe join's approach, locked to the TRAVEL rather than a clock: the card starts a
+      // little beyond its pitch and closes in as the finger uncovers the gap, fully seated by
+      // 70pt — slow and firm, and it can never lag the swipe or pop (user, 2026-08-13, after
+      // instant read as harsh and every timed entrance was either too quick or too slow). A held
+      // join seats immediately; its entrance is the clamped spring on the mount instead.
+      const seat = airSettled ? 1 : Math.min(Math.abs(swipeX.value) / 70, 1);
       return {
         height: f.height,
         borderRadius: f.radius,
-        transform: [{ translateX: side * pitch + swipeX.value * (1 - cardCarry(prog.value)) }],
+        transform: [
+          { translateX: side * (pitch + 44 * (1 - seat)) + swipeX.value * (1 - cardCarry(prog.value)) },
+        ],
       };
     });
   /** The card face's corners, riding the SAME `f.radius` the ring draws — the page wore its
@@ -1846,7 +1854,7 @@ export default function SessionScreen() {
         (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInLeft.springify().damping(26).stiffness(110).overshootClamping(1) : SlideInLeft.duration(120)} exiting={pageSwipe === null ? SlideOutLeft.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInLeft.springify().damping(26).stiffness(110).overshootClamping(1) : undefined} exiting={pageSwipe === null ? SlideOutLeft.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
@@ -1856,7 +1864,7 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInRight.springify().damping(26).stiffness(110).overshootClamping(1) : SlideInRight.duration(120)} exiting={pageSwipe === null ? SlideOutRight.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInRight.springify().damping(26).stiffness(110).overshootClamping(1) : undefined} exiting={pageSwipe === null ? SlideOutRight.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
