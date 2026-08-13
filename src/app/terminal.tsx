@@ -453,6 +453,12 @@ export default function SessionScreen() {
   const perfStart = (fresh = false) => {
     if (perfOn.value === 1 && !fresh) return;
     perfBuf.value = { n: 0, d17: 0, d25: 0, worst: 0 };
+    evN.value = 0;
+    evGapMax.value = 0;
+    evPrevT.value = 0;
+    styN.value = 0;
+    styGapMax.value = 0;
+    styPrevT.value = 0;
     perfOn.value = 1;
   };
   const perfEnd = (label: string) => {
@@ -461,7 +467,8 @@ export default function SessionScreen() {
     const b = perfBuf.value;
     if (b.n > 5)
       console.log(
-        `[perf] ${label}: ${b.n} frames, ${b.d17} >17ms, ${b.d25} >25ms, worst ${Math.round(b.worst)}ms`,
+        `[perf] ${label}: ${b.n} frames, ${b.d17} >17ms, ${b.d25} >25ms, worst ${Math.round(b.worst)}ms | ` +
+          `ev ${evN.value} maxgap ${Math.round(evGapMax.value)}ms | sty ${styN.value} maxgap ${Math.round(styGapMax.value)}ms`,
       );
   };
   useEffect(() => {
@@ -663,6 +670,15 @@ export default function SessionScreen() {
   const rowLiveSV = useSharedValue(0);
   const rowPosSV = useSharedValue(0);
   const rowCountSV = useSharedValue(0);
+  /* §7 probe (TEMPORARY): where do the frames die? `ev*` counts the pan's onUpdate events on the
+   * UI thread, `sty*` counts boxStyle recomputations. "Jumping between 2-3 states" means one of
+   * these is sparse — or both are dense and the loss is in presentation. */
+  const evN = useSharedValue(0);
+  const evGapMax = useSharedValue(0);
+  const evPrevT = useSharedValue(0);
+  const styN = useSharedValue(0);
+  const styGapMax = useSharedValue(0);
+  const styPrevT = useSharedValue(0);
   /** Is a zoom drag live? The gesture's own truth, and the only thing its lifecycle turns on.
    *  `sw` cannot be: `setSw('drag')` is read back by the very next pan report, and a flick that
    *  ends in the same frame gets its release judged against a phase React has not written yet —
@@ -1156,6 +1172,9 @@ export default function SessionScreen() {
       rowPos: rowPosSV,
       rowCount: rowCountSV,
       stage: stageSV,
+      evN,
+      evGapMax,
+      evPrevT,
     }),
     [],
   );
@@ -1510,6 +1529,15 @@ export default function SessionScreen() {
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
    *  side without a clip cutting them off. */
   const boxStyle = useAnimatedStyle(() => {
+    {
+      const t = performance.now();
+      if (styPrevT.value > 0) {
+        const gap = t - styPrevT.value;
+        if (gap < 500 && gap > styGapMax.value) styGapMax.value = gap;
+      }
+      styPrevT.value = t;
+      styN.value += 1;
+    }
     const b = zoomBox(prog.value, dragX.value, aim(), stageSV.value);
     return {
       opacity: alpha.value,
