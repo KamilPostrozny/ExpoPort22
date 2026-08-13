@@ -25,6 +25,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   type AnimatedStyle,
+  type SharedValue,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
@@ -1693,13 +1694,10 @@ export default function SessionScreen() {
    * 85b36ab measured — no layout or raster props written during a flat hop — so they want their
    * own change and their own device walk, not a rider on this one.
    */
-  const aim = () => {
-    'worklet';
-    // Held: slot-SIZED by the pull's reach, screen-centred (`heldFrame`). Released: the flight
-    // carries whatever pose the hold reached into the real slot.
-    const held = heldFrame(stageSV.value, slotSV.value, HOLD_REACH * prog.value);
-    return aimFrame(held, slotSV.value, flight.value);
-  };
+  /** The shared values `aimAt` reads, as one stable object — see `aimAt` at module scope. */
+  /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
+  const aimSV = useMemo(() => ({ stage: stageSV, slot: slotSV, prog, flight }), []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   /**
    * A neighbouring page's card, INSIDE the zoomed container with the live one. It carries nothing
@@ -1746,7 +1744,7 @@ export default function SessionScreen() {
    */
   const cardRadiiStyle = useAnimatedStyle(() => {
     'worklet';
-    const r = zoomFrame(prog.value, dragX.value, aim(), stageSV.value).radius;
+    const r = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value).radius;
     const rb = kbSquare ? 0 : r;
     return {
       borderTopLeftRadius: r,
@@ -1771,7 +1769,7 @@ export default function SessionScreen() {
    * laggy"). At rest the static styles below stand in, and the gesture animates transforms only.
    */
   const cardClipStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
+    const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     const rb = kbSquare ? 0 : f.radius;
     return {
       height: f.height,
@@ -1805,7 +1803,7 @@ export default function SessionScreen() {
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
    *  side without a clip cutting them off. */
   const boxStyle = useAnimatedStyle(() => {
-    const b = zoomBox(prog.value, dragX.value, aim(), stageSV.value);
+    const b = zoomBox(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     return {
       opacity: alpha.value,
       transform: [
@@ -1868,7 +1866,7 @@ export default function SessionScreen() {
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
   // with it; border width divided by scale so it reads ~3pt on screen throughout.
   const ringStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
+    const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
@@ -2327,6 +2325,38 @@ export default function SessionScreen() {
       )}
     </View>
   );
+}
+
+/**
+ * What the surface is aimed at this frame — the hold pose under the finger, the slot once
+ * released, interpolated by `flight` (see `aimFrame`). Every style that draws the zoom reads the
+ * aim rather than the slot, so the card, its ring and its neighbours agree by construction.
+ *
+ * At MODULE scope, taking its shared values as an argument, because four `useAnimatedStyle`
+ * worklets call it. Reanimated derives a mapper's dependencies from its worklet's closure, and the
+ * plugin mints a new function object for a worklet declared in a component body on every render —
+ * so an `aim` living inside the component restarted `boxStyle`, `cardClipStyle`, `cardRadiiStyle`
+ * and `ringStyle` on every render of the screen.
+ *
+ * This was hoisted once before and reverted, because the keyboard-up page came back with rounded
+ * bottom corners. That was the wrong culprit: the corner was `cardRadiiStyle` being DETACHED at
+ * rest and leaving its last write on the view, and the per-render restart had been papering over
+ * it by rewriting the radius on every commit. The style is attached for good now (see its note),
+ * so the papering-over is not needed — and with four views permanently attached, a mapper that
+ * restarts every render rewrites raster props on all four every render, which is worse than what
+ * it was hiding. Stable identity here, one write when something actually moves.
+ */
+function aimAt(sv: {
+  stage: SharedValue<{ w: number; h: number }>;
+  slot: SharedValue<Frame>;
+  prog: SharedValue<number>;
+  flight: SharedValue<number>;
+}): Frame {
+  'worklet';
+  // Held: slot-SIZED by the pull's reach, screen-centred (`heldFrame`). Released: the flight
+  // carries whatever pose the hold reached into the real slot.
+  const held = heldFrame(sv.stage.value, sv.slot.value, HOLD_REACH * sv.prog.value);
+  return aimFrame(held, sv.slot.value, sv.flight.value);
 }
 
 /* --- T11: the page-slide's cards --- */
