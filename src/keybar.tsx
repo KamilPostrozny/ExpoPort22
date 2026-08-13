@@ -124,7 +124,7 @@ export type KeyBarProps = {
    *  or not the card has been lifted into the switcher: the two axes run together. The screen owns
    *  the model: rubber band, thresholds, commit, and the shared `x` the pages and the pills both
    *  ride (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
-  onBarSwipe?: (phase: 'start' | 'move' | 'end', dx: number) => void;
+  onBarSwipe?: (phase: 'start' | 'move' | 'end', dx: number, vx?: number) => void;
   /** The tab-name pills that replace the bar keys during a page swipe (§4.4). `x` is the
    *  screen's page offset, `pitch` its page step — the pills derive the continuous position.
    *  Passed whenever tabs are reachable, NOT just mid-swipe: each pill is a BlurView, and
@@ -510,7 +510,7 @@ export default function KeyBar(props: KeyBarProps) {
         props.onBarSwipe?.('start', 0);
         return;
       }
-      props.onBarSwipe?.('move', e.translationX - originX.current);
+      props.onBarSwipe?.('move', e.translationX - originX.current, e.velocityX);
     })
     // `onFinalize`, not `onEnd`: a pan can leave by being CANCELLED — another handler wins the
     // race, the view it is on unmounts — and that path never calls `onEnd`. The screen's zoom

@@ -1054,7 +1054,10 @@ export default function SessionScreen() {
     slideTo(0, () => clearBarSwipe(skipRefresh));
   };
 
-  const onBarSwipe = (phase: 'start' | 'move' | 'end', dx: number) => {
+  /** The swipe's horizontal speed, low-passed — the join's approach distance shrinks with it
+   *  (user, 2026-08-13: the quicker the swipe, the faster the slide-in). */
+  const swipeVX = useSharedValue(0);
+  const onBarSwipe = (phase: 'start' | 'move' | 'end', dx: number, vx = 0) => {
     if (stage === null) return;
     if (phase === 'start') {
       // `drag` is a swipe that has ALREADY lifted — Safari's card can be paged sideways after it
@@ -1096,6 +1099,7 @@ export default function SessionScreen() {
     } else if (phase === 'move') {
       const info = swipeInfo.current;
       if (!info?.live) return;
+      swipeVX.value = swipeVX.value * 0.7 + vx * 0.3;
       swipeX.value = rubber(dx, info.pos, info.windows.length + 1);
     } else {
       const info = swipeInfo.current;
@@ -1353,7 +1357,9 @@ export default function SessionScreen() {
       // 130pt — slow and firm, and it can never lag the swipe or pop (user, 2026-08-13, after
       // instant read as harsh and every timed entrance was either too quick or too slow). A held
       // join seats immediately; its entrance is the clamped spring on the mount instead.
-      const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / 130, 1));
+      // The approach distance shrinks with the swipe's speed: 130pt at a walk, ~40pt at a flick.
+      const reachD = 130 / (1 + Math.min(Math.abs(swipeVX.value), 2000) / 900);
+      const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / reachD, 1));
       return {
         height: f.height,
         borderRadius: f.radius,
