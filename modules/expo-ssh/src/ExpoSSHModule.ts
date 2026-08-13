@@ -35,8 +35,17 @@ const native = requireNativeModule<ExpoSSHModule>('ExpoSSH');
  * Set false to go quiet. Worth doing before profiling anything on the scroll path: `onShellData`
  * fires per channel read, so a `less` page or a `htop` refresh is hundreds of console lines, and
  * Metro's transport is slow enough to be the thing you end up measuring.
+ *
+ * OFF (2026-08-13): the comment above was right and the cost is not only on the scroll path. The
+ * perf monitor had the JS thread at 13-30fps while the UI thread ran clean, and every gesture
+ * TRANSITION is a JS call — the row mounting, the release slide starting, the settle clearing —
+ * so each landed 50-150ms late and a fast swipe showed 2-3 states instead of an animation.
+ * Briefing the payloads was not enough: the cost is per console.log through Metro's socket, and
+ * an idle tmux poll alone is a dozen of them every couple of seconds. Flip it back on to debug
+ * the SSH layer itself; the app's own `[terminal]`/`[switcher]`/`[barswipe]` traces are
+ * unaffected and are what §7 actually asks for.
  */
-const LOG = true;
+const LOG = false;
 
 const TAP_OUT = new Set(['addListener', 'removeListener', 'removeAllListeners', 'emit']);
 
