@@ -1848,6 +1848,13 @@ export default function SessionScreen() {
                 <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
               </Animated.View>
+              {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
+                  crop's upward translate and clipped out at the top, the ring bug over again
+                  (user, 2026-08-13, "outlines bugging out"). */}
+              <Animated.View
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.accent }, cardRadiiStyle]}
+              />
             </Animated.View>
           )}
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
@@ -1858,6 +1865,13 @@ export default function SessionScreen() {
                 <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
               </Animated.View>
+              {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
+                  crop's upward translate and clipped out at the top, the ring bug over again
+                  (user, 2026-08-13, "outlines bugging out"). */}
+              <Animated.View
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.accent }, cardRadiiStyle]}
+              />
             </Animated.View>
           )}
         </>
@@ -2169,10 +2183,6 @@ function NeighborPage({
         cell={cell}
         insets={insets}
         liveCols={liveCols}
-      />
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.accent }, radii]}
       />
     </Animated.View>
   );
