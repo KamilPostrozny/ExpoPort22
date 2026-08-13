@@ -121,13 +121,11 @@ export type KeyBarProps = {
   /** T10: the zoom drag's TRANSITIONS, one JS call each — the per-frame follow runs in this
    *  file's pan worklet against `panSV`, because the JS thread stalls 40–300ms under load and a
    *  runOnJS pan hitched with it (perf harness, 2026-08-13). `onZoomGrab` pays the open's
-   *  one-off costs; `onZoomEnd` decides commit-or-spring-back from the release's velocity;
-   *  `onAirSettled` mounts the row when the worklet's settle latch fires. */
+   *  one-off costs; `onZoomEnd` decides commit-or-spring-back from the release's velocity. */
   onZoomGrab?: (dx: number, dy: number) => void;
   onZoomEnd?: (dx: number, dy: number, vx: number, vy: number) => void;
   /** The card has actually begun to lift — arm the switcher's own state now, not at the grab. */
   onZoomArm?: () => void;
-  onAirSettled?: () => void;
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
    *  the worklet. The screen owns the model: rubber band, thresholds, commit
@@ -494,7 +492,7 @@ function KeyBarInner(props: KeyBarProps) {
   const grabbed = useSharedValue(0);
   /** The keyboard has already been sent away by this pan. */
   const dismissed = useSharedValue(0);
-  /** The worklet's half of the settle latch (see `onAirSettled`). */
+  /** The worklet's half of the settle latch: the held card's row springs in from here. */
   const settled = useSharedValue(0);
   /** The pan's translation at the instant the card was grabbed. The grab costs `BAR_AXIS_SLOP` of
    *  travel, and the pan reports it from TOUCH-DOWN — so handing the page `e.translationX` made
@@ -513,14 +511,12 @@ function KeyBarInner(props: KeyBarProps) {
     onZoomGrab: props.onZoomGrab,
     onZoomArm: props.onZoomArm,
     onZoomEnd: props.onZoomEnd,
-    onAirSettled: props.onAirSettled,
     onBarSwipe: props.onBarSwipe,
   });
   cbRef.current = {
     onZoomGrab: props.onZoomGrab,
     onZoomArm: props.onZoomArm,
     onZoomEnd: props.onZoomEnd,
-    onAirSettled: props.onAirSettled,
     onBarSwipe: props.onBarSwipe,
   };
   const jsZoomGrab = useCallback((dx: number, dy: number) => cbRef.current.onZoomGrab?.(dx, dy), []);
@@ -528,7 +524,6 @@ function KeyBarInner(props: KeyBarProps) {
     (dx: number, dy: number, vx: number, vy: number) => cbRef.current.onZoomEnd?.(dx, dy, vx, vy),
     [],
   );
-  const jsAirSettled = useCallback(() => cbRef.current.onAirSettled?.(), []);
   const jsZoomArm = useCallback(() => cbRef.current.onZoomArm?.(), []);
   const jsBarSwipe = useCallback(
     (phase: 'start' | 'end', dx: number) => cbRef.current.onBarSwipe?.(phase, dx),
@@ -599,9 +594,11 @@ function KeyBarInner(props: KeyBarProps) {
           // and the first sideways move revealed it already seated instead of bouncing in
           // (user, 2026-08-13). The spring is what the eye reads; the opacity just has to be on
           // before it runs.
+          // …and it stays entirely on this thread. The JS hop that used to run here told React the
+          // card had settled, and React had nothing left to do with it once the row became
+          // permanent — it was a runOnJS per gesture paying for a state nobody read.
           sv.rowVis.value = 1;
           sv.join.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
-          runOnJS(jsAirSettled)();
         }
       }
       // The keys get out of the way once the card is visibly off the bar — not at the slop, which

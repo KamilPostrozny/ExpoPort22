@@ -566,6 +566,10 @@ export default function SessionScreen() {
   const PHASE_WATCHDOG_MS = 1500;
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
+  /** The birth entrance (see `birth`). Shorter than a zoom on purpose: the slide it follows has
+   *  already spent the eye's patience, and this is the last thing between the finger coming off
+   *  and a usable shell. */
+  const BIRTH_IN = { duration: 260, easing: Easing.out(Easing.quad) };
   /** Every console.log serializes through Metro's socket ON the JS thread — the same cost that
    *  made the SSH tap the thing we were measuring. A hop emits ~10 of them between the harness,
    *  the trace and §7's own lines, which is JS-thread time inside the gesture being measured.
@@ -773,18 +777,23 @@ export default function SessionScreen() {
    *  the release is dropped, the render lands on `drag`, and nothing is left to end it. That is a
    *  frozen app (user, 2026-08-11), and it is the same shape as the two before it. */
   const dragging = useRef(false);
-  /** The card has been deliberately HELD in the air — vertical motion stopped — which is when the
-   *  neighbours bounce in beside it (user, 2026-08-13): during a slow flick up they never join,
-   *  and a card in the hand only grows its row once the hand pauses. Latched for the rest of the
-   *  gesture; a release clears it.
+  /**
+   * The new terminal's entrance, 0→1: a window that was born by a swipe has no page to slide in
+   * from, so it comes up out of the backdrop where the swipe left off (user, 2026-08-13). Drives
+   * the card's opacity and, as its complement, a blur over it — so the shell arrives soft and
+   * sharpens, rather than being switched on.
    *
-   *  State, not the ref it was: this is the frame the row becomes VISIBLE on (the worklet's settle
-   *  latch sets `rowVis` and springs the join there), and it is the only moment React can learn
-   *  that a row exists without a page swipe under it. Without it the held row is drawn from the
-   *  resting `cards.length + 1` and the empty new-tab page stands beside a held last tab from the
-   *  moment the card settles, rather than sliding in with the swipe that creates it (user,
-   *  2026-08-13). One render, at the one instant in the gesture where the hand has stopped. */
-  const [airHeld, setAirHeld] = useState(false);
+   * 1 at rest, and every other landing leaves it there: a hop between existing windows is a cut,
+   * deliberately, because the card that landed and the terminal under it are the same picture.
+   */
+  const birth = useSharedValue(1);
+  /** Is that entrance running? React's half — it mounts the blur, which is a UIVisualEffectView and
+   *  therefore must not exist a frame longer than it is seen (the grid's own blur, and the note
+   *  there). Set at the landing, cleared by the animation's own callback. */
+  const [birthing, setBirthing] = useState(false);
+  /** Did the swipe just committed to birth a window? Read by `clearBarSwipe`, which is where every
+   *  landing — cut or entrance — ends up. */
+  const birthLanding = useRef(false);
   /** The held join's approach, 0→1 on a clamped spring the moment the hand settles. A Reanimated
    *  `entering` did this job and flickered: layout animations under a scaled, translated parent
    *  paint their first frame at the final position before jumping to the start (user,
@@ -881,18 +890,11 @@ export default function SessionScreen() {
     setSw('drag');
   };
 
-  /** The row joined a held card — React's half of the worklet's settle latch (the spring on
-   *  `joinSV` starts on the UI thread; this mounts the row). */
-  const onAirSettled = () => {
-    setAirHeld(true);
-  };
-
   const onZoomEnd = (dx: number, dy: number, vx: number, vy: number) => {
     if (stage === null) return;
     if (dragging.current) {
       dragging.current = false;
       draggingSV.value = 0;
-      setAirHeld(false);
       // The row goes back out to the sides so the card flies to the grid alone — unless a hop is
       // landing, whose own clear cuts it (see `clearBarSwipe`).
       if (swipeInfo.current?.live !== true) {
@@ -1290,6 +1292,23 @@ export default function SessionScreen() {
     setPageSwipe(null);
     swipeX.value = 0;
     roundSV.value = 0; // x is already 0 here, so the travel factor has faded the edge out too
+    // A birth lands here too, and it is the one landing with nothing underneath it: every other
+    // hop cuts because the page that slid in and the terminal beneath are the same picture, and
+    // this slide had no page at all. So the stage comes back from zero — under a blur, which is
+    // fixed and fades by OPACITY, never by intensity (the grid's entrance, and the note there).
+    // Set on this same call, before the paint that puts the card back at x=0: the reset above is
+    // a cut to somewhere invisible.
+    if (birthLanding.current) {
+      birthLanding.current = false;
+      setBirthing(true);
+      birth.value = 0;
+      birth.value = withTiming(1, BIRTH_IN, (done) => {
+        // Guarded: a second birth landing inside this one REPLACES this animation and fires this
+        // callback with false, and unmounting the blur there would strip it off the entrance that
+        // is still running. Nothing cancels `birth`, so the last one always finishes and clears.
+        if (done) runOnJS(setBirthing)(false);
+      });
+    }
   };
 
   const settleBarSwipe = () => {
@@ -1477,10 +1496,14 @@ export default function SessionScreen() {
         // the halo all point at the wrong tab until something re-lists.
         // `refresh(false)` is list-only: no capture burst on the JS thread, and the fresh shell
         // has nothing to snapshot yet. Rare by nature — this is a window being created, not a hop.
-        else
+        else {
+          // Nothing slid in behind this one, so nothing is covering the stage when the motion
+          // stops: the landing is an entrance, not a cut (see `birth`).
+          birthLanding.current = true;
           newWindow()
             .then(() => refresh(false))
             .catch((error) => console.log('[barswipe] new window failed:', error));
+        }
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
         slideTo((info.pos - target) * pagePitch(stage.w), settleBarSwipe);
       }
@@ -1578,7 +1601,6 @@ export default function SessionScreen() {
     onZoomGrab,
     onZoomArm,
     onZoomEnd,
-    onAirSettled,
     onBarSwipe,
   };
   const kb_sendBytes = useCallback((...a: any[]) => kbH.current.sendBytes(...a), []);
@@ -1587,7 +1609,6 @@ export default function SessionScreen() {
   const kb_onZoomGrab = useCallback((...a: any[]) => kbH.current.onZoomGrab(...a), []);
   const kb_onZoomArm = useCallback((...a: any[]) => kbH.current.onZoomArm(...a), []);
   const kb_onZoomEnd = useCallback((...a: any[]) => kbH.current.onZoomEnd(...a), []);
-  const kb_onAirSettled = useCallback((...a: any[]) => kbH.current.onAirSettled(...a), []);
   const kb_onBarSwipe = useCallback((...a: any[]) => kbH.current.onBarSwipe(...a), []);
 
   const onRibbonCap = (cap: Cap) => {
@@ -1642,20 +1663,6 @@ export default function SessionScreen() {
    *  hop's `setCards` plus the two warm captures behind it changed its identity three times a
    *  swipe without a single name being different. */
   const pillNames = pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME];
-  /** How many pages the row beside the live card DRAWS — not how far it reaches. The slot past the
-   *  last window is reachable in every case, held or flat, and committing onto it births a window
-   *  (that is `windows.length + 1` at the band and the release). What it is not is visible before
-   *  the finger asks for it: Safari's held card has nothing beside it until you swipe, and the new
-   *  tab appears as it slides in (user, 2026-08-13).
-   *
-   *  So a live swipe draws its whole row, and a card merely held in the air draws one page fewer —
-   *  the empty new-tab page waits for the swipe that creates it. `airHeld` is what makes the second
-   *  case knowable at all: a held row joins at the settle latch, earlier than any page swipe.
-   *
-   *  Not `pillNames.length`, though it agrees with it during a swipe: the strip's names are keyed
-   *  by content and feed a memoised KeyBar, and making them move with the hold would re-render the
-   *  whole bar mid-gesture for pills that are not even live yet (`pillsLive`). */
-  const rowSlots = pageSwipe?.names.length ?? cards.length + (airHeld ? 0 : 1);
   const pillNamesKey = pillNames.join('\u0000');
   /** Keys or pills? The settle is the BAR's landing, not the terminal's — the overlay still waits
    *  for the host to finish redrawing because it is a picture of a pane, but the keys are not a
@@ -1866,6 +1873,11 @@ export default function SessionScreen() {
   const gridBlurStyle = useAnimatedStyle(() => ({
     opacity: 1 - flight.value,
   }));
+  /** The birth's blur, on the same principle and for the same reason: fixed intensity, animated
+   *  opacity. It is the complement of the card's own fade, and it sits OUTSIDE the box rather
+   *  than in it — inside, the card's rising opacity would multiply the blur away exactly when the
+   *  blur is meant to be doing its work, and the shell would simply fade up sharp. */
+  const birthBlurStyle = useAnimatedStyle(() => ({ opacity: 1 - birth.value }));
 
   /** The container every card rides: one scale, one flight, one place. Its height is the stage's
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
@@ -1873,7 +1885,9 @@ export default function SessionScreen() {
   const boxStyle = useAnimatedStyle(() => {
     const b = zoomBox(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     return {
-      opacity: alpha.value,
+      // `birth` is 1 for everything that is not a window arriving out of the backdrop, so this
+      // multiply is the identity on every other path through here.
+      opacity: alpha.value * birth.value,
       transform: [
         // The row moves as one, always: the box IS the swipe. The page/card handover that used
         // to live here (cardCarry) existed for a bar that no longer rides inside the card, and
@@ -2220,11 +2234,13 @@ export default function SessionScreen() {
               />
             </Animated.View>
           )}
-          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
-              empty pane the shell about to be born will draw into. Drawn only once a swipe is
-              asking for it — a card held in the air has nothing beside it on this side until the
-              finger moves (see `rowSlots`), the way it has nothing beside it past the first tab. */}
-          {anchor < rowSlots - 1 && (
+          {/* Real windows only, both sides. The slot past the last one is still REACHABLE — the
+              band, the release and the pill strip all count it, and committing onto it births a
+              window — but it is not a page, and it used to slide in as one: an empty pane the
+              width of the screen, pretending to be a window that did not exist. Nothing comes in
+              from that side now; the swipe uncovers the backdrop, and the new terminal arrives as
+              itself once the motion is over (see `birth`, user 2026-08-13). */}
+          {anchor < cards.length - 1 && (
             <Animated.View pointerEvents="none" style={[
                 styles.stageWrapper,
                 { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
@@ -2247,6 +2263,16 @@ export default function SessionScreen() {
       )}
 
       </Animated.View>
+
+      {/* The birth's blur (see `birth`). Over the box, not inside it, and mounted only for the
+          260ms it is seen: a UIVisualEffectView costs GPU for as long as it exists, whatever its
+          opacity — the lesson the grid's own blur is annotated with, and the reason this is not
+          simply left standing at zero. */}
+      {birthing && (
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, birthBlurStyle]}>
+          <BlurView intensity={40} tint={theme.isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
+        </Animated.View>
+      )}
 
       {/* Everything from here down is SCREEN-STATIC chrome, deliberately outside the box the
           cards ride in: the box carries the swipe itself now (no page/card handover — see
@@ -2280,7 +2306,6 @@ export default function SessionScreen() {
         onZoomGrab={kb_onZoomGrab}
         onZoomArm={kb_onZoomArm}
         onZoomEnd={kb_onZoomEnd}
-        onAirSettled={kb_onAirSettled}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? kb_onBarSwipe : undefined}
