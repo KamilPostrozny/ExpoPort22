@@ -188,9 +188,10 @@ export const ROW_AIR_PROG = 0.05;
  *  its way to the grid, and neighbours around it are just clutter in the flight path (user,
  *  2026-08-14). The ceiling asked for was 30% of the pull, but `prog` saturates at 280pt of
  *  travel: 0.3 of it is 84pt, which on the phone is the very bottom of the motion and left the
- *  row triggerable only at the start (user, same day). Half the pull is the same intent at the
- *  scale the thumb actually works in — and it is the knob to turn if it still reads tight. */
-export const ROW_MAX_PROG = 0.5;
+ *  row triggerable only at the start (user, same day). 0.65 is the same intent at the scale the
+ *  thumb actually works in: two thirds of the way up still gathers neighbours, the top third is
+ *  the card alone. Tried at 0.5 first, still tight (user, same day). This is the knob. */
+export const ROW_MAX_PROG = 0.65;
 
 /** Horizontal travel that earns the page row (see `barGrabbed`): the slop on the bar; in the air,
  *  deliberate travel AND a card that is being held — the hand stopped climbing (`held`, the
