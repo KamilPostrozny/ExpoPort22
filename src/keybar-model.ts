@@ -157,14 +157,41 @@ export const BAR_AXIS_SLOP = 10;
 /** Vertical travel at which the keyboard gesture fires (the prototype's 24px). */
 export const BAR_SWIPE_FIRE = 24;
 
-export type BarSwipe = 'up' | 'down' | 'horizontal' | null;
+/** Upward speed, pt/s, that reads as a flick rather than drift. */
+export const BAR_LIFT_VY = 700;
 
-/** Classifies a pan on the bar from its total travel. `horizontal` is handed to T11's window
- *  switching; `up`/`down` drive the keyboard (§4.4). Null means keep watching. */
-export function classifyBarSwipe(dx: number, dy: number): BarSwipe {
-  if (Math.abs(dx) <= BAR_AXIS_SLOP && Math.abs(dy) <= BAR_AXIS_SLOP) return null;
-  if (Math.abs(dx) > Math.abs(dy)) return 'horizontal';
-  if (dy <= -BAR_SWIPE_FIRE) return 'up';
-  if (dy >= BAR_SWIPE_FIRE) return 'down';
-  return null;
+/**
+ * The bar pan is ONE gesture with two exits (Safari's tab handle, user 2026-08-12): past the slop
+ * the card is in hand and riding the finger sideways, and from there it can still be flicked up
+ * into the switcher. So there is no axis to classify any more — no single answer the rest of the
+ * pan is held to. There is a grab, and then two questions asked of every frame, independently.
+ *
+ * The grab is horizontal travel alone, not either axis: the page has nothing to show until the
+ * finger has actually gone sideways, and starting it on the 10pt a pull UP passes through would
+ * mount and cancel a whole swipe in the 14pt before the lift — React work under the finger at
+ * the one moment the code everywhere else here is at pains to keep clear.
+ */
+export function barGrabbed(dx: number): boolean {
+  return Math.abs(dx) > BAR_AXIS_SLOP;
+}
+
+/**
+ * Does this frame lift the card out of the sideways swipe and into T10's switcher drag?
+ *
+ * Two ways in, because travel alone cannot answer both. A deliberate pull straight up is slow and
+ * has no velocity to speak of, but its travel beats the sideways drift — that is the first rule,
+ * and it is the old classifier's `up`. A flick up *out of* a swipe already 200pt along can never
+ * beat that drift, however hard it is thrown; there only speed says anything. Requiring the
+ * vertical speed to beat the horizontal is what keeps a fast flat swipe — and the upward arc a
+ * thumb draws through one — on the ground.
+ */
+export function barLifts(dx: number, dy: number, vx: number, vy: number): boolean {
+  if (dy <= -BAR_SWIPE_FIRE && Math.abs(dy) >= Math.abs(dx)) return true;
+  return vy <= -BAR_LIFT_VY && Math.abs(vy) > Math.abs(vx) && dy <= -BAR_AXIS_SLOP;
+}
+
+/** The other vertical exit: a swipe down puts the keyboard away (§4.4). Same travel test as the
+ *  pull up, mirrored — a sideways swipe that sags does not count. */
+export function barDismisses(dx: number, dy: number): boolean {
+  return dy >= BAR_SWIPE_FIRE && dy >= Math.abs(dx);
 }

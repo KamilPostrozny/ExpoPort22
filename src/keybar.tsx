@@ -64,7 +64,9 @@ import {
   CHORD_STRIP,
   afterChord,
   applyCtrl,
-  classifyBarSwipe,
+  barDismisses,
+  barGrabbed,
+  barLifts,
   controlByte,
   CARET_SETTLE_MS,
   CARET_STEP_MAX,
@@ -73,7 +75,6 @@ import {
   diffInput,
   navKey,
   pasteBytes,
-  type BarSwipe,
   type CtrlMode,
   type NavKey,
 } from '@/keybar-model';
@@ -113,14 +114,15 @@ export type KeyBarProps = {
   onTabsTap?: () => void;
   /** T10: bar swipe ↑ is the drag into the switcher — the prototype's `zoomFollow` — whatever the
    *  keyboard is doing (user, 2026-08-11: the gesture is one thing, always). Fired per move with
-   *  the pan's translation once the swipe has classified as up, then once with 'end' on release;
-   *  the screen turns dy into zoom progress and decides commit-or-spring-back. Only wired while
-   *  `showTabs`. */
+   *  the pan's translation from the moment the held card lifts (`barLifts`), then once with 'end'
+   *  on release; the screen turns dy into zoom progress and decides commit-or-spring-back. Only
+   *  wired while `showTabs`. */
   onSwitcherDrag?: (phase: 'move' | 'end', dx: number, dy: number) => void;
   /** T11: bar swipe ↔ is the page-slide window hop. Raw gesture only — 'start' once when the pan
-   *  claims the horizontal axis, 'move' per frame with the pan's translation, 'end' on release.
-   *  The screen owns the model: rubber band, thresholds, commit, and the shared `x` the pages
-   *  and the pills both ride (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
+   *  leaves the slop, 'move' per frame with the pan's translation, 'end' on release. Fires whether
+   *  or not the card has been lifted into the switcher: the two axes run together. The screen owns
+   *  the model: rubber band, thresholds, commit, and the shared `x` the pages and the pills both
+   *  ride (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
   onBarSwipe?: (phase: 'start' | 'move' | 'end', dx: number) => void;
   /** The tab-name pills that replace the bar keys during a page swipe (§4.4). `x` is the
    *  screen's page offset, `pitch` its page step — the pills derive the continuous position.
@@ -307,8 +309,6 @@ export default function KeyBar(props: KeyBarProps) {
   };
   const [ctrl, setCtrl] = useState<CtrlMode>('off');
   const lastCtrlTap = useRef(0);
-  /** The axis this bar pan committed to, so it fires once and never also presses keys. */
-  const swipe = useRef<BarSwipe>(null);
   /** The pill's measured width — the name-pill pitch (prototype: item + gap exactly fill it). */
   const [pillW, setPillW] = useState(0);
 
@@ -442,53 +442,74 @@ export default function KeyBar(props: KeyBarProps) {
   // pasteboard as it opens (the accepted moment for the iOS paste banner).
   const onPasteLongPress = () => onOpenChange('clipboard');
 
-  // The bar swipe (§4.4): ↓ hides the keyboard, ↑ is always T10's switcher drag (the keys come
-  // back with a tap on the terminal). Horizontal is T11's window switch; the hook fires on release.
-  // Keys never fire during a swipe: the pan activating cancels the childrens' touches.
+  // The bar swipe (§4.4) — one gesture holding the card, with both of Safari's axes live at the
+  // same time rather than an axis chosen at 10pt and held to for the rest of the pan. Sideways is
+  // T11's window hop, up is T10's switcher drag, down puts the keyboard away, and the first two
+  // run TOGETHER: a card already pulled a little off the bar can still be swiped between windows,
+  // and a swipe already running sideways can still be flicked up (user, 2026-08-12). Only the
+  // release picks a winner, and the screen does that — it is the side that knows how far up the
+  // card got. Keys never fire during a swipe: the pan activating cancels the childrens' touches.
+  /** Past the slop: the page is under the finger and every frame is forwarded. */
+  const held = useRef(false);
   /** The swipe became T10's switcher drag: every further move is forwarded as zoom progress. */
   const zooming = useRef(false);
-  /** The pan's translation at the instant the axis was chosen. Choosing costs `BAR_AXIS_SLOP` of
+  /** The keyboard has already been sent away by this pan — the test stays true as the finger
+   *  travels further down, and dismissing every frame is a call per frame. */
+  const dismissed = useRef(false);
+  /** The pan's translation at the instant the card was grabbed. The grab costs `BAR_AXIS_SLOP` of
    *  travel, and the pan reports it from TOUCH-DOWN — so handing the page `e.translationX` made
    *  it open 10pt along instead of at zero: the card detached from the edge with a jump in the
    *  direction of the finger rather than growing out of it (user, 2026-08-11). The hop measures
    *  from here on, which also makes the commit and flick distances in `barswipe-model` mean the
-   *  travel they say they do, the way the vertical gesture's already budget for this. */
+   *  travel they say they do, the way the vertical gesture's already budget for this. The vertical
+   *  tests keep the raw translation: the lift is measured from touch-down (its 24pt is the budget),
+   *  and the zoom re-origins for itself at the frame it arms (the screen's `zoomFrom`). */
   const originX = useRef(0);
   const pan = Gesture.Pan()
     .runOnJS(true)
     .maxPointers(1)
     .onBegin(() => {
-      swipe.current = null;
+      held.current = false;
       zooming.current = false;
+      dismissed.current = false;
     })
     .onUpdate((e) => {
+      // The lift, asked every frame until it happens — from a standing start OR out of a swipe
+      // already sideways. Where there is no switcher to lift into (no tmux) the gesture stays on
+      // the ground, like the button.
+      if (
+        !zooming.current &&
+        props.showTabs &&
+        props.onSwitcherDrag &&
+        barLifts(e.translationX, e.translationY, e.velocityX, e.velocityY)
+      ) {
+        zooming.current = true;
+        Keyboard.dismiss(); // the prototype drops the keyboard the moment the grab lifts
+      }
       if (zooming.current) {
-        props.onSwitcherDrag?.('move', e.translationX, e.translationY);
-        return;
+        // The lift takes the vertical and nothing else. Its own horizontal drift is frozen at the
+        // grab (`originX`) once the pages are carrying x, because two things moving the card at
+        // once is a card travelling twice as far as the finger — but it stays live before the
+        // grab, which is the ±10pt of tilt a straight pull up has always had.
+        props.onSwitcherDrag?.('move', held.current ? originX.current : e.translationX, e.translationY);
+      } else if (!dismissed.current && barDismisses(e.translationX, e.translationY)) {
+        // Down puts the keys away and the swipe carries on: the page stays in hand, and a hop the
+        // same finger decides a moment later is still one gesture.
+        dismissed.current = true;
+        Keyboard.dismiss();
       }
-      if (swipe.current === 'horizontal') {
-        props.onBarSwipe?.('move', e.translationX - originX.current);
-        return;
-      }
-      if (swipe.current !== null) return;
-      const s = classifyBarSwipe(e.translationX, e.translationY);
-      if (s === null) return;
-      swipe.current = s;
-      if (s === 'horizontal') {
+      // The horizontal, alive the WHOLE gesture — lifted or not. Safari's card can be swiped
+      // between tabs while it is already off the bottom of the screen, and the swipe can start
+      // at any point in the pull up (user, 2026-08-12); an axis that goes quiet the moment the
+      // card leaves the bar is the deliberateness that was missing.
+      if (!held.current) {
+        if (!barGrabbed(e.translationX)) return;
+        held.current = true;
         originX.current = e.translationX;
         props.onBarSwipe?.('start', 0);
+        return;
       }
-      else if (s === 'down') Keyboard.dismiss();
-      else if (s === 'up') {
-        // Always the drag into the switcher (§4.4), keyboard up or down — the keys have their own
-        // door now, a tap on the terminal (user, 2026-08-11). Where there is no switcher to drag
-        // into (no tmux) the gesture is silence, like the button.
-        if (props.showTabs && props.onSwitcherDrag) {
-          zooming.current = true;
-          Keyboard.dismiss(); // the prototype drops the keyboard the moment the grab starts
-          props.onSwitcherDrag('move', e.translationX, e.translationY);
-        }
-      }
+      props.onBarSwipe?.('move', e.translationX - originX.current);
     })
     // `onFinalize`, not `onEnd`: a pan can leave by being CANCELLED — another handler wins the
     // race, the view it is on unmounts — and that path never calls `onEnd`. The screen's zoom
@@ -496,13 +517,18 @@ export default function KeyBar(props: KeyBarProps) {
     // behind a stage that takes no touches, which reads as the whole app freezing (user,
     // 2026-08-11). Finalize fires for every exit, successful or not.
     .onFinalize((e) => {
+      // Both axes report, in this order, and the screen arbitrates: a release that commits to the
+      // grid ends the page swipe itself (no hop), so the call below finds nothing live to decide.
+      // The bar cannot make that call — the commit is a question about zoom progress, which lives
+      // over there.
       if (zooming.current) {
         zooming.current = false;
-        props.onSwitcherDrag?.('end', e.translationX, e.translationY);
-        return;
+        props.onSwitcherDrag?.('end', held.current ? originX.current : e.translationX, e.translationY);
       }
-      if (swipe.current === 'horizontal')
+      if (held.current) {
+        held.current = false;
         props.onBarSwipe?.('end', e.translationX - originX.current);
+      }
     });
 
   const keyLabel = { color: theme.foreground, fontFamily: MONO, fontSize: 14 };

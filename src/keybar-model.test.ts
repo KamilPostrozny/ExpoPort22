@@ -13,7 +13,9 @@ import {
   CARET_STEP_MAX,
   applyCtrl,
   caretKeys,
-  classifyBarSwipe,
+  barDismisses,
+  barGrabbed,
+  barLifts,
   controlByte,
   ctrlTap,
   diffInput,
@@ -177,25 +179,34 @@ test('a settled delta of several characters is still travel', () => {
   expect(CARET_STEP_MAX).toBeGreaterThan(1); // room for a coalesced pair of real steps
 });
 
-/* --- bar swipe classification --- */
+/* --- the bar grab and its two exits --- */
 
-test('under the slop nothing fires', () => {
-  expect(classifyBarSwipe(5, 5)).toBeNull();
+test('the page comes into hand on horizontal travel alone', () => {
+  expect(barGrabbed(5)).toBe(false);
+  expect(barGrabbed(11)).toBe(true);
+  expect(barGrabbed(-11)).toBe(true);
 });
 
-test('vertical travel past the fire threshold is a keyboard gesture', () => {
-  expect(classifyBarSwipe(0, -30)).toBe('up');
-  expect(classifyBarSwipe(0, 30)).toBe('down');
+test('a pull straight up lifts, a shallow one waits', () => {
+  expect(barLifts(0, -30, 0, -50)).toBe(true);
+  expect(barLifts(0, -15, 0, -50)).toBe(false);
 });
 
-test('vertical travel past the slop but under the threshold waits', () => {
-  expect(classifyBarSwipe(0, -15)).toBeNull();
-  expect(classifyBarSwipe(0, 15)).toBeNull();
+test('a flick up out of a swipe already sideways lifts on speed alone', () => {
+  // 200pt along: no upward travel can beat that drift, which is why velocity is asked.
+  expect(barLifts(-200, -14, -300, -1400)).toBe(true);
+  expect(barLifts(-200, -14, -300, -400)).toBe(false); // drifting up, not thrown
 });
 
-test('dominant horizontal travel is the window swipe (T11)', () => {
-  expect(classifyBarSwipe(40, 5)).toBe('horizontal');
-  expect(classifyBarSwipe(-40, 30)).toBe('horizontal');
+test('a fast flat swipe stays on the ground, arc and all', () => {
+  expect(barLifts(-120, -8, -2000, -300)).toBe(false); // the thumb's arc, at speed
+  expect(barLifts(-120, -30, -2000, -900)).toBe(false); // vy real but vx still bigger
+});
+
+test('down dismisses the keyboard, a sagging sideways swipe does not', () => {
+  expect(barDismisses(0, 30)).toBe(true);
+  expect(barDismisses(-60, 30)).toBe(false);
+  expect(barDismisses(0, 15)).toBe(false);
 });
 
 /* --- two-finger tap (lives with the touch layer's brain in scroll-model) --- */

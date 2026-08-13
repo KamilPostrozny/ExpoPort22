@@ -634,8 +634,17 @@ export default function SessionScreen() {
       dragX.value = dx - zoomFrom.current.x;
     } else if (dragging.current) {
       dragging.current = false;
-      if (zoomCommits(dy, Date.now() - zoomT0.current, prog.value)) commitOpen();
-      else springBack();
+      if (zoomCommits(dy, Date.now() - zoomT0.current, prog.value)) {
+        // The grid outranks the hop: the card flying into the grid is the one that was under the
+        // finger, so a page swipe still open under this release must decide nothing. It is told by
+        // this flag rather than by a call, because the bar reports the two axes in order and the
+        // horizontal's own 'end' is the next thing to arrive.
+        // ponytail: the flight always aims at the window it started on. Committing to the grid
+        // from 80% of the way to the NEXT tab could reasonably land there instead; nobody has
+        // asked, and it costs a re-aim mid-release.
+        gridTookIt.current = true;
+        commitOpen();
+      } else springBack();
     }
   };
 
@@ -961,10 +970,29 @@ export default function SessionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageSwipe?.phase]);
 
+  /** The page slides home and the swipe is over, no hop. Both ways out that decide nothing: a
+   *  release under the thresholds, and a release that committed to the grid instead — there the
+   *  hop is not cancelled so much as outranked, and marking the swipe spent here is what stops the
+   *  bar's own 'end' (which arrives straight after) from also hopping. */
+  /** Set by a release that committed to the grid, read by the page swipe's own 'end' a call later:
+   *  one gesture, two axes, and only one of them gets to decide the release. */
+  const gridTookIt = useRef(false);
+
+  const springPageHome = (skipRefresh: boolean) => {
+    if (swipeInfo.current === null) return;
+    swipeInfo.current.live = false;
+    setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
+    // No edge-fade timer: the slide home takes x to 0 and the travel factor fades it with it.
+    slideTo(0, () => clearBarSwipe(skipRefresh));
+  };
+
   const onBarSwipe = (phase: 'start' | 'move' | 'end', dx: number) => {
     if (stage === null) return;
     if (phase === 'start') {
-      if (sw !== 'closed' || !connected) return;
+      // `drag` is a swipe that has ALREADY lifted — Safari's card can be paged sideways after it
+      // has left the bar, and the finger may only decide that a hundred points into the pull up
+      // (user, 2026-08-12). Off the ref, not the render: mid-gesture the render is a frame behind.
+      if ((swRef.current !== 'closed' && swRef.current !== 'drag') || !connected) return;
       if (swipeInfo.current !== null) {
         // Mid-settle re-swipe: the hold exists to hide a refit, but making the finger WAIT for
         // it read as lag — rapid back-and-forth hopping used to be instant (user, 2026-08-11).
@@ -975,6 +1003,9 @@ export default function SessionScreen() {
       const windows = cards.map((c) => c.win);
       if (windows.length === 0) return;
       const pos = activePosIn(cards);
+      // A lift that never went sideways leaves the flag set — no 'end' arrives on this axis to
+      // read it — so every swipe starts by clearing it rather than trusting the last one to.
+      gridTookIt.current = false;
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
       setOpen('none');
       console.log('[barswipe] start at', pos, 'of', windows.length);
@@ -995,14 +1026,21 @@ export default function SessionScreen() {
     } else {
       const info = swipeInfo.current;
       if (!info?.live) return;
-      info.live = false;
+      // The same release lifted the card into the grid: this axis yields (see `onSwitcherDrag`).
+      // The refresh is skipped — a capture per window on the JS thread is the stutter
+      // `clearBarSwipe` describes, and here it would land inside the flight.
+      if (gridTookIt.current) {
+        gridTookIt.current = false;
+        console.log('[barswipe] yielded to the grid');
+        springPageHome(true);
+        return;
+      }
       const target = swipeTarget(dx, Date.now() - info.t0, info.pos, info.windows.length + 1);
       if (target === info.pos) {
         console.log('[barswipe] cancel');
-        setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
-        // No edge-fade timer: the slide home takes x to 0 and the travel factor fades it with it.
-        slideTo(0, clearBarSwipe);
+        springPageHome(false);
       } else {
+        info.live = false;
         // `undefined` at the slot past the last tab — the page sliding in is a window that does
         // not exist yet, and committing onto it is what births it (user, 2026-08-10).
         const win = info.windows[target];

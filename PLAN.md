@@ -563,8 +563,16 @@ Decisions: **the bar's final horizontal contract is raw gesture out, model in th
 `onBarSwipe(phase: 'start'|'move'|'end', dx)` replaced T7's release-only hook; the bar reports,
 the screen owns rubber/thresholds/commit, and both ride one shared page-offset value (the pills
 derive their continuous position from it in worklets, so nothing re-renders per frame). The
-vertical claims are untouched: `classifyBarSwipe` still splits the axes, and up/down still mean
-T10's zoom drag and the keyboard. Only the *terminal area* slides — the bar stays put under the
+vertical claims run *alongside* it rather than instead of it (2026-08-12): the pan no longer picks
+an axis and holds the rest of the gesture to it. `barGrabbed` puts the page in hand on horizontal
+travel, `barLifts` hands the vertical to T10's zoom from anywhere in the swipe (travel for a pull
+straight up, velocity for a flick out of a swipe already sideways, which no travel test could
+catch), `barDismisses` is the keyboard — and both surviving axes stay live at once, Safari's
+model: a card pulled a little off the bar still pages between windows, and the page swipe can
+start at any point in the pull up. Only the release picks, in the screen, which is the side that
+knows the zoom progress: it commits to the grid and sets `gridTookIt`, and the horizontal's own
+'end' — the next call in — reads that and springs home deciding nothing. The zoom's own sideways
+drift freezes at the grab, so exactly one thing is carrying x at any moment. Only the *terminal area* slides — the bar stays put under the
 pills, which is why the page wrapper sits inside the stage rather than being the stage. After a
 commit the slide lands on the snapshot, a **settle overlay** holds that snapshot ~350ms while
 tmux's redraw reaches the PTY, then drops (ponytail: fixed hold; dropping on first shell data is
