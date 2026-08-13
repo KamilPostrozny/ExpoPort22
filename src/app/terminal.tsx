@@ -432,6 +432,12 @@ export default function SessionScreen() {
   const PHASE_WATCHDOG_MS = 1500;
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
+  /** Every console.log serializes through Metro's socket ON the JS thread — the same cost that
+   *  made the SSH tap the thing we were measuring. A hop emits ~10 of them between the harness,
+   *  the trace and §7's own lines, which is JS-thread time inside the gesture being measured.
+   *  Flip on to debug; off to measure or to use the app. */
+  const GESTURE_LOG = false;
+
   /* --- §7 perf harness (TEMPORARY, 2026-08-13): "measure that every animation is actually
    * happening without dropped frames" (user). `perfOn` spans a gesture from its first event to
    * the frame everything settles; the UI-thread frame callback histograms real frame gaps, and
@@ -467,7 +473,7 @@ export default function SessionScreen() {
     if (perfOn.value === 0) return;
     perfOn.value = 0;
     const b = perfBuf.value;
-    if (b.n > 5)
+    if (b.n > 5 && GESTURE_LOG)
       console.log(
         `[perf] ${label}: ${b.n} frames, ${b.d17} >17ms, ${b.d25} >25ms, worst ${Math.round(b.worst)}ms | ` +
           `ev ${evN.value} maxgap ${Math.round(evGapMax.value)}ms | sty ${styN.value} maxgap ${Math.round(styGapMax.value)}ms`,
@@ -479,7 +485,7 @@ export default function SessionScreen() {
       const now = Date.now();
       const late = now - last - 100;
       last = now;
-      if (late > 40) console.log(`[perf] js thread stalled ${late}ms`);
+      if (late > 40 && GESTURE_LOG) console.log(`[perf] js thread stalled ${late}ms`);
     }, 100);
     return () => clearInterval(id);
   }, []);
@@ -519,7 +525,7 @@ export default function SessionScreen() {
   /** The last size the webview reported, so the probe can print what changed, not what was seen. */
   const lastFit = useRef<{ cols: number; rows: number; top: number } | null>(null);
   const probe = (what: string) => {
-    if (probeT0.current === 0) return;
+    if (!GESTURE_LOG || probeT0.current === 0) return;
     const dt = Date.now() - probeT0.current;
     if (dt > 2000) {
       probeT0.current = 0;
@@ -712,7 +718,7 @@ export default function SessionScreen() {
     {
       if (!dragging.current && at === 'closed') {
         perfStart();
-        console.log('[switcher] open (bar drag)');
+        if (GESTURE_LOG) console.log('[switcher] open (bar drag)');
         setOpen('none');
         // The grab no longer implies a raised keyboard (the swipe ↑ is one gesture whatever the
         // keys are doing), so read the pad as the tap door does. KeyBar's dismiss is one call old
@@ -1235,10 +1241,11 @@ export default function SessionScreen() {
       // §7: "the neighbour did not render" and "the neighbour rendered with nothing in it" look
       // identical on a dark theme — an empty page card is the background colour. Only the cache
       // can tell them apart (user, 2026-08-13, three screenshots of an empty half-screen).
-      console.log(
-        '[barswipe] start at', pos, 'of', windows.length,
-        'snaps', cards.map((c) => (c.snap ? '#' : '.')).join(''),
-      );
+      if (GESTURE_LOG)
+        console.log(
+          '[barswipe] start at', pos, 'of', windows.length,
+          'snaps', cards.map((c) => (c.snap ? '#' : '.')).join(''),
+        );
       setPageSwipe({
         names: [...windows.map((w) => w.name), NEW_TAB_NAME],
         pos,
@@ -1259,13 +1266,13 @@ export default function SessionScreen() {
       // `clearBarSwipe` describes, and here it would land inside the flight.
       if (gridTookIt.current) {
         gridTookIt.current = false;
-        console.log('[barswipe] yielded to the grid');
+        if (GESTURE_LOG) console.log('[barswipe] yielded to the grid');
         springPageHome(true);
         return;
       }
       const target = swipeTarget(dx, Date.now() - info.t0, info.pos, info.windows.length + 1);
       if (target === info.pos) {
-        console.log('[barswipe] cancel');
+        if (GESTURE_LOG) console.log('[barswipe] cancel');
         springPageHome(false);
       } else {
         info.live = false;
@@ -1273,7 +1280,8 @@ export default function SessionScreen() {
         // `undefined` at the slot past the last tab — the page sliding in is a window that does
         // not exist yet, and committing onto it is what births it (user, 2026-08-10).
         const win = info.windows[target];
-        console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
+        if (GESTURE_LOG)
+          console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
         // The handle changes with the slide, not a poll beat after it — and it costs no height,
         // so nothing refits. A window we are about to create runs an idle shell: no handle.
         if (win) ribbonForWindow(win);
@@ -1583,12 +1591,12 @@ export default function SessionScreen() {
   /* --- §7 structured-test trace (TEMPORARY): phase flips and layer mounts only — the per-frame
    * geometry sampler is gone, it was JS load inside the very gestures under test. --- */
   useEffect(() => {
-    console.log('[trace] sw →', sw);
-  }, [sw]);
+    if (GESTURE_LOG) console.log('[trace] sw →', sw);
+  }, [sw, GESTURE_LOG]);
   const pagePhase = pageSwipe?.phase ?? 'none';
   useEffect(() => {
-    console.log('[trace] page →', pagePhase);
-  }, [pagePhase]);
+    if (GESTURE_LOG) console.log('[trace] page →', pagePhase);
+  }, [pagePhase, GESTURE_LOG]);
 
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
