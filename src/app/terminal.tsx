@@ -1846,7 +1846,7 @@ export default function SessionScreen() {
         (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInLeft.springify().damping(26).stiffness(110).overshootClamping(1) : undefined} exiting={pageSwipe === null ? SlideOutLeft.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInLeft.springify().damping(26).stiffness(110).overshootClamping(1) : SlideInLeft.duration(120)} exiting={pageSwipe === null ? SlideOutLeft.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
@@ -1856,7 +1856,7 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInRight.springify().damping(26).stiffness(110).overshootClamping(1) : undefined} exiting={pageSwipe === null ? SlideOutRight.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" entering={pageSwipe === null ? SlideInRight.springify().damping(26).stiffness(110).overshootClamping(1) : SlideInRight.duration(120)} exiting={pageSwipe === null ? SlideOutRight.duration(160) : undefined} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
