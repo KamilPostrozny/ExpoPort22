@@ -438,6 +438,7 @@ export default function SessionScreen() {
   const ZOOM_WEDGE_FRAMES = 120;
 
   const finishClose = () => {
+    perfEnd('lift/return');
     probe('landed');
     setSw('closed');
     // The keys come back exactly as they were left (`keysWereUp`) — except onto an armed search
@@ -500,7 +501,20 @@ export default function SessionScreen() {
     // under the finger (`aimFrame`). On every other route in this is already 1 and the timing is a
     // no-op. It rides ZOOM_OUT so the aim and the progress arrive together — a shorter curve here
     // would land the card in its slot and then keep scaling into it.
-    flight.value = withTiming(1, ZOOM_OUT);
+    //
+    // The hand-over cut (alpha 0, sw 'open') rides whichever of the two values actually has
+    // distance to travel. On a DEEP pull prog is already 1 at the release, its timing finishes
+    // immediately, and a cut attached there fired before the flight moved a point — the
+    // fly-to-grid animation visibly skipped (user, 2026-08-13). On a tap-open it is the mirror:
+    // flight is already 1 and prog travels.
+    const flightTravels = flight.value < 0.999;
+    flight.value = withTiming(1, ZOOM_OUT, (done) => {
+      if (done && flightTravels) {
+        alpha.value = 0;
+        runOnJS(setSw)('open');
+        runOnJS(perfEnd)('fly-to-grid');
+      }
+    });
     // The prototype fades the surface out only near the end, once it covers its card — and "near
     // the end" is measured in TRAVEL, not in milliseconds. ZOOM_OUT is out-cubic, so at 180ms
     // (53% of 340) the surface is only ~90% of the way there, while the card underneath goes fully
@@ -518,9 +532,10 @@ export default function SessionScreen() {
     // t=1 exactly, where the two pictures are the same picture — which is the whole point of the
     // geometry. A cut, not a fade, for the reason `springBack` snaps its own (see there).
     prog.value = withTiming(1, ZOOM_OUT, (done) => {
-      if (done) {
+      if (done && !flightTravels) {
         alpha.value = 0;
         runOnJS(setSw)('open');
+        runOnJS(perfEnd)('fly-to-grid');
       }
     });
   };
@@ -624,6 +639,7 @@ export default function SessionScreen() {
     const at = swRef.current;
     if (phase === 'move') {
       if (!dragging.current && at === 'closed') {
+        perfStart();
         console.log('[switcher] open (bar drag)');
         setOpen('none');
         // The grab no longer implies a raised keyboard (the swipe ↑ is one gesture whatever the
@@ -679,8 +695,11 @@ export default function SessionScreen() {
       } else if (!dragging.current) return;
       if (!zoomReady.current) return;
       if (zoomFrom.current === null) zoomFrom.current = { x: dx, y: dy };
-      prog.value = Math.min(1, zoomBase.current + zoomProgress(dy - zoomFrom.current.y, stage.w));
       dragX.value = dx - zoomFrom.current.x;
+      prog.value = Math.min(
+        1,
+        zoomBase.current + zoomProgress(dy - zoomFrom.current.y, stage.w, dragX.value),
+      );
       // Settled: airborne and the hand has stopped. 90pt/s is stillness to a finger, not to a
       // flick — a slow flick up still travels several hundred.
       if (!airSettledRef.current && prog.value > 0.02 && Math.abs(vy) < 90 && Math.abs(vx) < 90) {
@@ -986,6 +1005,7 @@ export default function SessionScreen() {
   };
 
   const clearBarSwipe = (skipRefresh = false) => {
+    perfEnd('hop');
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
     // start of this one: a capture per window is an exec burst and a parse of every answer, and
     // on the JS thread at the instant the finger goes down that is a stutter in the slide it is
@@ -1077,6 +1097,7 @@ export default function SessionScreen() {
       // A lift that never went sideways leaves the flag set — no 'end' arrives on this axis to
       // read it — so every swipe starts by clearing it rather than trusting the last one to.
       gridTookIt.current = false;
+      perfStart();
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
       setOpen('none');
       // §7: "the neighbour did not render" and "the neighbour rendered with nothing in it" look
@@ -1418,6 +1439,47 @@ export default function SessionScreen() {
       ],
     };
   });
+
+  /* --- §7 perf harness (TEMPORARY, 2026-08-13): "measure that every animation is actually
+   * happening without dropped frames" (user). `perfOn` spans a gesture from its first event to
+   * the frame everything settles; the UI-thread frame callback histograms real frame gaps, and
+   * the report prints at the settle. A separate 100ms heartbeat exposes JS-thread stalls, which
+   * is where a runOnJS pan handler would hitch. --- */
+  const perfOn = useSharedValue(0);
+  const perfBuf = useSharedValue({ n: 0, drops: 0, worst: 0 });
+  useFrameCallback((fi) => {
+    if (perfOn.value === 0) return;
+    const dt = fi.timeSincePreviousFrame ?? 0;
+    if (dt <= 0) return;
+    const b = perfBuf.value;
+    b.n += 1;
+    if (dt > 20) b.drops += 1;
+    if (dt > b.worst) b.worst = dt;
+  });
+  const perfStart = () => {
+    if (perfOn.value === 1) return;
+    perfBuf.value = { n: 0, drops: 0, worst: 0 };
+    perfOn.value = 1;
+  };
+  const perfEnd = (label: string) => {
+    if (perfOn.value === 0) return;
+    perfOn.value = 0;
+    const b = perfBuf.value;
+    if (b.n > 5)
+      console.log(
+        `[perf] ${label}: ${b.n} frames, ${b.drops} dropped (>20ms), worst ${Math.round(b.worst)}ms`,
+      );
+  };
+  useEffect(() => {
+    let last = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      const late = now - last - 100;
+      last = now;
+      if (late > 40) console.log(`[perf] js thread stalled ${late}ms`);
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
 
   /* --- §7 structured-test trace (TEMPORARY, 2026-08-13) ---
    * The reported artifacts are motion — flicker, layers over layers, a row moving inside its

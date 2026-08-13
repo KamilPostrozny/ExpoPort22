@@ -120,14 +120,20 @@ test('swipe opacity fades to zero one card-width out', () => {
   expect(swipeOpacity(40, 402)).toBe(1); // rightward never fades
 });
 
-test('zoomProgress: a 30pt dead zone, then saturating 280pt later', () => {
+test('zoomProgress: a dead zone sized by how sideways the gesture is', () => {
   expect(zoomProgress(0, 402)).toBe(0);
-  expect(zoomProgress(-26, 402)).toBe(0); // the thumb's arc, in full — a flat hop never shrinks
+  // A flat hop's arc, in full: 10-19pt sideways when dy crosses -26 — never shrinks the card.
+  expect(zoomProgress(-26, 402, 15)).toBe(0);
+  expect(zoomProgress(-26, 402, 19)).toBe(0);
+  // A straight flick pays only the minimum: moving by 10pt up already.
+  expect(zoomProgress(-10, 402, 0)).toBeGreaterThan(0);
+  expect(zoomProgress(-8, 402, 0)).toBe(0);
+  // The legacy full zone with no sideways information.
   expect(zoomProgress(-30 - 140, 402)).toBeCloseTo(0.5);
   expect(zoomProgress(-30 - 280, 402)).toBe(1);
   expect(zoomProgress(-1000, 402)).toBe(1);
   expect(zoomProgress(50, 402)).toBe(0); // downward drag is not a zoom
-  // The dead zone scales with the screen like the ramp does.
+  // Everything scales with the screen like the ramp does.
   expect(zoomProgress(-14, 201)).toBe(0);
   expect(zoomProgress(-15 - 70, 201)).toBeCloseTo(0.5); // half of the half-width 140pt ramp
   expect(ZOOM_COMMIT).toBe(0.25);

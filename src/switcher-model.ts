@@ -169,13 +169,22 @@ export function swipeOpacity(offset: number, width: number): number {
  *  (structured test, movement 2). Sized just past the measured arcs (dy -24…-26). */
 export const ZOOM_DEAD = 30;
 
-/** Bar-swipe-up drag travel → zoom progress: nothing for `ZOOM_DEAD`, then saturating 280pt
- *  later. Design-width points, scaled. Travel is measured from where the drag-follow ARMS (the
- *  grab), not from touch-down — the slop and the two set-up frames are dropped by the screen's
- *  re-origin, so the dead zone here is the only one the finger pays. */
-export function zoomProgress(travel: number, width: number): number {
+/** The dead zone a clearly-vertical gesture pays instead — barely anything. The full ZOOM_DEAD
+ *  exists to discount the arc a thumb draws through a SIDEWAYS swipe, and charging it to a pure
+ *  flick up made the card feel weighted, needing real travel before it moved (user, 2026-08-13).
+ *  The arcs measured 10–19pt sideways at the moment they crossed -24…-26 up, so the zone grows
+ *  with |dx| and covers them exactly, while a straight flick pays 8pt. */
+export const ZOOM_DEAD_MIN = 8;
+
+/** Bar-swipe-up drag travel → zoom progress: nothing for the dead zone — sized by how sideways
+ *  the gesture is (`sideways` = |dx|, same origin as the travel) — then saturating 280pt later.
+ *  Design-width points, scaled. Travel is measured from where the drag-follow ARMS (the grab),
+ *  not from touch-down — the slop and the set-up frames are dropped by the screen's re-origin,
+ *  so this dead zone is the only one the finger pays. */
+export function zoomProgress(travel: number, width: number, sideways = Infinity): number {
   const s = width / DESIGN_W;
-  return Math.min(Math.max((-travel - ZOOM_DEAD * s) / (280 * s), 0), 1);
+  const dead = Math.min(ZOOM_DEAD, ZOOM_DEAD_MIN + 1.3 * Math.abs(sideways / s)) * s;
+  return Math.min(Math.max((-travel - dead) / (280 * s), 0), 1);
 }
 
 /** Release above this progress commits to the grid; below springs back. */
