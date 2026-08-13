@@ -776,8 +776,15 @@ export default function SessionScreen() {
   /** The card has been deliberately HELD in the air — vertical motion stopped — which is when the
    *  neighbours bounce in beside it (user, 2026-08-13): during a slow flick up they never join,
    *  and a card in the hand only grows its row once the hand pauses. Latched for the rest of the
-   *  gesture; a release clears it. */
-  const airSettledRef = useRef(false);
+   *  gesture; a release clears it.
+   *
+   *  State, not the ref it was: this is the frame the row becomes VISIBLE on (the worklet's settle
+   *  latch sets `rowVis` and springs the join there), and it is the only moment React can learn
+   *  that a row exists without a page swipe under it. Without that the held row was drawn from the
+   *  resting `cards.length + 1`, so a new-tab page stood beside a held last tab that no swipe could
+   *  ever reach — visible until the finger moved, then vanishing as the swipe's own row replaced it
+   *  (user, 2026-08-13). One render, at the one instant in the gesture where the hand has stopped. */
+  const [airHeld, setAirHeld] = useState(false);
   /** The held join's approach, 0→1 on a clamped spring the moment the hand settles. A Reanimated
    *  `entering` did this job and flickered: layout animations under a scaled, translated parent
    *  paint their first frame at the final position before jumping to the start (user,
@@ -877,7 +884,7 @@ export default function SessionScreen() {
   /** The row joined a held card — React's half of the worklet's settle latch (the spring on
    *  `joinSV` starts on the UI thread; this mounts the row). */
   const onAirSettled = () => {
-    airSettledRef.current = true;
+    setAirHeld(true);
   };
 
   const onZoomEnd = (dx: number, dy: number, vx: number, vy: number) => {
@@ -885,7 +892,7 @@ export default function SessionScreen() {
     if (dragging.current) {
       dragging.current = false;
       draggingSV.value = 0;
-      airSettledRef.current = false;
+      setAirHeld(false);
       // The row goes back out to the sides so the card flies to the grid alone — unless a hop is
       // landing, whose own clear cuts it (see `clearBarSwipe`).
       if (swipeInfo.current?.live !== true) {
@@ -1649,10 +1656,16 @@ export default function SessionScreen() {
    *  hop's `setCards` plus the two warm captures behind it changed its identity three times a
    *  swipe without a single name being different. */
   const pillNames = pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME];
-  /** The row's length, pills and pages alike — the live swipe's `slots` seen through the names it
-   *  was built with, so the page one past the anchor exists exactly when there is a pill for it.
-   *  A held card's row has no new-tab slot, and this is what stops its page being drawn. */
-  const rowSlots = pillNames.length;
+  /** How many pages the row beside the live card has — what decides whether one is drawn past the
+   *  anchor. A live swipe answers with the row it built (`slots`, frozen at its 'start'). Before
+   *  there is one it is the resting row, MINUS the new-tab slot while the card is held in the air:
+   *  a held row joins at the settle, which is earlier than any page swipe, and the new-tab page
+   *  used to stand there through the whole hold (see `airHeld`).
+   *
+   *  Not `pillNames.length`, though it agrees with it during a swipe: the strip's names are keyed
+   *  by content and feed a memoised KeyBar, and making them move with the hold would re-render the
+   *  whole bar mid-gesture for pills that are not even live yet (`pillsLive`). */
+  const rowSlots = pageSwipe?.names.length ?? cards.length + (airHeld ? 0 : 1);
   const pillNamesKey = pillNames.join('\u0000');
   /** Keys or pills? The settle is the BAR's landing, not the terminal's — the overlay still waits
    *  for the host to finish redrawing because it is a picture of a pane, but the keys are not a
