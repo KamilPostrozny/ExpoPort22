@@ -592,13 +592,21 @@ Which leaves *what moves*. Only the terminal area slides at rest — the bar sta
 pills, which is why the page wrapper sits inside the stage rather than being the stage — but a
 lifted card has an outline, and an outline that holds still while its content slides inside it is a
 window, not a card. `cardCarry` hands the offset from the page to the card over the first tenth of
-the lift; both draw it at the same place on screen, so the handover is invisible. For the same
-reason the neighbouring pages are **siblings of the wrapper**, each wearing its own copy of the
-zoom a pitch to the side: as children they shared its clip and its ring, and a row of cards came
-out as one frame with pages sliding about in it. They sit *after* the wrapper (which paints an
-opaque stage-wide ground — underneath it, an arriving page simply never appeared) and only while
-the card is in a hand (`closed` or `drag`), or a committed release takes them into the grid one
-pitch behind it: tabs arriving in pairs. After a
+the lift; both draw it at the same place on screen, so the handover is invisible.
+
+The pages beside it took four goes, and the lesson is worth the space. They cannot be children of
+the card (they share its clip and its ring, so a row of cards renders as one frame with pages
+sliding about inside it), and giving each its own copy of the zoom is worse: two transforms that
+must agree by arithmetic, which drew a neighbour unscaled beside a card at `HOLD_SCALE`, and at
+`HOLD_SCALE²` when the tree put the zoom on both. So **one `zoomBox` carries the whole row** — one
+scale, one flight, no clip — and the cards inside carry only their pitch and their own crop.
+Within it they are drawn **in front of** the live card, with the key bar moved out to sit in front
+of them: behind it they were laid out perfectly (420×912 at the right offset, every number checked
+on device) and simply never drawn, because a transparent parent still owns its subtree. Three
+fixes aimed at backgrounds and tree order missed that; `onLayout` said it in one line. They join
+on `pageSwipe` — a card held up alone has no row until the finger starts moving sideways — and
+leave on the commit, or they fly into the grid a pitch behind the card: tabs arriving in pairs.
+After a
 commit the slide lands on the snapshot, a **settle overlay** holds that snapshot ~350ms while
 tmux's redraw reaches the PTY, then drops (ponytail: fixed hold; dropping on first shell data is
 the upgrade). **Suspended is tracked, not observed**: the poll cannot tell "stopped" from
