@@ -757,9 +757,18 @@ function WindowCard({
       .onTouchesUp(() => {
         touchDown.current = false;
       })
-      .onTouchesCancelled((_e, mgr) => {
+      // `mgr.fail()` used to be here and never did anything. This pan is `.runOnJS(true)`, so its
+      // callbacks run on the RN JS thread, and RNGH's state manager reaches the handler through
+      // Reanimated's `setGestureState` — which checks the runtime it is on, logs "You can not use
+      // setGestureState in non-worklet function" and returns (node_modules/react-native-reanimated
+      // /lib/module/platformFunctions/setGestureState.js). So it was a no-op that cost a
+      // console.warn through Metro's socket, on the JS thread, on every touch iOS cancelled during
+      // a card gesture — the cost class this file's own perf notes are about. `touchDown` is what
+      // actually closes T10.9's stranded-lift (see the block comment above): the ghost activation
+      // still arrives, and `onStart` skips every side effect because this flag says the finger is
+      // gone. That was always the mechanism; the fail() was belt-and-braces that never buckled.
+      .onTouchesCancelled(() => {
         touchDown.current = false;
-        mgr.fail();
       })
       .onFinalize(() => {
         // A pan that lost the race (swipe/tap won) or failed pre-hold finalizes too — running
