@@ -804,13 +804,27 @@ function WindowCard({
   // drives it from `dragged` instead, so it changes only at commit time.
   // ponytail: the dropping card cedes the top layer at release rather than at spring-settle; if
   // the brief crossing of springing cards ever reads wrong, give the drop its own settle state.
-  const style = useAnimatedStyle(() => ({
+  /**
+   * WHERE the card is — and therefore where it can be TOUCHED. This has to sit on the outer view,
+   * the one `GestureDetector` wraps: the slot position is carried entirely by this transform (the
+   * views are all laid out at left/top 0), so a card whose transform lives on an inner child draws
+   * in its slot while its touch target stays stacked at the origin with every other card's. The
+   * hit test then goes to whichever is last among the siblings, which is a first tab that opens
+   * the last one and a swipe on the first card that animates the last (user, 2026-08-13). Layout
+   * is not the only thing a transform decides.
+   */
+  const posStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: x.value + swipeX.value },
       { translateY: y.value },
       { scale: 1 + 0.06 * lift.value },
       { rotate: `${2 * lift.value}deg` },
     ],
+  }));
+
+  /** WHAT the card looks like. Separated from the position only so the mount/unmount fade above
+   *  can own an opacity of its own without the two overwriting each other (see the JSX). */
+  const style = useAnimatedStyle(() => ({
     // Hidden only while the surface is FULLY opaque — not faded as its complement. Two linear
     // opacities crossing sum to less than one in the middle (both at 0.5 lets a quarter of the
     // crust scrim through the pair), and that gap is the flash at the landing (user, 2026-08-11).
@@ -875,12 +889,17 @@ function WindowCard({
           same view. Whichever wrote last won. Separated, the fade owns the outer view's opacity
           and the crossfade owns the inner's, and neither can overwrite the other.
 
-          Position stays outside and the transform stays inside: a transform does not affect
-          layout, so the card sits where it always did. */}
+          The POSITION transform stays on the outer view with the fade, because that is the view
+          the GestureDetector wraps and the slot position is carried entirely by the transform —
+          putting it on the inner child drew the card in its slot while its touch target stayed at
+          the origin on top of every other card's (see `posStyle`). */}
       <Animated.View
         entering={FadeIn.duration(200)}
         exiting={FadeOut.duration(160)}
-        style={{ position: 'absolute', left: 0, top: 0, width: slot.w, zIndex: dragged ? 10 : 1 }}>
+        style={[
+          { position: 'absolute', left: 0, top: 0, width: slot.w, zIndex: dragged ? 10 : 1 },
+          posStyle,
+        ]}>
       <Animated.View style={[styles.card, style]}>
         <View
           style={[
