@@ -73,6 +73,10 @@ const TRAVEL = 620;
  *  theme roles, so the radius is the whole Android skin. */
 const SHEET_RADIUS = Platform.OS === 'android' ? 28 : 24;
 const SLIDE = { duration: 340, easing: Easing.bezier(0.32, 0.72, 0.3, 1) };
+/** How far down the sheet counts as "the grabber" for a drag: `paddingTop` 8 + the 5pt bar + its
+ *  12pt padding is 25, rounded up to a thumb. Generous on purpose — it laps a little over the
+ *  APPEARANCE header, where a downward drag has nothing else to mean. */
+const GRABBER_ZONE = 40;
 
 /** The prototype's cross-flavour neutrals (overlay-grey at fixed alpha, same literal on all four
  *  flavours — the same family the key bar uses). */
@@ -98,9 +102,16 @@ export default function SettingsSheet({
   const ty = useSharedValue(TRAVEL);
   const scrollRef = useRef<ScrollView>(null);
   /** The theme lists make the sheet taller than the screen, so it scrolls — and a scroll and a
-   *  swipe-dismiss are the same finger. The sheet only rides the finger from the top of the list;
-   *  below that the list keeps the gesture. */
+   *  swipe-dismiss are the same finger. Inside the list, the sheet only rides the finger from the
+   *  top; below that the list keeps the gesture, or a flick through the themes would throw the
+   *  sheet off the screen. */
   const atTop = useRef(true);
+  /** Whether this drag began on the grabber, which always dismisses however the list is scrolled.
+   *  Gating the grabber on `atTop` too is what made the sheet feel stuck (user, 2026-08-14: "hard
+   *  time swiping them down… either the app lagging or it's hard to close them") — with
+   *  twenty-six rows the list is almost never at the top, so the one handle whose entire job is
+   *  dismissing was the one place dismissing did not work. */
+  const fromGrabber = useRef(false);
   useEffect(() => {
     ty.value = withTiming(0, SLIDE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,11 +130,15 @@ export default function SettingsSheet({
     // RNGH types the argument as a component ref; a ScrollView ref is what it actually wants, and
     // without this the pan wins the arbitration outright and the list never scrolls.
     .simultaneousWithExternalGesture(scrollRef as unknown as React.RefObject<React.ComponentType>)
+    .onBegin((e) => {
+      fromGrabber.current = e.y < GRABBER_ZONE;
+    })
     .onUpdate((e) => {
-      if (atTop.current) ty.value = Math.max(0, e.translationY);
+      if (fromGrabber.current || atTop.current) ty.value = Math.max(0, e.translationY);
     })
     .onEnd((e) => {
-      if (atTop.current && sheetShouldDismiss(e.translationY, e.velocityY)) close();
+      const rides = fromGrabber.current || atTop.current;
+      if (rides && sheetShouldDismiss(e.translationY, e.velocityY)) close();
       else ty.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
     });
 
