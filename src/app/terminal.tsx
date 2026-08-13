@@ -1610,15 +1610,8 @@ export default function SessionScreen() {
   // hairline the switcher's cards wear does. An overlay, NOT a real border: a border is part of
   // the box and would resize the terminal mid-swipe. This one still fades in with the travel —
   // the corners are permanent, a hairline round the resting page is not.
-  // …and it belongs to a swipe, so a birth's entrance suppresses it outright: the accent edge is
-  // what separates a card riding the finger from the backdrop, and a window arriving on its own is
-  // not that. It was flashing on at the landing (user, 2026-08-13) — a card nobody is holding
-  // wearing the outline of one that is.
   const pageEdgeStyle = useAnimatedStyle(() => ({
-    // A gate, not a ramp: `birth` is exactly 1 at rest and anything less means an entrance is
-    // running, which is the whole window in which this must not draw.
-    opacity:
-      Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value * (birth.value >= 1 ? 1 : 0),
+    opacity: Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value,
   }));
 
   /* --- T11: the edge handle (§4.4) ---
@@ -2027,15 +2020,10 @@ export default function SessionScreen() {
   // with it; border width divided by scale so it reads ~3pt on screen throughout.
   const ringStyle = useAnimatedStyle(() => {
     const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
-    // Gated on the entrance for the same reason as the page edge: this ring means "in transition,
-    // in the hand", and a window that was just born is neither. A release that never really pulled
-    // leaves `prog` parked a hair above zero (`springBack` returns early below 0.005 rather than
-    // animating it down), which is enough to give this a border width.
-    const born = birth.value >= 1 ? 1 : 0;
     return {
-      opacity: f.ringOpacity * born,
+      opacity: f.ringOpacity,
       borderRadius: f.radius,
-      borderWidth: prog.value > 0 ? (3 / f.scale) * born : 0,
+      borderWidth: prog.value > 0 ? 3 / f.scale : 0,
     };
   });
 
