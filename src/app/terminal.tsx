@@ -90,6 +90,7 @@ import Switcher, {
 import {
   SEARCH_BAR_H,
   gridTop,
+  HOLD_REACH,
   aimFrame,
   holdFrame,
   slotFrame,
@@ -1323,7 +1324,9 @@ export default function SessionScreen() {
    *  the aim rather than the slot, so the card, its ring and its neighbours agree by construction. */
   const aim = () => {
     'worklet';
-    return aimFrame(holdFrame(stageSV.value), slotSV.value, flight.value);
+    // Toward the slot: the release's flight, or the held pull's own reach — whichever is further.
+    const t = Math.max(flight.value, HOLD_REACH * prog.value);
+    return aimFrame(holdFrame(stageSV.value), slotSV.value, t);
   };
 
   /**
@@ -1470,7 +1473,9 @@ export default function SessionScreen() {
   // screenshot). `prog * flight` is zero for the whole hold and exactly the old value on every
   // flight to the grid, where the two ramp together.
   const cropStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: -cropTop * prog.value * flight.value }],
+    transform: [
+      { translateY: -cropTop * prog.value * Math.max(flight.value, HOLD_REACH * prog.value) },
+    ],
   }));
 
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales

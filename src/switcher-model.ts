@@ -195,6 +195,14 @@ export const ZOOM_COMMIT = 0.25;
  */
 export const HOLD_SCALE = 0.62;
 
+/** How far toward its actual grid slot a HELD card can be pulled — the aim blends hold→slot with
+ *  the drag itself, reaching this at full travel, and the release covers the rest. The fixed hold
+ *  pose alone read as a wall: past half the flight more travel changed nothing ("stopped by some
+ *  force", user 2026-08-13) — and blending the aim is also what shrinks the card's HEIGHT from
+ *  the first pixel of the pull, fluidly toward the grid card's shape, expanding back on the way
+ *  down. */
+export const HOLD_REACH = 0.7;
+
 
 /** The pose a held card settles into: the whole stage, scaled about its own centre. Nothing is
  *  cropped — `h` scales with `w`, so `zoomFrame`'s clip stays open and the card is the screen made
