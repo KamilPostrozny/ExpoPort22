@@ -99,6 +99,35 @@ export function gridHeight(n: number, width: number): number {
   return (MARGIN + Math.ceil(n / 2) * ROW_PITCH) * width;
 }
 
+/**
+ * The scroll offset that puts slot `pos` on screen, moving as little as possible from `at`.
+ *
+ * The grid keeps whatever offset it was last left at — 0 on a fresh launch, stale after a bar
+ * swipe hopped to a window in another row — so with enough windows the zoom aims at a slot below
+ * the fold and the card flies off the bottom of the screen (user, 2026-08-13). This is what the
+ * aim has to be taken through.
+ *
+ * `headerH` is the grid's own top inset (notch + search block) and `bottomH` what the floating bar
+ * and the home strip cover: the card has to clear both, not just the screen's edges. A whole ROW
+ * is reserved, not a card — the name and path under the snapshot are part of it.
+ */
+export function revealOffset(a: {
+  pos: number;
+  count: number;
+  /** Where the grid is scrolled now. */
+  at: number;
+  width: number;
+  height: number;
+  headerH: number;
+  bottomH: number;
+}): number {
+  const top = a.headerH + slotFrame(a.pos, a.width).y;
+  const lo = top + rowPitch(a.width) - (a.height - a.bottomH); // any less and the bar covers it
+  const hi = top - a.headerH; // any more and the search strip does
+  const max = Math.max(0, a.headerH + gridHeight(a.count, a.width) + a.bottomH - a.height);
+  return Math.max(0, Math.min(max, Math.min(Math.max(a.at, lo), hi)));
+}
+
 /** Where a dragged card (top-left at x,y) wants to land: nearest slot by card centre, clamped to
  *  the existing cards. The prototype's cardMove, in width-relative terms. */
 export function targetSlot(x: number, y: number, width: number, count: number): number {

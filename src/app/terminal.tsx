@@ -84,6 +84,7 @@ import Switcher, {
 import {
   SEARCH_BAR_H,
   gridTop,
+  revealOffset,
   HOLD_REACH,
   aimFrame,
   heldFrame,
@@ -561,6 +562,40 @@ export default function SessionScreen() {
     return { ...f, y: insets.top + SEARCH_BAR_H + gridTop(w) + f.y - scrollY.current };
   };
 
+  /** The switcher's bottom bar, unmeasured — its own `barH` default. A few points either way only
+   *  decide how much air the revealed card keeps under it. */
+  const BAR_RESERVE = 64;
+  /**
+   * Scroll the grid so the slot the zoom is about to aim at is actually on screen — see
+   * `revealOffset` for why it usually is not. Answers whether it had to move.
+   *
+   * On the way IN nothing is animated and nothing waits: the grid is invisible until prog 0.75, so
+   * the jump is never seen, and `scrollY` is written here rather than read back from `onScroll`,
+   * because `zoomSlot` takes the aim on this frame. On the way OUT the grid is in plain sight, so
+   * it scrolls properly and the aim waits for it (`REVEAL_MS`) — `onScroll` reports the offset as
+   * it travels, and the flight reads it once it has arrived.
+   */
+  const revealSlot = (pos: number, animated = false) => {
+    if (stage === null) return false;
+    const y = revealOffset({
+      pos,
+      count: gridCards.current.length,
+      at: scrollY.current,
+      width: stage.w,
+      height: stage.h,
+      headerH: insets.top + SEARCH_BAR_H + gridTop(stage.w),
+      bottomH: BAR_RESERVE + insets.bottom,
+    });
+    if (y === scrollY.current) return false;
+    if (!animated) scrollY.current = y;
+    gridRef.current?.scrollTo({ y, animated });
+    return true;
+  };
+  /** How long the grid's own scroll takes before a Done can fly out of it. UIScrollView's animated
+   *  `setContentOffset` is a fixed ~300ms whatever the distance, and leaving early aims the flight
+   *  at an offset still moving. */
+  const REVEAL_MS = 320;
+
   /** How long a zoom phase may stand before the watchdog below calls it stuck. The animations are
    *  340 and 380ms, so this is comfortably past any real one and still inside a lost second. */
   const PHASE_WATCHDOG_MS = 1500;
@@ -733,6 +768,7 @@ export default function SessionScreen() {
     Keyboard.dismiss();
     const pos = activePos();
     setZoomId(idAt(pos));
+    revealSlot(pos);
     slotSV.value = zoomSlot(pos);
     // The card this zoom-out lands on may be stale (tabs switched since the grid was last up) —
     // recapture it under the surface, so the crossfade lands on the pane being looked at.
@@ -820,6 +856,7 @@ export default function SessionScreen() {
         // truth — and it is what decides whether the keys come back on the way out.
         keysWereUp.current = keyboardPad > 0;
         const pos = activePos();
+        revealSlot(pos);
         slotSV.value = zoomSlot(pos);
         // In the hand, not on its way to the grid: the card shrinks toward the centred hold pose
         // and stays somewhere it can still be pushed sideways. `commitOpen` releases it.
@@ -947,6 +984,23 @@ export default function SessionScreen() {
   };
   /** Is a `closeTo` waiting out its two frames? Cleared by the flight itself and by a grab. */
   const closeArmed = useRef(false);
+
+  /**
+   * Leaving the grid for the active window — Done, and Android's back press. Unlike a card tap,
+   * which lands on a card the finger could reach, this one aims at whichever card is active, and a
+   * grid scrolled away from it used to fly out of a slot below the fold: a frame of bare backdrop
+   * where the card should have vanished from, then the terminal arriving from off the edge of the
+   * screen (user, 2026-08-13). The grid goes to that card first, in sight, and the flight leaves
+   * from it. A tap that lands on another card during the scroll has already flown by the time the
+   * timer fires — `open` is the only phase this owns.
+   */
+  const doneToActive = () => {
+    const pos = activePos();
+    if (!revealSlot(pos, true)) return closeTo(pos);
+    setTimeout(() => {
+      if (swRef.current === 'open') closeTo(activePos());
+    }, REVEAL_MS);
+  };
 
   const selectCard = (pos: number, win: TmuxWindow) => {
     if (sw !== 'open') return;
@@ -1100,7 +1154,7 @@ export default function SessionScreen() {
     onSelect: selectCard,
     onKill: killCard,
     onNew: birthCard,
-    onDone: () => closeTo(activePos()),
+    onDone: doneToActive,
     onMove: async ({ from, to }: { from: number; to: number }) => {
       // A rapid re-drag can race the previous move's renumbering and send a stale index —
       // the re-list below is the truth either way. TODO: target windows by `@id` in every
@@ -1191,7 +1245,7 @@ export default function SessionScreen() {
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (sw !== 'closed') {
-        if (sw === 'open') closeTo(activePos()); // mid-transition: swallowed, the zoom owns the screen
+        if (sw === 'open') doneToActive(); // mid-transition: swallowed, the zoom owns the screen
       } else if (open !== 'none') {
         setOpen('none');
       } else {
@@ -1200,8 +1254,8 @@ export default function SessionScreen() {
       return true;
     });
     return () => sub.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- closeTo/activePos are per-render
-    // closures; cards keeps activePos fresh while the grid sits open across snapshot polls.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- doneToActive is a per-render
+    // closure; cards keeps the activePos inside it fresh across the grid's snapshot polls.
   }, [sw, cards, open]);
 
   /* --- T11: bar-swipe window hop (§4.4) ---

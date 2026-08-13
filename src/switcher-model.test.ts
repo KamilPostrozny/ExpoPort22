@@ -11,6 +11,7 @@ import {
   ZOOM_COMMIT,
   aimFrame,
   gridHeight,
+  revealOffset,
   heldFrame,
   holdFrame,
   gridTop,
@@ -69,6 +70,25 @@ test('grid height covers the last row', () => {
   expect(gridHeight(2, 402)).toBe(20 + 298);
   expect(gridHeight(3, 402)).toBe(20 + 2 * 298);
   expect(gridHeight(5, 402)).toBe(20 + 3 * 298);
+});
+
+test('revealOffset puts the aimed slot on screen, and moves as little as it can', () => {
+  // A phone-shaped viewport: 402 wide, 874 tall, notch+search block above, bar+home strip below.
+  const grid = { count: 12, width: 402, height: 874, headerH: 107, bottomH: 98 };
+  const top = (pos: number) => grid.headerH + slotFrame(pos, 402).y;
+
+  // The launch case: the grid has never scrolled and the active window is five rows down.
+  const y = revealOffset({ ...grid, pos: 10, at: 0 });
+  expect(y).toBeGreaterThan(0);
+  expect(top(10) - y).toBeGreaterThanOrEqual(grid.headerH); // clear of the search strip
+  expect(top(10) + 298 - y).toBeLessThanOrEqual(grid.height - grid.bottomH); // clear of the bar
+
+  // Already comfortably in view: nothing moves.
+  expect(revealOffset({ ...grid, pos: 4, at: top(4) - grid.headerH })).toBe(top(4) - grid.headerH);
+  // The first row never needs a scroll, and the offset never goes negative or past the end.
+  expect(revealOffset({ ...grid, pos: 0, at: 0 })).toBe(0);
+  const end = revealOffset({ ...grid, pos: 11, at: 1e6 });
+  expect(end).toBe(grid.headerH + gridHeight(12, 402) + grid.bottomH - grid.height);
 });
 
 test('targetSlot: a card dragged onto a slot centre lands there, clamped to the deck', () => {
