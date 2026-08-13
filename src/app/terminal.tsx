@@ -1374,6 +1374,15 @@ export default function SessionScreen() {
   const prevCardStyle = usePageCardStyle(-1);
   const nextCardStyle = usePageCardStyle(1);
 
+  /** The grid's arrival, the same travel that carries the card (§7's no-clocks principle): the
+   *  backdrop stays dark until the card is halfway to the tabs view, then the grid comes in
+   *  quickly over the next fifth — on a drag it rides the finger, on a tap-open or a release it
+   *  rides the same `prog` the flight animates. It also keeps the grid out of the gap between
+   *  page cards during a plain hop, where prog is 0 and this is 0. */
+  const gridInStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(Math.max((prog.value - 0.5) / 0.2, 0), 1),
+  }));
+
   /** The container every card rides: one scale, one flight, one place. Its height is the stage's
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
    *  side without a clip cutting them off. */
@@ -1504,6 +1513,7 @@ export default function SessionScreen() {
           is a static subtree nobody can see or touch. Same condition as the snapshot cache's own
           `enabled` (T14A) — the content and the views it draws warm together. */}
       {stage !== null && (sw !== 'closed' || (showTabs && connected)) && (
+        <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, gridInStyle]}>
         <Switcher
           theme={theme}
           stageW={stage.w}
@@ -1544,6 +1554,7 @@ export default function SessionScreen() {
           zoomId={zoomId}
           fade={alpha}
         />
+        </Animated.View>
       )}
 
       {/* The zoomed container: one scale, one flight, holding the live card and — once a swipe is
