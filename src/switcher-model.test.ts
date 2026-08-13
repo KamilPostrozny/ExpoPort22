@@ -6,9 +6,12 @@
 import { expect, test } from 'bun:test';
 
 import {
+  HOLD_SCALE,
   MONO_ADVANCE,
   ZOOM_COMMIT,
+  aimFrame,
   gridHeight,
+  holdFrame,
   gridTop,
   reorder,
   reorderArgs,
@@ -122,6 +125,30 @@ test('zoomProgress: saturating 280pt from the arm point, clamped both ends', () 
   expect(zoomProgress(-1000, 402)).toBe(1);
   expect(zoomProgress(50, 402)).toBe(0); // downward drag is not a zoom
   expect(ZOOM_COMMIT).toBe(0.25);
+});
+
+test('the held pose is the whole screen made small, centred and uncropped', () => {
+  const stage = { w: 402, h: 874 };
+  const hold = holdFrame(stage);
+  // Centred: the margin either side is the same, and likewise above and below.
+  expect(hold.x).toBeCloseTo((402 - hold.w) / 2);
+  expect(hold.y).toBeCloseTo((874 - hold.h) / 2);
+  // Aspect preserved, so `zoomFrame`'s clip never closes — a card in the hand shows the whole
+  // page, unlike a card in the grid, which is cropped to its slot.
+  const f = zoomFrame(1, 0, hold, stage);
+  expect(f.scale).toBeCloseTo(HOLD_SCALE);
+  expect(f.height).toBeCloseTo(stage.h);
+});
+
+test('the aim leaves the hold pose only as the release flies it to the slot', () => {
+  const stage = { w: 402, h: 874 };
+  const hold = holdFrame(stage);
+  const slot = slotFrame(3, 402);
+  expect(aimFrame(hold, slot, 0)).toEqual(hold);
+  expect(aimFrame(hold, slot, 1)).toEqual(slot);
+  const half = aimFrame(hold, slot, 0.5);
+  expect(half.x).toBeCloseTo((hold.x + slot.x) / 2);
+  expect(half.w).toBeCloseTo((hold.w + slot.w) / 2);
 });
 
 test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {

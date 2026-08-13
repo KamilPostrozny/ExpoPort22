@@ -175,6 +175,47 @@ export function zoomProgress(travel: number, width: number): number {
 /** Release above this progress commits to the grid; below springs back. */
 export const ZOOM_COMMIT = 0.25;
 
+/* --- what the card is aimed at, and when --- */
+
+/**
+ * The size a pulled card holds at, as a fraction of the stage.
+ *
+ * Safari does not fly the card to its place in the tab grid while you are still holding it: pull
+ * one up and it settles to about this much of the screen, near the middle, and stays there to be
+ * moved around — the flight to its actual slot happens on release (user, 2026-08-13, screenshot).
+ * Aiming at the slot the whole way is what made ours feel like one step: the card was already
+ * halfway to a corner of the grid while the finger still had it, so there was nowhere left to
+ * push it sideways to.
+ */
+export const HOLD_SCALE = 0.62;
+
+/** The pose a held card settles into: the whole stage, scaled about its own centre. Nothing is
+ *  cropped — `h` scales with `w`, so `zoomFrame`'s clip stays open and the card is the screen made
+ *  small, which is what a card in the hand looks like. The grid slot crops; this does not. */
+export function holdFrame(stage: { w: number; h: number }): Frame {
+  'worklet';
+  return {
+    x: (stage.w * (1 - HOLD_SCALE)) / 2,
+    y: (stage.h * (1 - HOLD_SCALE)) / 2,
+    w: stage.w * HOLD_SCALE,
+    h: stage.h * HOLD_SCALE,
+  };
+}
+
+/** Where the card is aimed right now: the hold pose while the finger owns it (`t` 0), its slot in
+ *  the grid once the release has let it go (`t` 1). Every other way into the switcher — the tabs
+ *  tap, the close — never leaves `t` 1, so they fly between terminal and slot exactly as before. */
+export function aimFrame(hold: Frame, slot: Frame, t: number): Frame {
+  'worklet';
+  if (t >= 1) return slot;
+  return {
+    x: hold.x + (slot.x - hold.x) * t,
+    y: hold.y + (slot.y - hold.y) * t,
+    w: hold.w + (slot.w - hold.w) * t,
+    h: hold.h + (slot.h - hold.h) * t,
+  };
+}
+
 export type ZoomFrame = {
   /** Scale about the wrapper's centre. */
   scale: number;

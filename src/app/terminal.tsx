@@ -26,11 +26,11 @@ import Animated, {
   useFrameCallback,
   useSharedValue,
   withTiming,
-  type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  PAGE_GAP,
   pageRadius,
   pagePitch,
   slideMs,
@@ -82,6 +82,8 @@ import Switcher, {
 import {
   SEARCH_BAR_H,
   gridTop,
+  aimFrame,
+  holdFrame,
   slotFrame,
   snapshotType,
   termPad,
@@ -331,6 +333,10 @@ export default function SessionScreen() {
   const dragX = useSharedValue(0); // finger drift during the bar-swipe-up follow
   const alpha = useSharedValue(1); // the stage fades out at the end of the zoom-out, back in first on return
   const slotSV = useSharedValue<Frame>({ x: 0, y: 0, w: 1, h: 1 });
+  /** 0 = the card is in the hand, aimed at the centred hold pose; 1 = aimed at its slot in the
+   *  grid. Only the bar drag ever takes it off 1, and only its release puts it back — every other
+   *  route into the switcher flies terminal↔slot as it always did (`aimFrame`). */
+  const flight = useSharedValue(1);
   /** Whose slot `slotSV` is aimed at — the grid leaves that one card undrawn while the surface is
    *  in the air (see `zoomId` in switcher.tsx). Set wherever the aim is: the two are one decision. */
   const [zoomId, setZoomId] = useState<string | null>(null);
@@ -481,6 +487,11 @@ export default function SessionScreen() {
   const commitOpen = () => {
     setSw('opening');
     dragX.value = withTiming(0, { duration: 250 });
+    // The release is what sends the card to its slot: until now it has been aimed at the hold pose
+    // under the finger (`aimFrame`). On every other route in this is already 1 and the timing is a
+    // no-op. It rides ZOOM_OUT so the aim and the progress arrive together — a shorter curve here
+    // would land the card in its slot and then keep scaling into it.
+    flight.value = withTiming(1, ZOOM_OUT);
     // The prototype fades the surface out only near the end, once it covers its card — and "near
     // the end" is measured in TRAVEL, not in milliseconds. ZOOM_OUT is out-cubic, so at 180ms
     // (53% of 340) the surface is only ~90% of the way there, while the card underneath goes fully
@@ -519,7 +530,12 @@ export default function SessionScreen() {
     alpha.value = 1;
     dragX.value = withTiming(0, { duration: 200 });
     prog.value = withTiming(0, ZOOM_IN, (done) => {
-      if (done) runOnJS(finishClose)();
+      if (done) {
+        // Back to aiming at the slot. At prog 0 the aim draws nothing, so this costs no frame —
+        // it is only here so the NEXT way in (a tabs tap) does not inherit a hold pose.
+        flight.value = 1;
+        runOnJS(finishClose)();
+      }
     });
   };
 
@@ -587,6 +603,9 @@ export default function SessionScreen() {
         const pos = activePos();
         setZoomId(idAt(pos));
         slotSV.value = zoomSlot(pos);
+        // In the hand, not on its way to the grid: the card shrinks toward the centred hold pose
+        // and stays somewhere it can still be pushed sideways. `commitOpen` releases it.
+        flight.value = 0;
         const aimed = visibleCards[pos]?.win; // same staleness as the tap door — see openSwitcher
         if (aimed) void refreshCard(aimed);
         setSw('drag');
@@ -1253,11 +1272,48 @@ export default function SessionScreen() {
    *  home strip and the keyboard's overlap, because that layer's bottom is the window's. */
   const popBase = barHeight + 6 + keyboardPad + insets.bottom;
 
+  /** What the surface is aimed at this frame — the hold pose under the finger, the slot once
+   *  released, interpolated by `flight` (see `aimFrame`). Every style that draws the zoom reads
+   *  the aim rather than the slot, so the card, its ring and its neighbours agree by construction. */
+  const aim = () => {
+    'worklet';
+    return aimFrame(holdFrame(stageSV.value), slotSV.value, flight.value);
+  };
+
+  /**
+   * A neighbouring page's own card. It is a SIBLING of the stage wrapper, not a child of it, and
+   * that is the whole point: as a child it shared the wrapper's clip and its ring, so a lifted
+   * swipe drew one outline with pages sliding about inside it instead of a row of cards (user,
+   * 2026-08-13, screenshot). Wearing its own copy of the zoom means it shrinks, rounds and crops
+   * exactly like the live card, a page-pitch to one side.
+   *
+   * The offset is multiplied by the scale because these transforms are in the parent's units,
+   * while the pitch is stage units — which is also why this comes out identical to the inner
+   * slide it replaces at rest, where the scale is 1.
+   */
+  const usePageCardStyle = (side: -1 | 1) =>
+    useAnimatedStyle(() => {
+      const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
+      const pitch = stageSV.value.w * (1 + PAGE_GAP);
+      return {
+        height: f.height,
+        borderRadius: f.radius,
+        opacity: alpha.value,
+        transform: [
+          { translateX: f.translateX + (side * pitch + swipeX.value) * f.scale },
+          { translateY: f.translateY },
+          { scale: f.scale },
+        ],
+      };
+    });
+  const prevCardStyle = usePageCardStyle(-1);
+  const nextCardStyle = usePageCardStyle(1);
+
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
   // compensated for RN's centre-origin scale — all from the one tested function.
   const wrapperStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value);
+    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
     return {
       height: f.height,
       // All four corners together, the keyboard's cut included: the flying surface is the card,
@@ -1291,7 +1347,7 @@ export default function SessionScreen() {
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
   // with it; border width divided by scale so it reads ~3pt on screen throughout.
   const ringStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, slotSV.value, stageSV.value);
+    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
@@ -1368,6 +1424,31 @@ export default function SessionScreen() {
           zoomId={zoomId}
           fade={alpha}
         />
+      )}
+
+      {/* The neighbouring windows, each its own card beside the live one — a page-pitch away and
+          wearing the same zoom, so a swipe reads as a row of cards moving rather than as content
+          sliding inside one frame. Under the wrapper in the tree so the live card stays on top,
+          over the grid so they travel with it. */}
+      {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' && (
+        <>
+          {anchor > 0 && (
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, prevCardStyle]}>
+              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+              </Animated.View>
+            </Animated.View>
+          )}
+          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
+              empty pane the shell about to be born will draw into. */}
+          {anchor < cards.length && (
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, nextCardStyle]}>
+              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+              </Animated.View>
+            </Animated.View>
+          )}
+        </>
       )}
 
       {/* The stage wrapper the zoom animates: at rest an invisible identity, mid-transition the
@@ -1589,20 +1670,9 @@ export default function SessionScreen() {
       />
       </Animated.View>
 
-      {/* The neighbour pages while a swipe is live, and the settle overlay after a commit —
-          which holds the committed snapshot over the terminal until tmux's redraw has landed. */}
-      {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' && (
-        <>
-          {anchor > 0 && (
-            <NeighborPage side={-1} snap={neighbour(-1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} x={swipeX} />
-          )}
-          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
-              empty pane the shell about to be born will draw into. */}
-          {anchor < cards.length && (
-            <NeighborPage side={1} snap={neighbour(1)} pitch={pagePitch(stage.w)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} x={swipeX} />
-          )}
-        </>
-      )}
+      {/* The settle overlay after a commit — holds the committed snapshot over the terminal until
+          tmux's redraw has landed. (The neighbour pages are siblings of the whole wrapper now, not
+          children of this crop: see `usePageCardStyle`.) */}
       {pageSwipe?.phase === 'settle' && stage !== null && (
         <Animated.View
           pointerEvents="none"
@@ -1860,22 +1930,18 @@ function PageContent({
   );
 }
 
-/** One neighbour page card, riding the shared page offset a full pitch to the side. */
+/** One neighbouring window's page. The pitch, the swipe offset and the zoom all live on the card
+ *  wrapper around this (`usePageCardStyle`) — this is just the picture inside it. */
 function NeighborPage({
-  side,
   snap,
-  pitch,
   stageW,
   theme,
   cell,
   insets,
   liveCols,
   bottomR,
-  x,
 }: {
-  side: -1 | 1;
   snap: PageSnap;
-  pitch: number;
   stageW: number;
   /** see `pageRB` — square while the keyboard cuts the page off */
   bottomR: number;
@@ -1883,19 +1949,14 @@ function NeighborPage({
   cell: { w: number; h: number };
   insets: { top: number; side: number; bottom: number };
   liveCols: number;
-  x: SharedValue<number>;
 }) {
-  const style = useAnimatedStyle(() => ({
-    transform: [{ translateX: side * pitch + x.value }],
-  }));
   return (
-    <Animated.View
+    <View
       pointerEvents="none"
       style={[
         StyleSheet.absoluteFill,
         styles.page,
         { backgroundColor: theme.background, borderRadius: pageRadius(stageW), borderBottomLeftRadius: bottomR, borderBottomRightRadius: bottomR },
-        style,
       ]}>
       <PageContent
         snap={snap}
@@ -1913,7 +1974,7 @@ function NeighborPage({
           { borderColor: theme.border, borderRadius: pageRadius(stageW), borderBottomLeftRadius: bottomR, borderBottomRightRadius: bottomR },
         ]}
       />
-    </Animated.View>
+    </View>
   );
 }
 

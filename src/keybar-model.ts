@@ -157,8 +157,19 @@ export const BAR_AXIS_SLOP = 10;
 /** Vertical travel at which the keyboard gesture fires (the prototype's 24px). */
 export const BAR_SWIPE_FIRE = 24;
 
-/** Upward speed, pt/s, that reads as a flick rather than drift. */
-export const BAR_LIFT_VY = 700;
+/** Upward speed, pt/s, that reads as a throw rather than the ordinary briskness of a swipe. The
+ *  device numbers are why it is this high: the first frames of a FLAT swipe on a bottom bar report
+ *  vy -600…-900 against vx 400–550 (2026-08-12), because a thumb pivots. */
+export const BAR_LIFT_VY = 900;
+
+/** How much extra upward travel each point of sideways travel costs the lift. The pull-up test is
+ *  a cone, not a half-plane: dead straight it fires at `BAR_SWIPE_FIRE`, and the further sideways
+ *  the finger has already gone the further up it must go to still count as a pull. */
+export const LIFT_CONE = 1.5;
+
+/** Sideways travel past which a lift can only be thrown, never walked — the swipe is committed to
+ *  its axis by then, and this is what keeps the cone from having to judge the arc at all. */
+export const LIFT_FLICK_DX = 60;
 
 /**
  * The bar pan is ONE gesture with two exits (Safari's tab handle, user 2026-08-12): past the slop
@@ -178,16 +189,24 @@ export function barGrabbed(dx: number): boolean {
 /**
  * Does this frame lift the card out of the sideways swipe and into T10's switcher drag?
  *
- * Two ways in, because travel alone cannot answer both. A deliberate pull straight up is slow and
- * has no velocity to speak of, but its travel beats the sideways drift — that is the first rule,
- * and it is the old classifier's `up`. A flick up *out of* a swipe already 200pt along can never
- * beat that drift, however hard it is thrown; there only speed says anything. Requiring the
- * vertical speed to beat the horizontal is what keeps a fast flat swipe — and the upward arc a
- * thumb draws through one — on the ground.
+ * Two ways in, and the shape of both is dictated by one measurement: a thumb on a bar at the
+ * bottom of the phone *pivots*, so the opening of a perfectly ordinary sideways swipe is upward.
+ * The device log (2026-08-12) is unanimous — ten flat hops in a row crossed dy -24…-26 with only
+ * 10–19pt of sideways travel, and at vy -600…-900. Neither "up beat sideways" nor "it was thrown
+ * upward" can tell that arc from a pull; both fire on every swipe the phone has ever made.
+ *
+ * So the walk-in is a cone. Straight up it still lifts at `BAR_SWIPE_FIRE` — nothing is slower
+ * than it was — but every point of sideways travel buys `LIFT_CONE` more points of up, and the
+ * arc's own dx is what disqualifies it. Past `LIFT_FLICK_DX` the cone is unreachable by design:
+ * a swipe that far along is committed, and the only way out of it is to throw the card, hard
+ * (`BAR_LIFT_VY`) and with the horizontal genuinely spent (vy beating vx twice over) — which is
+ * what a flick up out of a running swipe actually looks like, and what the arc never does.
  */
 export function barLifts(dx: number, dy: number, vx: number, vy: number): boolean {
-  if (dy <= -BAR_SWIPE_FIRE && Math.abs(dy) >= Math.abs(dx)) return true;
-  return vy <= -BAR_LIFT_VY && Math.abs(vy) > Math.abs(vx) && dy <= -BAR_AXIS_SLOP;
+  if (-dy >= BAR_SWIPE_FIRE + LIFT_CONE * Math.abs(dx)) return true;
+  return (
+    Math.abs(dx) > LIFT_FLICK_DX && vy <= -BAR_LIFT_VY && Math.abs(vy) > 2 * Math.abs(vx)
+  );
 }
 
 /** The other vertical exit: a swipe down puts the keyboard away (§4.4). Same travel test as the

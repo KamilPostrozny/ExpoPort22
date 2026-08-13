@@ -484,6 +484,13 @@ export default function KeyBar(props: KeyBarProps) {
         barLifts(e.translationX, e.translationY, e.velocityX, e.velocityY)
       ) {
         zooming.current = true;
+        // §7: the lift is a judgement call made from four numbers on a moving finger, and no other
+        // log can show which of them decided it — a false lift and a real one look identical from
+        // the switcher's side (device, 2026-08-12: every sideways hop was arming the zoom).
+        console.log(
+          `[barswipe] lift dx ${e.translationX.toFixed(0)} dy ${e.translationY.toFixed(0)} ` +
+            `vx ${e.velocityX.toFixed(0)} vy ${e.velocityY.toFixed(0)}`,
+        );
         Keyboard.dismiss(); // the prototype drops the keyboard the moment the grab lifts
       }
       if (zooming.current) {

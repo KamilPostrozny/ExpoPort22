@@ -187,20 +187,36 @@ test('the page comes into hand on horizontal travel alone', () => {
   expect(barGrabbed(-11)).toBe(true);
 });
 
-test('a pull straight up lifts, a shallow one waits', () => {
+test('a pull straight up lifts at the fire threshold, a shallow one waits', () => {
   expect(barLifts(0, -30, 0, -50)).toBe(true);
+  expect(barLifts(0, -24, 0, -50)).toBe(true);
   expect(barLifts(0, -15, 0, -50)).toBe(false);
 });
 
-test('a flick up out of a swipe already sideways lifts on speed alone', () => {
-  // 200pt along: no upward travel can beat that drift, which is why velocity is asked.
-  expect(barLifts(-200, -14, -300, -1400)).toBe(true);
-  expect(barLifts(-200, -14, -300, -400)).toBe(false); // drifting up, not thrown
+test('the thumb arc that opens every flat swipe does NOT lift', () => {
+  // Measured on device (2026-08-12), ten flat hops in a row: the bar sits at the bottom, the
+  // thumb pivots, and the swipe's first 25pt are upward at -600…-900pt/s. Every one of these
+  // lifted under the old "up beat sideways" test, which is the bug this cone exists for.
+  expect(barLifts(-19, -26, -272, -344)).toBe(false);
+  expect(barLifts(15, -24, 368, -600)).toBe(false);
+  expect(barLifts(19, -26, 552, -792)).toBe(false);
+  expect(barLifts(10, -26, 200, -463)).toBe(false);
+  expect(barLifts(8, -15, 472, -784)).toBe(false); // the flick rule must not catch it either
+  expect(barLifts(-13, -26, -328, -712)).toBe(false);
 });
 
-test('a fast flat swipe stays on the ground, arc and all', () => {
-  expect(barLifts(-120, -8, -2000, -300)).toBe(false); // the thumb's arc, at speed
-  expect(barLifts(-120, -30, -2000, -900)).toBe(false); // vy real but vx still bigger
+test('the cone widens with sideways travel', () => {
+  expect(barLifts(4, -32, 0, -300)).toBe(true); // 24 + 1.5*4 = 30 ≤ 32
+  expect(barLifts(4, -28, 0, -300)).toBe(false); // …but 28 is not
+  expect(barLifts(40, -60, 0, -300)).toBe(false); // 40 sideways wants 84 of up
+});
+
+test('past the cone only a real throw lifts', () => {
+  // 200pt along: the cone is unreachable there by design, so speed is the only way out.
+  expect(barLifts(-200, -30, -100, -1400)).toBe(true);
+  expect(barLifts(-200, -30, -100, -700)).toBe(false); // brisk, not thrown
+  expect(barLifts(-200, -30, -800, -1400)).toBe(false); // still travelling sideways too fast
+  expect(barLifts(-40, -30, -100, -1400)).toBe(false); // not far enough along to be a throw
 });
 
 test('down dismisses the keyboard, a sagging sideways swipe does not', () => {
