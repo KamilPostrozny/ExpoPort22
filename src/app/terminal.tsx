@@ -83,6 +83,7 @@ import {
   SEARCH_BAR_H,
   gridTop,
   aimFrame,
+  cardCarry,
   holdFrame,
   slotFrame,
   snapshotType,
@@ -1110,7 +1111,11 @@ export default function SessionScreen() {
   const kbSquare = keyboardPad > 0 && pageSwipe === null;
   const pageRB = kbSquare ? 0 : pageR;
   const roundR = 0.1 * (stage?.w ?? 390);
-  const termSlideStyle = useAnimatedStyle(() => ({ transform: [{ translateX: swipeX.value }] }));
+  // The other half of `cardCarry`: the page slides inside the surface exactly as much as the card
+  // around it does not. The two are the same distance on screen, so nothing moves at the handover.
+  const termSlideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: swipeX.value * (1 - cardCarry(prog.value)) }],
+  }));
   // The card's edge: in the dark flavours base and crust are nearly the same ink, so the gap
   // alone does not separate card from backdrop (user, 2026-08-11, screenshot) — the same
   // hairline the switcher's cards wear does. An overlay, NOT a real border: a border is part of
@@ -1321,7 +1326,13 @@ export default function SessionScreen() {
       // cut lives on the page inside it — see `kbSquare`.
       borderRadius: f.radius,
       opacity: alpha.value,
-      transform: [{ translateX: f.translateX }, { translateY: f.translateY }, { scale: f.scale }],
+      transform: [
+        // The card carries the page offset itself once it has lifted (`cardCarry`) — at rest the
+        // page slides inside it instead, which is the same picture and the tested behaviour.
+        { translateX: f.translateX + swipeX.value * cardCarry(prog.value) * f.scale },
+        { translateY: f.translateY },
+        { scale: f.scale },
+      ],
     };
   });
 
@@ -1424,31 +1435,6 @@ export default function SessionScreen() {
           zoomId={zoomId}
           fade={alpha}
         />
-      )}
-
-      {/* The neighbouring windows, each its own card beside the live one — a page-pitch away and
-          wearing the same zoom, so a swipe reads as a row of cards moving rather than as content
-          sliding inside one frame. Under the wrapper in the tree so the live card stays on top,
-          over the grid so they travel with it. */}
-      {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' && (
-        <>
-          {anchor > 0 && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, prevCardStyle]}>
-              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
-              </Animated.View>
-            </Animated.View>
-          )}
-          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
-              empty pane the shell about to be born will draw into. */}
-          {anchor < cards.length && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, nextCardStyle]}>
-              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
-              </Animated.View>
-            </Animated.View>
-          )}
-        </>
       )}
 
       {/* The stage wrapper the zoom animates: at rest an invisible identity, mid-transition the
@@ -1707,6 +1693,41 @@ export default function SessionScreen() {
       )}
 
       </View>
+
+      {/* The neighbouring windows, each its own card beside the live one — a page-pitch away and
+          wearing the same zoom, so a swipe reads as a row of cards moving rather than as content
+          sliding inside one frame.
+
+          AFTER the wrapper, not before it: the wrapper paints an opaque background across the whole
+          stage, so a card drawn underneath simply never appeared — the page slid in and there was
+          nothing there (user, 2026-08-13). Still before the bar, which draws over the pages as it
+          always has. They do not overlap the live card, so being on top of it costs nothing.
+
+          And only while the card is in a hand — `closed` for an ordinary hop, `drag` for a lifted
+          one. Once the release commits, the switcher owns the screen and these would fly along
+          beside the card into the grid, one pitch away: tabs arriving in pairs (user, 2026-08-13,
+          screenshot). */}
+      {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' &&
+        (sw === 'closed' || sw === 'drag') && (
+        <>
+          {anchor > 0 && (
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, prevCardStyle]}>
+              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+              </Animated.View>
+            </Animated.View>
+          )}
+          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
+              empty pane the shell about to be born will draw into. */}
+          {anchor < cards.length && (
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, nextCardStyle]}>
+              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+              </Animated.View>
+            </Animated.View>
+          )}
+        </>
+      )}
 
       {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
           full window height under it. Its own glass pills carry no full-width ground, so the

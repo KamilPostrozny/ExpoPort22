@@ -10,6 +10,7 @@ import {
   MONO_ADVANCE,
   ZOOM_COMMIT,
   aimFrame,
+  cardCarry,
   gridHeight,
   holdFrame,
   gridTop,
@@ -125,6 +126,15 @@ test('zoomProgress: saturating 280pt from the arm point, clamped both ends', () 
   expect(zoomProgress(-1000, 402)).toBe(1);
   expect(zoomProgress(50, 402)).toBe(0); // downward drag is not a zoom
   expect(ZOOM_COMMIT).toBe(0.25);
+});
+
+test('the page offset moves from the page to the card as it lifts, and only once', () => {
+  expect(cardCarry(0)).toBe(0); // at rest the page slides inside a full-screen surface
+  expect(cardCarry(0.05)).toBeCloseTo(0.5);
+  expect(cardCarry(0.1)).toBe(1); // lifted at all: the card carries it
+  expect(cardCarry(1)).toBe(1);
+  // The two halves always sum to one — which is why the handover cannot be seen.
+  for (const p of [0, 0.02, 0.07, 0.1, 0.6, 1]) expect(cardCarry(p) + (1 - cardCarry(p))).toBe(1);
 });
 
 test('the held pose is the whole screen made small, centred and uncropped', () => {
