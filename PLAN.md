@@ -588,6 +588,14 @@ screen made small — and `aimFrame` blends hold→slot on `flight`, which only 
 what made the gesture read as one step: the card was already halfway into a corner while the finger
 still had it, with nowhere left to push it sideways.
 
+**While the finger is down, everything is travel-driven — no clocks** (user principle,
+2026-08-13). A timed animation cannot match a finger: instant reads harsh, any duration is too
+quick at one speed and lags at another — the joining card's approach went through all three
+before landing on travel (44pt beyond its pitch, seated by 70pt of |x|). Clocks are legitimate
+in exactly two places: after the release, where there is no finger to track (flights, the hop's
+landing slide — itself distance-proportional), and on the held join, which triggers on stillness,
+where travel does not exist and nothing else is moving to be out of sync with.
+
 Which leaves *what moves*. Only the terminal area slides at rest — the bar stays put under the
 pills, which is why the page wrapper sits inside the stage rather than being the stage — but a
 lifted card has an outline, and an outline that holds still while its content slides inside it is a
