@@ -1104,6 +1104,12 @@ export default function SessionScreen() {
    * neighbour recomputed at that moment would swap its content while the slide is still running. */
   const anchor = pageSwipe?.pos ?? activePosIn(cards);
   const neighbour = (side: -1 | 1) => cards[anchor + side]?.snap ?? null;
+  if (pageSwipe !== null)
+    console.log(
+      '[barswipe] row anchor', anchor, 'of', cards.length, 'phase', pageSwipe.phase, 'sw', sw,
+      'tabs', showTabs, 'conn', connected,
+      'prev', anchor > 0, 'next', anchor < cards.length,
+    );
 
   // The live terminal is itself a page while a swipe is on: it slides, already wearing the
   // screen's corner. The radius is a constant, not an animation — the page is round at rest too
