@@ -21,8 +21,9 @@ import {
 import Animated, {
   cancelAnimation,
   Easing,
-  FadeIn,
   FadeOut,
+  SlideInLeft,
+  SlideInRight,
   runOnJS,
   useAnimatedStyle,
   type AnimatedStyle,
@@ -681,7 +682,16 @@ export default function SessionScreen() {
       dragging.current = false;
       airSettledRef.current = false;
       setAirSettled(false);
-      if (zoomCommits(prog.value, vx, vy)) {
+      // The hop is asked FIRST: with the card held in the air `prog` sits past ZOOM_COMMIT the
+      // whole time, so asking the grid first meant every release went to the grid and a sideways
+      // hop could never win (user, 2026-08-13). The grid takes the release only when the
+      // horizontal axis decides nothing.
+      const info = swipeInfo.current;
+      const hopWould =
+        info?.live === true &&
+        swipeTarget(swipeX.value, Date.now() - info.t0, info.pos, info.windows.length + 1) !==
+          info.pos;
+      if (!hopWould && zoomCommits(prog.value, vx, vy)) {
         // The grid outranks the hop: the card flying into the grid is the one that was under the
         // finger, so a page swipe still open under this release must decide nothing. It is told by
         // this flag rather than by a call, because the bar reports the two axes in order and the
@@ -1828,7 +1838,7 @@ export default function SessionScreen() {
         (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" entering={FadeIn.duration(160)} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" entering={SlideInLeft.springify().damping(18).stiffness(160)} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:prev" />
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
@@ -1838,7 +1848,7 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" entering={FadeIn.duration(160)} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" entering={SlideInRight.springify().damping(18).stiffness(160)} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:next" />
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
