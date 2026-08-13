@@ -1356,6 +1356,12 @@ export default function SessionScreen() {
     // a cut to somewhere invisible.
     if (birthLanding.current) {
       birthLanding.current = false;
+      // Ungated, like the birth's own failure line above it: a window being created is rare, and
+      // this is the one line that says the entrance ran AND which build is running it — the
+      // duration is the version stamp. Two rounds were spent guessing at whether the phone had
+      // the code or the code had a bug (2026-08-13); it was the bug, and this is what would have
+      // said so on the first swipe.
+      console.log('[birth] entrance', BIRTH_IN.duration + 'ms');
       setBirthing(true);
       // ONE assignment, and that is the whole point of the sequence. Written as `birth.value = 0`
       // followed by `birth.value = withTiming(1, …)` — the obvious way — the second assignment
