@@ -1383,13 +1383,15 @@ export default function SessionScreen() {
    *  rides the same `prog` the flight animates. It also keeps the grid out of the gap between
    *  page cards during a plain hop, where prog is 0 and this is 0. */
   const gridInStyle = useAnimatedStyle(() => ({
-    opacity: Math.min(Math.max((prog.value - 0.6) / 0.2, 0), 1),
+    opacity: Math.min(Math.max((prog.value - 0.75) / 0.15, 0), 1),
   }));
   /** …and it arrives BLURRED, sharpening only as the card lands — Safari's sequencing exactly
    *  (user, 2026-08-13, two reference screenshots): the tabs behind a still-travelling card are
    *  legible as shapes, not content. Blur intensity is travel, like everything else. */
   const gridBlurProps = useAnimatedProps(() => ({
-    intensity: 30 * (1 - Math.min(Math.max((prog.value - 0.8) / 0.2, 0), 1)),
+    // Sharp only once the tab is LET GO: the blur rides the release's flight, not the pull —
+    // held at any depth, the grid stays blurred shapes (user, 2026-08-13).
+    intensity: 30 * (1 - flight.value),
   }));
 
   /** The container every card rides: one scale, one flight, one place. Its height is the stage's
