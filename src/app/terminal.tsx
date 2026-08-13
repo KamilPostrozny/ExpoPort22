@@ -809,11 +809,18 @@ export default function SessionScreen() {
    *  the release is dropped, the render lands on `drag`, and nothing is left to end it. That is a
    *  frozen app (user, 2026-08-11), and it is the same shape as the two before it. */
   const dragging = useRef(false);
-  /** The card is being HELD in the air — set at the worklet's settle latch, which is the frame the
-   *  row becomes visible, and cleared by the release. It decides only what the row DRAWS: a held
-   *  card gets no blank new-tab page beside it, while a flat swipe gets exactly the one it always
-   *  had (user, 2026-08-13). Reach is not its business — see `onBarSwipe`. */
-  const [airHeld, setAirHeld] = useState(false);
+  /**
+   * Is this gesture's card held in the air? Written by the bar's worklet — 0 at every grab, 1 at
+   * the settle latch — and read on the same thread by the page row's own style.
+   *
+   * A shared value and not React state, and that is the whole point. The latch sets `rowVis` and
+   * this in ONE frame; routing the same fact through a `setState` put React a commit behind, so
+   * the blank new-tab page beside a held card became visible and then vanished a frame or two
+   * later (user, 2026-08-13). What reveals the row has to be what hides that page.
+   *
+   * It decides only DRAWING. Reach is `windows + 1` either way — see `onBarSwipe`.
+   */
+  const heldAirSV = useSharedValue(0);
   /** The held join's approach, 0→1 on a clamped spring the moment the hand settles. A Reanimated
    *  `entering` did this job and flickered: layout animations under a scaled, translated parent
    *  paint their first frame at the final position before jumping to the start (user,
@@ -911,17 +918,11 @@ export default function SessionScreen() {
     setSw('drag');
   };
 
-  /** The row joined a held card — React's half of the worklet's settle latch. */
-  const onAirSettled = () => {
-    setAirHeld(true);
-  };
-
   const onZoomEnd = (dx: number, dy: number, vx: number, vy: number) => {
     if (stage === null) return;
     if (dragging.current) {
       dragging.current = false;
       draggingSV.value = 0;
-      setAirHeld(false);
       // The row goes back out to the sides so the card flies to the grid alone — unless a hop is
       // landing, whose own clear cuts it (see `clearBarSwipe`).
       if (swipeInfo.current?.live !== true) {
@@ -1419,13 +1420,14 @@ export default function SessionScreen() {
       rowVis: rowVisSV,
       rowPos: rowPosSV,
       rowCount: rowCountSV,
+      heldAir: heldAirSV,
       stage: stageSV,
     }),
     [],
   );
   /* eslint-enable react-hooks/exhaustive-deps */
 
-  const onBarSwipe = (phase: 'start' | 'end', dx: number, air = false) => {
+  const onBarSwipe = (phase: 'start' | 'end', dx: number) => {
     if (stage === null) return;
     if (phase === 'start') {
       // `drag` is a swipe that has ALREADY lifted — Safari's card can be paged sideways after it
@@ -1471,10 +1473,6 @@ export default function SessionScreen() {
         phase: 'drag',
         settled: null,
         settleInsets: null,
-        // What to DRAW, not how far to reach: the band and the release below both still count
-        // `windows.length + 1`, so the slot past the last tab is committable either way. A card
-        // held in the air simply has no blank page put beside it.
-        draw: windows.length + (air ? 0 : 1),
       });
       roundSV.value = 1; // the edge itself rides the travel — see pageEdgeStyle
       swipeX.value = rubber(dx, pos, windows.length + 1);
@@ -1628,7 +1626,6 @@ export default function SessionScreen() {
     onZoomGrab,
     onZoomArm,
     onZoomEnd,
-    onAirSettled,
     onBarSwipe,
   };
   const kb_sendBytes = useCallback((...a: any[]) => kbH.current.sendBytes(...a), []);
@@ -1637,7 +1634,6 @@ export default function SessionScreen() {
   const kb_onZoomGrab = useCallback((...a: any[]) => kbH.current.onZoomGrab(...a), []);
   const kb_onZoomArm = useCallback((...a: any[]) => kbH.current.onZoomArm(...a), []);
   const kb_onZoomEnd = useCallback((...a: any[]) => kbH.current.onZoomEnd(...a), []);
-  const kb_onAirSettled = useCallback((...a: any[]) => kbH.current.onAirSettled(...a), []);
   const kb_onBarSwipe = useCallback((...a: any[]) => kbH.current.onBarSwipe(...a), []);
 
   const onRibbonCap = (cap: Cap) => {
@@ -1692,10 +1688,6 @@ export default function SessionScreen() {
    *  hop's `setCards` plus the two warm captures behind it changed its identity three times a
    *  swipe without a single name being different. */
   const pillNames = pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME];
-  /** How many pages sit in the row on screen — the live swipe's own answer, or, before there is a
-   *  swipe, the resting row minus the new-tab page while the card is merely held. Display only;
-   *  nothing here decides what a release can commit to. */
-  const rowSlots = pageSwipe?.draw ?? cards.length + (airHeld ? 0 : 1);
   const pillNamesKey = pillNames.join('\u0000');
   /** Keys or pills? The settle is the BAR's landing, not the terminal's — the overlay still waits
    *  for the host to finish redrawing because it is a picture of a pane, but the keys are not a
@@ -1814,7 +1806,7 @@ export default function SessionScreen() {
    *
    * The swipe offset lives on the container alone — the row is rigid by construction.
    */
-  const usePageCardStyle = (side: -1 | 1) =>
+  const usePageCardStyle = (side: -1 | 1, phantom = false) =>
     useAnimatedStyle(() => {
       // Deliberately reads only what it uses: a leftover `zoomFrame` call here made this worklet
       // a dependent of prog, dragX, slotSV and flight, so it recomputed on every value the zoom
@@ -1829,7 +1821,10 @@ export default function SessionScreen() {
       const reachD = 130 / (1 + Math.min(Math.abs(swipeVX.value), 2000) / 900);
       const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / reachD, 1));
       return {
-        opacity: rowVisSV.value,
+        // `phantom` is the new-tab page — the one past the last window, which a card held in the
+        // air must not be given. Read off the worklet's own latch so it is dark on the very frame
+        // the row is revealed, never a commit later.
+        opacity: rowVisSV.value * (phantom && heldAirSV.value === 1 ? 0 : 1),
         transform: [{ translateX: side * (pitch + 44 * (1 - seat)) }],
       };
     });
@@ -1863,7 +1858,10 @@ export default function SessionScreen() {
   });
 
   const prevCardStyle = usePageCardStyle(-1);
-  const nextCardStyle = usePageCardStyle(1);
+  /** The page on the right is the phantom exactly when the anchor is the last window. A plain
+   *  boolean in the worklet's closure: it changes when the tab list or the active tab does, never
+   *  per frame. */
+  const nextCardStyle = usePageCardStyle(1, anchor >= cards.length - 1);
 
   /**
    * The card's crop and corner, SEPARATED from the per-frame transform above and applied only
@@ -2265,9 +2263,13 @@ export default function SessionScreen() {
               as it always did — that blank page is what covers the moment the new shell is being
               drawn, and taking it away left the arrival blinking dark with the card's accent edge
               standing on it (user, 2026-08-13). A card held in the air gets nothing on this side:
-              there the new tab is not a page you slide onto. `rowSlots` is the whole difference,
-              and it is a DRAWING count — either way the slot is reachable and births a window. */}
-          {anchor < rowSlots - 1 && (
+              there the new tab is not a page you slide onto.
+              MOUNTED for both, and hidden for one — the difference is `heldAir` inside the style,
+              not a condition here. Unmounting it on a React commit is a frame or two behind the
+              worklet that reveals the row, which is precisely long enough to see the page appear
+              and then go (user, 2026-08-13). Either way the slot is reachable and births a
+              window; this is only about what is drawn. */}
+          {anchor < cards.length && (
             <Animated.View pointerEvents="none" style={[
                 styles.stageWrapper,
                 { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
@@ -2323,7 +2325,6 @@ export default function SessionScreen() {
         onZoomGrab={kb_onZoomGrab}
         onZoomArm={kb_onZoomArm}
         onZoomEnd={kb_onZoomEnd}
-        onAirSettled={kb_onAirSettled}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? kb_onBarSwipe : undefined}
@@ -2496,10 +2497,6 @@ type PageSwipe = {
    *  pills read their position from it, and leaving it behind snapped the strip back to the tab
    *  just left for the length of the settle, which is a second flicker of the wrong name before
    *  the keys return (user, 2026-08-10). */
-  /** How many pages the row DRAWS. The reach is always `windows + 1` — the slot past the last tab
-   *  is committable and births a window — but a card held in the air is not given a blank page
-   *  beside it, and a flat swipe is (user, 2026-08-13). */
-  draw: number;
   settled: PageSnap;
   /** The pane insets AS OF the settle's mount — the deferred ribbon swap changes the live ones
    *  a layout later, and the overlay must not move with them (see settleBarSwipe). */
