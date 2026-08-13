@@ -152,9 +152,6 @@ export type KeyBarProps = {
     rowPos: SharedValue<number>;
     rowCount: SharedValue<number>;
     stage: SharedValue<{ w: number; h: number }>;
-    evN: SharedValue<number>;
-    evGapMax: SharedValue<number>;
-    evPrevT: SharedValue<number>;
   };
   /** The tab-name pills that replace the bar keys during a page swipe (§4.4). `x` is the
    *  screen's page offset, `pitch` its page step — the pills derive the continuous position.
@@ -548,15 +545,6 @@ export default function KeyBar(props: KeyBarProps) {
     .onUpdate((e) => {
       'worklet';
       const sv = props.panSV;
-      if (sv !== undefined) {
-        const t = performance.now();
-        if (sv.evPrevT.value > 0) {
-          const gap = t - sv.evPrevT.value;
-          if (gap < 500 && gap > sv.evGapMax.value) sv.evGapMax.value = gap;
-        }
-        sv.evPrevT.value = t;
-        sv.evN.value += 1;
-      }
       const tx = e.translationX;
       const ty = e.translationY;
       // The grab. From here the card is in hand and BOTH axes are simply live — no threshold in

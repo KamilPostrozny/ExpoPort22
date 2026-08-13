@@ -540,81 +540,13 @@ export default function SessionScreen() {
    *  made the SSH tap the thing we were measuring. A hop emits ~10 of them between the harness,
    *  the trace and §7's own lines, which is JS-thread time inside the gesture being measured.
    *  Flip on to debug; off to measure or to use the app. */
-  const GESTURE_LOG = true;
-
-  /* §7 probe (TEMPORARY): how much React does per gesture. Guessing at JS costs one at a time
-   * has flattened out at ~30fps; this counts the screen's renders and the wall time its bodies
-   * take, so the next cut is chosen from a number. */
-  const renderN = useRef(0);
-  const renderMs = useRef(0);
-  const renderT0 = performance.now();
-  renderN.current += 1;
-  useEffect(() => {
-    renderMs.current += performance.now() - renderT0;
-  });
-  const renderMark = useRef({ n: 0, ms: 0 });
-
-  /* --- §7 perf harness (TEMPORARY, 2026-08-13): "measure that every animation is actually
-   * happening without dropped frames" (user). `perfOn` spans a gesture from its first event to
-   * the frame everything settles; the UI-thread frame callback histograms real frame gaps, and
-   * the report prints at the settle. A separate 100ms heartbeat exposes JS-thread stalls, which
-   * is where a runOnJS pan handler would hitch. --- */
-  const perfOn = useSharedValue(0);
-  const perfBuf = useSharedValue({ n: 0, d17: 0, d25: 0, worst: 0 });
-  useFrameCallback((fi) => {
-    if (perfOn.value === 0) return;
-    const dt = fi.timeSincePreviousFrame ?? 0;
-    if (dt <= 0) return;
-    const b = perfBuf.value;
-    b.n += 1;
-    // The display is 120Hz: a healthy gap is ~8ms, 17+ is a missed pair (visible at speed),
-    // 25+ is a missed 60Hz frame (visible always). The first cut counted only >20ms and called
-    // fast-swipe jank "clean" (user, 2026-08-13).
-    if (dt > 17) b.d17 += 1;
-    if (dt > 25) b.d25 += 1;
-    if (dt > b.worst) b.worst = dt;
-  });
-  const perfStart = (fresh = false) => {
-    if (perfOn.value === 1 && !fresh) return;
-    perfBuf.value = { n: 0, d17: 0, d25: 0, worst: 0 };
-    renderMark.current = { n: renderN.current, ms: renderMs.current };
-    evN.value = 0;
-    evGapMax.value = 0;
-    evPrevT.value = 0;
-    styN.value = 0;
-    styGapMax.value = 0;
-    styPrevT.value = 0;
-    perfOn.value = 1;
-  };
-  const perfEnd = (label: string) => {
-    if (perfOn.value === 0) return;
-    perfOn.value = 0;
-    const b = perfBuf.value;
-    if (b.n > 5 && GESTURE_LOG)
-      console.log(
-        `[perf] ${label}: ${b.n} frames, ${b.d17} >17ms, ${b.d25} >25ms, worst ${Math.round(b.worst)}ms | ` +
-          `ev ${evN.value} maxgap ${Math.round(evGapMax.value)}ms | sty ${styN.value} maxgap ${Math.round(styGapMax.value)}ms | ` +
-          `renders ${renderN.current - renderMark.current.n} in ${Math.round(renderMs.current - renderMark.current.ms)}ms`,
-      );
-  };
-  useEffect(() => {
-    let last = Date.now();
-    const id = setInterval(() => {
-      const now = Date.now();
-      const late = now - last - 100;
-      last = now;
-      if (late > 40 && GESTURE_LOG) console.log(`[perf] js thread stalled ${late}ms`);
-    }, 100);
-    return () => clearInterval(id);
-  }, []);
-
+  const GESTURE_LOG = false;
 
   /** The guard for a redraw that never comes at all: ~1–2s of frames, an order of magnitude
    *  past the ~50ms roundtrip the trace measured, so it never shapes how a switch feels. */
   const ZOOM_WEDGE_FRAMES = 120;
 
   const finishClose = () => {
-    perfEnd('lift/return');
     probe('landed');
     setSw('closed');
     // The keys come back exactly as they were left (`keysWereUp`) — except onto an armed search
@@ -688,7 +620,6 @@ export default function SessionScreen() {
       if (done && flightTravels) {
         alpha.value = 0;
         runOnJS(setSw)('open');
-        runOnJS(perfEnd)('fly-to-grid');
       }
     });
     // The prototype fades the surface out only near the end, once it covers its card — and "near
@@ -711,7 +642,6 @@ export default function SessionScreen() {
       if (done && !flightTravels) {
         alpha.value = 0;
         runOnJS(setSw)('open');
-        runOnJS(perfEnd)('fly-to-grid');
       }
     });
   };
@@ -798,15 +728,6 @@ export default function SessionScreen() {
   const rowLiveSV = useSharedValue(0);
   const rowPosSV = useSharedValue(0);
   const rowCountSV = useSharedValue(0);
-  /* §7 probe (TEMPORARY): where do the frames die? `ev*` counts the pan's onUpdate events on the
-   * UI thread, `sty*` counts boxStyle recomputations. "Jumping between 2-3 states" means one of
-   * these is sparse — or both are dense and the loss is in presentation. */
-  const evN = useSharedValue(0);
-  const evGapMax = useSharedValue(0);
-  const evPrevT = useSharedValue(0);
-  const styN = useSharedValue(0);
-  const styGapMax = useSharedValue(0);
-  const styPrevT = useSharedValue(0);
   /** Is a zoom drag live? The gesture's own truth, and the only thing its lifecycle turns on.
    *  `sw` cannot be: `setSw('drag')` is read back by the very next pan report, and a flick that
    *  ends in the same frame gets its release judged against a phase React has not written yet —
@@ -837,7 +758,6 @@ export default function SessionScreen() {
     const at = swRef.current;
     {
       if (!dragging.current && at === 'closed') {
-        perfStart();
         if (GESTURE_LOG) console.log('[switcher] open (bar drag)');
         // The grab no longer implies a raised keyboard (the swipe ↑ is one gesture whatever the
         // keys are doing), so read the pad as the tap door does. KeyBar's dismiss is one call old
@@ -924,8 +844,6 @@ export default function SessionScreen() {
   const onZoomEnd = (dx: number, dy: number, vx: number, vy: number) => {
     if (stage === null) return;
     if (dragging.current) {
-      perfEnd('zoom-drag');
-      perfStart(true);
       dragging.current = false;
       draggingSV.value = 0;
       airSettledRef.current = false;
@@ -1228,7 +1146,6 @@ export default function SessionScreen() {
   };
 
   const clearBarSwipe = (skipRefresh = false) => {
-    perfEnd('hop-settle');
     // The refresh that keeps the cache warm for the NEXT swipe runs here rather than at the
     // start of this one: a capture per window is an exec burst and a parse of every answer, and
     // on the JS thread at the instant the finger goes down that is a stutter in the slide it is
@@ -1341,9 +1258,6 @@ export default function SessionScreen() {
       rowPos: rowPosSV,
       rowCount: rowCountSV,
       stage: stageSV,
-      evN,
-      evGapMax,
-      evPrevT,
     }),
     [],
   );
@@ -1369,7 +1283,6 @@ export default function SessionScreen() {
       // A lift that never went sideways leaves the flag set — no 'end' arrives on this axis to
       // read it — so every swipe starts by clearing it rather than trusting the last one to.
       gridTookIt.current = false;
-      perfStart();
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
       rowLiveSV.value = 1;
       rowVisSV.value = 1;
@@ -1397,8 +1310,6 @@ export default function SessionScreen() {
     } else {
       const info = swipeInfo.current;
       if (!info?.live) return;
-      perfEnd('hop-drag');
-      perfStart(true);
       // The same release lifted the card into the grid: this axis yields (see `onSwitcherDrag`).
       // The refresh is skipped — a capture per window on the JS thread is the stutter
       // `clearBarSwipe` describes, and here it would land inside the flight.
@@ -1474,9 +1385,6 @@ export default function SessionScreen() {
   const pageEdgeStyle = useAnimatedStyle(() => ({
     opacity: Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value,
   }));
-  /** The settle overlay's edge follows `roundSV`'s fade-out, not the travel — the reset has
-   *  already zeroed `swipeX` under it. */
-  const settleEdgeStyle = useAnimatedStyle(() => ({ opacity: roundSV.value }));
 
   /* --- T11: the edge handle (§4.4) ---
    *
@@ -1647,7 +1555,9 @@ export default function SessionScreen() {
    */
   const usePageCardStyle = (side: -1 | 1) =>
     useAnimatedStyle(() => {
-      const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
+      // Deliberately reads only what it uses: a leftover `zoomFrame` call here made this worklet
+      // a dependent of prog, dragX, slotSV and flight, so it recomputed on every value the zoom
+      // touches instead of only on the ones that move the row.
       const pitch = stageSV.value.w * (1 + PAGE_GAP);
       // The swipe join's approach, locked to the TRAVEL rather than a clock: the card starts a
       // little beyond its pitch and closes in as the finger uncovers the gap, fully seated by
@@ -1726,15 +1636,6 @@ export default function SessionScreen() {
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
    *  side without a clip cutting them off. */
   const boxStyle = useAnimatedStyle(() => {
-    {
-      const t = performance.now();
-      if (styPrevT.value > 0) {
-        const gap = t - styPrevT.value;
-        if (gap < 500 && gap > styGapMax.value) styGapMax.value = gap;
-      }
-      styPrevT.value = t;
-      styN.value += 1;
-    }
     const b = zoomBox(prog.value, dragX.value, aim(), stageSV.value);
     return {
       opacity: alpha.value,
