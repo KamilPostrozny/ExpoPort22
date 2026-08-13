@@ -601,10 +601,11 @@ export default function SessionScreen() {
   const PHASE_WATCHDOG_MS = 1500;
   const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
   const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
-  /** The birth entrance (see `birth`). Shorter than a zoom on purpose: the slide it follows has
-   *  already spent the eye's patience, and this is the last thing between the finger coming off
-   *  and a usable shell. */
-  const BIRTH_IN = { duration: 260, easing: Easing.out(Easing.quad) };
+  /** The birth entrance (see `birth`). Longer than the zooms, not shorter: those two cross-fade
+   *  between two pictures of the same thing and can afford to be brisk, while this one comes from
+   *  nothing at all — at 260ms it read as the shell being switched on rather than arriving (user,
+   *  2026-08-13). An ease-IN-out, so it leaves the dark gently instead of jumping off it. */
+  const BIRTH_IN = { duration: 440, easing: Easing.inOut(Easing.quad) };
   /** Every console.log serializes through Metro's socket ON the JS thread — the same cost that
    *  made the SSH tap the thing we were measuring. A hop emits ~10 of them between the harness,
    *  the trace and §7's own lines, which is JS-thread time inside the gesture being measured.
@@ -1593,8 +1594,15 @@ export default function SessionScreen() {
   // hairline the switcher's cards wear does. An overlay, NOT a real border: a border is part of
   // the box and would resize the terminal mid-swipe. This one still fades in with the travel —
   // the corners are permanent, a hairline round the resting page is not.
+  // …and it belongs to a swipe, so a birth's entrance suppresses it outright: the accent edge is
+  // what separates a card riding the finger from the backdrop, and a window arriving on its own is
+  // not that. It was flashing on at the landing (user, 2026-08-13) — a card nobody is holding
+  // wearing the outline of one that is.
   const pageEdgeStyle = useAnimatedStyle(() => ({
-    opacity: Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value,
+    // A gate, not a ramp: `birth` is exactly 1 at rest and anything less means an entrance is
+    // running, which is the whole window in which this must not draw.
+    opacity:
+      Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value * (birth.value >= 1 ? 1 : 0),
   }));
 
   /* --- T11: the edge handle (§4.4) ---
@@ -2003,10 +2011,15 @@ export default function SessionScreen() {
   // with it; border width divided by scale so it reads ~3pt on screen throughout.
   const ringStyle = useAnimatedStyle(() => {
     const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
+    // Gated on the entrance for the same reason as the page edge: this ring means "in transition,
+    // in the hand", and a window that was just born is neither. A release that never really pulled
+    // leaves `prog` parked a hair above zero (`springBack` returns early below 0.005 rather than
+    // animating it down), which is enough to give this a border width.
+    const born = birth.value >= 1 ? 1 : 0;
     return {
-      opacity: f.ringOpacity,
+      opacity: f.ringOpacity * born,
       borderRadius: f.radius,
-      borderWidth: prog.value > 0 ? 3 / f.scale : 0,
+      borderWidth: prog.value > 0 ? (3 / f.scale) * born : 0,
     };
   });
 
