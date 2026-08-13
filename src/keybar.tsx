@@ -125,6 +125,8 @@ export type KeyBarProps = {
    *  `onAirSettled` mounts the row when the worklet's settle latch fires. */
   onZoomGrab?: (dx: number, dy: number) => void;
   onZoomEnd?: (dx: number, dy: number, vx: number, vy: number) => void;
+  /** The card has actually begun to lift — arm the switcher's own state now, not at the grab. */
+  onZoomArm?: () => void;
   onAirSettled?: () => void;
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
@@ -144,6 +146,7 @@ export type KeyBarProps = {
     zoomFromY: SharedValue<number>;
     zoomFromSet: SharedValue<number>;
     dragging: SharedValue<number>;
+    armed: SharedValue<number>;
     rowLive: SharedValue<number>;
     rowVis: SharedValue<number>;
     rowPos: SharedValue<number>;
@@ -502,12 +505,14 @@ export default function KeyBar(props: KeyBarProps) {
    *  render, mid-gesture (user: "hitching even worse" after the UI-thread move). */
   const cbRef = useRef({
     onZoomGrab: props.onZoomGrab,
+    onZoomArm: props.onZoomArm,
     onZoomEnd: props.onZoomEnd,
     onAirSettled: props.onAirSettled,
     onBarSwipe: props.onBarSwipe,
   });
   cbRef.current = {
     onZoomGrab: props.onZoomGrab,
+    onZoomArm: props.onZoomArm,
     onZoomEnd: props.onZoomEnd,
     onAirSettled: props.onAirSettled,
     onBarSwipe: props.onBarSwipe,
@@ -518,6 +523,7 @@ export default function KeyBar(props: KeyBarProps) {
     [],
   );
   const jsAirSettled = useCallback(() => cbRef.current.onAirSettled?.(), []);
+  const jsZoomArm = useCallback(() => cbRef.current.onZoomArm?.(), []);
   const jsBarSwipe = useCallback(
     (phase: 'start' | 'end', dx: number) => cbRef.current.onBarSwipe?.(phase, dx),
     [],
@@ -574,6 +580,12 @@ export default function KeyBar(props: KeyBarProps) {
           1,
           sv.zoomBase.value + zoomProgress(ty - sv.zoomFromY.value, sv.stage.value.w, sv.dragX.value),
         );
+        // The card has left the bar for real: only now does the switcher's React state cost
+        // anything (see `onZoomArm`). A flat hop never reaches here.
+        if (sv.armed.value === 0 && sv.prog.value > 0.01) {
+          sv.armed.value = 1;
+          runOnJS(jsZoomArm)();
+        }
         // Settled: airborne and the hand has stopped. 90pt/s is stillness to a finger, not to a
         // slow flick. The join spring starts HERE, on this thread; React only mounts the row.
         if (

@@ -290,7 +290,12 @@ export type SwitcherProps = {
 /** The reorder spring — the prototype's overshooting cubic-bezier(0.3,1.3,0.45,1), near enough. */
 const SPRING = { damping: 16, stiffness: 220, mass: 1 };
 
-export default function Switcher(props: SwitcherProps) {
+/**
+ * Memoized: the terminal screen re-renders on every phase of a swipe, and re-rendering the whole
+ * grid — N cards, each a snapshot tree of Text runs — is JS-thread work inside the gesture
+ * (perf, 2026-08-13). Its props only change when the grid's own content does.
+ */
+function SwitcherInner(props: SwitcherProps) {
   const { theme, stageW, cards, interactive } = props;
   /** A filtered grid isn't the real order — reorder is off while a query is armed (§T14). */
   const filtered = normalizeQuery(props.query) !== '';
@@ -540,6 +545,10 @@ export default function Switcher(props: SwitcherProps) {
   );
 }
 
+/** See the note on `SwitcherInner`: memoized so a swipe's phase renders do not re-render the
+ *  whole grid. */
+export default memo(SwitcherInner);
+
 /**
  * A blur that ramps rather than a strip that starts: `LAYERS` backdrop blurs stacked from the top,
  * each shorter than the last, so the top of the screen is seen through all of them and the bottom
@@ -563,6 +572,7 @@ export default function Switcher(props: SwitcherProps) {
  * ponytail: twelve steps, not a mask. If banding ever shows on a busier flavour, raise `LAYERS` —
  * `TOP` is the total either way, so the steps just get finer.
  */
+
 const LAYERS = 12;
 /** Where the ramp ends up, at the top of the screen. Keybar's glass is 40, for scale. */
 const TOP = 48;

@@ -673,6 +673,8 @@ export default function SessionScreen() {
   const zoomFromSetSV = useSharedValue(0);
   const zoomBaseSV = useSharedValue(0);
   const draggingSV = useSharedValue(0);
+  /** Has the worklet already asked React to arm the switcher? (see `onZoomArm`) */
+  const armedSV = useSharedValue(0);
   /** The live page row, mirrored for the worklet: whether a hop is live, and the rubber band's
    *  position/count. */
   const rowLiveSV = useSharedValue(0);
@@ -719,21 +721,17 @@ export default function SessionScreen() {
       if (!dragging.current && at === 'closed') {
         perfStart();
         if (GESTURE_LOG) console.log('[switcher] open (bar drag)');
-        setOpen('none');
         // The grab no longer implies a raised keyboard (the swipe ↑ is one gesture whatever the
         // keys are doing), so read the pad as the tap door does. KeyBar's dismiss is one call old
         // at this point and iOS reports the frame a beat later, so this is still the pre-drag
         // truth — and it is what decides whether the keys come back on the way out.
         keysWereUp.current = keyboardPad > 0;
         const pos = activePos();
-        setZoomId(idAt(pos));
         slotSV.value = zoomSlot(pos);
         // In the hand, not on its way to the grid: the card shrinks toward the centred hold pose
         // and stays somewhere it can still be pushed sideways. `commitOpen` releases it.
         flight.value = 0;
-        const aimed = visibleCards[pos]?.win; // same staleness as the tap door — see openSwitcher
-        if (aimed) void refreshCard(aimed);
-        setSw('drag');
+        armPos.current = pos;
         // The tap defers its flight two frames so the open's one-off costs — the phase render, the
         // holdSize marshal into the webview, the keyboard starting down — are paid before anything
         // moves (see `openSwitcher`). This gesture used to pay them on the frame its motion
@@ -743,6 +741,7 @@ export default function SessionScreen() {
         // to rather than jumping to the travel it spent waiting.
         dragging.current = true;
         draggingSV.value = 1;
+        armedSV.value = 0;
         zoomReadySV.value = 0;
         zoomFromSetSV.value = 0;
         zoomBaseSV.value = 0;
@@ -776,6 +775,26 @@ export default function SessionScreen() {
         return;
       }
     }
+  };
+
+  /** Which window the grab aimed at, for the deferred arm. */
+  const armPos = useRef(0);
+  /**
+   * The switcher's own state, armed only once the card has ACTUALLY started to lift.
+   *
+   * The grab arms nothing but shared values now. Since the vertical lost its threshold, every
+   * horizontal hop grabs — and doing the full open there charged each flat swipe a phase render,
+   * a grid re-render and an SSH capture it never used before, which is JS-thread work inside the
+   * gesture (perf, 2026-08-13). Nothing here is needed to SHOW the card moving: the box's
+   * transform reads `prog`, which the worklet writes from the first pixel.
+   */
+  const onZoomArm = () => {
+    if (swRef.current !== 'closed' || !dragging.current) return;
+    setOpen('none');
+    setZoomId(idAt(armPos.current));
+    const aimed = visibleCards[armPos.current]?.win;
+    if (aimed) void refreshCard(aimed);
+    setSw('drag');
   };
 
   /** The row joined a held card — React's half of the worklet's settle latch (the spring on
@@ -1198,6 +1217,7 @@ export default function SessionScreen() {
       zoomFromY: zoomFromYSV,
       zoomFromSet: zoomFromSetSV,
       dragging: draggingSV,
+      armed: armedSV,
       rowLive: rowLiveSV,
       rowVis: rowVisSV,
       rowPos: rowPosSV,
@@ -2067,6 +2087,7 @@ export default function SessionScreen() {
         showTabs={showTabs}
         onTabsTap={openSwitcher}
         onZoomGrab={onZoomGrab}
+        onZoomArm={onZoomArm}
         onZoomEnd={onZoomEnd}
         onAirSettled={onAirSettled}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
