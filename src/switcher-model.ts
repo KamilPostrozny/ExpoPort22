@@ -217,6 +217,19 @@ export function holdFrame(stage: { w: number; h: number }): Frame {
   };
 }
 
+/** The held pose at reach `t`: the SIZE blends hold→slot — the fluid shrink toward the grid
+ *  card's shape — but the centre stays the screen's, wherever the slot lives. A bottom-row tab
+ *  held low instead of centred is what taking the slot's position while held looked like (user,
+ *  2026-08-13, screenshot); the position is the release's business. */
+export function heldFrame(stage: { w: number; h: number }, slot: Frame, t: number): Frame {
+  'worklet';
+  const hold = holdFrame(stage);
+  const w = hold.w + (slot.w - hold.w) * t;
+  // At width w, the ASPECT blends from the screen's toward the slot's — that is the height shrink.
+  const h = w * ((stage.h / stage.w) * (1 - t) + (slot.h / slot.w) * t);
+  return { x: (stage.w - w) / 2, y: (stage.h - h) / 2, w, h };
+}
+
 /** Where the card is aimed right now: the hold pose while the finger owns it (`t` 0), its slot in
  *  the grid once the release has let it go (`t` 1). Every other way into the switcher — the tabs
  *  tap, the close — never leaves `t` 1, so they fly between terminal and slot exactly as before. */

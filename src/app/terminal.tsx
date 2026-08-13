@@ -91,7 +91,7 @@ import {
   gridTop,
   HOLD_REACH,
   aimFrame,
-  holdFrame,
+  heldFrame,
   slotFrame,
   snapshotType,
   termPad,
@@ -1331,9 +1331,10 @@ export default function SessionScreen() {
    *  the aim rather than the slot, so the card, its ring and its neighbours agree by construction. */
   const aim = () => {
     'worklet';
-    // Toward the slot: the release's flight, or the held pull's own reach — whichever is further.
-    const t = Math.max(flight.value, HOLD_REACH * prog.value);
-    return aimFrame(holdFrame(stageSV.value), slotSV.value, t);
+    // Held: slot-SIZED by the pull's reach, screen-centred (`heldFrame`). Released: the flight
+    // carries whatever pose the hold reached into the real slot.
+    const held = heldFrame(stageSV.value, slotSV.value, HOLD_REACH * prog.value);
+    return aimFrame(held, slotSV.value, flight.value);
   };
 
   /**

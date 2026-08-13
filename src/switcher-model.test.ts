@@ -11,6 +11,7 @@ import {
   ZOOM_COMMIT,
   aimFrame,
   gridHeight,
+  heldFrame,
   holdFrame,
   gridTop,
   reorder,
@@ -144,6 +145,20 @@ test('the held pose is the whole screen made small, centred and uncropped', () =
   const f = zoomFrame(1, 0, hold, stage);
   expect(f.scale).toBeCloseTo(HOLD_SCALE);
   expect(f.height).toBeCloseTo(stage.h);
+});
+
+test('a held card is slot-sized by its reach but always screen-centred', () => {
+  const stage = { w: 402, h: 874 };
+  const slot = { ...slotFrame(5, 402), y: 900 }; // a bottom-row slot, scrolled low
+  for (const t of [0, 0.4, 0.7]) {
+    const f = heldFrame(stage, slot, t);
+    expect(f.x).toBeCloseTo((stage.w - f.w) / 2); // centred whatever the slot's place
+    expect(f.y).toBeCloseTo((stage.h - f.h) / 2);
+  }
+  expect(heldFrame(stage, slot, 0).w).toBeCloseTo(stage.w * HOLD_SCALE);
+  // at full reach the aspect is the slot's, not the screen's — the height shrink
+  const deep = heldFrame(stage, slot, 1);
+  expect(deep.h / deep.w).toBeCloseTo(slot.h / slot.w);
 });
 
 test('the aim leaves the hold pose only as the release flies it to the slot', () => {
