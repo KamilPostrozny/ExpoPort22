@@ -28,18 +28,28 @@ import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef } from 'react';
 import {
   Alert,
+  Dimensions,
   Modal,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+// The ScrollView is RNGH's, not React Native's, and that is the whole reason the drag works:
+// `simultaneousWithExternalGesture` resolves a ref by reading the handler tag RNGH puts on its own
+// wrapped components. Handed a plain RN ScrollView it silently relates the pan to nothing, the
+// native scroll view swallows every touch inside the list, and only the grabber — which sits
+// outside it — can still dismiss (user, 2026-08-14: "only grabbing by handle allow to dismiss").
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+  ScrollView,
+} from 'react-native-gesture-handler';
 import Animated, {
   Easing,
   runOnJS,
@@ -68,8 +78,12 @@ import {
   type ThemeName,
 } from '@/theme';
 
-/** How far offscreen the sheet starts and returns to — comfortably past its own height. */
-const TRAVEL = 620;
+/** How far offscreen the sheet starts and returns to. The window's own height, because that is the
+ *  one number guaranteed to clear the sheet: it is capped at 88% of the screen, and the old fixed
+ *  620 was shorter than the theme lists made it — so the dismiss animated to 620, stopped with a
+ *  strip of sheet still showing, and only vanished when the Modal unmounted underneath it (user,
+ *  2026-08-14: "settings briefly stop at the bottom and then hide"). */
+const TRAVEL = Dimensions.get('window').height;
 /** Design §5d: Material sheets corner at 28; everything else here — mantle ground, surface0 cards
  *  at 16, the 36×5 overlay grabber — is what the Android frames already show, through the same
  *  theme roles, so the radius is the whole Android skin. */
@@ -102,7 +116,7 @@ export default function SettingsSheet({
   const settings = useSettings();
   const insets = useSafeAreaInsets();
   const ty = useSharedValue(TRAVEL);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   /** The theme lists make the sheet taller than the screen, so it scrolls — and a scroll and a
    *  swipe-dismiss are the same finger. Inside the list, the sheet only rides the finger from the
    *  top; below that the list keeps the gesture, or a flick through the themes would throw the
@@ -133,8 +147,9 @@ export default function SettingsSheet({
   // release decision — distance or flick — is input-model's, tested.
   const pan = Gesture.Pan()
     .runOnJS(true)
-    // RNGH types the argument as a component ref; a ScrollView ref is what it actually wants, and
-    // without this the pan wins the arbitration outright and the list never scrolls.
+    // Without this the pan wins the arbitration outright and the list never scrolls. The cast is a
+    // typing gap, not a runtime one — RNGH's own ScrollView ref is not assignable to RNGH's own
+    // parameter type, and the wrapped component does carry the handler tag this reads.
     .simultaneousWithExternalGesture(scrollRef as unknown as React.RefObject<React.ComponentType>)
     .onBegin((e) => {
       fromGrabber.current = e.y < GRABBER_ZONE;
