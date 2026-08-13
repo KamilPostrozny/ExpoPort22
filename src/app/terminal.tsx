@@ -1208,7 +1208,17 @@ export default function SessionScreen() {
   const swipeX = useSharedValue(0);
   /** A constant zero the pills read during the settle, in place of `swipeX` — see the pills
    *  prop for why the real value is briefly stale there. */
-  const pillsSettled = useSharedValue(0);
+  /** The pills' position and their read-zero gate, as shared values rather than props.
+   *
+   *  Every `NamePill` has two `useAnimatedStyle` mappers, and both closed over the numeric `pos`
+   *  and over whichever shared value `x` pointed at — which used to SWAP between a constant zero
+   *  and `swipeX`. Reanimated derives a mapper's dependencies from its worklet's closure, so a
+   *  changing number and a swapping identity restarted both mappers on every pill about three
+   *  times a swipe, on a strip that is deliberately pre-mounted so a swipe never pays to build it.
+   *  As shared values the closure is constant and the mappers attach once, at mount. */
+  const pillPosSV = useSharedValue(0);
+  /** 1 = read the offset as zero (at rest, and through the settle — see `pillsProp`). */
+  const pillHoldSV = useSharedValue(1);
   const roundSV = useSharedValue(0); // gate for the page's card edge, 0→1 (the corners are constant)
   // `pageSwipe` itself is declared with the switcher state above (the cache freezes on it).
   const swipeInfo = useRef<{ windows: TmuxWindow[]; pos: number; t0: number; live: boolean } | null>(
@@ -1606,36 +1616,54 @@ export default function SessionScreen() {
     }
   };
 
+  /* --- the name pills' inputs --- */
+
+  /** Where the strip sits, and whether the offset counts. The settle moves `pos` to the target in
+   *  the same commit, but `swipeX` keeps the slide's final offset until the post-paint reset
+   *  effect — read together they put the continuous position a full window off, snapping the new
+   *  pill to a capsule and back (user, 2026-08-11). The settle IS the landing, so the offset is
+   *  gated to zero there rather than `x` being pointed at a different value: swapping the shared
+   *  value was what made the pills' mappers restart (see `pillPosSV`). */
+  const pillPos = pageSwipe?.pos ?? activePosIn(cards);
+  const pillHold = pageSwipe === null || pageSwipe.phase === 'settle';
+  useEffect(() => {
+    pillPosSV.value = pillPos;
+    pillHoldSV.value = pillHold ? 1 : 0;
+  }, [pillPos, pillHold, pillPosSV, pillHoldSV]);
+
+  /** The names, keyed by CONTENT: the array is rebuilt from `cards` on every list refresh, and a
+   *  hop's `setCards` plus the two warm captures behind it changed its identity three times a
+   *  swipe without a single name being different. */
+  const pillNames = pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME];
+  const pillNamesKey = pillNames.join('\u0000');
+  /** Keys or pills? The settle is the BAR's landing, not the terminal's — the overlay still waits
+   *  for the host to finish redrawing because it is a picture of a pane, but the keys are not a
+   *  picture of anything, and holding them behind that wait read as the bar taking forever to
+   *  settle (user, 2026-08-11; the trace put tmux's redraw at +35ms and the keys at +550). Both
+   *  sets are mounted, so this flips two opacities. */
+  const pillsLive = pageSwipe !== null && pageSwipe.phase !== 'settle';
+
   /** The bar-swipe morph inputs the name pills ride. See KeyBarProps.pills for why it exists at
    *  rest too. */
   /* Memoised so `KeyBar`'s memo can bite: rebuilt every render, this object alone re-rendered the
    * whole bar — pills, glass and all — on every keyboard step, ribbon poll and phase flip, none of
-   * which change a pill. The deps are what the pills actually draw from; `pillsSettled` and
-   * `swipeX` are shared values and stable by construction. */
-  /* eslint-disable-next-line react-hooks/exhaustive-deps -- activePosIn is a per-render closure
-     over `tmux.windowIndex`, which is in the deps below. */
+   * which change a pill. Every member is now either stable by construction (the shared values) or
+   * keyed by content (`pillNamesKey`). */
+  /* eslint-disable-next-line react-hooks/exhaustive-deps -- `pillNames` is keyed by
+     `pillNamesKey`; the shared values are stable. */
   const pillsProp = useMemo(
     () =>
     showTabs && connected && stage !== null
       ? {
-          names: pageSwipe?.names ?? [...cards.map((c) => c.win.name), NEW_TAB_NAME],
-          pos: pageSwipe?.pos ?? activePosIn(cards),
-          // The settle moves `pos` to the target in the same commit, but `swipeX` keeps the
-          // slide's final offset until the post-paint reset effect — read together they put the
-          // continuous position a full window off, snapping the new pill to a capsule and back
-          // (user, 2026-08-11). The settle IS the landing: pinned to a zero offset there.
-          x: pageSwipe === null || pageSwipe.phase === 'settle' ? pillsSettled : swipeX,
+          names: pillNames,
+          pos: pillPosSV,
+          hold: pillHoldSV,
+          x: swipeX,
           pitch: pagePitch(stage.w),
-          // The settle is the BAR's landing, not the terminal's. The overlay still waits for the
-          // host to finish redrawing, because it is a picture of a pane and a stale one would
-          // show — but the keys are not a picture of anything, and holding them behind that wait
-          // is what read as the bar taking forever to settle (user, 2026-08-11; the probe trace
-          // put tmux's redraw at +35ms and the keys at +550). Pills and keys are both mounted, so
-          // this flips two opacities.
-          live: pageSwipe !== null && pageSwipe.phase !== 'settle',
+          live: pillsLive,
         }
       : null,
-    [showTabs, connected, stage, pageSwipe, cards, tmux.windowIndex],
+    [showTabs, connected, stage, pillNamesKey, pillsLive, pillPosSV, pillHoldSV, swipeX],
   );
 
   /* --- the pane's insets ---

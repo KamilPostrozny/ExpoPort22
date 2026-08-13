@@ -160,7 +160,16 @@ export type KeyBarProps = {
    *  (user, 2026-08-11) — pre-mounted and hidden, `live` merely flips opacities. */
   pills?: {
     names: string[];
-    pos: number;
+    /** Shared values, not numbers, and `x` never swaps: each pill runs two `useAnimatedStyle`
+     *  mappers, Reanimated keys a mapper's dependencies on its worklet's closure, and a changing
+     *  number or a swapping identity restarts every one of them. The strip is pre-mounted exactly
+     *  so a swipe never pays to build it; restarting its mappers three times a swipe gave that
+     *  back (perf, 2026-08-13). */
+    pos: SharedValue<number>;
+    /** 1 = read `x` as zero. The settle moves `pos` to the target while `x` still holds the
+     *  slide's final offset until the screen's post-paint reset, and read together they put the
+     *  continuous position a full window off (user, 2026-08-11). A gate, not a second value. */
+    hold: SharedValue<number>;
     x: SharedValue<number>;
     pitch: number;
     live: boolean;
@@ -884,9 +893,9 @@ function NamePill({
   pills: NonNullable<KeyBarProps['pills']>;
   width: number;
 }) {
-  const { pos, x, pitch } = pills;
+  const { pos, hold, x, pitch } = pills;
   const style = useAnimatedStyle(() => {
-    const d = pillDist(i, pillCont(pos, x.value, pitch));
+    const d = pillDist(i, pillCont(pos.value, hold.value === 1 ? 0 : x.value, pitch));
     // Grown = the WHOLE slot, exactly the keys glass it crossfades with at the end — the old
     // strip's PILL_ITEM (94% of the slot) left a visible size jump at the swap back to the
     // keys (user, 2026-08-11, screenshots).
@@ -897,7 +906,10 @@ function NamePill({
   // card exits through — and one on the next side grows in from the RIGHT. At its own window the
   // width is full and the anchor is moot, so the sign flip as `cont` crosses `i` never jumps.
   const anchor = useAnimatedStyle(() => ({
-    alignItems: i < pillCont(pos, x.value, pitch) ? ('flex-start' as const) : ('flex-end' as const),
+    alignItems:
+      i < pillCont(pos.value, hold.value === 1 ? 0 : x.value, pitch)
+        ? ('flex-start' as const)
+        : ('flex-end' as const),
   }));
   // A whole glass pill per name, morphing Safari's way: the capsule SQUEEZES sideways — animated
   // width, height untouched, text clipped by the glass — and grows back out at its window.
