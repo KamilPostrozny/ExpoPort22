@@ -648,12 +648,20 @@ export default function SessionScreen() {
   // nothing in between — up, back down, up again — and only the release decides, on how far it
   // got or how fast it was thrown (`zoomCommits`).
   /** Has the open's one-off cost landed (two frames, as in `openSwitcher`)? Until it has, the
-   *  drag is set-up only and nothing moves. */
-  const zoomReady = useRef(false);
-  /** The pan's translation at the frame the follow armed — the origin the surface grows from. */
-  const zoomFrom = useRef<{ x: number; y: number } | null>(null);
-  /** The progress the follow starts from: 0 for a fresh grab, wherever a caught close had got to. */
-  const zoomBase = useRef(0);
+   *  drag is set-up only and nothing moves. Shared values, not refs: the pan's per-frame path
+   *  runs on the UI thread now (the perf harness convicted the JS thread — 41–305ms stalls under
+   *  every gesture while the UI thread ran clean), and the worklet must read these. */
+  const zoomReadySV = useSharedValue(0);
+  const zoomFromXSV = useSharedValue(0);
+  const zoomFromYSV = useSharedValue(0);
+  const zoomFromSetSV = useSharedValue(0);
+  const zoomBaseSV = useSharedValue(0);
+  const draggingSV = useSharedValue(0);
+  /** The live page row, mirrored for the worklet: whether a hop is live, and the rubber band's
+   *  position/count. */
+  const rowLiveSV = useSharedValue(0);
+  const rowPosSV = useSharedValue(0);
+  const rowCountSV = useSharedValue(0);
   /** Is a zoom drag live? The gesture's own truth, and the only thing its lifecycle turns on.
    *  `sw` cannot be: `setSw('drag')` is read back by the very next pan report, and a flick that
    *  ends in the same frame gets its release judged against a phase React has not written yet —
@@ -672,14 +680,12 @@ export default function SessionScreen() {
    *  2026-08-13, "flickeringly show up"). A shared value through the same seat term the swipe
    *  join uses cannot. */
   const joinSV = useSharedValue(0);
-  const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number, vx = 0, vy = 0) => {
+  /** The grab, one JS call per gesture: the open's one-off costs. Everything per-frame — prog,
+   *  dragX, the settle latch — runs in the bar's worklet against the shared values above. */
+  const onZoomGrab = (dx: number, dy: number) => {
     if (stage === null) return;
-    // Where the phase IS consulted it comes off the ref, not the render: a pan reports every frame,
-    // and through a closure a render behind, "already dragging" still looks like "closed" — the
-    // open ran again every frame until React caught up, re-firing its capture and resetting the
-    // origin under the finger (user, 2026-08-11, "laggy").
     const at = swRef.current;
-    if (phase === 'move') {
+    {
       if (!dragging.current && at === 'closed') {
         perfStart();
         console.log('[switcher] open (bar drag)');
@@ -706,12 +712,13 @@ export default function SessionScreen() {
         // re-origins at the frame it arms, so the surface grows from zero where the finger has got
         // to rather than jumping to the travel it spent waiting.
         dragging.current = true;
-        zoomReady.current = false;
-        zoomFrom.current = null;
-        zoomBase.current = 0;
+        draggingSV.value = 1;
+        zoomReadySV.value = 0;
+        zoomFromSetSV.value = 0;
+        zoomBaseSV.value = 0;
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {
-            zoomReady.current = true;
+            zoomReadySV.value = 1;
           }),
         );
         return;
@@ -725,32 +732,34 @@ export default function SessionScreen() {
         console.log('[switcher] open (caught the close)');
         closeArmed.current = false; // caught inside the two-frame gap: no flight is owed
         dragging.current = true;
+        draggingSV.value = 1;
         cancelAnimation(prog);
         cancelAnimation(dragX);
         cancelAnimation(alpha);
         alpha.value = 1;
-        zoomBase.current = prog.value;
-        zoomFrom.current = { x: dx, y: dy };
-        zoomReady.current = true;
+        zoomBaseSV.value = prog.value;
+        zoomFromXSV.value = dx;
+        zoomFromYSV.value = dy;
+        zoomFromSetSV.value = 1;
+        zoomReadySV.value = 1;
         setSw('drag');
         return;
-      } else if (!dragging.current) return;
-      if (!zoomReady.current) return;
-      if (zoomFrom.current === null) zoomFrom.current = { x: dx, y: dy };
-      dragX.value = dx - zoomFrom.current.x;
-      prog.value = Math.min(
-        1,
-        zoomBase.current + zoomProgress(dy - zoomFrom.current.y, stage.w, dragX.value),
-      );
-      // Settled: airborne and the hand has stopped. 90pt/s is stillness to a finger, not to a
-      // flick — a slow flick up still travels several hundred.
-      if (!airSettledRef.current && prog.value > 0.02 && Math.abs(vy) < 90 && Math.abs(vx) < 90) {
-        airSettledRef.current = true;
-        setAirSettled(true);
-        joinSV.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
       }
-    } else if (dragging.current) {
+    }
+  };
+
+  /** The row joined a held card — React's half of the worklet's settle latch (the spring on
+   *  `joinSV` starts on the UI thread; this mounts the row). */
+  const onAirSettled = () => {
+    airSettledRef.current = true;
+    setAirSettled(true);
+  };
+
+  const onZoomEnd = (dx: number, dy: number, vx: number, vy: number) => {
+    if (stage === null) return;
+    if (dragging.current) {
       dragging.current = false;
+      draggingSV.value = 0;
       airSettledRef.current = false;
       setAirSettled(false);
       joinSV.value = 0;
@@ -1057,6 +1066,7 @@ export default function SessionScreen() {
     if (!skipRefresh) void refresh(true);
     selectSeq.current++; // supersedes a settle's redraw-wait, so it cannot clear a later swipe
     swipeInfo.current = null;
+    rowLiveSV.value = 0;
     setPageSwipe(null);
     swipeX.value = 0;
     roundSV.value = 0; // x is already 0 here, so the travel factor has faded the edge out too
@@ -1111,6 +1121,7 @@ export default function SessionScreen() {
   const springPageHome = (skipRefresh: boolean) => {
     if (swipeInfo.current === null) return;
     swipeInfo.current.live = false;
+    rowLiveSV.value = 0;
     setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
     // No edge-fade timer: the slide home takes x to 0 and the travel factor fades it with it.
     slideTo(0, () => clearBarSwipe(skipRefresh));
@@ -1119,7 +1130,7 @@ export default function SessionScreen() {
   /** The swipe's horizontal speed, low-passed — the join's approach distance shrinks with it
    *  (user, 2026-08-13: the quicker the swipe, the faster the slide-in). */
   const swipeVX = useSharedValue(0);
-  const onBarSwipe = (phase: 'start' | 'move' | 'end', dx: number, vx = 0) => {
+  const onBarSwipe = (phase: 'start' | 'end', dx: number) => {
     if (stage === null) return;
     if (phase === 'start') {
       // `drag` is a swipe that has ALREADY lifted — Safari's card can be paged sideways after it
@@ -1141,6 +1152,9 @@ export default function SessionScreen() {
       gridTookIt.current = false;
       perfStart();
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true };
+      rowLiveSV.value = 1;
+      rowPosSV.value = pos;
+      rowCountSV.value = windows.length + 1;
       setOpen('none');
       // §7: "the neighbour did not render" and "the neighbour rendered with nothing in it" look
       // identical on a dark theme — an empty page card is the background colour. Only the cache
@@ -1159,11 +1173,6 @@ export default function SessionScreen() {
       });
       roundSV.value = 1; // the edge itself rides the travel — see pageEdgeStyle
       swipeX.value = rubber(dx, pos, windows.length + 1);
-    } else if (phase === 'move') {
-      const info = swipeInfo.current;
-      if (!info?.live) return;
-      swipeVX.value = swipeVX.value * 0.7 + vx * 0.3;
-      swipeX.value = rubber(dx, info.pos, info.windows.length + 1);
     } else {
       const info = swipeInfo.current;
       if (!info?.live) return;
@@ -1182,6 +1191,7 @@ export default function SessionScreen() {
         springPageHome(false);
       } else {
         info.live = false;
+        rowLiveSV.value = 0;
         // `undefined` at the slot past the last tab — the page sliding in is a window that does
         // not exist yet, and committing onto it is what births it (user, 2026-08-10).
         const win = info.windows[target];
@@ -1482,30 +1492,8 @@ export default function SessionScreen() {
     };
   });
 
-  /* --- §7 structured-test trace (TEMPORARY, 2026-08-13) ---
-   * The reported artifacts are motion — flicker, layers over layers, a row moving inside its
-   * outline — and neither a screenshot nor a video the assistant cannot watch holds them. So the
-   * log holds them instead: one compact line ~10×/s while anything is moving (every animated
-   * input the three transforms are built from), a line for every layer mount/unmount, a line for
-   * every phase flip. One described movement at a time reconstructs the whole timeline. */
-  const traceTick = useSharedValue(0);
-  const logTrace = (s: string) => console.log('[trace]', s);
-  useFrameCallback(() => {
-    const moving =
-      prog.value > 0.001 || swipeX.value !== 0 || alpha.value < 1 || flight.value < 1;
-    if (!moving) {
-      traceTick.value = 0;
-      return;
-    }
-    traceTick.value++;
-    if (traceTick.value % 6 !== 1) return; // ~10 lines/s at 60fps, and the first moving frame
-    const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
-    runOnJS(logTrace)(
-      `prog ${prog.value.toFixed(2)} flight ${flight.value.toFixed(2)} x ${swipeX.value.toFixed(0)} ` +
-        `drag ${dragX.value.toFixed(0)} a ${alpha.value.toFixed(2)} ` +
-        `scale ${f.scale.toFixed(2)} ring ${f.ringOpacity.toFixed(2)} round ${roundSV.value.toFixed(2)}`,
-    );
-  });
+  /* --- §7 structured-test trace (TEMPORARY): phase flips and layer mounts only — the per-frame
+   * geometry sampler is gone, it was JS load inside the very gestures under test. --- */
   useEffect(() => {
     console.log('[trace] sw →', sw);
   }, [sw]);
@@ -1513,7 +1501,6 @@ export default function SessionScreen() {
   useEffect(() => {
     console.log('[trace] page →', pagePhase);
   }, [pagePhase]);
-  /* --- end trace --- */
 
   // The stage wrapper: identity at rest, the zoom interpolation the moment progress moves.
   // Height is the clip (the prototype's clip-path inset), radius the rounding, translate
@@ -2026,10 +2013,31 @@ export default function SessionScreen() {
         // (`tabsHint`, user 2026-08-12).
         showTabs={showTabs}
         onTabsTap={openSwitcher}
-        onSwitcherDrag={onSwitcherDrag}
+        onZoomGrab={onZoomGrab}
+        onZoomEnd={onZoomEnd}
+        onAirSettled={onAirSettled}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? onBarSwipe : undefined}
+        // The pan's per-frame writes happen on the UI thread against these (perf: the JS thread
+        // stalls 40-300ms under load and a runOnJS pan hitched with it).
+        panSV={{
+          swipeX,
+          swipeVX,
+          prog,
+          dragX,
+          join: joinSV,
+          zoomReady: zoomReadySV,
+          zoomBase: zoomBaseSV,
+          zoomFromX: zoomFromXSV,
+          zoomFromY: zoomFromYSV,
+          zoomFromSet: zoomFromSetSV,
+          dragging: draggingSV,
+          rowLive: rowLiveSV,
+          rowPos: rowPosSV,
+          rowCount: rowCountSV,
+          stage: stageSV,
+        }}
         pills={pillsProp}
       />
       </Animated.View>

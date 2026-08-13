@@ -168,6 +168,7 @@ export const BAR_SWIPE_FIRE = 24;
  * a card held up on its own has no row around it until the finger starts moving sideways.
  */
 export function barGrabbed(dx: number, dy: number): boolean {
+  'worklet';
   return Math.abs(dx) > BAR_AXIS_SLOP || Math.abs(dy) > BAR_AXIS_SLOP;
 }
 
@@ -181,6 +182,7 @@ export const ROW_AIR_DX = 48;
 /** Horizontal travel that earns the page row (see `barGrabbed`): the slop on the bar, deliberate
  *  travel in the air. */
 export function rowJoins(dx: number, dy: number): boolean {
+  'worklet';
   return Math.abs(dx) > (-dy > ROW_AIR_DY ? ROW_AIR_DX : BAR_AXIS_SLOP);
 }
 
@@ -193,5 +195,6 @@ export const KEYS_DROP_DY = 60;
 /** The other vertical exit: a swipe down puts the keyboard away (§4.4). Same travel test as the
  *  pull up, mirrored — a sideways swipe that sags does not count. */
 export function barDismisses(dx: number, dy: number): boolean {
+  'worklet';
   return dy >= BAR_SWIPE_FIRE && dy >= Math.abs(dx);
 }

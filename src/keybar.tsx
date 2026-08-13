@@ -40,7 +40,10 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   FadeInDown,
   FadeOutDown,
+  runOnJS,
   useAnimatedStyle,
+  useSharedValue,
+  withSpring,
   type SharedValue,
 } from 'react-native-reanimated';
 
@@ -49,6 +52,7 @@ import {
   pillDist,
   pillOpacity,
   pillWidthFrac,
+  rubber,
 } from '@/barswipe-model';
 import {
   pinPasteboard,
@@ -79,6 +83,7 @@ import {
   type CtrlMode,
   type NavKey,
 } from '@/keybar-model';
+import { zoomProgress } from '@/switcher-model';
 import { MONO, type Theme } from '@/theme';
 
 export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
@@ -113,18 +118,37 @@ export type KeyBarProps = {
   sending?: boolean;
   /** T10: tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
-  /** T10: bar swipe ↑ is the drag into the switcher — the prototype's `zoomFollow` — whatever the
-   *  keyboard is doing (user, 2026-08-11: the gesture is one thing, always). Fired per move with
-   *  the pan's translation from the GRAB onwards — there is no threshold between a swipe and the
-   *  switcher, so the card follows the finger up and back down the whole time — then once with
-   *  'end' and the release velocity, which is what decides a flick. Only wired while `showTabs`. */
-  onSwitcherDrag?: (phase: 'move' | 'end', dx: number, dy: number, vx?: number, vy?: number) => void;
-  /** T11: bar swipe ↔ is the page-slide window hop. Raw gesture only — 'start' once when the pan
-   *  leaves the slop, 'move' per frame with the pan's translation, 'end' on release. Fires whether
-   *  or not the card has been lifted into the switcher: the two axes run together. The screen owns
-   *  the model: rubber band, thresholds, commit, and the shared `x` the pages and the pills both
-   *  ride (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
-  onBarSwipe?: (phase: 'start' | 'move' | 'end', dx: number, vx?: number) => void;
+  /** T10: the zoom drag's TRANSITIONS, one JS call each — the per-frame follow runs in this
+   *  file's pan worklet against `panSV`, because the JS thread stalls 40–300ms under load and a
+   *  runOnJS pan hitched with it (perf harness, 2026-08-13). `onZoomGrab` pays the open's
+   *  one-off costs; `onZoomEnd` decides commit-or-spring-back from the release's velocity;
+   *  `onAirSettled` mounts the row when the worklet's settle latch fires. */
+  onZoomGrab?: (dx: number, dy: number) => void;
+  onZoomEnd?: (dx: number, dy: number, vx: number, vy: number) => void;
+  onAirSettled?: () => void;
+  /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
+   *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
+   *  the worklet. The screen owns the model: rubber band, thresholds, commit
+   *  (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
+  onBarSwipe?: (phase: 'start' | 'end', dx: number) => void;
+  /** The gesture's shared values, owned by the screen: the worklet writes the hot path here. */
+  panSV?: {
+    swipeX: SharedValue<number>;
+    swipeVX: SharedValue<number>;
+    prog: SharedValue<number>;
+    dragX: SharedValue<number>;
+    join: SharedValue<number>;
+    zoomReady: SharedValue<number>;
+    zoomBase: SharedValue<number>;
+    zoomFromX: SharedValue<number>;
+    zoomFromY: SharedValue<number>;
+    zoomFromSet: SharedValue<number>;
+    dragging: SharedValue<number>;
+    rowLive: SharedValue<number>;
+    rowPos: SharedValue<number>;
+    rowCount: SharedValue<number>;
+    stage: SharedValue<{ w: number; h: number }>;
+  };
   /** The tab-name pills that replace the bar keys during a page swipe (§4.4). `x` is the
    *  screen's page offset, `pitch` its page step — the pills derive the continuous position.
    *  Passed whenever tabs are reachable, NOT just mid-swipe: each pill is a BlurView, and
@@ -450,13 +474,15 @@ export default function KeyBar(props: KeyBarProps) {
   // and a swipe already running sideways can still be flicked up (user, 2026-08-12). Only the
   // release picks a winner, and the screen does that — it is the side that knows how far up the
   // card got. Keys never fire during a swipe: the pan activating cancels the childrens' touches.
-  /** Past the slop: the page is under the finger and every frame is forwarded. */
-  const held = useRef(false);
-  /** The swipe became T10's switcher drag: every further move is forwarded as zoom progress. */
-  const zooming = useRef(false);
-  /** The keyboard has already been sent away by this pan — the test stays true as the finger
-   *  travels further down, and dismissing every frame is a call per frame. */
-  const dismissed = useRef(false);
+  /** Past the slop: the page is under the finger. Shared values, not refs — the whole pan runs
+   *  on the UI thread now. */
+  const held = useSharedValue(0);
+  /** The grab happened: both axes are live from here. */
+  const grabbed = useSharedValue(0);
+  /** The keyboard has already been sent away by this pan. */
+  const dismissed = useSharedValue(0);
+  /** The worklet's half of the settle latch (see `onAirSettled`). */
+  const settled = useSharedValue(0);
   /** The pan's translation at the instant the card was grabbed. The grab costs `BAR_AXIS_SLOP` of
    *  travel, and the pan reports it from TOUCH-DOWN — so handing the page `e.translationX` made
    *  it open 10pt along instead of at zero: the card detached from the edge with a jump in the
@@ -465,77 +491,93 @@ export default function KeyBar(props: KeyBarProps) {
    *  travel they say they do, the way the vertical gesture's already budget for this. The vertical
    *  tests keep the raw translation: the lift is measured from touch-down (its 24pt is the budget),
    *  and the zoom re-origins for itself at the frame it arms (the screen's `zoomFrom`). */
-  const originX = useRef(0);
+  const originX = useSharedValue(0);
+  const dismissKeys = () => Keyboard.dismiss();
   const pan = Gesture.Pan()
-    .runOnJS(true)
     .maxPointers(1)
     .onBegin(() => {
-      held.current = false;
-      zooming.current = false;
-      dismissed.current = false;
+      'worklet';
+      held.value = 0;
+      grabbed.value = 0;
+      dismissed.value = 0;
+      settled.value = 0;
     })
     .onUpdate((e) => {
-      // The grab. From here the card is in hand and BOTH axes are simply live — there is no lift
-      // to earn and no threshold in the way of the vertical, so it can go up, come back down and
-      // go up again, and the card follows the whole time (user, 2026-08-13). Where there is no
-      // switcher to pull into (no tmux) the vertical is silence, like the button.
-      if (!zooming.current) {
-        if (!barGrabbed(e.translationX, e.translationY)) return;
-        zooming.current = true;
+      'worklet';
+      const sv = props.panSV;
+      const tx = e.translationX;
+      const ty = e.translationY;
+      // The grab. From here the card is in hand and BOTH axes are simply live — no threshold in
+      // the way of the vertical (user, 2026-08-13). One JS call pays the open's costs; every
+      // frame after is pure shared-value writes on this thread.
+      if (grabbed.value === 0) {
+        if (!barGrabbed(tx, ty)) return;
+        grabbed.value = 1;
+        if (props.showTabs && props.onZoomGrab) runOnJS(props.onZoomGrab)(tx, ty);
       }
-      if (props.showTabs && props.onSwitcherDrag) {
-        // The vertical, every frame. The zoom's own horizontal drift is frozen at the row's grab
-        // (`originX`), because two things moving the card at once is a card travelling twice as
-        // far as the finger — before that it is the ±10pt of tilt a straight pull has always had.
-        props.onSwitcherDrag(
-          'move',
-          held.current ? originX.current : e.translationX,
-          e.translationY,
-          e.velocityX,
-          e.velocityY,
+      if (sv !== undefined && props.showTabs && sv.dragging.value === 1 && sv.zoomReady.value === 1) {
+        if (sv.zoomFromSet.value === 0) {
+          sv.zoomFromSet.value = 1;
+          sv.zoomFromX.value = tx;
+          sv.zoomFromY.value = ty;
+        }
+        // The zoom's horizontal drift freezes once the row is held — two things moving the card
+        // at once is a card travelling twice as far as the finger.
+        if (held.value === 0) sv.dragX.value = tx - sv.zoomFromX.value;
+        sv.prog.value = Math.min(
+          1,
+          sv.zoomBase.value + zoomProgress(ty - sv.zoomFromY.value, sv.stage.value.w, sv.dragX.value),
         );
+        // Settled: airborne and the hand has stopped. 90pt/s is stillness to a finger, not to a
+        // slow flick. The join spring starts HERE, on this thread; React only mounts the row.
+        if (
+          settled.value === 0 &&
+          sv.prog.value > 0.02 &&
+          Math.abs(e.velocityY) < 90 &&
+          Math.abs(e.velocityX) < 90
+        ) {
+          settled.value = 1;
+          sv.join.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
+          if (props.onAirSettled) runOnJS(props.onAirSettled)();
+        }
       }
       // The keys get out of the way once the card is visibly off the bar — not at the slop, which
       // the opening arc of a flat hop passes through on its own (see `KEYS_DROP_DY`).
-      if (!dismissed.current && (e.translationY <= -KEYS_DROP_DY || barDismisses(e.translationX, e.translationY))) {
-        dismissed.current = true;
-        Keyboard.dismiss();
+      if (dismissed.value === 0 && (ty <= -KEYS_DROP_DY || barDismisses(tx, ty))) {
+        dismissed.value = 1;
+        runOnJS(dismissKeys)();
       }
       // The row joins when the finger actually goes sideways, whenever that is — from a standing
       // start, or a hundred points into a pull up.
-      if (!held.current) {
-        if (!rowJoins(e.translationX, e.translationY)) return;
-        held.current = true;
-        originX.current = e.translationX;
-        props.onBarSwipe?.('start', 0);
+      if (held.value === 0) {
+        if (!rowJoins(tx, ty)) return;
+        held.value = 1;
+        originX.value = tx;
+        if (props.onBarSwipe) runOnJS(props.onBarSwipe)('start', 0);
         return;
       }
-      props.onBarSwipe?.('move', e.translationX - originX.current, e.velocityX);
+      if (sv !== undefined) {
+        sv.swipeVX.value = sv.swipeVX.value * 0.7 + e.velocityX * 0.3;
+        // Guarded by the screen's own live flag: the JS 'start' above may still be in flight for
+        // the first frame or two, and the rubber band needs its position/count.
+        if (sv.rowLive.value === 1)
+          sv.swipeX.value = rubber(tx - originX.value, sv.rowPos.value, sv.rowCount.value);
+      }
     })
     // `onFinalize`, not `onEnd`: a pan can leave by being CANCELLED — another handler wins the
     // race, the view it is on unmounts — and that path never calls `onEnd`. The screen's zoom
-    // phase is only ever left by this callback, so a miss leaves it stuck mid-drag: the terminal
-    // behind a stage that takes no touches, which reads as the whole app freezing (user,
+    // phase is only ever left by this callback, so a miss leaves it stuck mid-drag (user,
     // 2026-08-11). Finalize fires for every exit, successful or not.
     .onFinalize((e) => {
-      // Both axes report, in this order, and the screen arbitrates: a release that commits to the
-      // grid ends the page swipe itself (no hop), so the call below finds nothing live to decide.
-      // The bar cannot make that call — the commit is a question about zoom progress, which lives
-      // over there.
-      if (zooming.current) {
-        zooming.current = false;
-        // The release's SPEED decides the flick, so it goes with it — see `zoomCommits`.
-        props.onSwitcherDrag?.(
-          'end',
-          held.current ? originX.current : e.translationX,
-          e.translationY,
-          e.velocityX,
-          e.velocityY,
-        );
-      }
-      if (held.current) {
-        held.current = false;
-        props.onBarSwipe?.('end', e.translationX - originX.current);
+      'worklet';
+      // Both axes report, in this order, and the screen arbitrates: a release that commits to
+      // the grid ends the page swipe itself, so the second call finds nothing live to decide.
+      if (grabbed.value === 1 && props.showTabs && props.onZoomEnd)
+        runOnJS(props.onZoomEnd)(e.translationX, e.translationY, e.velocityX, e.velocityY);
+      grabbed.value = 0;
+      if (held.value === 1) {
+        held.value = 0;
+        if (props.onBarSwipe) runOnJS(props.onBarSwipe)('end', e.translationX - originX.value);
       }
     });
 

@@ -182,6 +182,7 @@ export const ZOOM_DEAD_MIN = 8;
  *  not from touch-down — the slop and the set-up frames are dropped by the screen's re-origin,
  *  so this dead zone is the only one the finger pays. */
 export function zoomProgress(travel: number, width: number, sideways = Infinity): number {
+  'worklet';
   const s = width / DESIGN_W;
   const dead = Math.min(ZOOM_DEAD, ZOOM_DEAD_MIN + 1.3 * Math.abs(sideways / s)) * s;
   return Math.min(Math.max((-travel - dead) / (280 * s), 0), 1);
