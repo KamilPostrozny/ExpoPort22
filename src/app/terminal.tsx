@@ -1499,7 +1499,11 @@ export default function SessionScreen() {
     // changed colour on their own schedule at each end of the flight and the bar-swipe cards
     // read as bare text (user, 2026-08-11: the strips are integral to the card). Content clears
     // the strips by its own padding below.
-    <View style={[styles.screen, { backgroundColor: theme.background }]}>
+    // The one backdrop (user, 2026-08-13): `scrim`, darker than the terminal's own ground — the
+    // near-black the swipe gap shows, because it is also what the terminal area paints under a
+    // sliding page. The gap, the held-gesture backdrop and the open grid all sit on this same
+    // surface; the grid paints no ground of its own and the cards bring theirs.
+    <View style={[styles.screen, { backgroundColor: theme.scrim }]}>
       {/* No iOS edge-swipe-back on this screen: it pops to the connect screen WITHOUT running
           `leave()`'s disconnect, and a rightward card drag near the left edge triggers it by
           accident (T13). Leaving is `leave()`'s job. */}
