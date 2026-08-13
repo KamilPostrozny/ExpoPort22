@@ -29,6 +29,8 @@ import { useEffect, useRef } from 'react';
 import {
   Alert,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -116,6 +118,10 @@ export default function SettingsSheet({
     ty.value = withTiming(0, SLIDE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const trackTop = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    atTop.current = e.nativeEvent.contentOffset.y <= 0;
+  };
 
   const close = () => {
     ty.value = withTiming(TRAVEL, SLIDE, (done) => {
@@ -257,10 +263,14 @@ export default function SettingsSheet({
               ref={scrollRef}
               style={styles.scroll}
               bounces={false}
+              showsVerticalScrollIndicator={false}
               scrollEventThrottle={16}
-              onScroll={(e) => {
-                atTop.current = e.nativeEvent.contentOffset.y <= 0;
-              }}>
+              // All three, not just `onScroll`: a fling that coasts to rest fires its last
+              // `onScroll` before the list settles, and a stale "not at the top" is exactly the
+              // state where the drag-to-dismiss goes dead again.
+              onScroll={trackTop}
+              onScrollEndDrag={trackTop}
+              onMomentumScrollEnd={trackTop}>
               <Text style={[styles.header, { color: theme.muted }]}>APPEARANCE</Text>
               <View style={[styles.card, { backgroundColor: theme.surface }]}>
                 <View style={styles.row}>
