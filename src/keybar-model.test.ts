@@ -188,10 +188,12 @@ test('the grab is either axis — from there both are live and neither is a deci
   expect(barGrabbed(0, -11)).toBe(true); // a pull straight up is a grab too
 });
 
-test('the row waits for real sideways travel', () => {
-  expect(rowJoins(5)).toBe(false);
-  expect(rowJoins(11)).toBe(true);
-  expect(rowJoins(-11)).toBe(true);
+test('the row joins at the slop on the bar, but wants intent in the air', () => {
+  expect(rowJoins(5, 0)).toBe(false);
+  expect(rowJoins(11, 0)).toBe(true);
+  expect(rowJoins(-11, -25)).toBe(true); // the flat hop's own arc is still "on the bar"
+  expect(rowJoins(20, -120)).toBe(false); // a pull's incidental drift joins nothing
+  expect(rowJoins(49, -120)).toBe(true); // deliberate sideways while held: the row arrives
 });
 
 test('nothing about the vertical is judged mid-gesture any more', () => {

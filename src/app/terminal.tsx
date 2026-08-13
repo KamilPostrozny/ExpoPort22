@@ -16,13 +16,16 @@ import {
   TextInput,
   View,
   type ScrollView,
+  type ViewStyle,
 } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
+  FadeIn,
   FadeOut,
   runOnJS,
   useAnimatedStyle,
+  type AnimatedStyle,
   useFrameCallback,
   useSharedValue,
   withTiming,
@@ -596,6 +599,12 @@ export default function SessionScreen() {
    *  the release is dropped, the render lands on `drag`, and nothing is left to end it. That is a
    *  frozen app (user, 2026-08-11), and it is the same shape as the two before it. */
   const dragging = useRef(false);
+  /** The card has been deliberately HELD in the air — vertical motion stopped — which is when the
+   *  neighbours bounce in beside it (user, 2026-08-13): during a slow flick up they never join,
+   *  and a card in the hand only grows its row once the hand pauses. Latched for the rest of the
+   *  gesture; a release clears it. */
+  const [airSettled, setAirSettled] = useState(false);
+  const airSettledRef = useRef(false);
   const onSwitcherDrag = (phase: 'move' | 'end', dx: number, dy: number, vx = 0, vy = 0) => {
     if (stage === null) return;
     // Where the phase IS consulted it comes off the ref, not the render: a pan reports every frame,
@@ -662,8 +671,16 @@ export default function SessionScreen() {
       if (zoomFrom.current === null) zoomFrom.current = { x: dx, y: dy };
       prog.value = Math.min(1, zoomBase.current + zoomProgress(dy - zoomFrom.current.y, stage.w));
       dragX.value = dx - zoomFrom.current.x;
+      // Settled: airborne and the hand has stopped. 90pt/s is stillness to a finger, not to a
+      // flick — a slow flick up still travels several hundred.
+      if (!airSettledRef.current && prog.value > 0.02 && Math.abs(vy) < 90 && Math.abs(vx) < 90) {
+        airSettledRef.current = true;
+        setAirSettled(true);
+      }
     } else if (dragging.current) {
       dragging.current = false;
+      airSettledRef.current = false;
+      setAirSettled(false);
       if (zoomCommits(prog.value, vx, vy)) {
         // The grid outranks the hop: the card flying into the grid is the one that was under the
         // finger, so a page swipe still open under this release must decide nothing. It is told by
@@ -1320,6 +1337,20 @@ export default function SessionScreen() {
         transform: [{ translateX: side * pitch + swipeX.value * (1 - cardCarry(prog.value)) }],
       };
     });
+  /** The card face's corners, riding the SAME `f.radius` the ring draws — the page wore its
+   *  static at-rest radius mid-air, and its rounder corner pulled away from the ring's arc
+   *  (movement 3, screenshot). Shared by the live page, its edge, and the neighbours. */
+  const cardRadiiStyle = useAnimatedStyle(() => {
+    const r = zoomFrame(prog.value, dragX.value, aim(), stageSV.value).radius;
+    const rb = kbSquare ? 0 : r;
+    return {
+      borderTopLeftRadius: r,
+      borderTopRightRadius: r,
+      borderBottomLeftRadius: rb,
+      borderBottomRightRadius: rb,
+    };
+  });
+
   const prevCardStyle = usePageCardStyle(-1);
   const nextCardStyle = usePageCardStyle(1);
 
@@ -1606,9 +1637,6 @@ export default function SessionScreen() {
           styles.termSlide,
           {
             backgroundColor: theme.background,
-            borderRadius: pageR,
-            borderBottomLeftRadius: pageRB,
-            borderBottomRightRadius: pageRB,
             paddingTop: notchPad,
             paddingHorizontal: padH,
             // The remainder makes the box an exact multiple of the cell, so the webview's own
@@ -1616,6 +1644,7 @@ export default function SessionScreen() {
             paddingBottom: padBottom + barPad + rowRemainder,
           },
           termSlideStyle,
+          cardRadiiStyle,
         ]}>
       <TerminalView
         ref={terminal}
@@ -1720,7 +1749,8 @@ export default function SessionScreen() {
         style={[
           StyleSheet.absoluteFill,
           styles.pageEdge,
-          { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
+          { borderColor: theme.accent },
+          cardRadiiStyle,
           pageEdgeStyle,
         ]}
       />
@@ -1793,24 +1823,25 @@ export default function SessionScreen() {
           behind the card: tabs arriving in pairs (user, 2026-08-13, screenshot). `closing` keeps
           them: that is the spring back from a lift, the slide can still be live under it, and
           sitting the phase out unmounted them mid-slide — the flash (trace, movement 1). */}
-      {stage !== null && showTabs && connected && pageSwipe !== null && pageSwipe.phase !== 'settle' &&
+      {stage !== null && showTabs && connected &&
+        ((pageSwipe !== null && pageSwipe.phase !== 'settle') || airSettled) &&
         (sw === 'closed' || sw === 'drag' || sw === 'closing') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" entering={FadeIn.duration(160)} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:prev" />
-                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
               </Animated.View>
             </Animated.View>
           )}
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" entering={FadeIn.duration(160)} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <MountProbe name="card:next" />
-                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
               </Animated.View>
             </Animated.View>
           )}
@@ -2051,24 +2082,25 @@ function NeighborPage({
   cell,
   insets,
   liveCols,
-  bottomR,
+  radii,
 }: {
   snap: PageSnap;
   stageW: number;
-  /** see `pageRB` — square while the keyboard cuts the page off */
-  bottomR: number;
+  /** The shared card-corner style (`cardRadiiStyle`) — the same radius the ring draws. */
+  radii: AnimatedStyle<ViewStyle>;
   theme: Theme;
   cell: { w: number; h: number };
   insets: { top: number; side: number; bottom: number };
   liveCols: number;
 }) {
   return (
-    <View
+    <Animated.View
       pointerEvents="none"
       style={[
         StyleSheet.absoluteFill,
         styles.page,
-        { backgroundColor: theme.background, borderRadius: pageRadius(stageW), borderBottomLeftRadius: bottomR, borderBottomRightRadius: bottomR },
+        { backgroundColor: theme.background },
+        radii,
       ]}>
       <PageContent
         snap={snap}
@@ -2078,15 +2110,11 @@ function NeighborPage({
         insets={insets}
         liveCols={liveCols}
       />
-      <View
+      <Animated.View
         pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          styles.pageEdge,
-          { borderColor: theme.accent, borderRadius: pageRadius(stageW), borderBottomLeftRadius: bottomR, borderBottomRightRadius: bottomR },
-        ]}
+        style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.accent }, radii]}
       />
-    </View>
+    </Animated.View>
   );
 }
 

@@ -487,7 +487,13 @@ export default function KeyBar(props: KeyBarProps) {
         // The vertical, every frame. The zoom's own horizontal drift is frozen at the row's grab
         // (`originX`), because two things moving the card at once is a card travelling twice as
         // far as the finger — before that it is the ±10pt of tilt a straight pull has always had.
-        props.onSwitcherDrag('move', held.current ? originX.current : e.translationX, e.translationY);
+        props.onSwitcherDrag(
+          'move',
+          held.current ? originX.current : e.translationX,
+          e.translationY,
+          e.velocityX,
+          e.velocityY,
+        );
       }
       // The keys get out of the way once the card is visibly off the bar — not at the slop, which
       // the opening arc of a flat hop passes through on its own (see `KEYS_DROP_DY`).
@@ -498,7 +504,7 @@ export default function KeyBar(props: KeyBarProps) {
       // The row joins when the finger actually goes sideways, whenever that is — from a standing
       // start, or a hundred points into a pull up.
       if (!held.current) {
-        if (!rowJoins(e.translationX)) return;
+        if (!rowJoins(e.translationX, e.translationY)) return;
         held.current = true;
         originX.current = e.translationX;
         props.onBarSwipe?.('start', 0);

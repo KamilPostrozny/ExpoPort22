@@ -171,9 +171,17 @@ export function barGrabbed(dx: number, dy: number): boolean {
   return Math.abs(dx) > BAR_AXIS_SLOP || Math.abs(dy) > BAR_AXIS_SLOP;
 }
 
-/** Horizontal travel that earns the page row (see `barGrabbed`). */
-export function rowJoins(dx: number): boolean {
-  return Math.abs(dx) > BAR_AXIS_SLOP;
+/** Upward travel past which the card counts as airborne, and the sideways travel that earns the
+ *  page row up there. On the bar the row joins at the slop — a hop should feel instant — but a
+ *  deliberate pull straight up drifts 10–20pt sideways all by itself, and joining on that put
+ *  neighbour cards around a card nobody was swiping (movement 3, screenshot). */
+export const ROW_AIR_DY = 30;
+export const ROW_AIR_DX = 48;
+
+/** Horizontal travel that earns the page row (see `barGrabbed`): the slop on the bar, deliberate
+ *  travel in the air. */
+export function rowJoins(dx: number, dy: number): boolean {
+  return Math.abs(dx) > (-dy > ROW_AIR_DY ? ROW_AIR_DX : BAR_AXIS_SLOP);
 }
 
 /** Upward travel at which the keyboard gets out of the way. Not the slop: the opening of an
