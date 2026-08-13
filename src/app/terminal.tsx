@@ -667,6 +667,15 @@ export default function SessionScreen() {
       // gone: swipe down, keyboard bounces back up (user, 2026-08-13). A finger that barely moved
       // dismissed nothing, so clearing this costs that case nothing to give back.
       keysWereUp.current = false;
+      // …and if the gesture never armed, leave the PAD alone too. `finishClose`'s other half is
+      // `syncPad`, which exists for the doors that thaw a pad the `keyboardWillChangeFrame`
+      // listener was frozen out of (it returns early unless `sw` is `closed`). Here `sw` never
+      // left `closed`, so that listener has been live the whole way through and has already
+      // reported the dismiss. Calling `syncPad` on top of it asks iOS where the keyboard is in
+      // the middle of its hide animation, gets the frame it still has, and writes the old overlap
+      // back — the keys go away and the bar stays parked where they were, mid-screen (user,
+      // 2026-08-13). Nothing to reconcile: the listener owns this one.
+      if (swRef.current === 'closed') return;
       finishClose();
       return;
     }
