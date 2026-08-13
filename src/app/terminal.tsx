@@ -22,7 +22,6 @@ import Animated, {
   Easing,
   FadeOut,
   runOnJS,
-  useAnimatedReaction,
   useAnimatedStyle,
   useFrameCallback,
   useSharedValue,
@@ -1105,15 +1104,6 @@ export default function SessionScreen() {
    * neighbour recomputed at that moment would swap its content while the slide is still running. */
   const anchor = pageSwipe?.pos ?? activePosIn(cards);
   const neighbour = (side: -1 | 1) => cards[anchor + side]?.snap ?? null;
-  if (pageSwipe !== null)
-    console.log(
-      '[barswipe] row anchor', anchor, 'of', cards.length, 'phase', pageSwipe.phase, 'sw', sw,
-      'tabs', showTabs, 'conn', connected,
-      'prev', anchor > 0, 'next', anchor < cards.length,
-      '| stage', stage?.w, stage?.h, 'sv', stageSV.value.w, stageSV.value.h,
-      'gap', PAGE_GAP.toFixed(3), 'pitch', (stageSV.value.w * (1 + PAGE_GAP)).toFixed(0),
-      'x', swipeX.value.toFixed(0), 'prog', prog.value.toFixed(2),
-    );
 
   // The live terminal is itself a page while a swipe is on: it slides, already wearing the
   // screen's corner. The radius is a constant, not an animation — the page is round at rest too
@@ -1323,29 +1313,6 @@ export default function SessionScreen() {
     });
   const prevCardStyle = usePageCardStyle(-1);
   const nextCardStyle = usePageCardStyle(1);
-
-  // §7 probe: the row renders (logged) and cannot be seen, so what is left is what the WORKLET
-  // makes of it — a NaN anywhere in a transform is a view that lays out and never draws, and no
-  // JS-side print can show that. Bucketed by 100pt of travel so it speaks a few times a swipe.
-  const logGeom = (h: number, scale: number, pitch: number, x: number, carry: number) =>
-    console.log(
-      `[barswipe] geom h ${h.toFixed(0)} scale ${scale.toFixed(2)} pitch ${pitch.toFixed(0)} ` +
-        `x ${x.toFixed(0)} carry ${carry.toFixed(2)} → next at ${(pitch + x * (1 - carry)).toFixed(0)}`,
-    );
-  useAnimatedReaction(
-    () => Math.round(swipeX.value / 100),
-    (bucket, prev) => {
-      if (bucket === prev) return;
-      const f = zoomFrame(prog.value, dragX.value, aim(), stageSV.value);
-      runOnJS(logGeom)(
-        f.height,
-        f.scale,
-        stageSV.value.w * (1 + PAGE_GAP),
-        swipeX.value,
-        cardCarry(prog.value),
-      );
-    },
-  );
 
   /** The container every card rides: one scale, one flight, one place. Its height is the stage's
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
@@ -1775,7 +1742,7 @@ export default function SessionScreen() {
         (sw === 'closed' || sw === 'drag') && (
         <>
           {anchor > 0 && (
-            <Animated.View pointerEvents="none" onLayout={(e) => console.log('[barswipe] prev layout', JSON.stringify(e.nativeEvent.layout))} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, prevCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
               </Animated.View>
@@ -1784,7 +1751,7 @@ export default function SessionScreen() {
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. */}
           {anchor < cards.length && (
-            <Animated.View pointerEvents="none" onLayout={(e) => console.log('[barswipe] next layout', JSON.stringify(e.nativeEvent.layout))} style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }, nextCardStyle]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
               </Animated.View>
