@@ -1437,6 +1437,44 @@ export default function SessionScreen() {
         />
       )}
 
+      {/* The neighbouring windows, each its own card beside the live one — a page-pitch away and
+          wearing its own copy of the zoom, so a swipe reads as a row of cards moving rather than
+          as content sliding about inside one frame.
+
+          BEHIND the wrapper, and outside it. Outside because a child shares the wrapper's clip and
+          its ring — the outline you hold with pages moving in it — and would take the zoom twice
+          over, which drew the neighbour at HOLD_SCALE² beside a card at HOLD_SCALE (user,
+          2026-08-13, screenshot). Behind because the key bar rides inside the wrapper: in front,
+          these would cover it and the name pills with it. That works only because the wrapper no
+          longer paints a ground of its own (see there) — the live page paints its own, so what
+          shows through beside it is these.
+
+          And only while the card is in a hand — `closed` for an ordinary hop, `drag` for a lifted
+          one. Once the release commits, the switcher owns the screen and these would fly along
+          beside the card into the grid, one pitch behind it: tabs arriving in pairs (user,
+          2026-08-13, screenshot). */}
+      {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' &&
+        (sw === 'closed' || sw === 'drag') && (
+        <>
+          {anchor > 0 && (
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, prevCardStyle]}>
+              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+              </Animated.View>
+            </Animated.View>
+          )}
+          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
+              empty pane the shell about to be born will draw into. */}
+          {anchor < cards.length && (
+            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, nextCardStyle]}>
+              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
+                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
+              </Animated.View>
+            </Animated.View>
+          )}
+        </>
+      )}
+
       {/* The stage wrapper the zoom animates: at rest an invisible identity, mid-transition the
           clipped, scaled, ringed terminal surface riding into its card slot. */}
       <Animated.View
@@ -1448,7 +1486,12 @@ export default function SessionScreen() {
         style={[
           stage === null
             ? styles.screen
-            : [styles.stageWrapper, { width: stage.w, backgroundColor: theme.background }],
+            // No ground of its own. It used to paint the theme background across the whole stage,
+            // which is invisible at rest — the page inside covers every point of it, the bar band
+            // included (`termSlide` runs under the bar) — but it is an opaque slab in front of the
+            // neighbouring cards, and they sit behind this so the bar inside it can stay on top.
+            // A page that slid in behind that slab simply never appeared (user, 2026-08-13).
+            : [styles.stageWrapper, { width: stage.w }],
           stage !== null && wrapperStyle,
         ]}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
@@ -1693,41 +1736,6 @@ export default function SessionScreen() {
       )}
 
       </View>
-
-      {/* The neighbouring windows, each its own card beside the live one — a page-pitch away and
-          wearing the same zoom, so a swipe reads as a row of cards moving rather than as content
-          sliding inside one frame.
-
-          AFTER the wrapper, not before it: the wrapper paints an opaque background across the whole
-          stage, so a card drawn underneath simply never appeared — the page slid in and there was
-          nothing there (user, 2026-08-13). Still before the bar, which draws over the pages as it
-          always has. They do not overlap the live card, so being on top of it costs nothing.
-
-          And only while the card is in a hand — `closed` for an ordinary hop, `drag` for a lifted
-          one. Once the release commits, the switcher owns the screen and these would fly along
-          beside the card into the grid, one pitch away: tabs arriving in pairs (user, 2026-08-13,
-          screenshot). */}
-      {stage !== null && showTabs && connected && pageSwipe?.phase !== 'settle' &&
-        (sw === 'closed' || sw === 'drag') && (
-        <>
-          {anchor > 0 && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, prevCardStyle]}>
-              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
-              </Animated.View>
-            </Animated.View>
-          )}
-          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
-              empty pane the shell about to be born will draw into. */}
-          {anchor < cards.length && (
-            <Animated.View pointerEvents="none" style={[styles.stageWrapper, { width: stage.w }, nextCardStyle]}>
-              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} bottomR={pageRB} />
-              </Animated.View>
-            </Animated.View>
-          )}
-        </>
-      )}
 
       {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
           full window height under it. Its own glass pills carry no full-width ground, so the

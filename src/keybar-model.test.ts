@@ -214,8 +214,9 @@ test('the cone widens with sideways travel', () => {
 test('past the cone only a real throw lifts', () => {
   // 200pt along: the cone is unreachable there by design, so speed is the only way out.
   expect(barLifts(-200, -30, -100, -1400)).toBe(true);
-  expect(barLifts(-200, -30, -100, -700)).toBe(false); // brisk, not thrown
-  expect(barLifts(-200, -30, -800, -1400)).toBe(false); // still travelling sideways too fast
+  expect(barLifts(-200, -30, -100, -904)).toBe(true); // the device's own flick, which used to miss
+  expect(barLifts(-200, -30, -100, -400)).toBe(false); // drifting up, not thrown
+  expect(barLifts(-200, -30, -800, -700)).toBe(false); // still travelling sideways faster
   expect(barLifts(-40, -30, -100, -1400)).toBe(false); // not far enough along to be a throw
 });
 

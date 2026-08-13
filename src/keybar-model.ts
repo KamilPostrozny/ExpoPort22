@@ -157,10 +157,14 @@ export const BAR_AXIS_SLOP = 10;
 /** Vertical travel at which the keyboard gesture fires (the prototype's 24px). */
 export const BAR_SWIPE_FIRE = 24;
 
-/** Upward speed, pt/s, that reads as a throw rather than the ordinary briskness of a swipe. The
- *  device numbers are why it is this high: the first frames of a FLAT swipe on a bottom bar report
- *  vy -600…-900 against vx 400–550 (2026-08-12), because a thumb pivots. */
-export const BAR_LIFT_VY = 900;
+/** Upward speed, pt/s, that reads as a throw rather than the ordinary briskness of a swipe.
+ *
+ *  It was 900 to fend off the opening arc of a flat swipe, which reports vy -600…-900 (2026-08-12)
+ *  — but `LIFT_FLICK_DX` already rules that out on travel, and every arc measured was inside 19pt.
+ *  Left at 900 the throw had to be thrown implausibly hard: a real mid-swipe flick came in at -904
+ *  against a -900 bar, and mostly did not fire at all (user, 2026-08-13). The distance gate is
+ *  what separates the two, so the speed only has to say "thrown". */
+export const BAR_LIFT_VY = 600;
 
 /** How much extra upward travel each point of sideways travel costs the lift. The pull-up test is
  *  a cone, not a half-plane: dead straight it fires at `BAR_SWIPE_FIRE`, and the further sideways
@@ -199,14 +203,12 @@ export function barGrabbed(dx: number): boolean {
  * than it was — but every point of sideways travel buys `LIFT_CONE` more points of up, and the
  * arc's own dx is what disqualifies it. Past `LIFT_FLICK_DX` the cone is unreachable by design:
  * a swipe that far along is committed, and the only way out of it is to throw the card, hard
- * (`BAR_LIFT_VY`) and with the horizontal genuinely spent (vy beating vx twice over) — which is
- * what a flick up out of a running swipe actually looks like, and what the arc never does.
+ * (`BAR_LIFT_VY`) and with the horizontal no longer winning — which is what a flick up out of a
+ * running swipe looks like, and which the arc cannot reach because it never gets that far sideways.
  */
 export function barLifts(dx: number, dy: number, vx: number, vy: number): boolean {
   if (-dy >= BAR_SWIPE_FIRE + LIFT_CONE * Math.abs(dx)) return true;
-  return (
-    Math.abs(dx) > LIFT_FLICK_DX && vy <= -BAR_LIFT_VY && Math.abs(vy) > 2 * Math.abs(vx)
-  );
+  return Math.abs(dx) > LIFT_FLICK_DX && vy <= -BAR_LIFT_VY && Math.abs(vy) > Math.abs(vx);
 }
 
 /** The other vertical exit: a swipe down puts the keyboard away (§4.4). Same travel test as the
