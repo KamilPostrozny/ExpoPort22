@@ -31,7 +31,6 @@ import Animated, {
   type AnimatedStyle,
   useFrameCallback,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -97,7 +96,6 @@ import {
   termPad,
   zoomBox,
   zoomFrame,
-  zoomProgress,
   type Frame,
 } from '@/switcher-model';
 import SettingsSheet from '@/settings-sheet';
