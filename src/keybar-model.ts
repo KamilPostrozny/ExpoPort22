@@ -193,6 +193,11 @@ export const ROW_AIR_PROG = 0.05;
  *  the card alone. Tried at 0.5 first, still tight (user, same day). This is the knob. */
 export const ROW_MAX_PROG = 0.65;
 
+/** How long the neighbours take to leave when the card climbs past the ceiling: they unseat and
+ *  fade on the same clock, because vanishing on the frame read as a dropped frame, not a decision
+ *  (user, 2026-08-14). Coming back down is the entrance spring, unchanged. */
+export const ROW_OUT_MS = 180;
+
 /** Horizontal travel that earns the page row (see `barGrabbed`): the slop on the bar; in the air,
  *  deliberate travel AND a card that is being held — the hand stopped climbing (`held`, the
  *  settle latch) and stopped low (`prog` inside `ROW_MAX_PROG`). Still climbing, or already high,

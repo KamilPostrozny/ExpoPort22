@@ -44,6 +44,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withSpring,
+  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 
@@ -73,6 +74,7 @@ import {
   KEYS_DROP_DY,
   rowJoins,
   ROW_MAX_PROG,
+  ROW_OUT_MS,
   controlByte,
   CARET_SETTLE_MS,
   CARET_STEP_MAX,
@@ -505,6 +507,10 @@ function KeyBarInner(props: KeyBarProps) {
   const dismissed = useSharedValue(0);
   /** The worklet's half of the settle latch (see `onAirSettled`). */
   const settled = useSharedValue(0);
+  /** Which side of the neighbour ceiling the card was on last frame: 1 low, 0 high, -1 unasked.
+   *  A separate latch because `rowVis` is animated now — mid-slide it holds 0.4, and comparing the
+   *  wanted state against it would restart the slide every frame. */
+  const rowLow = useSharedValue(-1);
   /** The pan's translation at the instant the card was grabbed. The grab costs `BAR_AXIS_SLOP` of
    *  travel, and the pan reports it from TOUCH-DOWN — so handing the page `e.translationX` made
    *  it open 10pt along instead of at zero: the card detached from the edge with a jump in the
@@ -557,6 +563,7 @@ function KeyBarInner(props: KeyBarProps) {
       grabbed.value = 0;
       dismissed.value = 0;
       settled.value = 0;
+      rowLow.value = -1;
     })
     .onUpdate((e) => {
       'worklet';
@@ -622,12 +629,18 @@ function KeyBarInner(props: KeyBarProps) {
         // stopped, or the swipe started) and DRAWN only while the card is low.
         if (sv.heldAir.value === 1 || held.value === 1) {
           const low = sv.prog.value <= ROW_MAX_PROG ? 1 : 0;
-          if (low !== sv.rowVis.value) {
-            sv.rowVis.value = low;
-            sv.join.value =
-              low === 1
-                ? withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true })
-                : 0;
+          if (low !== rowLow.value) {
+            rowLow.value = low;
+            if (low === 1) {
+              sv.rowVis.value = 1; // on before the spring runs, as above
+              sv.join.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
+            } else {
+              // Out the way they came in, not a blink (user, 2026-08-14): `join` unseats them —
+              // the same 44pt the entrance closes — and the fade rides the same clock, so what the
+              // eye sees is the row leaving sideways rather than a frame of neighbours missing.
+              sv.join.value = withTiming(0, { duration: ROW_OUT_MS });
+              sv.rowVis.value = withTiming(0, { duration: ROW_OUT_MS });
+            }
           }
         }
       }
