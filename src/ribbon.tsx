@@ -28,17 +28,13 @@ import Animated, {
 import { Glass } from '@/keybar';
 import { formatElapsed } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
-import { MONO, type Theme } from '@/theme';
+import { SPACE, TEXT } from '@/style';
+import { MONO, rgba, type Theme } from '@/theme';
 
 /** Horizontal travel that counts as the open/close swipe (the prototype's 28). */
 const SWIPE_PX = 28;
 /** How long the two-tap quit stays armed (the prototype's 2800). */
 const ARM_MS = 2800;
-
-function rgba(hex: string, alpha: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
-}
 
 /* --- the closed handle --- */
 
@@ -190,7 +186,7 @@ export function RibbonPanel(props: RibbonPanelProps) {
             over a wall of text, so they take the prototype's own ground — surface0 at ~0.7
             over the blur (`hexA(f.s0, 0.72)`), which is what keeps a cap readable on top of
             a full CLAUDE.md (user, 2026-08-12, screenshot). */}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.surface, 0.62) }]} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.surface, 0.72) }]} />
         {danger && (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.danger, 0.16) }]} />
         )}
@@ -226,7 +222,7 @@ export function RibbonPanel(props: RibbonPanelProps) {
               the caps do, one size down. */}
           <Glass theme={theme} radius={14}>
             <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.surface, 0.62) }]}
+              style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.surface, 0.72) }]}
             />
             <View style={styles.labelRow}>
               <Animated.View style={[styles.dot, { backgroundColor: dotColor }, dotStyle]} />
@@ -270,7 +266,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 7,
     height: 28,
-    paddingHorizontal: 12,
+    paddingHorizontal: SPACE.md,
   },
   dot: { width: 7, height: 7, borderRadius: 4 },
   label: { fontFamily: MONO, fontSize: 11 },
@@ -289,16 +285,16 @@ const styles = StyleSheet.create({
     height: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: SPACE.sm,
     paddingHorizontal: 15,
   },
-  capKey: { fontFamily: MONO, fontSize: 14, fontWeight: '500' },
+  capKey: { fontFamily: MONO, fontSize: TEXT.mono, fontWeight: '500' },
   capCaption: { fontSize: 12.5 },
   stub: {
     width: 5,
     height: 46,
     borderRadius: 4,
     marginTop: 2,
-    marginRight: 4,
+    marginRight: SPACE.xs,
   },
 });

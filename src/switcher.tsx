@@ -40,6 +40,18 @@ import Animated, {
 import { highlightLine, parseAnsi, spanColor, type SpanLine } from '@/ansi-spans';
 import { SEARCH_DEBOUNCE_MS, normalizeQuery, type SearchHit } from '@/search-model';
 import {
+  BAR,
+  CARD_RADIUS,
+  CENTER,
+  PRESSED_KEY,
+  RADIUS,
+  SEARCH_RADIUS,
+  SPACE,
+  TEXT,
+  TINT,
+} from '@/style';
+import {
+  DESIGN_W,
   gridHeight,
   gridTop,
   reorder,
@@ -429,7 +441,11 @@ function SwitcherInner(props: SwitcherProps) {
             <View
               style={[
                 styles.placeholder,
-                { borderColor: theme.border },
+                // The corner comes from the call site for the same reason the card's does: it
+                // scales with the stage (`CARD_RADIUS * u`), and a flat radius in the stylesheet
+                // gave the dashed slot a different corner from the card it stands in for on every
+                // width but 402.
+                { borderColor: theme.border, borderRadius: CARD_RADIUS * (stageW / DESIGN_W) },
                 frameStyle(slotFrame(dragPos, stageW)),
               ]}
             />
@@ -497,7 +513,7 @@ function SwitcherInner(props: SwitcherProps) {
               style={({ pressed }) => [
                 styles.fab,
                 { backgroundColor: theme.accent },
-                pressed && styles.pressed,
+                pressed && PRESSED_KEY,
               ]}>
               <Text style={[styles.fabGlyph, { color: theme.background }]}>+</Text>
             </Pressable>
@@ -509,7 +525,7 @@ function SwitcherInner(props: SwitcherProps) {
           style={({ pressed }) => [
             styles.circle,
             { backgroundColor: theme.surface },
-            pressed && styles.pressed,
+            pressed && PRESSED_KEY,
           ]}>
           <SymbolView
             name="plus"
@@ -528,7 +544,7 @@ function SwitcherInner(props: SwitcherProps) {
           style={({ pressed }) => [
             styles.circle,
             { backgroundColor: theme.accent },
-            pressed && styles.pressed,
+            pressed && PRESSED_KEY,
           ]}>
           <SymbolView
             name="checkmark"
@@ -943,7 +959,7 @@ function WindowCard({
             ring,
             {
               height: slot.h,
-              borderRadius: 14 * u,
+              borderRadius: CARD_RADIUS * u,
               backgroundColor: theme.background,
               paddingHorizontal: shotPad,
               paddingTop: shotPadTop,
@@ -1112,16 +1128,17 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 20,
+    paddingHorizontal: SPACE.wide,
     // Derived, never a second number: the zoom aim and the grid's own top both count the field
     // plus this gap as SEARCH_BAR_H, and a hand-kept copy of it drifts the two apart.
     paddingBottom: SEARCH_BAR_H - SEARCH_FIELD_H,
     overflow: 'hidden', // the blur strip is a child, and it ends where this does
   },
-  // iOS is the prototype's 13pt radius; Android takes Material's 16dp (§5d: buttons 16).
+  // iOS is the prototype's 13pt radius; Android takes Material's 16dp (§5d: buttons 16) —
+  // `SEARCH_RADIUS.switcher` is that pair.
   searchField: {
     height: SEARCH_FIELD_H,
-    borderRadius: Platform.OS === 'android' ? 16 : 13,
+    borderRadius: SEARCH_RADIUS.switcher,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -1133,8 +1150,7 @@ const styles = StyleSheet.create({
     width: 19,
     height: 19,
     borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+    ...CENTER,
   },
   searchClearGlyph: { fontSize: 9, fontWeight: '700' },
   noHits: {
@@ -1143,18 +1159,17 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+    ...CENTER,
     gap: 8,
   },
-  noHitsLead: { fontSize: 15 },
-  noHitsQuery: { fontFamily: MONO, fontSize: 14 },
+  noHitsLead: { fontSize: TEXT.label },
+  noHitsQuery: { fontFamily: MONO, fontSize: TEXT.mono },
+  // No radius here: it scales with the stage, so it is passed at the call site (see there).
   placeholder: {
     position: 'absolute',
-    borderRadius: 14,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    backgroundColor: 'rgba(127,132,156,0.08)',
+    backgroundColor: TINT.ghost,
   },
   card: {
     shadowColor: '#000',
@@ -1170,8 +1185,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
+    ...CENTER,
     opacity: 0.88,
   },
   closeGlyph: { fontSize: 10, fontWeight: '700' },
@@ -1188,16 +1202,16 @@ const styles = StyleSheet.create({
       default: { paddingHorizontal: 34, paddingTop: 5, paddingBottom: 10 },
     }),
   },
-  circle: { width: 49, height: 49, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
-  pressed: { opacity: 0.6, transform: [{ scale: 0.94 }] },
-  count: { fontFamily: MONO, fontSize: 14 },
+  // §3's 49pt bar circle; its 25 was exactly half of that, which is `RADIUS.pill` said properly.
+  circle: { width: BAR.circle, height: BAR.circle, borderRadius: RADIUS.pill, ...CENTER },
+  count: { fontFamily: MONO, fontSize: TEXT.mono },
   // Android chrome text is Roboto by setting no fontFamily (T7A's finding, zero code).
   countAndroid: { fontSize: 14, fontWeight: '500' },
   doneText: { height: 40, paddingHorizontal: 16, borderRadius: 20, justifyContent: 'center' },
   doneLabel: { fontSize: 14, fontWeight: '500' },
   // 12dp corner per the working prototype (the §5c still shows 18 — the prototype wins, same
   // tie-break T7A used). Elevation is the Material shadow; iOS never renders this branch.
-  fab: { width: 56, height: 56, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 6 },
+  fab: { width: 56, height: 56, borderRadius: 12, ...CENTER, elevation: 6 },
   fabGlyph: { fontSize: 30, lineHeight: 34 },
   name: { textAlign: 'center', fontFamily: MONO, fontSize: 12, marginTop: 7 },
   sub: { textAlign: 'center', fontFamily: MONO, fontSize: 10, marginTop: 2 },
