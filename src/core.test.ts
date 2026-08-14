@@ -19,6 +19,7 @@ mock.module('expo-secure-store', () => ({
 
 const { flavors } = await import('@catppuccin/palette');
 const { DARK_THEMES, LIGHT_THEMES, THEMES, resolveTheme } = await import('@/theme');
+const { SCHEMES } = await import('@/themes-generated');
 const {
   DEFAULTS,
   clampFontSize,
@@ -69,6 +70,94 @@ test('every installed theme is a complete one', () => {
     }
     expect(t.colorSchemeNotification).toBe(t.isDark ? '\x1b[?997;1n' : '\x1b[?997;2n');
   }
+});
+
+test('no theme is quieter than the family it is matched to', () => {
+  const chan = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const lum = (hex: string) =>
+    chan(hex)
+      .map((v) => v / 255)
+      .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+      .reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const cr = (a: string, b: string) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const L = (hex: string) => {
+    const y = lum(hex);
+    return y <= 216 / 24389 ? (y * 24389) / 27 : Math.cbrt(y) * 116 - 16;
+  };
+  const mix = (a: string, b: string, t: number) =>
+    '#' +
+    chan(a)
+      .map((v, i) => Math.round(v + (chan(b)[i] - v) * t))
+      .map((v) => v.toString(16).padStart(2, '0'))
+      .join('');
+
+  // The floors in theme.ts are the minimum the four Catppuccin flavours already hit, so a generated
+  // scheme is checked against the tuned family rather than against WCAG — which Catppuccin itself
+  // does not meet (Latte's `overlay0` hairline is 2.30:1). The four flavours are excluded here
+  // because they are not floored at all: they come off the style guide's named steps, and the test
+  // above pins them to those steps by name. Flooring them would mean overruling the guide.
+  const CATPPUCCIN = new Set(['latte', 'frappe', 'macchiato', 'mocha']);
+  const published = new Map(SCHEMES.map((s) => [s.name, s]));
+  for (const t of [...DARK_THEMES, ...LIGHT_THEMES].filter((t) => !CATPPUCCIN.has(t.name))) {
+    const why = (role: string) => `${t.name}: ${role}`;
+    // A floor only governs a colour we derived. Where the author published one it is used as-is even
+    // when it is dimmer than the floor — Dracula's spec names Current Line for borders, and that is
+    // 1.56:1 on its own background. Overruling it would be the same mistake in the other direction.
+    const derived = (role: keyof (typeof SCHEMES)[number]) => !published.get(t.name)?.[role];
+    if (derived('muted')) {
+      // Bounded by what the ramp can actually reach — a tenth short of the scheme's own foreground.
+      // Both Solarized cuts run 4.13:1 and 4.75:1 foreground-on-background, so secondary text there
+      // cannot clear 4.4 however it is derived. Everything else is held to the floor proper.
+      const ceiling = cr(mix(t.background, t.foreground, 0.9), t.background);
+      expect(cr(t.muted, t.background), why('muted')).toBeGreaterThanOrEqual(
+        Math.min(4.3, ceiling - 0.01),
+      );
+      expect(t.muted, why('muted vs foreground')).not.toBe(t.foreground);
+    }
+    if (derived('placeholder')) {
+      expect(cr(t.placeholder, t.background), why('placeholder')).toBeGreaterThanOrEqual(2.75);
+    }
+    if (derived('border')) {
+      expect(cr(t.border, t.background), why('border')).toBeGreaterThanOrEqual(2.25);
+    }
+    expect(cr(t.dots.grey, t.background), why('grey dot')).toBeGreaterThanOrEqual(2.9);
+
+    // A sheet has to read as a sheet on a near-black background too — a ratio of the remaining
+    // distance to black moves ~1 L* on #0d1117, which is invisible.
+    expect(Math.abs(L(t.panel) - L(t.background)), why('panel step')).toBeGreaterThan(2.5);
+    expect(Math.abs(L(t.scrim) - L(t.panel)), why('scrim behind panel')).toBeGreaterThan(2.5);
+
+    // Two roles that mean different things may not be the same colour: the ribbon draws a peach
+    // handle next to a red failure, and an armed modifier next to a locked one.
+    expect(t.dots.peach, why('peach vs danger')).not.toBe(t.danger);
+    expect(t.accent, why('accent vs alternate')).not.toBe(t.accentAlternate);
+
+    // Bright white that *is* the background is not white at all: solarized-light shipped ansi[15] at
+    // 1.00:1 and everforest-light at 1.06:1 before those slots came from upstream rather than from a
+    // TextMate theme. This is a "distinguishable from the ground" check and nothing more — on a light
+    // scheme SGR 97 is legitimately the palest thing there is, and Latte's own is only 1.4:1.
+    expect(cr(t.ansi[15], t.background), why('ansi bright white')).toBeGreaterThan(1.15);
+  }
+});
+
+test('an author who publishes the colour outranks our arithmetic', () => {
+  // nord.css calls nord8 "the accent color of the color palette", where shiki's ansi[4] is nord9,
+  // documented for "keywords, operators, tags".
+  expect(THEMES.nord.accent).toBe('#88c0d0');
+  // spec.mdx, "Borders and Separators": "Subtle borders: Use Current Line color".
+  expect(THEMES.dracula.border).toBe('#44475a');
+  // gruvbox.vim branches its accent tier on `s:is_dark`; the neutral tier is only ever slots 1-6.
+  expect(THEMES['gruvbox-dark-medium'].accent).toBe('#83a598');
+  expect(THEMES['gruvbox-light-medium'].accent).toBe('#076678');
+  // ayu's whole identity is its gold, which shiki hands us only as the cursor.
+  expect(THEMES['ayu-dark'].accent).toBe('#e6b450');
+  // xresources: `*cursorColor: S_base1`. Shiki reports the tmTheme's `string.regexp` red.
+  expect(THEMES['solarized-dark'].cursor).toBe('#93a1a1');
+  // The published role table names highlightMed for selection.
+  expect(THEMES['rose-pine'].selection).toBe('#403d52');
 });
 
 test('following the system picks per appearance, ignoring it picks once', () => {

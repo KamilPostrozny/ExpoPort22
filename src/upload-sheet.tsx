@@ -193,7 +193,7 @@ export default function UploadSheet(props: UploadSheetProps) {
         style={[
           styles.sheet,
           ANDROID && styles.sheetAndroid,
-          { backgroundColor: theme.background, paddingBottom: keyboardPad },
+          { backgroundColor: theme.panel, paddingBottom: keyboardPad },
         ]}>
         <View style={styles.grabberRow}>
           <View style={[styles.grabber, { backgroundColor: theme.border }]} />

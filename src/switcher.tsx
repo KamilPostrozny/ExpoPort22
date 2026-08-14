@@ -429,7 +429,7 @@ function SwitcherInner(props: SwitcherProps) {
             <View
               style={[
                 styles.placeholder,
-                { borderColor: theme.border },
+                { borderColor: theme.border, backgroundColor: theme.surface },
                 frameStyle(slotFrame(dragPos, stageW)),
               ]}
             />
@@ -499,7 +499,7 @@ function SwitcherInner(props: SwitcherProps) {
                 { backgroundColor: theme.accent },
                 pressed && styles.pressed,
               ]}>
-              <Text style={[styles.fabGlyph, { color: theme.background }]}>+</Text>
+              <Text style={[styles.fabGlyph, { color: theme.onAccent }]}>+</Text>
             </Pressable>
           </>
         ) : (
@@ -1154,7 +1154,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    backgroundColor: 'rgba(127,132,156,0.08)',
   },
   card: {
     shadowColor: '#000',

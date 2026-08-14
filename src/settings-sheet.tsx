@@ -97,8 +97,11 @@ const GRABBER_ZONE = 40;
 
 /** The prototype's cross-flavour neutrals (overlay-grey at fixed alpha, same literal on all four
  *  flavours — the same family the key bar uses). */
-const HAIRLINE = 'rgba(127,132,156,0.3)';
-const STEPPER_TINT = 'rgba(127,132,156,0.25)';
+/**
+ * These were Catppuccin Mocha's `overlay1` at three alphas, written when the picker held four
+ * flavours. Across twenty-six they are simply the wrong grey — the roles below already name the
+ * jobs, so the colour comes from the theme and only the geometry stays here.
+ */
 
 /** The swatch strip's six chips, in the prototype's order — now ANSI slots rather than Catppuccin
  *  names, because those six are the one thing every scheme is guaranteed to have. */
@@ -243,7 +246,8 @@ export default function SettingsSheet({
           style={({ pressed }) => [
             styles.row,
             styles.rowLine,
-            pressed && { backgroundColor: STEPPER_TINT },
+            { borderTopColor: theme.border },
+            pressed && { backgroundColor: theme.surface },
           ]}>
           <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
           <Text style={[styles.value, { color: theme.muted }]} numberOfLines={1}>
@@ -265,7 +269,8 @@ export default function SettingsSheet({
                 styles.row,
                 styles.subRow,
                 styles.rowLine,
-                pressed && { backgroundColor: STEPPER_TINT },
+                { borderTopColor: theme.border },
+                pressed && { backgroundColor: theme.surface },
               ]}>
               <Text style={[styles.label, { color: theme.foreground }]} numberOfLines={1}>
                 {t.label}
@@ -288,7 +293,7 @@ export default function SettingsSheet({
     <Modal transparent statusBarTranslucent animationType="none" onRequestClose={close}>
       {/* RNGH needs its own root inside a Modal's native window. */}
       <GestureHandlerRootView style={styles.fill}>
-        <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, scrimStyle]}>
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}>
           <Pressable style={styles.fill} onPress={close} />
         </Animated.View>
 
@@ -337,16 +342,16 @@ export default function SettingsSheet({
                 ) : (
                   themeRow('Theme', ALL_THEMES, 'theme')
                 )}
-                <View style={[styles.row, styles.rowLine]}>
+                <View style={[styles.row, styles.rowLine, { borderTopColor: theme.border }]}>
                   <Text style={[styles.label, { color: theme.foreground }]}>Font size</Text>
                   <Text style={[styles.value, { color: theme.muted }]}>{settings.fontSize} pt</Text>
-                  <View style={styles.stepper}>
+                  <View style={[styles.stepper, { backgroundColor: theme.surface }]}>
                     <Pressable
                       onPress={() => stepFont(-1)}
                       style={({ pressed }) => [styles.stepKey, pressed && { opacity: 0.5 }]}>
                       <Text style={[styles.stepGlyph, { color: theme.foreground }]}>−</Text>
                     </Pressable>
-                    <View style={styles.stepDivider} />
+                    <View style={[styles.stepDivider, { backgroundColor: theme.border }]} />
                     <Pressable
                       onPress={() => stepFont(1)}
                       style={({ pressed }) => [styles.stepKey, pressed && { opacity: 0.5 }]}>
@@ -383,7 +388,7 @@ export default function SettingsSheet({
                   onPress={onDisconnect}
                   style={({ pressed }) => [
                     styles.actionRow,
-                    pressed && { backgroundColor: STEPPER_TINT },
+                    pressed && { backgroundColor: theme.surface },
                   ]}>
                   <Text style={[styles.label, { color: theme.accent }]}>Disconnect</Text>
                 </Pressable>
@@ -392,7 +397,8 @@ export default function SettingsSheet({
                   style={({ pressed }) => [
                     styles.actionRow,
                     styles.rowLine,
-                    pressed && { backgroundColor: STEPPER_TINT },
+                    { borderTopColor: theme.border },
+                    pressed && { backgroundColor: theme.surface },
                   ]}>
                   <Text style={[styles.label, { color: theme.danger }]}>Forget host key</Text>
                 </Pressable>
@@ -407,7 +413,6 @@ export default function SettingsSheet({
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  scrim: { backgroundColor: 'rgba(0,0,0,0.35)' },
   sheet: {
     position: 'absolute',
     left: 0,
@@ -441,7 +446,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 7,
   },
-  rowLine: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HAIRLINE },
+  rowLine: { borderTopWidth: StyleSheet.hairlineWidth },
   /** A theme inside an expanded list, indented off the disclosure row that opened it. */
   subRow: { paddingLeft: 32 },
   label: { flex: 1, fontSize: 15 },
@@ -449,15 +454,10 @@ const styles = StyleSheet.create({
   swatch: { flexDirection: 'row', gap: 3, borderRadius: 6, padding: 3, marginRight: 12 },
   chip: { width: 9, height: 13, borderRadius: 2.5 },
   checkSlot: { width: 18, alignItems: 'flex-end' },
-  stepper: {
-    flexDirection: 'row',
-    borderRadius: 9,
-    overflow: 'hidden',
-    backgroundColor: STEPPER_TINT,
-  },
+  stepper: { flexDirection: 'row', borderRadius: 9, overflow: 'hidden' },
   stepKey: { width: 38, height: 30, alignItems: 'center', justifyContent: 'center' },
   stepGlyph: { fontSize: 20, lineHeight: 24 },
-  stepDivider: { width: 1, backgroundColor: 'rgba(127,132,156,0.4)' },
+  stepDivider: { width: 1 },
   note: { fontSize: 11.5, lineHeight: 15, paddingHorizontal: 16, paddingTop: 6 },
   actionRow: { paddingHorizontal: 16, paddingVertical: 12 },
 });

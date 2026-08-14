@@ -28,17 +28,12 @@ import Animated, {
 import { Glass } from '@/keybar';
 import { formatElapsed } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
-import { MONO, type Theme } from '@/theme';
+import { MONO, withAlpha as rgba, type Theme } from '@/theme';
 
 /** Horizontal travel that counts as the open/close swipe (the prototype's 28). */
 const SWIPE_PX = 28;
 /** How long the two-tap quit stays armed (the prototype's 2800). */
 const ARM_MS = 2800;
-
-function rgba(hex: string, alpha: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
-}
 
 /* --- the closed handle --- */
 
