@@ -79,15 +79,25 @@ export function parseSearchOutput(stdout: string): SearchHit | null {
   return { lines, hitLine };
 }
 
-/** The grid's filter: a window survives on either half of the match. `hit` is `undefined` while
- *  its grep is still in flight — the card stays only if metadata already says so. */
+/** The grid's filter: a window survives on either half of the match.
+ *
+ *  The three states of `hit` are the whole of it — a card is removed only once its grep has
+ *  ANSWERED (`null`), never while the answer is still in flight (`undefined`). Treating "not known
+ *  yet" as "no match" emptied the grid on the first keystroke and refilled it a beat later, so a
+ *  quick query read as the tabs vanishing and coming back rather than as a list narrowing (user,
+ *  device). Held instead, the grid only ever loses cards, one grep at a time. */
 export function windowSurvives(
   win: TmuxWindow,
   q: string,
   hit: SearchHit | null | undefined,
 ): boolean {
-  return metaMatches(win, q) || (hit !== null && hit !== undefined);
+  return metaMatches(win, q) || hit !== null;
 }
 
 /** One settled keystroke per debounce window — the greps ride this, the metadata match doesn't. */
 export const SEARCH_DEBOUNCE_MS = 300;
+
+/** The terminal's own highlight, which is not a grep: each call walks the scrollback inside the
+ *  webview to rebuild the decoration set, so it wants a window — but a short one. At the grep's
+ *  300ms the highlight visibly trails the character being typed, which is the whole feature. */
+export const SEARCH_HIGHLIGHT_MS = 120;

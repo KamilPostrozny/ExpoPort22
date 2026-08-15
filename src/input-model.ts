@@ -52,6 +52,7 @@ export const SHEET_DISMISS_DISTANCE = 140;
 export const SHEET_DISMISS_VELOCITY = 500;
 
 export function sheetShouldDismiss(dy: number, velocityY: number): boolean {
+  'worklet'; // called from the sheet's pan `onEnd`, which runs on the UI thread
   if (dy <= 0) return false; // an upward release never dismisses, however fast
   return dy > SHEET_DISMISS_DISTANCE || velocityY > SHEET_DISMISS_VELOCITY;
 }

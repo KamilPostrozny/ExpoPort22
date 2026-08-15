@@ -122,13 +122,13 @@ export default function SettingsSheet({
    *  swipe-dismiss are the same finger. Inside the list, the sheet only rides the finger from the
    *  top; below that the list keeps the gesture, or a flick through the themes would throw the
    *  sheet off the screen. */
-  const atTop = useRef(true);
+  const atTop = useSharedValue(true);
   /** Whether this drag began on the grabber, which always dismisses however the list is scrolled.
    *  Gating the grabber on `atTop` too is what made the sheet feel stuck (user, 2026-08-14: "hard
    *  time swiping them down… either the app lagging or it's hard to close them") — with
    *  twenty-six rows the list is almost never at the top, so the one handle whose entire job is
    *  dismissing was the one place dismissing did not work. */
-  const fromGrabber = useRef(false);
+  const fromGrabber = useSharedValue(false);
   /** Which theme list is expanded, if any — one at a time, so the sheet never has two long lists
    *  in it at once. */
   const [open, setOpen] = useState<'theme' | 'themeDark' | 'themeLight' | null>(null);
@@ -138,7 +138,7 @@ export default function SettingsSheet({
   }, []);
 
   const trackTop = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    atTop.current = e.nativeEvent.contentOffset.y <= 0;
+    atTop.value = e.nativeEvent.contentOffset.y <= 0;
   };
 
   const close = () => {
@@ -149,21 +149,24 @@ export default function SettingsSheet({
 
   // The swipe-dismiss (§4.8): the sheet rides the finger down (never up past rest), and the
   // release decision — distance or flick — is input-model's, tested.
+  // Deliberately NOT `.runOnJS(true)`: this sheet sits over a live session that is still pumping
+  // bytes, so a callback stream on the RN JS thread would queue behind exactly the work that is
+  // busiest while the finger is down. Everything the drag needs is a shared value, so the whole
+  // gesture stays on the UI thread and hops to JS once, on the release that actually dismisses.
   const pan = Gesture.Pan()
-    .runOnJS(true)
     // Without this the pan wins the arbitration outright and the list never scrolls. The cast is a
     // typing gap, not a runtime one — RNGH's own ScrollView ref is not assignable to RNGH's own
     // parameter type, and the wrapped component does carry the handler tag this reads.
     .simultaneousWithExternalGesture(scrollRef as unknown as React.RefObject<React.ComponentType>)
     .onBegin((e) => {
-      fromGrabber.current = e.y < GRABBER_ZONE;
+      fromGrabber.value = e.y < GRABBER_ZONE;
     })
     .onUpdate((e) => {
-      if (fromGrabber.current || atTop.current) ty.value = Math.max(0, e.translationY);
+      if (fromGrabber.value || atTop.value) ty.value = Math.max(0, e.translationY);
     })
     .onEnd((e) => {
-      const rides = fromGrabber.current || atTop.current;
-      if (rides && sheetShouldDismiss(e.translationY, e.velocityY)) close();
+      const rides = fromGrabber.value || atTop.value;
+      if (rides && sheetShouldDismiss(e.translationY, e.velocityY)) runOnJS(close)();
       else ty.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
     });
 

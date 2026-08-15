@@ -58,6 +58,19 @@ test('the required half is in the conf whether or not the comforts are', () => {
         );
       }
     }
+    // The root table, where a notch arrives before anything is in copy mode. Without these tmux
+    // answers `copy-mode -e` for any app that never asked for the mouse, which on the alternate
+    // screen is a pager that will not scroll.
+    for (const [wheel, key] of [
+      ['WheelUpPane', 'Up'],
+      ['WheelDownPane', 'Down'],
+    ]) {
+      expect(conf).toMatch(new RegExp(`bind -n ${wheel}\\s+if -F .#\\{\\|\\|:`));
+      // The mouse-aware app keeps its untouched report, the alt screen gets one key per notch.
+      expect(conf).toMatch(new RegExp(`${wheel}[^\\n]*send -M[^\\n]*alternate_on[^\\n]*send -N1 ${key}`));
+      // ...and everything else still falls through to tmux's own default.
+      expect(conf).toMatch(new RegExp(`${wheel}[^\\n]*copy-mode -e`));
+    }
     // Never in either half: nothing here reads a title, and it rewrote every terminal's.
     expect(conf).not.toContain('set-titles');
   }

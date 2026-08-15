@@ -74,7 +74,7 @@ import {
   type Session,
 } from '@/session';
 import { endpoint, getSettings, updateSettings, useSettings, usesTmux } from '@/settings';
-import { normalizeQuery, windowSurvives } from '@/search-model';
+import { SEARCH_HIGHLIGHT_MS, normalizeQuery, windowSurvives } from '@/search-model';
 import Switcher, {
   Snapshot,
   useScrollbackSearch,
@@ -413,13 +413,13 @@ export default function SessionScreen() {
         },
     onBoot: async () => {
           detach.current?.();
-          detach.current = attachTerminal((base64) => {
-            dataSeq.current++; // "has the host redrawn yet" — see `afterHostRedraw`
+          detach.current = attachTerminal((chunks) => {
+            dataSeq.current += chunks.length; // "has the host redrawn yet" — see `afterHostRedraw`
             // `probe` bails on GESTURE_LOG, but the argument is built before the call: one
-            // template literal per chunk off the PTY, and a tmux redraw after a switch is hundreds
+            // template literal per batch off the PTY, and a tmux redraw after a switch is hundreds
             // of chunks — allocating on the JS thread inside the flight that switch is animating.
-            if (GESTURE_LOG) probe(`byte ${base64.length}b`);
-            terminal.current?.write(base64);
+            if (GESTURE_LOG) probe(`byte ${chunks.reduce((n, c) => n + c.length, 0)}b`);
+            terminal.current?.write(chunks);
           });
         },
     onBell: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light),
@@ -532,7 +532,11 @@ export default function SessionScreen() {
     if (!connected) return;
     if (search.on && search.q.trim() !== '') {
       searchEverArmed.current = true;
-      terminal.current?.search?.(search.q.trim());
+      // Debounced, because this is not a cheap call: with decorations on, the addon walks the
+      // whole scrollback to rebuild the highlight set, inside the same webview that is parsing
+      // shell output — and undebounced it did that once per character typed.
+      const t = setTimeout(() => terminal.current?.search?.(search.q.trim()), SEARCH_HIGHLIGHT_MS);
+      return () => clearTimeout(t);
     } else if (searchEverArmed.current) {
       searchEverArmed.current = false;
       terminal.current?.searchOff?.();
@@ -1404,7 +1408,11 @@ export default function SessionScreen() {
     slideTo(0, () => clearBarSwipe(skipRefresh));
   };
 
-  /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
+  // `-next-line`, never the block form. A block `eslint-disable` makes babel-plugin-react-compiler
+  // treat every function declared later in the file as suppressed — it never pairs the matching
+  // `eslint-enable` back up — and it then refuses to compile them. This one and the twin below
+  // were costing PageContent, NeighborPage and Status their compilation, though neither of them
+  // contains a suppression of its own.
   const panBridge = useMemo(
     () => ({
       swipeX,
@@ -1425,9 +1433,9 @@ export default function SessionScreen() {
       heldAir: heldAirSV,
       stage: stageSV,
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- every member is a stable shared value
     [],
   );
-  /* eslint-enable react-hooks/exhaustive-deps */
 
   const onBarSwipe = (phase: 'start' | 'end', dx: number, air = false) => {
     if (stage === null) return;
@@ -1802,9 +1810,8 @@ export default function SessionScreen() {
    * own change and their own device walk, not a rider on this one.
    */
   /** The shared values `aimAt` reads, as one stable object — see `aimAt` at module scope. */
-  /* eslint-disable react-hooks/exhaustive-deps -- every member is a stable shared value */
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- every member is a stable shared value
   const aimSV = useMemo(() => ({ stage: stageSV, slot: slotSV, prog, flight }), []);
-  /* eslint-enable react-hooks/exhaustive-deps */
 
   /**
    * A neighbouring page's card, INSIDE the zoomed container with the live one. It carries nothing

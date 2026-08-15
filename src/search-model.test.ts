@@ -66,7 +66,9 @@ test('a window survives on either half of the match', () => {
   expect(windowSurvives(win(), 'fish', undefined)).toBe(true); // metadata, grep still in flight
   expect(windowSurvives(win(), 'deploy', hit)).toBe(true); // scrollback only
   expect(windowSurvives(win(), 'deploy', null)).toBe(false); // grep answered: nothing
-  expect(windowSurvives(win(), 'deploy', undefined)).toBe(false); // not answered yet: not shown yet
+  // Held until the grep answers: a card leaves on a `null`, never on a pending `undefined`, so the
+  // grid narrows one answer at a time instead of emptying and refilling on the first keystroke.
+  expect(windowSurvives(win(), 'deploy', undefined)).toBe(true);
 });
 
 /* --- the highlight surgery (ansi-spans) --- */
