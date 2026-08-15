@@ -13,7 +13,9 @@
  * `printf`, `>>`. All of it was run through `fish -c` verbatim before landing here.
  */
 
-export const CONF_VERSION = 2;
+/** v3: the root-table wheel bindings, so a pager on the alternate screen scrolls instead of
+ *  opening copy mode over a buffer that does not move. */
+export const CONF_VERSION = 3;
 export const CONF_MARKER = `# port22-conf-v${CONF_VERSION}`;
 
 /** Relative on purpose: SFTP resolves paths against `$HOME`, absolute would leave it. */
@@ -62,6 +64,18 @@ bind -T copy-mode-vi WheelDownPane send -N1 -X scroll-down
 
 # Wheel events reach tmux at all only with mouse reporting on.
 set -g mouse on
+
+# What a wheel notch means in a pane that is NOT already in copy mode. tmux's default answer is
+# \`copy-mode -e\` for any app that has not asked for the mouse — and on the alternate screen that
+# opens copy mode over the alt buffer, where scrolling moves nothing. That is a pager that will not
+# scroll: \`less\` and \`man\` take the wheel and sit still (user, device). The alternate-screen case
+# has to become the keys the pager actually reads.
+#
+# Three cases, in the order tmux tests them: the app asked for the mouse (vim, htop, and this
+# app's own host) — hand it the report untouched; the alternate screen without mouse — one arrow
+# per notch, matching the copy-mode bindings above; anything else — copy mode, tmux's own default.
+bind -n WheelUpPane   if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{alternate_on}' 'send -N1 Up' 'copy-mode -e'"
+bind -n WheelDownPane if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{alternate_on}' 'send -N1 Down' 'copy-mode -e'"
 
 # A copy-mode yank lands on the phone's pasteboard over OSC 52 (§4.7). set-clipboard alone is not
 # enough: tmux only emits OSC 52 when the outer terminal advertises the Ms capability, and

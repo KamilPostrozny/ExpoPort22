@@ -334,6 +334,12 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       decorations: {
         matchBackground: t.selection,
         activeMatchBackground: t.warning,
+        // NOTE: the active match does not actually draw differently — see BUGS.md §3. The addon
+        // builds the decoration (it reports one) and these colours are far apart, but nothing of
+        // it reaches the screen. `activeMatchBorder` was tried here and made no difference, which
+        // is the useful part: an outline paints outside the box, so the element cannot merely be
+        // covered — it is not rendering. Fixing it means marking the hit ourselves, not passing
+        // this addon better colours.
         matchOverviewRuler: t.warning,
         activeMatchColorOverviewRuler: t.warning,
       },
@@ -434,6 +440,22 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // are the highlight, its result event the "i/N" label — nothing reimplemented here.
     const searchAddon = new SearchAddon();
     term.loadAddon(searchAddon);
+    // The addon re-runs the whole search 200ms after EVERY write: `activate` registers
+    // `onWriteParsed(() => this._updateMatches())`, and that callback clears the cached term,
+    // rebuilds every decoration and re-seeks with `findPrevious`. On a terminal that is never
+    // quiet — tmux repaints its status bar about once a second — the consequence is that the match
+    // the user stepped to drifts on its own between one tap of ∨ and the next (measured on device:
+    // `i 1` after a step, `i 2` at the next press with nothing touched), and the active-match
+    // decoration is destroyed and rebuilt somewhere else, so every hit reads as the same flat
+    // highlight. That is the whole of T14's "the arrows do nothing" — the arrows are fine.
+    //
+    // ponytail: reaches past the public API, because there is no public lever — the listener is
+    // registered inside `activate` and `_updateMatches` only disarms when `lastSearchOptions` has
+    // no `decorations`, which is exactly what draws the active match. The cost is that matches
+    // appearing in NEW output are not highlighted until the query changes or the user steps again,
+    // which is the better half of the trade. Upgrade path: vendor SearchAddon, or move search onto
+    // a frozen scrollback snapshot, if the highlight ever needs to track live output.
+    (searchAddon as unknown as { _updateMatches: () => void })._updateMatches = () => {};
     const searchResults = searchAddon.onDidChangeResults(({ resultIndex, resultCount }) => {
       latest.current.onSearchResults(resultIndex, resultCount);
     });
