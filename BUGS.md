@@ -124,6 +124,39 @@ rather than when it ends.
 
 ---
 
+## 5. Neighbour cards do not reliably leave during the swipe up
+
+**Repro.** Swipe a tab upward (the zoom toward the grid), slowly. Screenshot: 2026-08-15, 21:51.
+
+**Symptom.** The neighbouring cards either side of the live one do not always go away, and during a
+slow swipe they flash — appearing and disappearing — instead of leaving once and staying gone.
+
+**Suspect: this one may be a regression from `e75141f`, and it is the strongest such suspicion of
+the whole audit.** `NeighborPage` (`src/app/terminal.tsx`) is one of exactly three components that
+began being compiled by the React Compiler as a result of that commit — the two block-form
+`eslint-disable`s were making the compiler treat every function later in the file as suppressed, and
+removing them took `PageContent`, `NeighborPage` and `Status` from `CompileError` to
+`CompileSuccess` (verified by running babel-plugin-react-compiler with its logger: 0 before, 3
+after).
+
+So `NeighborPage` is memoized now and was not before. A conditionally-rendered component that has
+just acquired automatic memoization is exactly the thing that starts rendering a frame late, or
+holding a stale visibility, or flickering as its inputs settle — which is the reported symptom.
+Nothing else in the branch touches the neighbours.
+
+**How to settle it, surgically** — better than a full baseline checkout, because it isolates the one
+component instead of the whole commit. Put `"use no memo"` at the top of `NeighborPage` and reload:
+that opts only that component out of the compiler while leaving everything else compiled. If the
+flashing stops, it is confirmed, and the fix is either to leave that one component opted out with a
+comment saying why, or to find what the compiler is memoizing that should not be (a ref read during
+render, a value whose identity is load-bearing for visibility).
+
+If the flashing persists with the directive in place, it is pre-existing and the compiler is
+exonerated — then check the zoom's own visibility gating, since bug 4 shows the same transition
+already releases things a frame early.
+
+---
+
 ## Also open, found the same session, lower priority
 
 ### Grid tap intermittently does nothing
