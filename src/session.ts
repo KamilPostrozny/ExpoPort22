@@ -60,8 +60,11 @@ let failures = 0;
  *  the webview boots, which can be either side of the shell opening. */
 let size = { cols: 80, rows: 24 };
 let shellOpen = false;
-let sink: ((base64: string) => void) | null = null;
+let sink: ((chunks: string[]) => void) | null = null;
 let history: string[] = [];
+/** Chunks emitted this turn, waiting for `drain` to carry them over together. */
+let pending: string[] = [];
+let flush: ReturnType<typeof setTimeout> | null = null;
 /** Set when *we* are the ones refusing, so the rejection can say why in English rather than
  *  surfacing whatever the SSH library says when a handshake is abandoned. */
 let refusal: { message: string; mismatch: boolean } | null = null;
@@ -97,7 +100,7 @@ export async function connect(): Promise<void> {
   if (state.status === 'connecting') return;
   const settings = getSettings();
   refusal = null;
-  history = [];
+  resetHistory();
   set({ status: 'connecting', hostKey: null });
   try {
     const key = await loadOrCreateKey();
@@ -159,7 +162,7 @@ export async function listHostSessions(): Promise<string[]> {
 export async function disconnect(): Promise<void> {
   shellOpen = false;
   failures = 0;
-  history = [];
+  resetHistory();
   set({ status: 'idle' });
   await ExpoSSH.disconnect().catch(() => {});
 }
@@ -203,9 +206,12 @@ export function setSize(cols: number, rows: number): void {
 
 /** Points shell output at a terminal and replays the session so far into it. Called on every boot
  *  of the webview, not only the first: iOS reaps a backgrounded WKWebView and it comes back empty. */
-export function attachTerminal(write: (base64: string) => void): () => void {
+export function attachTerminal(write: (chunks: string[]) => void): () => void {
   sink = write;
-  for (const chunk of history) write(chunk);
+  // Anything still queued is already in `history`, and the replay below is about to carry it —
+  // draining it afterwards as well would write those chunks to the screen twice.
+  dropPending();
+  if (history.length > 0) write(history.slice()); // one crossing for the whole replay, not 500
   return () => {
     if (sink === write) sink = null;
   };
@@ -216,7 +222,35 @@ export function attachTerminal(write: (base64: string) => void): () => void {
 function emit(base64: string) {
   history.push(base64);
   if (history.length > MAX_HISTORY_CHUNKS) history.shift();
-  sink?.(base64);
+  if (sink === null) return;
+  // Coalesced, because a crossing into the terminal is not a cheap message. expo/dom serializes
+  // each imperative call into a JavaScript SOURCE STRING and hands it to `evaluateJavaScript` on
+  // the main thread, so one call per PTY read is one main-thread hop and one full JS parse per
+  // read — and a redraw arrives as a burst of them. A zero timer, not a frame: everything native
+  // delivered in this turn goes over together, and nothing waits on the display to echo.
+  pending.push(base64);
+  if (flush === null) flush = setTimeout(drain, 0);
+}
+
+function drain() {
+  flush = null;
+  if (pending.length === 0) return;
+  const batch = pending;
+  pending = [];
+  sink?.(batch);
+}
+
+/** Forget what has not crossed yet, without touching `history`. */
+function dropPending() {
+  pending = [];
+  if (flush !== null) clearTimeout(flush);
+  flush = null;
+}
+
+/** A session boundary: the replay buffer and anything still queued for the screen both go. */
+function resetHistory() {
+  history = [];
+  dropPending();
 }
 
 /**

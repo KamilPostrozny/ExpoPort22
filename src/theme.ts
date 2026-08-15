@@ -254,7 +254,6 @@ export function resolveTheme(name: ThemeName): Theme {
   return THEMES[name] ?? THEMES[DEFAULT_DARK];
 }
 
-/** Bundled JetBrains Mono Nerd Font, loaded in `app/_layout.tsx`. The terminal grid and every
- *  monospaced readout (public key, remote paths) use these; chrome text uses the system font. */
-export const MONO = 'JetBrainsMono';
-export const MONO_BOLD = 'JetBrainsMono-Bold';
+/** The font names live in `fonts.ts` — a leaf, so the DOM terminal can take them without dragging
+ *  the palette into the webview bundle. Re-exported here because this is where they read. */
+export { MONO, MONO_BOLD } from '@/fonts';

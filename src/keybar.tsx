@@ -205,6 +205,10 @@ const KEY_RADIUS = ANDROID ? 12 : 18;
 /** The bar row's side margins — Android's bar docks 8pt from the edges (design §5a). */
 const SIDE_MARGIN = ANDROID ? 8 : 24;
 
+/** How this bar hides a glass layer it wants to keep mounted. Never `opacity: 0` — see the two
+ *  call sites; the frozen object keeps the style array's identity stable across renders. */
+const DISPLAY_NONE = { display: 'none' } as const;
+
 function rgba(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
@@ -778,8 +782,12 @@ function KeyBarInner(props: KeyBarProps) {
               morph is the pill itself shrinking and growing, and scaling only the text inside a
               static glass read as no morph at all (user, 2026-08-11). */}
           <View style={styles.pill} onLayout={(e) => setPillW(e.nativeEvent.layout.width)}>
+            {/* `display: 'none'`, not `opacity: 0`: a UIVisualEffectView keeps re-rendering its
+                backdrop under a zero opacity (terminal.tsx's grid blur learned this on device).
+                A hidden view is not composited, and it stays mounted either way — which is the
+                whole point of keeping it here, so the swipe's first frame builds no glass. */}
             <View
-              style={[StyleSheet.absoluteFill, props.pills?.live && { opacity: 0 }]}
+              style={[StyleSheet.absoluteFill, props.pills?.live && DISPLAY_NONE]}
               pointerEvents={props.pills?.live ? 'none' : 'auto'}>
             <Glass theme={theme} radius={BAR_RADIUS} style={styles.pillGlass}>
             <View style={styles.keysRow}>
@@ -827,7 +835,7 @@ function KeyBarInner(props: KeyBarProps) {
             {props.pills != null && pillW > 0 && (
               <View
                 pointerEvents="none"
-                style={[styles.namesWrap, !props.pills.live && { opacity: 0 }]}>
+                style={[styles.namesWrap, !props.pills.live && DISPLAY_NONE]}>
                 <NameStrip theme={theme} pills={props.pills} width={pillW} />
               </View>
             )}

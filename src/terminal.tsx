@@ -40,7 +40,10 @@ import {
 } from '@/scroll-model';
 import { MONO_ADVANCE } from '@/switcher-model';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
-import { MONO, type Theme } from '@/theme';
+// `MONO` from the leaf, `Theme` as a type only — both so that `@/theme`, and with it the palette
+// and the 27-theme graph, stays out of this webview's bundle. See `fonts.ts`.
+import { MONO } from '@/fonts';
+import type { Theme } from '@/theme';
 // (`ModeSignal` cannot be re-exported from here: a 'use dom' module allows only its default
 //  export to leave. T11 imports it from '@/scroll-model', where it lives.)
 
@@ -48,8 +51,11 @@ import { MONO, type Theme } from '@/theme';
 // taking `JSONValue`s, which would let a caller write a number at the terminal. The bridge only
 // carries JSON either way, so the cast at the hook below is the whole cost of saying `string`.
 export type TerminalHandle = {
-  /** Shell output, base64 — the wire format `ExpoSSH` emits. */
-  write(base64: string): void;
+  /** Shell output, base64 — the wire format `ExpoSSH` emits. A batch, not a chunk: every call
+   *  becomes a JavaScript source string that the main thread has to parse (see `session.emit`),
+   *  so the coalescing happens on the native side and the whole turn crosses at once. Each chunk
+   *  is decoded separately — a read can split a UTF-8 sequence, and the padding is per chunk. */
+  write(chunks: string[]): void;
   /** T14: highlight every occurrence of `query` in the buffer and land on the next one. The
    *  incremental form — a growing query stays on the same hit while it still matches. */
   search(query: string): void;
@@ -335,7 +341,11 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
   };
 
   const handle: TerminalHandle = {
-    write: (base64) => terminal.current?.write(fromBase64(base64)),
+    write: (chunks) => {
+      const term = terminal.current;
+      if (term === null) return;
+      for (const chunk of chunks) term.write(fromBase64(chunk));
+    },
     search: (query) => {
       if (query === '') search.current?.clearDecorations();
       else search.current?.findNext(query, { ...searchOptions(), incremental: true });
@@ -441,9 +451,13 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // A long-press selection is the system's, not xterm's, so it fires no xterm event and leaves no
     // other trace: without this line there is no way to tell "the gesture never started" from "it
     // selected and the menu did not draw".
+    // `selectionchange` also fires for every collapsed caret move, and `toString()` serializes the
+    // whole range to build a string this only ever slices to 40 characters. The collapsed case is
+    // the common one and carries no information, so it never pays for the serialization.
     const onSelectionChange = () => {
-      const text = document.getSelection()?.toString() ?? '';
-      console.log('[terminal] selection', JSON.stringify(text.slice(0, 40)));
+      const sel = document.getSelection();
+      if (sel === null || sel.isCollapsed) return;
+      console.log('[terminal] selection', JSON.stringify(sel.toString().slice(0, 40)));
     };
     document.addEventListener('selectionchange', onSelectionChange);
 
@@ -550,10 +564,19 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     };
     // The row pitch stays the screen's own: xterm lays rows out as boxes at that height, so unlike
     // the advance it is what is drawn.
-    const cell = () => {
+    // Split from `cell` because `advance()` is not free: it appends a 1000-glyph span to the live
+    // rows container and reads `getBoundingClientRect()`, which forces a synchronous layout of the
+    // terminal subtree, then invalidates it again on removal. Only `report` wants the width;
+    // `fitRows` wants the pitch alone and used to pay for a probe it threw away — on every
+    // keyboard edge, rotation and hold release, twice per resize.
+    const rowPitch = () => {
       const screen = host.current?.querySelector('.xterm-screen') as HTMLElement | null;
-      if (screen === null || term.cols === 0 || term.rows === 0) return { w: 0, h: 0 };
-      return { w: advance(), h: screen.clientHeight / term.rows };
+      if (screen === null || term.cols === 0 || term.rows === 0) return 0;
+      return screen.clientHeight / term.rows;
+    };
+    const cell = () => {
+      const h = rowPitch();
+      return h === 0 ? { w: 0, h: 0 } : { w: advance(), h };
     };
     // Whole rows, and the remainder above the first one rather than below the last — the gap
     // under the last line is the key bar's to fill, and it already has one (user, 2026-08-10).
@@ -575,7 +598,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     const fitRows = () => {
       const el = host.current;
       if (el === null) return fitAddon.fit();
-      const { h } = cell();
+      const h = rowPitch();
       padTop = h > 0 ? el.clientHeight % h : 0;
       el.style.paddingTop = `${padTop}px`;
       fitAddon.fit();
@@ -715,20 +738,24 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         term.scrollLines(-taken.notches);
         return;
       }
-      for (let i = 0; i < Math.abs(taken.notches); i++) {
-        if (route === 'wheel') {
-          term.element?.dispatchEvent(
-            new WheelEvent('wheel', {
-              deltaY: up ? -1 : 1,
-              deltaMode: WheelEvent.DOM_DELTA_LINE,
-              clientX: x,
-              clientY: y,
-              cancelable: true,
-            }),
-          );
-        } else {
-          latest.current.onData(arrowKey(up, modes.decckm));
-        }
+      const n = Math.abs(taken.notches);
+      if (route === 'arrows') {
+        // One bridge post and one SSH packet for the whole batch, not one per notch. A coast frame
+        // spends several notches, and the bytes on the wire are identical either way — the host
+        // cannot tell a repeated arrow from n separate ones.
+        latest.current.onData(arrowKey(up, modes.decckm).repeat(n));
+        return;
+      }
+      for (let i = 0; i < n; i++) {
+        term.element?.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: up ? -1 : 1,
+            deltaMode: WheelEvent.DOM_DELTA_LINE,
+            clientX: x,
+            clientY: y,
+            cancelable: true,
+          }),
+        );
       }
     };
 

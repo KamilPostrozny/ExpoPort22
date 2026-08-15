@@ -91,3 +91,8 @@ export function windowSurvives(
 
 /** One settled keystroke per debounce window — the greps ride this, the metadata match doesn't. */
 export const SEARCH_DEBOUNCE_MS = 300;
+
+/** The terminal's own highlight, which is not a grep: each call walks the scrollback inside the
+ *  webview to rebuild the decoration set, so it wants a window — but a short one. At the grep's
+ *  300ms the highlight visibly trails the character being typed, which is the whole feature. */
+export const SEARCH_HIGHLIGHT_MS = 120;

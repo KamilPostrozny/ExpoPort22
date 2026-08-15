@@ -786,9 +786,15 @@ function WindowCard({
       })
       .onUpdate((e) => {
         if (!started.current) return;
-        x.value = base.current.x + e.translationX;
-        y.value = base.current.y + e.translationY;
-        live.current.onDragMove(x.value, y.value);
+        // The two values are computed here, so pass the locals on. Reading `x.value` back from
+        // the JS thread is the blocking direction of the bridge — with
+        // `USE_SYNCHRONIZABLE_FOR_MUTABLES` on (Reanimated 4.5's default), a dirty read hops
+        // synchronously into the UI runtime and the JS thread waits for it, twice a drag frame.
+        const nx = base.current.x + e.translationX;
+        const ny = base.current.y + e.translationY;
+        x.value = nx;
+        y.value = ny;
+        live.current.onDragMove(nx, ny);
       })
       .onTouchesUp(() => {
         touchDown.current = false;

@@ -4,7 +4,6 @@
  * The public half is re-derived on load rather than stored, so there is one source of truth.
  */
 
-import { ed25519 } from '@noble/curves/ed25519.js';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
@@ -30,6 +29,12 @@ export async function loadOrCreateKey(comment = 'port22'): Promise<KeyPair> {
     seedBase64 = toBase64(Crypto.getRandomBytes(32));
     await SecureStore.setItemAsync(SEED_KEY, seedBase64, STORE_OPTIONS);
   }
+  // Imported here rather than at the top of the file. `keys.ts` is on the initial route's module
+  // graph, and `@noble/curves/ed25519.js` evaluates the FROST, OPRF and ristretto255 constructions
+  // at its own top level — none of which this app calls, and all of which survive tree shaking
+  // (they are in the shipped bytecode). That is ~15ms of field arithmetic on the first-paint path
+  // to serve the one call below, which is already async and happens after the screen is up.
+  const { ed25519 } = await import('@noble/curves/ed25519.js');
   const publicKey = ed25519.getPublicKey(fromBase64(seedBase64));
   const publicKeyLine = `${KEY_TYPE} ${toBase64(publicKeyBlob(publicKey))} ${comment}`;
   // PLAN.md §7 says log freely; the seed is the one thing held back, and only because the public
