@@ -22,13 +22,33 @@ and refilling while typing a query (`windowSurvives` treated "grep still in flig
 - the key bar sits raised, at its keyboard-up position, with no keyboard on screen and dead space
   below it.
 
-**Where to look.** `pageRadius(stageW)` in `src/barswipe-model.ts` is documented as "0 at rest", so
-a non-zero radius means the page card still believes a swipe or zoom is live. The raised key bar is
-the same shape of problem on the inset: something that is set on the way *into* the grid is not
-being unset on this particular way out. The exit path taken when search is armed is the suspect —
-the ordinary exit does not do this.
+**Fixed — not yet walked on device.** Two separate causes, neither of them stale zoom state.
 
-**Not yet investigated.** No instrumentation has been added for this one.
+*The corners.* `pageRadius` is documented "0 at rest" and its own next sentence contradicts that: it
+returns `SCREEN_R * stageW` always, because the resting page IS the screen and wears the display's
+corner. Nothing was left over. What changed is where that corner sits: an armed search row takes
+`insets.top + 46` off the top (`searchRowH`, and `notchPad` drops to 0 with it), so the page starts
+below the bar and its 24pt corner is suddenly in plain sight in mid-screen. Fixed as the mirror of
+`kbSquare` — a `searchSquare` that squares the TOP corners while the row is up, for the mirror of
+`kbSquare`'s reason: that edge is not the top of anything, it is where the search bar cuts the page
+off. Same bar-swipe exception, since there the page is a card.
+
+*The key bar.* `finishClose` reconciles the frozen pad with `syncPad()` on exactly this path (the
+non-`keysWereUp` branch, taken whenever a search is armed). `syncPad` reads `Keyboard.metrics()` —
+which is **not** where the keyboard is. RN stores `_currentlyShowing` on `keyboardDidShow` and
+clears it on `keyboardDidHide`, at the *end* of the hide animation
+(`react-native/Libraries/Components/Keyboard/Keyboard.js:185`). So a landing that catches the
+keyboard mid-hide reads the departing frame and writes its overlap back as padding — and on this
+path nothing ever corrects it, because the hide's own `keyboardWillChangeFrame` was frozen out by
+the `swRef.current !== 'closed'` guard and no further keyboard event is coming. `springBack` avoids
+the same trap by not calling `syncPad` at all (its comment at the `prog < 0.005` early return
+describes this exact failure). Fixed with a `keyboardDidHide` listener under the same
+`sw === 'closed'` guard: the end of a hide is the one unambiguous moment — no keyboard, no pad. The
+frozen-during-flight case still resolves through `syncPad`, where `metrics()` is null by then and it
+already writes 0.
+
+**Left to confirm.** iOS-only code (`syncPad` returns early off iOS), so the emulator harness cannot
+see it: walk the repro on the phone.
 
 ---
 
