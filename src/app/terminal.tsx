@@ -193,7 +193,8 @@ export default function SessionScreen() {
     return () => clearTimeout(timer);
   }, [kbSettle]);
   /** The listener's math, off the keyboard's current frame instead of an event — for the doors
-   *  that unfreeze the pad with no keyboard move left to re-report it. */
+   *  that unfreeze the pad with no keyboard move left to re-report it. Mid-hide it reads the
+   *  departing keyboard (see the `keyboardDidHide` listener below, which is what corrects that). */
   const syncPad = () => {
     if (Platform.OS !== 'ios') return;
     const frame = Keyboard.metrics();
@@ -231,9 +232,15 @@ export default function SessionScreen() {
       // keyboard is on its way out reads the departing frame and writes its overlap back — and on
       // the way out of the grid nothing is left to correct it, because the hide's own
       // `keyboardWillChangeFrame` was frozen out above. That is a key bar parked at its
-      // keyboard-up position over dead space, for good (BUGS.md #1); `springBack` dodges the same
-      // trap by not calling `syncPad` at all. The end of the hide is the one unambiguous moment:
-      // no keyboard, no pad.
+      // keyboard-up position over dead space, for good (BUGS.md, "search view keeps the zoom's
+      // chrome"); `springBack` dodges the same trap by not calling `syncPad` at all. The end of the
+      // hide is the one unambiguous moment: no keyboard, no pad.
+      //
+      // It corrects rather than prevents: the probe walk (device, 2026-08-15) shows the pad going
+      // 286 → 0 on every such exit, which is the bar sitting raised for the rest of the hide.
+      // Reading the last ANNOUNCED frame instead of `metrics()` would never write the 286 at all —
+      // see the "key bar is up before the keyboard is" entry in BUGS.md, which wants the same
+      // change and its own device walk.
       Keyboard.addListener('keyboardDidHide', () => {
         // Same freeze as above — the zoom owns the stage's box while it runs, and `finishClose`
         // reconciles on the way out (by which time `metrics()` is null and syncPad reads 0).
@@ -635,13 +642,14 @@ export default function SessionScreen() {
   const finishClose = () => {
     probe('landed');
     setSw('closed');
-    // The keys come back exactly as they were left (`keysWereUp`) — except onto an armed search
-    // hit, where you came to read, not type (T14). The size hold outlives the zoom by exactly
-    // that keyboard: released at the end of the animation it measures a stage with no keyboard in
-    // it, reports that, and is corrected ~250ms later — two reflows of every pane on the host,
-    // landing just as the terminal comes back into view (device). Nothing is raised, nothing to
-    // wait for.
-    if (!searchRef.current.on && keysWereUp.current) {
+    // The keys come back exactly as they were left (`keysWereUp`), with no exception — T14's "an
+    // armed search hit is for reading, not typing" was overruled on device: whatever the keyboard
+    // was doing before the grid, it is doing again after it (user, 2026-08-15). The size hold
+    // outlives the zoom by exactly that keyboard: released at the end of the animation it measures
+    // a stage with no keyboard in it, reports that, and is corrected ~250ms later — two reflows of
+    // every pane on the host, landing just as the terminal comes back into view (device). Nothing
+    // is raised, nothing to wait for.
+    if (keysWereUp.current) {
       setKbSettle(true);
       setFocusSignal((n) => n + 1);
     } else {
