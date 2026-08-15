@@ -1,0 +1,858 @@
+<title>The ribbon, redesigned — three approaches</title>
+<style>
+  /* Palette is the app's own: Catppuccin Latte (light) / Mocha (dark).
+     Accent = mauve. Semantic pass/fail = green/red, kept separate from the accent. */
+  :root {
+    --bg:        #eff1f5;
+    --panel:     #e6e9ef;
+    --surface:   #dce0e8;
+    --line:      #bcc0cc;
+    --text:      #4c4f69;
+    --muted:     #6c6f85;
+    --faint:     #8c8fa1;
+    --accent:    #8839ef;
+    --accent-dim:#8839ef1f;
+    --fail:      #d20f39;
+    --fail-dim:  #d20f3914;
+    --pass:      #40a02b;
+    --pass-dim:  #40a02b14;
+    --warn:      #df8e1d;
+
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --body: ui-serif, Charter, "Iowan Old Style", Georgia, serif;
+
+    --col: 68ch;
+    --step--1: 0.8125rem;
+    --step-0:  1.0625rem;
+    --step-1:  1.3rem;
+    --step-2:  1.65rem;
+    --step-3:  2.1rem;
+    --step-4:  2.9rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #1e1e2e;
+      --panel:     #181825;
+      --surface:   #313244;
+      --line:      #45475a;
+      --text:      #cdd6f4;
+      --muted:     #a6adc8;
+      --faint:     #7f849c;
+      --accent:    #cba6f7;
+      --accent-dim:#cba6f726;
+      --fail:      #f38ba8;
+      --fail-dim:  #f38ba81f;
+      --pass:      #a6e3a1;
+      --pass-dim:  #a6e3a11a;
+      --warn:      #f9e2af;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:        #1e1e2e;
+    --panel:     #181825;
+    --surface:   #313244;
+    --line:      #45475a;
+    --text:      #cdd6f4;
+    --muted:     #a6adc8;
+    --faint:     #7f849c;
+    --accent:    #cba6f7;
+    --accent-dim:#cba6f726;
+    --fail:      #f38ba8;
+    --fail-dim:  #f38ba81f;
+    --pass:      #a6e3a1;
+    --pass-dim:  #a6e3a11a;
+    --warn:      #f9e2af;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--body);
+    font-size: var(--step-0);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: var(--col);
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+  /* Data, mockups and tables break the measure — they are read, not scanned as prose. */
+  .wide {
+    max-width: 78ch;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+
+  /* ---- masthead ---- */
+  header {
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    padding: 4.5rem 0 2.75rem;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.25rem;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: var(--step-4);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  .standfirst {
+    font-size: var(--step-1);
+    line-height: 1.5;
+    color: var(--muted);
+    margin: 0;
+    text-wrap: pretty;
+  }
+  .byline {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    color: var(--faint);
+    margin: 1.75rem 0 0;
+    line-height: 1.7;
+  }
+
+  /* ---- sections ---- */
+  main { padding-bottom: 6rem; }
+  section { padding-top: 3.5rem; }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: var(--step-2);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0 0 0.35rem;
+  }
+  h2 .num {
+    color: var(--accent);
+    font-weight: 500;
+    margin-right: 0.6rem;
+  }
+  h3 {
+    font-family: var(--mono);
+    font-size: var(--step-1);
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 0 0 0.5rem;
+  }
+  .dek {
+    color: var(--muted);
+    font-style: italic;
+    margin: 0 0 1.75rem;
+  }
+  p { margin: 0 0 1.15rem; text-wrap: pretty; }
+  a { color: var(--accent); text-underline-offset: 0.2em; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+  strong { font-weight: 700; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--surface);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  ul { margin: 0 0 1.15rem; padding-left: 1.2rem; }
+  li { margin-bottom: 0.5rem; }
+  li::marker { color: var(--faint); }
+
+  /* ---- verdict ---- */
+  .verdict {
+    border: 1px solid var(--accent);
+    background: var(--accent-dim);
+    border-radius: 4px;
+    padding: 1.5rem 1.75rem;
+    margin-top: 3.5rem;
+  }
+  .verdict h2 { font-size: var(--step-1); margin-bottom: 0.75rem; }
+  .verdict p:last-child { margin-bottom: 0; }
+
+  /* ---- data ---- */
+  .scroller { overflow-x: auto; margin: 0 0 1.5rem; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.45;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 0.78rem;
+    color: var(--faint);
+    border-bottom: 1px solid var(--line);
+    padding: 0 1rem 0.5rem 0;
+    white-space: nowrap;
+  }
+  td {
+    padding: 0.6rem 1rem 0.6rem 0;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.num { text-align: right; white-space: nowrap; }
+  .bad  { color: var(--fail); font-weight: 600; }
+  .good { color: var(--pass); font-weight: 600; }
+
+  /* score bars encode rank, which is the one thing the table is for */
+  .bar {
+    display: inline-block;
+    height: 7px;
+    background: var(--accent);
+    border-radius: 1px;
+    vertical-align: middle;
+    margin-right: 0.5rem;
+  }
+  tr.dead td { color: var(--faint); }
+  tr.dead .bar { background: var(--line); }
+
+  /* ---- mockups ---- */
+  figure { margin: 0 0 1.75rem; }
+  pre {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1.1rem 1.25rem;
+    overflow-x: auto;
+    margin: 0;
+    color: var(--text);
+  }
+  figcaption {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    color: var(--faint);
+    margin-top: 0.6rem;
+  }
+
+  /* ---- approach cards ---- */
+  .approach {
+    border-top: 2px solid var(--text);
+    padding-top: 1.5rem;
+    margin-top: 3rem;
+  }
+  .approach.killed { border-top-color: var(--line); }
+  .tagrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.25em 0.6em;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .tag.win  { border-color: var(--pass); color: var(--pass); background: var(--pass-dim); }
+  .tag.dead { border-color: var(--fail); color: var(--fail); background: var(--fail-dim); }
+  .tag.score { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+  .costs { display: grid; gap: 1rem; margin: 0 0 1.25rem; }
+  @media (min-width: 620px) { .costs { grid-template-columns: 1fr 1fr; } }
+  .cost {
+    border-left: 2px solid var(--line);
+    padding-left: 0.9rem;
+  }
+  .cost.pro { border-left-color: var(--pass); }
+  .cost.con { border-left-color: var(--fail); }
+  .cost h4 {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 0.4rem;
+    font-weight: 600;
+  }
+  .cost p { margin: 0; font-size: var(--step--1); line-height: 1.55; }
+
+  /* ---- corrections ---- */
+  ol.fixes { counter-reset: fix; list-style: none; padding: 0; margin: 0; }
+  ol.fixes > li {
+    counter-increment: fix;
+    border-bottom: 1px solid var(--line);
+    padding: 1rem 0 1rem 2.6rem;
+    position: relative;
+    margin: 0;
+  }
+  ol.fixes > li::before {
+    content: counter(fix, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 1rem;
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    color: var(--fail);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .steps { counter-reset: step; list-style: none; padding: 0; }
+  .steps > li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 2.6rem;
+    margin-bottom: 1rem;
+  }
+  .steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0.15em;
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    color: var(--bg);
+    background: var(--accent);
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 600;
+  }
+
+  blockquote {
+    margin: 0 0 1.5rem;
+    padding-left: 1.1rem;
+    border-left: 2px solid var(--accent);
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 2rem 0 3rem;
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    color: var(--faint);
+  }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">ExpoPort22 · §4.4 design study</p>
+    <h1>The ribbon, redesigned</h1>
+    <p class="standfirst">Three ways to show contextual actions over a terminal without being
+      invisible, intrusive, or unreadable — and the measurement showing all three complaints are
+      one bug.</p>
+    <p class="byline">
+      14 agents · 5 literature sweeps · 6 mechanisms · 3 judges · 3 specs · 1 adversarial pass<br>
+      Full specs: spec-accessory.md · spec-compact.md · spec-reader.md
+    </p>
+  </div>
+</header>
+
+<main>
+
+  <div class="wrap">
+    <div class="verdict">
+      <h2>Build Accessory — but ship the three-line gate first</h2>
+      <p>Rotate the ribbon 90°: one 52pt opaque band where twelve caps and three caps occupy the
+        identical footprint. It is the only candidate that stops drawing a column at all, which is
+        the shape that was rejected. Before that, add a minimum-lifetime gate so the thing stops
+        appearing for <code>git log</code>.</p>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <h2><span class="num">01</span>The complaint is one bug</h2>
+      <p class="dek">Three symptoms, one wrong decision — plus one wrong channel.</p>
+      <p>A translucent plate cannot serve two opposite extremes at once. Measured from
+        <code>src/ribbon.tsx</code> as shipped, sRGB relative luminance, WCAG 2.2:</p>
+    </div>
+
+    <div class="wide">
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr><th>Element</th><th class="num">Measured</th><th class="num">Needs</th><th>Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>12.5pt caption on <code>surface@0.62</code>, over bright output</td>
+              <td class="num bad">1.76 : 1</td><td class="num">4.5 : 1</td><td>unreadable</td>
+            </tr>
+            <tr>
+              <td>Red destructive label, over bright output</td>
+              <td class="num bad">1.69 : 1</td><td class="num">4.5 : 1</td>
+              <td>the most dangerous cap is the least legible</td>
+            </tr>
+            <tr>
+              <td>Capsule body vs a normal dark pane</td>
+              <td class="num bad">1.17 : 1</td><td class="num">3 : 1</td><td>invisible</td>
+            </tr>
+            <tr>
+              <td>The 5pt closed tab</td>
+              <td class="num bad">Lc ~15</td><td class="num">Lc 60</td>
+              <td>APCA defines Lc 15 as “treat as invisible”</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <p>The discovery cue is in the weakest channel there is. Bartram, Ware &amp; Calvert (IJHCS
+        58(5), 2003) measured peripheral <strong>colour</strong> cues missed <strong>25%</strong> of
+        the time versus <strong>under 2%</strong> for motion, and ranked the motion families:
+        <em>blink &lt; slow linear oscillation &lt; zoom &lt; travel</em>. The shipped handle pulses
+        opacity <em>and</em> <code>scaleY</code> at 0.53 Hz — a blink/zoom hybrid, the two worst
+        families, on a 5pt colour target. It is close to a worst case on the published evidence.</p>
+
+      <p>Two more found by reading source rather than design notes:</p>
+      <ul>
+        <li><strong>The open panel's scrim kills the key bar.</strong> Its full-screen
+          <code>Pressable</code> (<code>ribbon.tsx:221</code>) renders after the key bar
+          (<code>terminal.tsx:2376</code> vs <code>:2320</code>) with no <code>zIndex</code> in the
+          tree — so while the panel is open, Ctrl / Esc / Tab / Paste / arrows / tabs are all dead.
+          Combining a cap with a modifier is impossible today.</li>
+        <li><strong><code>BarMenu</code> and <code>ClipboardPopover</code> have the same defect</strong>,
+          unfiled. Bare <code>Glass</code> over the live pane; they only get away with it because
+          they open rarely.</li>
+      </ul>
+
+      <blockquote>Corrected constraint: the rule is not “never reserve vertical height”. Arming Ctrl
+        already takes the bar stack from 60 to ~120pt, so the app <em>already</em> accepts a ~60pt
+        terminal reflow on an explicit user action. The real rule is <strong>don't reserve height on
+        a poll</strong> — and <code>popBase</code> is not a fixed anchor either.</blockquote>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2><span class="num">02</span>What the evidence says</h2>
+      <p class="dek">Everything below was fetched and read, not recalled.</p>
+
+      <h3>Legibility over content you don't control</h3>
+      <p>No <em>single</em> colour can pass SC 1.4.11 over this terminal, because the terminal draws
+        in the same theme — every candidate role colour can land on itself at exactly
+        <strong>1.00 : 1</strong>. The only construction that survives is W3C technique
+        <strong>C40</strong>: two adjacent strokes of contrasting colours, so at least one always
+        clears 3:1.</p>
+      <p>Apple's own answer to glass over bright content is not thinner glass — it is
+        <em>“a dark dimming layer of 35% opacity”</em> and <em>“thicker materials… provide better
+        contrast for elements with fine features.”</em> The Dynamic Island <em>“uses a black opaque
+        background.”</em> Apple shipped this failure and reversed it: Liquid Glass went clear →
+        frosted between iOS 26 beta 1 and beta 3. Meanwhile <code>expo-blur</code> on Android now
+        needs the blurred content wrapped in <code>BlurTargetView</code> and cannot cross window
+        boundaries — and our terminal is a WebView, so any translucent design was Android-broken
+        from the start.</p>
+
+      <h3>Being noticed without interrupting</h3>
+      <ul>
+        <li>Slow linear oscillation is the peer-reviewed best “appears by itself but isn't
+          intrusive” signal; amplitude barely affects detection, so 2–4pt is enough.</li>
+        <li>WCAG <strong>2.2.2 (Level A)</strong>: motion that starts by itself and runs over five
+          seconds must be stoppable. An indefinite <code>withRepeat(…, -1)</code> the user never
+          started fails outright.</li>
+        <li>Yantis &amp; Jonides (1990): attentional capture by abrupt onset is <strong>suppressed
+          when attention is already focused</strong>. Someone reading output will not be captured by
+          anything, at any amplitude — the cue must survive to their <em>next</em> glance. That one
+          finding is why the 5pt tab could never have worked, and it is what separates the
+          finalists.</li>
+        <li>Bailey &amp; Konstan (2006, N=50): interrupting mid-task cost 3–27% more time,
+          <strong>2× the errors</strong>, 31–106% more annoyance — and deferring by just a few
+          seconds largely mitigates it.</li>
+      </ul>
+
+      <h3>Reach, size, and how many items a menu can carry</h3>
+      <ul>
+        <li>Parhi et al. (MobileHCI '06): ≥9.2mm discrete / ≥9.6mm serial for one-handed thumb use;
+          29.9% error at 3.8mm, because thumbs land where a target <em>looks</em>, not where its hit
+          rect is. Hit-slop on a 5pt tab was never going to work. 44pt ≈ 9.7mm at 3×.</li>
+        <li>Kurtenbach's thesis: breadth-12 flat menus <em>“border on unreliability”</em>; &lt;10%
+          error only to breadth 8 / depth 2. Material caps FAB menus at 2–6. <strong>The 12-cap
+          agent recipe is over every documented ceiling</strong> — for a menu you aim at from
+          memory. Which argues for a toolbar you <em>read</em>.</li>
+        <li>NN/g (n=179): hidden navigation used in 57% of mobile cases vs <strong>86%</strong> for
+          visible/combo, &gt;20% lower discoverability, 15–39% longer tasks.</li>
+      </ul>
+
+      <h3>What the competition ships</h3>
+      <ul>
+        <li><strong>Termius:</strong> the keyboard add-on “sits directly above the system keyboard
+          and is always visible while typing.”</li>
+        <li><strong>Blink Shell:</strong> SmartKeys live exactly as long as the on-screen keyboard;
+          its Context Bar is summoned by <strong>double-tapping the iOS home bar</strong>.</li>
+        <li><strong>Panic Prompt 3:</strong> an Extra Keyboard Row, shipped <strong>off by
+          default</strong>.</li>
+        <li><strong>Adobe's Contextual Task Bar</strong> — the closest analogue — has as its top
+          complaint that it <strong>repositions itself mid-task</strong>. Adobe's shipped answer was
+          a pin.</li>
+      </ul>
+      <p>Every shipping iOS terminal puts extra keys in a horizontal band in the bottom chrome. None
+        of them reserves it permanently.</p>
+
+      <h3>Platform escape hatches, checked</h3>
+      <ul>
+        <li><code>@expo/ui</code> (~57.0.9, installed, unused) gives a real SwiftUI <code>Menu</code>
+          / Compose <code>DropdownMenu</code> — but <strong>a UIMenu cannot present itself</strong>.
+          Programmatic open is Android-only. It can be the open half, never the whole design.</li>
+        <li><code>expo-glass-effect</code> (~57.0.1, installed, unused) is <strong>iOS 26+
+          only</strong>.</li>
+        <li>RNGH <strong>will not</strong> arbitrate against system edge gestures (issue #833, closed
+          as not planned), and Android's back gesture owns <em>both</em> edges.</li>
+        <li>The repo has <strong>zero</strong> accessibility code today — no
+          <code>accessibilityLabel</code>, no <code>accessibilityRole</code>, no
+          <code>useReducedMotion</code> anywhere in <code>src/</code>.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2><span class="num">03</span>Six mechanisms, three judges</h2>
+      <p class="dek">Each judge saw one axis only, and scored blind to the others.</p>
+    </div>
+
+    <div class="wide">
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr>
+              <th>Candidate</th><th class="num">Discover</th><th class="num">Legible</th>
+              <th class="num">Buildable</th><th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Accessory</strong> — rotate the ribbon 90°</td>
+              <td class="num">9</td><td class="num">8.5</td><td class="num">7</td>
+              <td><span class="bar" style="width:98px"></span>24.5</td>
+            </tr>
+            <tr>
+              <td><strong>Compact</strong> — a Live Activity pill</td>
+              <td class="num">8</td><td class="num">7.5</td><td class="num">8</td>
+              <td><span class="bar" style="width:94px"></span>23.5</td>
+            </tr>
+            <tr>
+              <td><strong>Reader</strong> — the ⋯ key becomes the recipe</td>
+              <td class="num">4</td><td class="num">9</td><td class="num">9</td>
+              <td><span class="bar" style="width:88px"></span>22</td>
+            </tr>
+            <tr class="dead">
+              <td>Clearing — park in the emptiest band of text</td>
+              <td class="num">7</td><td class="num">6</td><td class="num">5</td>
+              <td><span class="bar" style="width:72px"></span>18</td>
+            </tr>
+            <tr class="dead">
+              <td>Native — a real SwiftUI / Compose menu</td>
+              <td class="num">3</td><td class="num">9</td><td class="num">4</td>
+              <td><span class="bar" style="width:64px"></span>16</td>
+            </tr>
+            <tr class="dead">
+              <td>Flick — press the edge, a radial blooms</td>
+              <td class="num">6</td><td class="num">5</td><td class="num">3</td>
+              <td><span class="bar" style="width:56px"></span>14</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <p>The three that died, and the lesson each left behind:</p>
+      <ul>
+        <li><strong>Clearing</strong> scans the pane for empty rows — but four of six recipes (vim,
+          pager, htop, agent) are alt-screen apps that fill the pane edge to edge. There is no empty
+          band, so it freezes an opaque, touch-eating rectangle mid-pane for the life of the
+          process.</li>
+        <li><strong>Native</strong> cannot self-appear, which is the feature's defining requirement.
+          It is half a design by construction, and cannot carry a live timer or the two-tap arm.</li>
+        <li><strong>Flick</strong> needs a hot-zone overlapping both Android's predictive-back edge
+          and the terminal's own pan recogniser. A right-thumb scroll near the edge would dim the
+          screen and could fire a stray <code>^C</code> into a running job.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2><span class="num">04</span>The three approaches</h2>
+      <p class="dek">Each was specced in full, then attacked by a verifier whose default was that it
+        was wrong.</p>
+
+      <div class="approach">
+        <div class="tagrow">
+          <span class="tag win">recommended</span>
+          <span class="tag score">24.5 / 30</span>
+          <span class="tag">~1 day</span>
+          <span class="tag">5 files</span>
+          <span class="tag">0 new deps</span>
+        </div>
+        <h3>Accessory — rotate the ribbon 90°</h3>
+        <p>One 52pt opaque band pinned at <code>popBase</code>. At rest, a 44pt identity chip flush
+          to the trailing edge: glyph, process name, live clock. Tap and it <em>unrolls leftward</em>
+          into a horizontal row of 44pt caps. A 12-cap agent recipe occupies the identical footprint
+          to a 3-cap running recipe, forever.</p>
+      </div>
+    </div>
+
+    <div class="wide">
+      <figure>
+<pre>
+│ ⠿ minifying …                                       │
+│╭────────────────────────────────────────────────────┤ ┐
+││          ╭──────╮╭──────────╮╭─────╮│╭────────────╮│ │
+││          │! kill││  ^Z bg   ││ ^C  │││▶ npm · 0:16││ ├ 52pt, opaque theme.panel
+││          │ force││background││stop ││╰────────────╯│ │  C40 two-colour perimeter
+││          ╰──────╯╰──────────╯╰─────╯│              │ │
+│╰────────────────────────────────────────────────────┤ ┘
+│  ╭───╮ ╭─────────────────────────────╮ ╭───╮        │ ← STILL LIVE: the dismiss
+│  │ ⋯ │ │ Ctrl │Esc│Tab│ Paste │  ↕   │ │ ▣ │        │   catcher stops at the band's
+│  ╰───╯ ╰─────────────────────────────╯ ╰───╯        │   top edge (bug fix)
+</pre>
+        <figcaption>Open, `running` recipe. Destructive cap furthest from the thumb; most-used hard
+          against the chip.</figcaption>
+      </figure>
+    </div>
+
+    <div class="wrap">
+      <div class="costs">
+        <div class="cost pro">
+          <h4>Why it gets noticed</h4>
+          <p>Two channels, neither behind a gesture. The 44pt chip — and, stronger, the caps sit in
+            the strip the eye already scans for Ctrl/Esc/Tab whenever the keyboard is up. It
+            sidesteps Yantis &amp; Jonides instead of fighting it: the cue is found on a glance the
+            user is already making.</p>
+        </div>
+        <div class="cost pro">
+          <h4>Why it's readable</h4>
+          <p>Opaque <code>theme.panel</code>, no glass, no blur — every contrast figure becomes a
+            constant. <code>foreground</code> on <code>panel</code> = 12.13 : 1 on Mocha. Danger caps
+            render bold because Latte's red is 4.46:1 (fails regular, passes the 3:1 bold floor).</p>
+        </div>
+        <div class="cost pro">
+          <h4>Why it scales</h4>
+          <p>12 caps as a column is 660pt — taller than the safe area, which is what forces today's
+            <code>maxCapsHeight</code> clamp. Rotated, it is 972pt of horizontal content in a band
+            that is 52pt tall for every recipe. The clamp is <em>deleted</em>, not tuned.</p>
+        </div>
+        <div class="cost con">
+          <h4>Honest cost</h4>
+          <p>Caps past the fourth need a flick on the agent recipe. The open band is the widest
+            surface of the three, and the resting chip covers a corner permanently. With the chord
+            strip up, bottom chrome stacks to ~172pt.</p>
+        </div>
+      </div>
+      <p>Both risky bets have in-repo precedent that was verified, not assumed: the animated
+        <code>width</code> inside a clip already ships in <code>NamePill</code>
+        (<code>keybar.tsx:938</code>), and the opaque plate is the finished version of the
+        <code>surface@0.62</code> emergency patch the codebase already recorded as insufficient. It
+        fixes the key-bar scrim bug for free.</p>
+
+      <div class="approach killed">
+        <div class="tagrow">
+          <span class="tag dead">did not survive</span>
+          <span class="tag score">23.5 / 30</span>
+          <span class="tag">smallest diff</span>
+        </div>
+        <h3>Compact — the handle as a Live Activity pill</h3>
+        <p>The Dynamic Island's minimal presentation: a 44pt opaque plate carrying glyph, name and
+          clock, announcing itself once with six finite cycles of a 4pt nudge, then still. Tap and it
+          grows <em>in place</em> into a 208pt panel whose bottom header row <em>is</em> the pill.
+          Twelve caps are split by a three-segment control so no column exceeds five rows.</p>
+      </div>
+    </div>
+
+    <div class="wide">
+      <figure>
+<pre>
+│   Bash npx tsc ╭─────────────────────────────▐ │
+│   ⎿  no errors │ SESSION │COMMANDS│   NOW    ▐ │ ← 30pt segments
+│                ╭─────────────────────────────▐ │
+│                │    📎    attach             ▐ │
+│                ╭─────────────────────────────▐ │
+│                │    ⇧⇥    plan mode          ▐ │
+│                ╭─────────────────────────────▐ │
+│                │ ✦  claude    0:41        ⌄  ▐ │ ← the pill, grown
+│ ───────────────╰─────────────────────────────▐ │
+</pre>
+        <figcaption>The 12-cap agent recipe, segmented. Never taller than 342pt, never wider than
+          208.</figcaption>
+      </figure>
+    </div>
+
+    <div class="wrap">
+      <p>It has the best-argued contrast reasoning of the three — a worked C40 floor of
+        <strong>3.58:1 against any luminance whatsoever</strong> — and it is the smallest delta from
+        shipping code. <strong>It still failed verification</strong>, because the rejection was of
+        the <em>shape</em>, not the material: this is still a column of capsules climbing over the
+        output from a small resting token, and its own first trade-off concedes it “will be read as
+        ‘the same thing again’”. Its 208 × 342pt panel is the largest persistent-over-output surface
+        of the three. Its motion table and C40 arithmetic should be harvested into whatever ships.</p>
+
+      <div class="approach">
+        <div class="tagrow">
+          <span class="tag score">22 / 30</span>
+          <span class="tag">cheapest build</span>
+          <span class="tag">net deletion</span>
+          <span class="tag">zero occlusion</span>
+        </div>
+        <h3>Reader — the ⋯ key <em>becomes</em> the recipe</h3>
+        <p>Delete the floating layer. Detection's whole ambient expression is the key bar's ⋯ circle
+          filling with the recipe's identity colour and swapping its glyph — a shape-and-fill change
+          on a 49pt control at a fixed, already-visited location. The caps become the first section
+          of the menu that key already opens.</p>
+      </div>
+    </div>
+
+    <div class="wide">
+      <figure>
+<pre>
+│  ╭───╮ ╭─────────────────────────────╮ ╭───╮   │
+│  │ ✦ │ │ Ctrl │Esc│Tab│ Paste │  ↕   │ │ ▣ │   │  ⋯ → filled peach + ✦
+│  ╰───╯ ╰─────────────────────────────╯ ╰───╯   │  nothing over the terminal
+</pre>
+        <figcaption>The entire resting state. Nothing is ever drawn over the pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="wrap">
+      <div class="costs">
+        <div class="cost pro">
+          <h4>What it wins</h4>
+          <p>No new gesture, no new layer, no new back-handler rung, no edge-gesture collision on
+            either platform, zero occlusion at rest. It is the only candidate that is <em>less</em>
+            code than today — <code>ribbon.tsx</code>'s 304 lines go away.</p>
+        </div>
+        <div class="cost con">
+          <h4>What it can't promise</h4>
+          <p>That anyone notices. By its own cited literature, a 49pt disc changing fill on a control
+            the eye has learned to ignore, against a pane full of masking transients, is the textbook
+            change-blindness stimulus. And ⋯ sits on the <em>left</em> — the far side from a right
+            thumb.</p>
+        </div>
+      </div>
+      <p>Twelve caps also make the menu 810pt tall, pushing Upload and Settings below the fold
+        whenever an agent is running — an IA inversion the spec names but does not solve.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2><span class="num">05</span>Corrections from verification</h2>
+      <p class="dek">The adversarial pass re-read the source and <code>node_modules</code>. These
+        override the spec bodies.</p>
+
+      <ol class="fixes">
+        <li><strong>All three specs repeat a false claim.</strong> “Reanimated 4 neuters
+          <code>withRepeat</code> under Reduce Motion, leaving the handle a static
+          <em>invisible</em> 5pt bar.” Traced in <code>node_modules</code>: each
+          <code>withTiming</code> jumps to its <code>toValue</code> and <code>withRepeat</code> stops
+          after one rep. Since the breath is seeded at 1 and the sequence ends on
+          <code>withTiming(1)</code>, it resolves to <code>opacity: 0.95</code> — <strong>fully
+          visible and still</strong>. Reduce Motion currently makes the handle <em>brighter</em>. The
+          real defect is the WCAG 2.2.2 violation for everyone else, which stands.</li>
+        <li><strong>Don't hand-roll <code>useReduceMotion()</code></strong> — Reanimated 4.5.1
+          already exports <code>useReducedMotion</code>. Only Compact got this right.</li>
+        <li><strong><code>theme.muted</code> is unsafe on the generated schemes.</strong> On
+          Solarized Dark it is <span class="bad">2.96 : 1</span> on <code>surface</code> — Compact's
+          claimed ≈4.6:1 floor is wrong and would ship a failing caption. Use
+          <code>rgba(theme.foreground, 0.78)</code> and drop <code>theme.muted</code> from the
+          design.</li>
+        <li><strong>Accessory's C40 numbers don't reproduce.</strong> The strokes composite against
+          the background; the crossover is near L ≈ 0.165 where both sit at ≈4.2:1 — better than
+          stated, but the stated figures are wrong.</li>
+        <li><strong>Accessory contradicts itself on the destructive cap</strong> — “off-screen until
+          scrolled to” vs its own mockup showing it first at x = 0. Hiding it means reordering
+          <code>ribbon-recipes.ts</code>, contradicting the “zero recipe changes” claim.</li>
+        <li><strong>Reader's <code>inkOn</code> helper inverts on its own motivating example</strong>
+          — on Latte's grey dot it returns the 2.3:1 option by one unit. Drop the heuristic; pick by
+          <code>theme.isDark</code>.</li>
+        <li><strong>The Safari Reader precedent is overstated.</strong> iOS 18 shows the <em>words</em>
+          “Reader Available”; macOS adds a new button. The real precedent argues for a
+          <em>worded</em> cue in existing chrome.</li>
+        <li><strong>Citations:</strong> Parhi's ≥9.2mm is <em>discrete</em> and ≥9.6mm is
+          <em>serial</em> — “≥9.6mm one-handed” as a separate finding doesn't exist. The CHI '25
+          signifiers paper is Mackamul, Chevalier, Casiez &amp; Malacria; Bailly is not an author.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2><span class="num">06</span>The question nobody asked</h2>
+      <p class="dek">Every spec tunes <em>when within a process</em> the ribbon arrives. None asks
+        whether the process qualifies.</p>
+      <p>The <code>running</code> recipe matches <em>any</em> non-shell foreground command. It fires
+        for <code>git log</code>, <code>ls</code>, <code>npm test</code>, every <code>rg</code> —
+        dozens of times an hour. That is why an unrequested surface reads as intrusive no matter how
+        well it is drawn.</p>
+      <p>A <strong>minimum-lifetime gate</strong> in <code>ribbon-model.ts</code> — show
+        <code>running</code> only once the process has been alive ~3s, which is exactly when
+        kill / bg / stop become useful — is a three-line pure change with a unit test in a suite that
+        already exists. It would do more for “not intrusive” than any amount of plate, blur or
+        easing, and it composes with all three designs.</p>
+      <p>The stronger version of the same thought: <strong>make it pull, not push.</strong> If
+        long-pressing ⋯ summons the recipe on demand, the whole “it appears by itself and must not
+        interrupt” constraint disappears. That deserved to be one of the six and wasn't.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2><span class="num">07</span>Order of work</h2>
+      <p class="dek">Cheapest and most decisive first.</p>
+      <ol class="steps">
+        <li>The <code>running</code> minimum-lifetime gate in <code>ribbon-model.ts</code>, plus its
+          unit test. Three lines. Ship it alone and see whether the complaint changes.</li>
+        <li>Spike <code>@expo/ui</code>'s <code>Menu</code> on both platforms with a screenshot — the
+          cheapest high-value verification available, and what decides whether the open half can ever
+          be a platform menu.</li>
+        <li>Build <strong>Accessory</strong>, with the §05 corrections applied and
+          <code>theme.muted</code> dropped from the design.</li>
+        <li>Run the adversarial contrast test: <code>htop</code> on a many-core box,
+          <code>bat CLAUDE.md</code>, Latte at outdoor brightness. Sample the worst pixels along the
+          perimeter and assert the ratio. The current design was never measured against anything
+          harder than an idle prompt — which is exactly how it shipped at 1.69 : 1.</li>
+      </ol>
+      <p><strong>They are not mutually exclusive.</strong> Reader's ⋯-circle fill is ~15 lines and
+        composes with Accessory. If the resting chip's corner occlusion becomes the new complaint,
+        that pairing — loud identity in the chrome, band summoned on demand — is the fallback, and it
+        is the “pull, not push” design in disguise.</p>
+      <p>The Android emulator harness on this box means every Android divergence these specs concede
+        — no swipe, edge-gesture collisions, no blur — is <strong>testable today</strong> rather than
+        assumed.</p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      docs/ribbon-redesign.md · branch worktree-ribbon-design-research<br>
+      Full specs: docs/ribbon/spec-accessory.md · spec-compact.md · spec-reader.md
+    </div>
+  </footer>
+</main>
