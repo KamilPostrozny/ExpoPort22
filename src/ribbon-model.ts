@@ -144,6 +144,7 @@ export function matchRecipe(command: string): RecipeId | null {
 export function selectRecipe(
   core: RibbonCore,
   altScreen: boolean,
+  now: number,
 ): { id: RecipeId; proc: string } | null {
   if (core.suspended !== null) return { id: 'suspended', proc: core.suspended };
   if (core.command === null) return null;
@@ -151,8 +152,21 @@ export function selectRecipe(
   if (named !== null) return { id: named, proc: core.command };
   if (REPL_NAMES.has(core.command)) return null;
   if (altScreen) return null; // an unknown TUI: no caps beat wrong caps (§4.4)
+  if (now - core.startedAt < RIBBON_MIN_RUN_MS) return null;
   return { id: 'running', proc: core.command };
 }
+
+/**
+ * How long a plain foreground command must have been alive before `running` earns the band.
+ *
+ * `running` matches EVERY non-shell foreground — `git log`, `ls`, `npm test`, every `rg` — so
+ * ungated it appears dozens of times an hour for processes that are gone before the eye finds
+ * them, which is what makes an unrequested surface read as intrusive no matter how it is drawn
+ * (docs/ribbon-redesign.md §6). Three seconds is also exactly when kill / bg / stop start being
+ * the caps you actually want. The named recipes (vim, pager, htop, agent) are not gated: those
+ * are things the user opened on purpose and sat down in.
+ */
+export const RIBBON_MIN_RUN_MS = 3000;
 
 /* --- the running timer --- */
 

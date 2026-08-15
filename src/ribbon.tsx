@@ -1,304 +1,522 @@
 /**
- * The edge handle (§4.4, redesigned 2026-08: the design's "handle floats over output — two
- * states, closed and open, and zero vertical cost"). Closed, it is a 5pt colour tab hugging the
- * terminal's right edge above the bar — the recipe's identity colour, breathing while the
- * process is live. Tap or swipe it left and the panel opens: the process label, then the
- * recipe's caps as a right-aligned vertical column of glass capsules, then a stub that is the
- * handle again. Tap the terminal, pick a cap, or swipe the panel right to close. Nothing here
- * ever resizes the terminal — which is the whole point of the redesign; the old in-bar pill
- * traded ~3 rows and needed a settle overlay to hide the refit.
+ * The context band (§4.4), redesigned 2026-08-16 to the "Accessory" approach recommended in
+ * docs/ribbon-redesign.md §7 — the ribbon rotated 90°.
  *
- * The screen owns the state (`src/ribbon-model.ts` decides everything) and executes the caps;
- * this file draws, ticks the running timer, pulses the handle, arms the two-tap quit, and reads
- * the open/close gestures. Geometry is the iOS prototype's: 46×64 touch target on a 5×46 tab,
- * 40pt caps at 21pt radius, 14pt mono keys with 12.5pt captions, 7pt gaps.
+ * One 52pt band pinned at the screen's `popBase`, immediately above the key bar. At rest it is a
+ * 44pt identity chip flush to the trailing edge — glyph, process name, live clock. Tap it and the
+ * band unrolls leftward into a horizontal row of 44pt caps, so the 13-item agent recipe has the
+ * same footprint as the 3-cap running one, forever. Nothing is ever reserved: the layer is
+ * absolute and never enters `paneInsets`, so the terminal's rows do not rewrap.
+ *
+ * What the old 5pt breathing tab got wrong, measured (redesign §1): the caption on
+ * `surface@0.62` over bright output read 1.76:1 and the red destructive label 1.69:1 (need 4.5);
+ * the capsule body sat at 1.17:1 against a dark pane; the tab itself was APCA Lc ~15, which is
+ * the threshold for "treat as invisible"; and the discovery cue was an infinite opacity+scaleY
+ * pulse — blink plus zoom, the two least detectable motion families (Bartram, Ware & Calvert
+ * 2003), on a 5pt COLOUR target, and a WCAG 2.2.2 failure besides. So: no glass, no blur, no
+ * alpha ground. The plate is opaque `theme.panel`, which makes every contrast figure a constant
+ * (12.13:1 on Mocha) whatever the terminal is printing, and the only edge that meets arbitrary
+ * content is a two-colour C40 perimeter — no single role colour can work, because the terminal
+ * draws in the same theme and can always land on itself at 1.00:1.
+ *
+ * The screen owns the state (`src/ribbon-model.ts` decides, `RIBBON_MIN_RUN_MS` gates) and
+ * executes the caps; this file draws, ticks the clock, arms the two-tap quit, and reads the
+ * open gesture.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  Easing,
+  FadeIn,
+  FadeInDown,
+  FadeOut,
+  FadeOutDown,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
+  withDelay,
   withRepeat,
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
 
-import { Glass } from '@/keybar';
+import { Key, rgba } from '@/keybar';
 import { formatElapsed } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
-import { MONO, type Theme } from '@/theme';
+import { MONO, MONO_BOLD, type Theme } from '@/theme';
 
-/** Horizontal travel that counts as the open/close swipe (the prototype's 28). */
+const ANDROID = Platform.OS === 'android';
+/** Horizontal travel that counts as the open swipe (the prototype's 28). */
 const SWIPE_PX = 28;
 /** How long the two-tap quit stays armed (the prototype's 2800). */
 const ARM_MS = 2800;
+/** The band, and the row of 44pt controls inside its 1pt perimeter. */
+const BAND_H = 52;
+const ROW_H = 44;
+/**
+ * The C40 perimeter (https://www.w3.org/WAI/WCAG22/Techniques/css/C40): two adjacent strokes of
+ * opposite neutrals, so whatever the pane is drawing, one of them clears 3:1 against it — the
+ * pair bottoms out at ≈4.2:1 around relative luminance 0.165, where they cross. Deliberately
+ * OUTSIDE the theme's gamut: `border`, `scrim` and `foreground` can each land on themselves.
+ */
+const EDGE_DARK = 'rgba(0,0,0,0.9)';
+const EDGE_LIGHT = 'rgba(255,255,255,0.9)';
+/** Android's bar docks 8pt from the edge; iOS lets the trailing edge do the aiming (Parhi). */
+const EDGE_INSET = ANDROID ? 8 : 0;
+/** The house slide easing (settings sheet, name pills). */
+const EASE = Easing.bezier(0.32, 0.72, 0.3, 1);
 
-function rgba(hex: string, alpha: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
-}
-
-/* --- the closed handle --- */
-
-export type RibbonHandleProps = {
+export type RibbonAccessoryProps = {
   theme: Theme;
   recipe: { id: RecipeId; proc: string };
-  /** Distance from the parent layer's bottom to the tab (the screen's `popBase`). */
-  bottom: number;
-  onOpen: () => void;
-};
-
-export function RibbonHandle({ theme, recipe, bottom, onOpen }: RibbonHandleProps) {
-  const data = RECIPES[recipe.id];
-
-  // The breath (prototype `p22edge`): opacity and height together, only while the process is
-  // live — a stopped job or a TUI sitting there earns a still handle.
-  const breath = useSharedValue(1);
-  useEffect(() => {
-    breath.value = data.pulse
-      ? withRepeat(withSequence(withTiming(0, { duration: 950 }), withTiming(1, { duration: 950 })), -1)
-      : 1;
-  }, [data.pulse, breath]);
-  const breathStyle = useAnimatedStyle(() =>
-    data.pulse
-      ? { opacity: 0.95 - 0.5 * (1 - breath.value), transform: [{ scaleY: 1 - 0.16 * (1 - breath.value) }] }
-      : { opacity: 0.9, transform: [{ scaleY: 1 }] },
-  );
-
-  // Tap opens; so does a leftward swipe — the tab sits on the edge the panel slides in from.
-  const swipeOpen = Gesture.Pan()
-    .runOnJS(true)
-    .activeOffsetX(-12)
-    .failOffsetX(12)
-    .failOffsetY([-12, 12])
-    .onEnd((e) => {
-      if (e.translationX < -SWIPE_PX) onOpen();
-    });
-
-  return (
-    <GestureDetector gesture={swipeOpen}>
-      <Pressable onPress={onOpen} style={[styles.handleTouch, { bottom }]}>
-        <Animated.View
-          style={[styles.handleTab, { backgroundColor: theme.dots[data.dot] }, breathStyle]}
-        />
-      </Pressable>
-    </GestureDetector>
-  );
-}
-
-/* --- the open panel --- */
-
-export type RibbonPanelProps = {
-  theme: Theme;
-  recipe: { id: RecipeId; proc: string };
-  /** The instance's first-detection clock ms — the running timer's zero. */
+  /** The instance's first-detection clock ms — the chip clock's zero. */
   startedAt: number;
   /** §4.6: an upload in flight — the attach cap tints accent and goes inert. */
   busy: boolean;
-  /** Distance from the parent layer's bottom to the panel's foot (the screen's `popBase`). */
+  /** Distance from the parent layer's bottom to the band's foot: the screen's `popBase`, which
+   *  already folds in the keyboard and the chord strip. The band owns no second geometry — that
+   *  is what keeps it from desyncing off its own keyboard subscription. */
   bottom: number;
-  /** The caps column's ceiling — the panel scrolls past it rather than growing under the
-   *  status bar (prototype `rbCapsSty`). */
-  maxCapsHeight: number;
+  /** `stage.w` and the terminal's own side pad: together, the open band's width. */
+  width: number;
+  padH: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onCap: (cap: Cap) => void;
-  onClose: () => void;
 };
 
-export function RibbonPanel(props: RibbonPanelProps) {
-  const { theme, recipe, busy } = props;
+export function RibbonAccessory(props: RibbonAccessoryProps) {
+  const { theme, recipe, busy, bottom, open, onOpenChange } = props;
   const data = RECIPES[recipe.id];
-  const running = recipe.id === 'running';
-  const dotColor = theme.dots[data.dot];
+  const bandW = Math.max(160, props.width - props.padH);
+  const reduceMotion = useReducedMotion();
 
-  // The running timer: re-render once a second while the label carries elapsed time.
+  // The chip's clock: re-render once a second while a live process is being timed.
   const [, setBeat] = useState(0);
   useEffect(() => {
-    if (!running) return;
+    if (!data.pulse) return;
     const timer = setInterval(() => setBeat((n) => n + 1), 1000);
     return () => clearInterval(timer);
-  }, [running]);
+  }, [data.pulse]);
 
-  // The pulsing dot (prototype `p22pulse`): only the running recipe breathes.
-  const pulse = useSharedValue(1);
+  /** The resting silhouette is the chip's own width — measured, because the process name is not
+   *  ours to predict. The default is the running recipe's typical width, so the first frame is
+   *  the right size rather than a sliver that grows. */
+  const [chipW, setChipW] = useState(132);
+  const [overflows, setOverflows] = useState(false);
+  const contentW = useRef(0);
+  const viewW = useRef(0);
+
+  /* --- motion. Everything here is finite: the shipped design's infinite breath is a WCAG 2.2.2
+     (Pause, Stop, Hide, Level A) failure for content the user never started. --- */
+
+  const w = useSharedValue(chipW + 8);
+  const wasOpen = useRef(open);
   useEffect(() => {
-    pulse.value = running
-      ? withRepeat(withSequence(withTiming(0.35, { duration: 800 }), withTiming(1, { duration: 800 })), -1)
-      : 1;
-  }, [running, pulse]);
-  const dotStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+    const target = open ? bandW : chipW + 8;
+    // Only the open/close transition animates. A width that merely got measured, or a rotation,
+    // jumps — animating those reads as the band twitching on its own.
+    const animate = wasOpen.current !== open && !reduceMotion;
+    wasOpen.current = open;
+    w.value = animate ? withTiming(target, { duration: open ? 260 : 200, easing: EASE }) : target;
+  }, [open, chipW, bandW, reduceMotion, w]);
 
-  const label = running
-    ? `${recipe.proc} · ${formatElapsed(Date.now() - props.startedAt)}`
-    : recipe.id === 'suspended'
-      ? `${recipe.proc} · stopped`
-      : recipe.proc;
+  const caps = useSharedValue(0);
+  useEffect(() => {
+    caps.value = open
+      ? withDelay(reduceMotion ? 0 : 80, withTiming(1, { duration: 140, easing: Easing.out(Easing.quad) }))
+      : withTiming(0, { duration: 100 });
+  }, [open, reduceMotion, caps]);
 
-  // The two-tap quit (prototype `rbQuit`): the first tap fires and re-labels the cap
-  // "tap again"; un-tapped it disarms itself, and only the second tap closes the panel.
+  // The make-aware cue, played exactly once per recipe: three cycles of a 2.5pt lateral
+  // oscillation, then still forever. Slow linear oscillation is the best detection/irritation
+  // compromise in the literature; the axis is horizontal because the pane's own transients
+  // (scrolling text) are vertical, so this is orthogonal to the masking signal.
+  const nudge = useSharedValue(0);
+  useEffect(() => {
+    if (reduceMotion) {
+      nudge.value = 0;
+      return;
+    }
+    nudge.value = withRepeat(
+      withSequence(
+        withTiming(-2.5, { duration: 525, easing: Easing.inOut(Easing.sin) }),
+        withTiming(0, { duration: 525, easing: Easing.inOut(Easing.sin) }),
+      ),
+      3,
+      false,
+    );
+  }, [recipe.id, reduceMotion, nudge]);
+
+  const clipStyle = useAnimatedStyle(() => ({
+    width: w.value,
+    transform: [{ translateX: nudge.value }],
+  }));
+  const capsStyle = useAnimatedStyle(() => ({ opacity: caps.value }));
+
+  // The chevrons say "there is more" without a JS re-render per scroll frame — the JS thread
+  // stalls 40-300ms under SSH load, so the scroll offset stays on the UI thread.
+  const sx = useSharedValue(0);
+  const maxX = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((e) => {
+    sx.value = e.contentOffset.x;
+  });
+  const leftChevron = useAnimatedStyle(() => ({
+    opacity: withTiming(sx.value > 2 ? 1 : 0, { duration: 120 }),
+  }));
+  const rightChevron = useAnimatedStyle(() => ({
+    opacity: withTiming(sx.value < maxX.value - 2 ? 1 : 0, { duration: 120 }),
+  }));
+
+  /** Whether the caps overflow is MEASURED, not counted: four of six recipes then install no
+   *  scroll recogniser at all, on every device rather than on the ones a cap count guessed. */
+  const overflowed = useRef(false);
+  const measure = () => {
+    maxX.value = Math.max(0, contentW.current - viewW.current);
+    const over = contentW.current > viewW.current + 1;
+    if (over === overflowed.current) return;
+    overflowed.current = over;
+    console.log(
+      `[ribbon] band ${contentW.current.toFixed(0)}/${viewW.current.toFixed(0)} scroll=${over}`,
+    );
+    setOverflows(over);
+  };
+
+  /* --- the two-tap quit (prototype `rbQuit`) --- */
+
   const [armed, setArmed] = useState(false);
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => clearTimeout(armTimer.current ?? undefined), []);
 
   const tap = (c: Cap) => {
     props.onCap(c);
-    if (c.arm && !armed) {
+    if (c.arm === true && !armed) {
       setArmed(true);
       clearTimeout(armTimer.current ?? undefined);
       armTimer.current = setTimeout(() => setArmed(false), ARM_MS);
       return; // still open — the cap now reads "tap again"
     }
-    props.onClose();
+    // Any other cap disarms without firing the armed one (HIG Alerts' Cancel-button rule).
+    if (armed) setArmed(false);
+    // A search cap raises the keyboard and the band rides up with `popBase`: it stays open, so
+    // the follow-up cap (`n`, next hit) is one tap away on the keyboard's top edge.
+    if (c.focus === true) return;
+    onOpenChange(false);
   };
 
-  // Swipe the column right → closed, the mirror of the handle's open swipe.
-  const swipeClose = Gesture.Pan()
-    .runOnJS(true)
-    .activeOffsetX(12)
-    .failOffsetX(-12)
-    .failOffsetY([-12, 12])
-    .onEnd((e) => {
-      if (e.translationX > SWIPE_PX) props.onClose();
-    });
+  // Self-appearing chrome is invisible to VoiceOver unless it says so, and must not steal focus
+  // from whatever is being read.
+  useEffect(() => {
+    AccessibilityInfo.announceForAccessibility(`${recipe.proc} actions available`);
+  }, [recipe.id, recipe.proc]);
 
-  const cap = (c: Cap, i: number) => {
+  // The leftward swipe still opens the band on iOS — fluent, already learned, and never the only
+  // route. Not on Android: the back gesture owns both edges, exclusion is capped at 200dp and
+  // refused at the bottom, and RNGH will not arbitrate against system edge gestures (#833).
+  // Closing has no swipe: the caps' own horizontal scroll is the better claimant of that axis.
+  const swipeOpen = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!ANDROID && !open)
+        .runOnJS(true)
+        .activeOffsetX(-12)
+        .failOffsetX(12)
+        .failOffsetY([-12, 12])
+        .onEnd((e) => {
+          if (e.translationX < -SWIPE_PX) onOpenChange(true);
+        }),
+    [open, onOpenChange],
+  );
+
+  const meta = data.pulse
+    ? ` · ${formatElapsed(Date.now() - props.startedAt)}`
+    : recipe.id === 'suspended'
+      ? ' · stopped'
+      : null;
+
+  const renderCap = (c: Cap, i: number) => {
     if (c.header !== undefined)
       return (
-        <Text
+        // A recess between groups, not a cap: an opaque chip on the backmost ground, inert.
+        // (The old bare letterspaced 9.5pt header with a text-shadow was a display-type rescue
+        // that never worked over a wall of text.)
+        <View
           key={i}
-          // The prototype's text-shadow (`0 1px 3px crust@0.9`) — a header floats bare over
-          // whatever the pane is showing, and the shadow is what keeps it legible there.
-          style={[
-            styles.header,
-            { color: theme.muted, textShadowColor: rgba(theme.scrim, 0.9) },
-          ]}>
-          {c.header}
-        </Text>
+          accessibilityRole="header"
+          style={[styles.marker, { backgroundColor: theme.scrim }]}>
+          <Text
+            maxFontSizeMultiplier={1.3}
+            style={[styles.markerText, { color: rgba(theme.foreground, 0.78) }]}>
+            {c.header}
+          </Text>
+        </View>
       );
     const arm = c.arm === true && armed;
     const danger = c.danger === true || arm;
     const attachBusy = busy && c.action === 'attach';
     const caption = arm ? 'tap again' : c.caption;
+    // Captions are `foreground` at 0.78 over a known opaque ground, never `theme.muted`: muted is
+    // mix(bg, fg, 0.78) on the 22 generated schemes and lands at 2.96:1 on Solarized Dark.
+    const ink = attachBusy ? theme.background : danger ? theme.danger : theme.foreground;
+    const captionInk = attachBusy
+      ? theme.background
+      : danger
+        ? theme.danger
+        : rgba(theme.foreground, 0.78);
     return (
-      <Glass
+      <Key
         key={i}
-        theme={theme}
-        radius={21}
-        style={danger ? { borderColor: rgba(theme.danger, arm ? 0.85 : 0.42) } : null}>
-        {/* The bar's glass tint is tuned for the card's quiet bottom band; these caps float
-            over a wall of text, so they take the prototype's own ground — surface0 at ~0.7
-            over the blur (`hexA(f.s0, 0.72)`), which is what keeps a cap readable on top of
-            a full CLAUDE.md (user, 2026-08-12, screenshot). */}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.surface, 0.62) }]} />
-        {danger && (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.danger, 0.16) }]} />
-        )}
-        <Pressable
-          disabled={attachBusy}
-          onPress={() => tap(c)}
-          style={({ pressed }) => [
-            styles.cap,
-            attachBusy && { backgroundColor: rgba(theme.accent, 0.5) }, // inert tint = the progress UI
-            pressed && { opacity: 0.5 },
-          ]}>
-          <Text style={[styles.capKey, { color: danger ? theme.danger : theme.foreground }]}>
+        disabled={attachBusy}
+        onPress={() => tap(c)}
+        accessibilityLabel={`${danger ? 'Destructive: ' : ''}${arm ? 'Confirm quit' : (c.caption ?? c.label ?? '')}`}
+        accessibilityHint={arm ? 'Tap again to confirm' : `Sends ${c.label}`}
+        style={[
+          styles.cap,
+          {
+            backgroundColor: attachBusy
+              ? theme.accent // §4.6: the inert tint IS the upload progress UI
+              : danger
+                ? rgba(theme.danger, arm ? 0.2 : 0.18)
+                : theme.surface,
+            borderColor: danger ? rgba(theme.danger, arm ? 0.9 : 0.55) : 'transparent',
+          },
+        ]}>
+        <View style={styles.capKeyRow}>
+          {danger && (
+            // Colour is never the only signal (WCAG 1.4.1) — and the bold weight below is what
+            // rescues Latte's #d20f39, which is 4.46:1 on the plate: it fails the 4.5 floor at a
+            // regular weight and passes the 3:1 one at 14pt bold.
+            <SymbolView
+              name="exclamationmark.triangle.fill"
+              size={10}
+              tintColor={theme.danger}
+              fallback={<Text style={[styles.capWarn, { color: theme.danger }]}>!</Text>}
+            />
+          )}
+          <Text
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.3}
+            style={[styles.capKey, danger && styles.capKeyDanger, { color: ink }]}>
             {c.label}
           </Text>
-          {caption !== undefined && (
-            <Text style={[styles.capCaption, { color: danger ? theme.danger : theme.muted }]}>
-              {caption}
-            </Text>
-          )}
-        </Pressable>
-      </Glass>
+        </View>
+        {caption !== undefined && (
+          <Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={[styles.capCaption, { color: captionInk }]}>
+            {caption}
+          </Text>
+        )}
+      </Key>
     );
   };
 
   return (
-    <View style={StyleSheet.absoluteFill}>
-      {/* The scrim is invisible and eats exactly one tap — "tap the terminal to close". */}
-      <Pressable style={StyleSheet.absoluteFill} onPress={props.onClose} />
-      <GestureDetector gesture={swipeClose}>
-        <View style={[styles.column, { bottom: props.bottom + 2 }]}>
-          {/* The label needs its own ground: bare over a busy pane, an 11pt muted name simply
-              vanished (user, 2026-08-12, dark-mode screenshot) — so it rides the same glass
-              the caps do, one size down. */}
-          <Glass theme={theme} radius={14}>
-            <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: rgba(theme.surface, 0.62) }]}
-            />
-            <View style={styles.labelRow}>
-              <Animated.View style={[styles.dot, { backgroundColor: dotColor }, dotStyle]} />
-              <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
-            </View>
-          </Glass>
-          <ScrollView
-            style={{ maxHeight: props.maxCapsHeight }}
-            contentContainerStyle={styles.caps}
-            showsVerticalScrollIndicator={false}>
-            {data.caps.map(cap)}
-          </ScrollView>
-          {/* The handle again, at the column's foot — tap to close, same as it opened. */}
-          <Pressable onPress={props.onClose} hitSlop={12}>
-            <View style={[styles.stub, { backgroundColor: dotColor }]} />
-          </Pressable>
-        </View>
+    <>
+      {/* The dismiss catcher stops at the band's TOP edge, so unlike the old full-screen scrim
+          the key bar stays live while the band is open — combining a cap with Ctrl/Esc/Tab was
+          impossible before, and the first tap on any of them only closed the panel. */}
+      {open && (
+        <Pressable
+          accessible={false}
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: bottom + BAND_H }}
+          onPress={() => onOpenChange(false)}
+        />
+      )}
+      <GestureDetector gesture={swipeOpen}>
+        <Animated.View
+          entering={(reduceMotion ? FadeIn : FadeInDown).duration(180)}
+          // 180 out as well as in: a 140 exit against a 180 entry read as the ribbon blinking
+          // out while the arrival glided (aae62fe, 2026-08-11).
+          exiting={(reduceMotion ? FadeOut : FadeOutDown).duration(180)}
+          style={[
+            styles.clip,
+            { bottom, borderColor: EDGE_DARK },
+            ANDROID && styles.androidShadow,
+            clipStyle,
+          ]}>
+          {/* Fixed width, so the plate's own layout never re-resolves while the clip animates. */}
+          <View style={[styles.plate, { width: bandW, backgroundColor: theme.panel }]}>
+            <Animated.View
+              style={[styles.capsRegion, capsStyle]}
+              pointerEvents={open ? 'auto' : 'none'}>
+              <Animated.ScrollView
+                horizontal
+                directionalLockEnabled
+                showsHorizontalScrollIndicator={false}
+                scrollEnabled={overflows}
+                scrollEventThrottle={16}
+                onScroll={onScroll}
+                onLayout={(e) => {
+                  viewW.current = e.nativeEvent.layout.width;
+                  measure();
+                }}
+                onContentSizeChange={(cw) => {
+                  contentW.current = cw;
+                  measure();
+                }}
+                // flex-end is load-bearing: when the caps fit they sit hard against the chip,
+                // i.e. nearest the thumb. When they overflow, flexGrow is inert and the row
+                // starts at x = 0, which is where the scroll rests.
+                contentContainerStyle={styles.capsRow}>
+                {data.caps.map(renderCap)}
+              </Animated.ScrollView>
+              {overflows && (
+                <>
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.chevron, { left: 0, backgroundColor: theme.panel }, leftChevron]}>
+                    <Text style={[styles.chevronText, { color: rgba(theme.foreground, 0.78) }]}>‹</Text>
+                  </Animated.View>
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.chevron, { right: 0, backgroundColor: theme.panel }, rightChevron]}>
+                    <Text style={[styles.chevronText, { color: rgba(theme.foreground, 0.78) }]}>›</Text>
+                  </Animated.View>
+                </>
+              )}
+            </Animated.View>
+            <View style={[styles.divider, { backgroundColor: theme.border }]} />
+            {/* The one always-present control: the same object at two sizes, Dynamic-Island
+                style — tap to unroll, tap to roll back up. */}
+            <Pressable
+              onLayout={(e) => setChipW(e.nativeEvent.layout.width)}
+              onPress={() => onOpenChange(!open)}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: EDGE_INSET + 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={`${recipe.proc} actions`}
+              accessibilityHint={open ? 'Hides the actions' : `Shows the actions for ${recipe.proc}`}
+              accessibilityState={{ expanded: open }}
+              style={({ pressed }) => [
+                styles.chip,
+                { backgroundColor: theme.surface },
+                pressed && { opacity: 0.5 },
+              ]}>
+              <SymbolView
+                name={data.sf}
+                size={15}
+                tintColor={theme.dots[data.dot]}
+                fallback={
+                  <Text style={[styles.mark, { color: theme.dots[data.dot] }]}>{data.mark}</Text>
+                }
+              />
+              <Text
+                numberOfLines={1}
+                maxFontSizeMultiplier={1.3}
+                style={[styles.chipName, { color: theme.foreground }]}>
+                {recipe.proc}
+              </Text>
+              {meta !== null && (
+                <Text
+                  maxFontSizeMultiplier={1.3}
+                  style={[styles.chipMeta, { color: rgba(theme.foreground, 0.78) }]}>
+                  {meta}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+          {/* The inner half of the C40 pair, over the plate's outermost point. */}
+          <View pointerEvents="none" style={[styles.innerStroke, { borderColor: EDGE_LIGHT }]} />
+        </Animated.View>
       </GestureDetector>
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  /** 46×64 of touch target on 5pt of ink — an edge tab any thumb can find blind. */
-  handleTouch: {
+  /** Square right corners hard against the trailing edge — the edge does the aiming, and the
+   *  visible left end is what unrolls. */
+  clip: {
     position: 'absolute',
-    right: 0,
-    width: 46,
-    height: 64,
+    right: EDGE_INSET,
+    height: BAND_H,
+    overflow: 'hidden',
     alignItems: 'flex-end',
+    borderTopLeftRadius: 26,
+    borderBottomLeftRadius: 26,
+    borderWidth: 1,
+    borderRightWidth: 0,
+  },
+  // iOS gets no shadow: on a rounded overlay it draws as a RECTANGLE here (user, 2026-08-12) —
+  // the C40 perimeter carries the figure/ground separation alone.
+  androidShadow: { boxShadow: '0 2px 6px rgba(0,0,0,0.5)' },
+  innerStroke: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    borderWidth: 1,
+    borderRightWidth: 0,
+    borderTopLeftRadius: 25,
+    borderBottomLeftRadius: 25,
+  },
+  /** Opaque. No Glass, no BlurView, no rgba(surface, 0.62) — that is the whole redesign in one
+   *  line, and it is also why Reduce Transparency is a no-op here and why Android (where
+   *  expo-blur cannot cross the WebView's window boundary) gets the same thing iOS does. */
+  plate: {
+    height: BAND_H - 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  capsRegion: { flex: 1, height: ROW_H, overflow: 'hidden' },
+  capsRow: {
+    flexGrow: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  chevron: {
+    position: 'absolute',
+    top: 0,
+    width: 16,
+    height: ROW_H,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  handleTab: { width: 5, height: 46, borderTopLeftRadius: 4, borderBottomLeftRadius: 4 },
+  chevronText: { fontFamily: MONO, fontSize: 13 },
+  divider: { width: 1, height: 28, marginHorizontal: 6, opacity: 0.6 },
 
-  column: { position: 'absolute', right: 14, alignItems: 'flex-end', gap: 7 },
-  // No drop shadow, deliberately: on iOS a shadow on the glass's transparent outer view draws
-  // as a RECTANGLE around the capsule (user, 2026-08-12, screenshot) — the bar's glass skips
-  // it for the same reason. The surface0 ground carries the separation alone.
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    height: 28,
-    paddingHorizontal: 12,
-  },
-  dot: { width: 7, height: 7, borderRadius: 4 },
-  label: { fontFamily: MONO, fontSize: 11 },
-  caps: { alignItems: 'flex-end', gap: 7, paddingRight: 1 },
-  header: {
-    fontSize: 9.5,
-    fontWeight: '600',
-    letterSpacing: 0.7,
-    paddingTop: 6,
-    paddingRight: 10,
-    paddingBottom: 1,
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
   cap: {
-    height: 40,
+    height: ROW_H,
+    minWidth: 52,
+    paddingHorizontal: 10,
+    borderRadius: 22,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  capKeyRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  capKey: { fontFamily: MONO, fontSize: 14, fontWeight: '500', lineHeight: 17 },
+  capKeyDanger: { fontFamily: MONO_BOLD },
+  capCaption: { fontSize: 10, lineHeight: 12 },
+  capWarn: { fontFamily: MONO_BOLD, fontSize: 10 },
+
+  chip: {
+    height: ROW_H,
+    maxWidth: 172,
+    borderRadius: 22,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 15,
+    gap: 6,
+    paddingLeft: 10,
+    paddingRight: 12,
   },
-  capKey: { fontFamily: MONO, fontSize: 14, fontWeight: '500' },
-  capCaption: { fontSize: 12.5 },
-  stub: {
-    width: 5,
-    height: 46,
-    borderRadius: 4,
-    marginTop: 2,
-    marginRight: 4,
+  mark: { fontFamily: MONO_BOLD, fontSize: 13 },
+  chipName: { fontFamily: MONO, fontSize: 12, maxWidth: 96 },
+  // Tabular figures, or the clock jitters every second as the digits change width.
+  chipMeta: { fontFamily: MONO, fontSize: 12, fontVariant: ['tabular-nums'] },
+  marker: {
+    height: ROW_H,
+    borderRadius: 22,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  markerText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
 });

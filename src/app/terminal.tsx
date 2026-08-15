@@ -51,9 +51,10 @@ import KeyBar, {
   TabsHintPopover,
   type BarPopover,
 } from '@/keybar';
-import { RibbonHandle, RibbonPanel } from '@/ribbon';
+import { RibbonAccessory } from '@/ribbon';
 import {
   RIBBON_IDLE,
+  RIBBON_MIN_RUN_MS,
   killCommand,
   ribbonPoll,
   ribbonResumed,
@@ -842,6 +843,7 @@ export default function SessionScreen() {
    *  dragX, the settle latch — runs in the bar's worklet against the shared values above. */
   const onZoomGrab = (dx: number, dy: number) => {
     if (stage === null) return;
+    setRbOpen(false); // the band fades out with the bar; it must not be open where the flight lands
     const at = swRef.current;
     {
       if (!dragging.current && at === 'closed') {
@@ -1236,6 +1238,10 @@ export default function SessionScreen() {
   // leaving is the sheet's Disconnect / the overlay's Setup button's job (same reasoning as
   // the iOS `gestureEnabled: false` below). The sheets are Modals, whose dialog windows take
   // the back press natively (`onRequestClose`) before this handler can see it.
+  /** The band's open flag, read by the back ladder below — which is declared above the ribbon's
+   *  own state, and a `rbOpen` in this effect's dependency array would be a temporal-dead-zone
+   *  throw on the first render (the same reason the key bar's handlers ride a ref). */
+  const rbOpenRef = useRef(false);
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -1243,6 +1249,8 @@ export default function SessionScreen() {
         if (sw === 'open') doneToActive(); // mid-transition: swallowed, the zoom owns the screen
       } else if (open !== 'none') {
         setOpen('none');
+      } else if (rbOpenRef.current) {
+        setRbOpen(false); // the band is a mode, and back closes a mode (the CAB contract)
       } else {
         BackHandler.exitApp();
       }
@@ -1588,8 +1596,10 @@ export default function SessionScreen() {
    * State crosses in ribbon-model's reducer (tested): T9's foreground poll, T6's altScreen, and
    * the ^Z watch on the key bar's send path. The screen only feeds events in and executes caps. */
   const [ribbonCore, setRibbonCore] = useState(RIBBON_IDLE);
-  /** The panel: open by the handle's tap/swipe, closed by a cap, the scrim, or the stub. */
+  /** The band: unrolled by the chip's tap (iOS: or its leftward swipe), rolled back up by a cap,
+   *  the chip, a tap on the terminal above it, or Android's back. */
   const [rbOpen, setRbOpen] = useState(false);
+  rbOpenRef.current = rbOpen;
   const fgCommand = tmux.foreground?.command ?? null;
   const fgPid = tmux.foreground?.pid ?? null;
   useEffect(() => {
@@ -1602,8 +1612,15 @@ export default function SessionScreen() {
       ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
     );
   }, [fgCommand, fgPid, frozen]);
-  // A new process instance means the caps under the finger changed: the panel closes.
-  useEffect(() => setRbOpen(false), [ribbonCore.instance]);
+  /** One re-render as `RIBBON_MIN_RUN_MS` elapses. `selectRecipe` reads the clock, and a quiet
+   *  poll deliberately returns the same core object (no re-render), so without this the band for
+   *  a slow job would wait for whatever happened to render next. 50ms of slack: the timeout must
+   *  land on the far side of the gate, never a millisecond short of it. */
+  const [, setGateBeat] = useState(0);
+  useEffect(() => {
+    const timer = setTimeout(() => setGateBeat((n) => n + 1), RIBBON_MIN_RUN_MS + 50);
+    return () => clearTimeout(timer);
+  }, [ribbonCore.instance]);
 
   /** The recipe for a window we are switching to, named from the list rather than waited for,
    *  so the handle changes with the transition instead of a poll beat after it. Every switch
@@ -1615,7 +1632,11 @@ export default function SessionScreen() {
     );
   };
 
-  const recipe = connected ? selectRecipe(ribbonCore, modes.altScreen) : null;
+  const recipe = connected ? selectRecipe(ribbonCore, modes.altScreen, Date.now()) : null;
+  // A DIFFERENT recipe means the caps under the finger changed, so the band collapses. A new
+  // instance of the same one (a second `npm run build`) leaves it open and just restarts the
+  // clock — closing chrome the user did not close is worse than a stale timer.
+  useEffect(() => setRbOpen(false), [recipe?.id]);
 
   /** Every key on its way to the PTY, with the ribbon's ^Z watch on the side. `ribbonSent`
    *  returns the same object for bytes that are not its business, so this re-renders nothing. */
@@ -2352,38 +2373,35 @@ export default function SessionScreen() {
       />
       </Animated.View>
 
-      {/* The edge handle (§4.4): the recipe's colour tab on the terminal's right edge, floating
-          over output just above the bar — zero vertical cost, so a recipe appearing or leaving
-          never resizes the terminal. It fades with the bar during the switcher's flight. Open,
-          the panel is its own layer: an invisible scrim (tap the terminal to close) under a
-          right-aligned column of caps. */}
-      {recipe !== null && !rbOpen && (
-        <Animated.View
+      {/* The context band (§4.4, "Accessory"): a 52pt opaque band at `popBase`, resting as a
+          44pt identity chip on the terminal's trailing edge and unrolling leftward into a row of
+          caps. Absolute, so it costs no vertical space however many caps a recipe has — the
+          agent's thirteen and the running recipe's three are the same 52pt. It fades with the
+          bar during the switcher's flight. */}
+      {/* The layer stays mounted whatever the recipe is: the band's own exit animation needs a
+          parent that outlives it, or a finished process takes the band off screen in one frame
+          instead of the 180ms glide down. */}
+      <Animated.View
           pointerEvents="box-none"
           style={[StyleSheet.absoluteFill, barFadeStyle]}>
-          <RibbonHandle
+        {recipe !== null && (
+          <RibbonAccessory
             theme={theme}
             recipe={recipe}
+            startedAt={ribbonCore.startedAt}
+            busy={sending}
             bottom={popBase}
-            onOpen={() => {
-              console.log('[ribbon] open', recipe.proc);
-              setRbOpen(true);
+            width={stage?.w ?? 0}
+            padH={padH}
+            open={rbOpen}
+            onOpenChange={(next) => {
+              if (next) console.log('[ribbon] open', recipe.proc);
+              setRbOpen(next);
             }}
+            onCap={onRibbonCap}
           />
-        </Animated.View>
-      )}
-      {recipe !== null && rbOpen && (
-        <RibbonPanel
-          theme={theme}
-          recipe={recipe}
-          startedAt={ribbonCore.startedAt}
-          busy={sending}
-          bottom={popBase}
-          maxCapsHeight={Math.max(150, (stage?.h ?? 600) - popBase - insets.top - 104)}
-          onCap={onRibbonCap}
-          onClose={() => setRbOpen(false)}
-        />
-      )}
+        )}
+      </Animated.View>
 
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the
           prototype), popovers anchored `popBase` up. That base carries the keyboard itself:

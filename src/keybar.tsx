@@ -209,7 +209,8 @@ const SIDE_MARGIN = ANDROID ? 8 : 24;
  *  call sites; the frozen object keeps the style array's identity stable across renders. */
 const DISPLAY_NONE = { display: 'none' } as const;
 
-function rgba(hex: string, alpha: number): string {
+/** Exported for the ribbon, which had a byte-identical copy of it. */
+export function rgba(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
@@ -280,22 +281,33 @@ export const BAR_PAD_TOP = 5;
 /** Every pressable on the bar: dim + shrink while touched, light haptic on the completed tap —
  *  NOT on touch-down, where a bar swipe starting over a key buzzed on every hop and broke the
  *  slide's fluidity; Safari's has none (user, 2026-08-11). A pan that wins the race never
- *  completes the press, so swipes are silent. */
-function Key({
+ *  completes the press, so swipes are silent. Exported for the ribbon's caps: they are the same
+ *  kind of control and used to be a bare Pressable with neither the haptic nor the shrink. */
+export function Key({
   onPress,
   onLongPress,
   delayLongPress,
+  disabled,
+  accessibilityLabel,
+  accessibilityHint,
   style,
   children,
 }: {
   onPress?: () => void;
   onLongPress?: () => void;
   delayLongPress?: number;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
   style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
 }) {
   return (
     <Pressable
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       onPress={
         onPress &&
         (() => {

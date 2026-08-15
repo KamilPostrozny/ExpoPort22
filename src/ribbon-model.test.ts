@@ -6,6 +6,7 @@ import { expect, test } from 'bun:test';
 
 import {
   RIBBON_IDLE,
+  RIBBON_MIN_RUN_MS,
   Z_CANDIDATE_MS,
   formatElapsed,
   killCommand,
@@ -25,33 +26,51 @@ function running(command: string): RibbonCore {
   return ribbonPoll(RIBBON_IDLE, fg(command), 1000);
 }
 
+/** `selectRecipe` with the clock already past `RIBBON_MIN_RUN_MS` — every test but the gate's
+ *  own is about WHICH recipe, not when. */
+const pick = (core: RibbonCore, altScreen: boolean, now = 1_000_000) =>
+  selectRecipe(core, altScreen, now);
+
 /* --- the selection table (§4.4) --- */
 
 test('recipe selection: names, running, and the silences', () => {
   // Name matches win, alt screen or not.
   for (const name of ['vim', 'nvim', 'vi']) {
-    expect(selectRecipe(running(name), true)).toEqual({ id: 'vim', proc: name });
+    expect(pick(running(name), true)).toEqual({ id: 'vim', proc: name });
   }
   for (const name of ['less', 'man', 'bat', 'delta']) {
-    expect(selectRecipe(running(name), true)?.id).toBe('pager');
+    expect(pick(running(name), true)?.id).toBe('pager');
   }
   for (const name of ['htop', 'top', 'btop']) {
-    expect(selectRecipe(running(name), true)?.id).toBe('htop');
+    expect(pick(running(name), true)?.id).toBe('htop');
   }
   for (const name of ['claude', 'codex', 'aider', 'gemini']) {
-    expect(selectRecipe(running(name), false)?.id).toBe('agent');
+    expect(pick(running(name), false)?.id).toBe('agent');
   }
   // Non-shell, no alt screen → running.
-  expect(selectRecipe(running('cargo'), false)).toEqual({ id: 'running', proc: 'cargo' });
-  expect(selectRecipe(running('sleep'), false)?.id).toBe('running');
+  expect(pick(running('cargo'), false)).toEqual({ id: 'running', proc: 'cargo' });
+  expect(pick(running('sleep'), false)?.id).toBe('running');
   // REPLs at their prompt → nothing (they would otherwise read as running).
   for (const name of ['python', 'node', 'irb', 'psql']) {
-    expect(selectRecipe(running(name), false)).toBeNull();
+    expect(pick(running(name), false)).toBeNull();
   }
   // An unknown TUI (alt screen, unmatched name) → nothing.
-  expect(selectRecipe(running('nethack'), true)).toBeNull();
+  expect(pick(running('nethack'), true)).toBeNull();
   // Idle shell: the poll already reports null, nothing to select.
-  expect(selectRecipe(RIBBON_IDLE, false)).toBeNull();
+  expect(pick(RIBBON_IDLE, false)).toBeNull();
+});
+
+test('a short-lived command never earns the band; a slow one does', () => {
+  const core = running('git'); // startedAt = 1000
+  expect(selectRecipe(core, false, 1000)).toBeNull();
+  expect(selectRecipe(core, false, 1000 + RIBBON_MIN_RUN_MS - 1)).toBeNull();
+  expect(selectRecipe(core, false, 1000 + RIBBON_MIN_RUN_MS)?.id).toBe('running');
+  // The gate is `running`'s alone: something the user opened on purpose shows at once.
+  expect(selectRecipe(running('vim'), true, 1000)?.id).toBe('vim');
+  expect(selectRecipe(running('claude'), false, 1000)?.id).toBe('agent');
+  // So does a job we watched stop — it has been alive by definition.
+  const stopped = { ...running('sleep'), suspended: 'sleep', command: null };
+  expect(selectRecipe(stopped, false, 1000)?.id).toBe('suspended');
 });
 
 /* --- instance identity + the timer --- */
@@ -72,7 +91,7 @@ test('a new foreground is a new instance with a fresh timer', () => {
 test('the same command through an idle gap is a new instance', () => {
   const core = running('vim');
   const idle = ribbonPoll(core, null, 3000);
-  expect(selectRecipe(idle, false)).toBeNull();
+  expect(pick(idle, false)).toBeNull();
   const again = ribbonPoll(idle, fg('vim'), 5000);
   expect(again.instance).toBe(core.instance + 2 - 1); // idle did not bump, the return did
   expect(again.instance).toBeGreaterThan(core.instance);
@@ -92,17 +111,17 @@ test('^Z then a shell poll = suspended; without the ^Z it just exited', () => {
   const core = running('sleep');
   const zed = ribbonSent(core, '\x1a', 2000);
   const stopped = ribbonPoll(zed, null, 3000);
-  expect(selectRecipe(stopped, false)).toEqual({ id: 'suspended', proc: 'sleep' });
+  expect(pick(stopped, false)).toEqual({ id: 'suspended', proc: 'sleep' });
   expect(stopped.instance).toBe(core.instance + 1); // the stop is its own instance
 
   const exited = ribbonPoll(core, null, 3000); // no ^Z was ever sent
-  expect(selectRecipe(exited, false)).toBeNull();
+  expect(pick(exited, false)).toBeNull();
 });
 
 test('a stale ^Z candidate expires', () => {
   const zed = ribbonSent(running('sleep'), '\x1a', 2000);
   const late = ribbonPoll(zed, null, 2000 + Z_CANDIDATE_MS + 1);
-  expect(selectRecipe(late, false)).toBeNull();
+  expect(pick(late, false)).toBeNull();
 });
 
 test('^Z at an idle shell tracks nothing', () => {
@@ -117,11 +136,11 @@ test('other bytes track nothing', () => {
 test('fg cap clears the stop now; the poll seeing it back in front clears it too', () => {
   const stopped = ribbonPoll(ribbonSent(running('sleep'), '\x1a', 2000), null, 3000);
   const resumed = ribbonResumed(stopped);
-  expect(selectRecipe(resumed, false)).toBeNull();
+  expect(pick(resumed, false)).toBeNull();
   // The other path: the user typed `fg` themselves and the poll noticed.
   const polledBack = ribbonPoll(stopped, fg('sleep'), 5000);
   expect(polledBack.suspended).toBeNull();
-  expect(selectRecipe(polledBack, false)?.id).toBe('running');
+  expect(pick(polledBack, false)?.id).toBe('running');
 });
 
 test('resume on a core with nothing suspended is a no-op', () => {
