@@ -93,6 +93,35 @@ and, probably, bug 2. The alternative is vendoring `SearchAddon`.
 
 ---
 
+## 4. The outgoing card shows the incoming tab's contents for a frame
+
+**Repro.** Switch tabs with any swipe. Watch the moment the switch is almost complete.
+
+**Symptom.** While the *previous* tab's card is still on screen, its contents are replaced with the
+contents of the tab being switched to. Brief, but visible every time.
+
+**Suspect: this may be a regression from the perf branch, not a pre-existing fault.** It has not
+been settled, and it should be before `e75141f` is merged.
+
+`afterHostRedraw` (`src/app/terminal.tsx`) releases the flight on two facts: bytes arrived after a
+baseline, and then a frame with no new bytes ("arrived, and quiet for a frame"). `e75141f` changed
+when those bytes are counted — `session.emit` now buffers a turn's chunks and delivers them in one
+batch on a zero timer, and the sink advances `dataSeq` once per batch instead of once per chunk. A
+redraw that used to arrive as several events spread over several frames now lands as one, so the
+quiet frame comes **one or more frames sooner**, and the flight is released earlier than it was.
+Releasing early is exactly the shape of this symptom.
+
+Note the file already documents a residual of this kind at the `selectCard` comment — "the card is
+one frame of cut behind the live pane rather than a tenth of a second of double exposure" — so the
+phenomenon pre-dates the branch. The open question is only whether the branch made it worse.
+
+**How to settle it** (the method used for everything else in this file): `git checkout fa4cb78`,
+reload, switch tabs a few times, and see whether the flash is there with the perf changes absent.
+If it is gone on the baseline, the fix is in `afterHostRedraw` — it needs to count frames rather
+than batches, or wait a frame longer, now that arrivals are coalesced.
+
+---
+
 ## Also open, found the same session, lower priority
 
 ### Grid tap intermittently does nothing
