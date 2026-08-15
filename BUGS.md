@@ -100,8 +100,9 @@ and, probably, bug 2. The alternative is vendoring `SearchAddon`.
 **Symptom.** While the *previous* tab's card is still on screen, its contents are replaced with the
 contents of the tab being switched to. Brief, but visible every time.
 
-**Suspect: this may be a regression from the perf branch, not a pre-existing fault.** It has not
-been settled, and it should be before `e75141f` is merged.
+**Settled: pre-existing, not the perf branch.** Reproduced on `fa4cb78` with the perf changes
+absent (device, 2026-08-15). The suspicion below is kept because it is still the mechanism most
+likely to make this *worse*, and whoever fixes it should know the timing moved.
 
 `afterHostRedraw` (`src/app/terminal.tsx`) releases the flight on two facts: bytes arrived after a
 baseline, and then a frame with no new bytes ("arrived, and quiet for a frame"). `e75141f` changed
@@ -115,10 +116,11 @@ Note the file already documents a residual of this kind at the `selectCard` comm
 one frame of cut behind the live pane rather than a tenth of a second of double exposure" — so the
 phenomenon pre-dates the branch. The open question is only whether the branch made it worse.
 
-**How to settle it** (the method used for everything else in this file): `git checkout fa4cb78`,
-reload, switch tabs a few times, and see whether the flash is there with the perf changes absent.
-If it is gone on the baseline, the fix is in `afterHostRedraw` — it needs to count frames rather
-than batches, or wait a frame longer, now that arrivals are coalesced.
+**Where a fix goes.** `afterHostRedraw` releases on "bytes arrived, then a frame with none". The
+outgoing card is still on screen at that moment, so anything that lands between the release and the
+card leaving is drawn into the wrong card. Either the release wants to be a frame later than the
+first quiet frame, or the card wants to stop taking live content the instant the flight is armed
+rather than when it ends.
 
 ---
 
