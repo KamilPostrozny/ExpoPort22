@@ -140,6 +140,37 @@ by itself on the next touch"), which matches the symptom exactly, including the 
 
 Reproduced on `fa4cb78` as well as on the perf branch.
 
+### One exec per grid open fails, and kills fail the same way
+
+Opening the tabs grid logs `[switcher] N of M captures failed` with **N always exactly 1** — 1 of
+25, 1 of 18, 1 of 8 — and `[switcher] kill failed` throws the identical error:
+
+```
+Citadel.SSHClient.CommandFailed error 1
+  (at ExpoModulesCore/ConcurrentFunctionDefinition.swift:90)
+```
+
+**Refuted:** SSH channel saturation. OpenSSH's `MaxSessions` defaults to 10 and the switcher opens
+one exec channel per window, so 18–25 windows looked like an obvious cause — until the same single
+failure appeared with only 8 windows open. Concurrency is not it; do not re-run that hypothesis.
+
+**Current hypothesis, unverified:** a stale window index. Commands address windows by index, tmux
+renumbers, and a command aimed at a window that no longer exists makes tmux exit 1, which Citadel
+surfaces as `CommandFailed`. `killCard` already anticipates exactly this — "A renumber race can
+leave the index stale — log, re-list, move on" — which is why the kill path degrades gracefully
+and the capture path merely counts the loss. That "always exactly one" is what a single stale entry
+in the list would look like.
+
+**Why this one matters more than the cosmetic bugs above:** every other item here looks wrong. This
+one is an action that does not happen. A kill that reports failure is survivable; a kill that
+appears to succeed while the window lives would not be, and nothing has established which of those
+is occurring.
+
+**Where to look.** `killWindowCommand`/`capturePaneCommand` in `src/tmux-model.ts` take an index;
+`src/switcher.tsx` schedules the captures. Logging the index alongside the failure would settle it
+in one grid open — if the failing index is always one that is not in the current list, it is
+confirmed.
+
 ### `DOM ERROR null` on every refit
 
 Every keyboard open/close, rotation, font-size change and theme change logs a bare `DOM ERROR null`
@@ -163,3 +194,19 @@ should not allocate on the keystroke path.
 
 A first attempt at catching only `onResize` did **not** silence it, so confirm which call is
 actually rejecting before fixing — and log the rejection reason, because `null` says nothing.
+
+---
+
+## Not a bug: the one perf change nobody has measured
+
+`package.json` carries `reanimated.staticFeatureFlags.IOS_SYNCHRONOUSLY_UPDATE_UI_PROPS: true`
+(added in `e75141f`). It is compiled into the native build, so it only takes effect in a fresh IPA.
+
+It is recorded here because it is the single change from the performance audit with **no
+measurement behind it**, and that fact is easy to lose. On the build where it first became active
+the app "felt solid" and JS sat around 50 — but the flag targets the *UI* thread, not JS, and the
+comparison was against a quieter session, so neither number says anything about it. It has not been
+shown to help and has not been shown to hurt.
+
+Either measure it — the perf overlay's UI figure, same session, same load, flag on and off — or
+take it out. Do not leave it sitting here as something everyone assumes was justified.
