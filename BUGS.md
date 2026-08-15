@@ -157,6 +157,44 @@ already releases things a frame early.
 
 ---
 
+## 6. Terminal search only sees the visible screen, not the session's scrollback
+
+**Repro.** Flood a pane (`yes "…" | head -200000`), then search the terminal for a word from the
+flood. Expect thousands of hits; get about **20** (device, 2026-08-15).
+
+**This is not an off-by-something — it is the architecture, and it makes the feature much weaker
+than it looks.** Three numbers are involved and none of them is the one that bites:
+
+| Limit | Value | Where |
+|---|---|---|
+| xterm `scrollback` | 10 000 rows | the phone, `src/terminal.tsx` |
+| tmux `history-limit` | 50 000 lines | the host, `EXTRAS` in `src/tmux-model.ts` |
+| `DEFAULT_HIGHLIGHT_LIMIT` | 1 000 results | `@xterm/addon-search`, `SearchAddon.ts:30` |
+
+The observed 20 is far below all three, and the reason is that **under tmux the outer terminal's
+scrollback is never filled**. tmux draws each pane inside a scroll region (DECSTBM); content
+scrolling within a region does not leave the screen into the emulator's scrollback. That is the
+same reason a tmux user needs copy-mode to scroll at all, and it is why this app pushes `mouse on`
+and binds the wheel. So xterm's 10 000 configured rows sit essentially unused, and the search
+addon — which walks *xterm's* buffer — has little more than the visible ~41 rows to search.
+
+**The asymmetry worth noticing:** the *grid's* search does not have this problem. It greps the
+host's real scrollback with `capture-pane -p -e -S -` (`searchPaneCommand`, `src/search-model.ts`),
+so it sees all 50 000 lines tmux is keeping. Two searches, in the same app, over the same session,
+with completely different reach — and the one that looks like "search this window" is the shallow
+one.
+
+**Where a fix goes.** The terminal search would have to stop searching xterm's buffer and search
+what the grid already searches: one `capture-pane -S -` for the current window, matched host-side,
+with the hits mapped back to positions. That is a different feature from what T14 built, so this is
+a design question, not a patch. A cheaper honest half-measure: say so in the UI — the count is
+"20" when the truth is "20 on screen", and nothing tells the user which they are looking at.
+
+Note that `scrollback: 10_000` is therefore also close to dead weight while a session is under
+tmux; it only earns its memory on a bare shell without tmux.
+
+---
+
 ## Also open, found the same session, lower priority
 
 ### Grid tap intermittently does nothing
