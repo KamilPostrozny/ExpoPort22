@@ -205,13 +205,39 @@ export default function SessionScreen() {
     const overlap = frame ? Dimensions.get('window').height - frame.screenY : 0;
     setKeyboardPad(overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0);
   };
+  // Category (1), an API that exists on one platform only: Android has no
+  // `keyboardWillChangeFrame`, so the pad is driven off `keyboardDidShow`/`Hide` instead — the same
+  // pad, the same subtraction, the same freeze while a zoom owns the box. What is NOT true any more
+  // is the reason this used to be an iOS-only effect: "Android's activity window resizes itself for
+  // the IME" holds under `adjustResize`, and this app is edge-to-edge, where it does not. Measured
+  // on the emulator 2026-08-16 with Gboard up: the IME inset starts at y=1517 and the activity's
+  // own frame is still [0,0][1080,2400] — so nothing shrank, the key bar sat under the keyboard,
+  // and the shell was never told it had lost the rows. `did` rather than `will` costs the head
+  // start iOS gets; there is no earlier event to take.
   useEffect(() => {
-    // Category (3), an OS behaviour that would otherwise double up: Android's activity window
-    // already resizes itself for the IME, so padding the stage here would subtract the keyboard
-    // height twice and leave a dead strip the height of Gboard (it would also drive a wrong
-    // `resize-window` to tmux). Category (1) on top: `keyboardWillChangeFrame` has no Android
-    // twin. Note the deliberate asymmetry with `src/upload-sheet.tsx`, which DOES pad on Android —
-    // a `statusBarTranslucent` Modal window does not adjustResize.
+    if (Platform.OS !== 'android') return;
+    const pad = (height: number) => {
+      if (swRef.current !== 'closed') return;
+      // No `- insets.bottom` here, and that is not a slip: the bar is placed at
+      // `keyboardPad + insets.bottom`, and Android's reported height already stops at the top of
+      // the gesture strip. Measured on the emulator (density 420): RN says 312.4dp while the
+      // system's own IME inset is 883px = 336.4dp — the 24dp between them IS `insets.bottom`, so
+      // subtracting it again parked the bar a gesture-strip's worth under the keyboard. iOS
+      // subtracts because it reports a screen-space frame that runs to the very bottom edge; same
+      // pad, two conventions.
+      setKeyboardPad(height);
+      setKbSettle(false);
+    };
+    const subs = [
+      Keyboard.addListener('keyboardDidShow', (e) => pad(e.endCoordinates.height)),
+      Keyboard.addListener('keyboardDidHide', () => pad(0)),
+    ];
+    return () => subs.forEach((sub) => sub.remove());
+  }, [insets.bottom]);
+  useEffect(() => {
+    // Category (1): `keyboardWillChangeFrame` has no Android twin — the effect above is that
+    // platform's answer. Note the asymmetry with `src/upload-sheet.tsx`, which pads on Android for
+    // its own reason: a `statusBarTranslucent` Modal window does not adjustResize either.
     if (Platform.OS !== 'ios') return;
     const subs = [
       Keyboard.addListener('keyboardWillChangeFrame', (e) => {

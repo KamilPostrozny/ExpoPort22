@@ -18,12 +18,23 @@ Android side, and the fix is to match iOS — never to pick a value that "suits 
 **No `Platform.OS` branching unless it is completely necessary.** Necessary means the system leaves
 no choice:
 
-- an API that exists on one platform only (`keyboardWillChangeFrame` has no Android twin;
-  `presentationStyle="pageSheet"` is an iOS Modal mode; `ascii-capable` is an iOS `keyboardType`),
+- an API that exists on one platform only (`keyboardWillChangeFrame` has no Android twin, so the
+  keyboard pad is driven off `keyboardDidShow`/`Hide` there; `presentationStyle="pageSheet"` is an
+  iOS Modal mode; `ascii-capable` is an iOS `keyboardType`),
 - a hardware or OS affordance the other platform does not have (Android's system back button, the
   gesture-nav edge, runtime permission prompts),
-- an OS-level behaviour that would otherwise double up (Android resizes its own window for the
-  keyboard, so iOS's manual padding would subtract it twice).
+- the same quantity reported in two conventions, where the arithmetic has to differ to reach one
+  answer (the keyboard pad again: iOS gives a screen-space frame that runs to the bottom edge and
+  the safe-area strip comes off it, Android reports a height that already stops at the gesture
+  strip and nothing comes off).
+
+**"Android does that for us" is a claim with a shelf life — measure it.** This file used to name a
+third kind: an OS behaviour that would double up, "Android resizes its own window for the keyboard".
+It does under `adjustResize`, and this app is edge-to-edge, where it does not — measured on the
+emulator 2026-08-16, IME inset at y=1517 and the activity's frame still the whole 1080×2400. On the
+strength of that sentence the terminal skipped the keyboard entirely on Android: the key bar sat
+under Gboard and the shell was never told it had lost eighteen rows, and nobody saw it because the
+emulator's keyboard had never been raised in a test.
 
 A branch that exists to make something *look* different is not necessary — delete it and take the
 iOS value. When you do add a necessary branch, say in a comment which of the three it is and what
