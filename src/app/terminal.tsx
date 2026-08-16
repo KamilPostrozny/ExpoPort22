@@ -425,11 +425,26 @@ export default function SessionScreen() {
           // and the webview is the only witness — so it says so rather than being read off a probe
           // that has to be there at the time. The first report is the boot fit, whose cell is not
           // measured yet.
+          // On the LAST report of a settling, not on every one of them. `rowRemainder` is rolled
+          // from `cell.h`, and `cell.h` arrives in this very callback — so the fit that first
+          // measures a cell is computed against the remainder of the old one and reports the whole
+          // leftover, and the fit after it is still ahead of the layout that carries the new
+          // remainder across. That is the boot handshake (8.1 → 8.8 → 0.8 on the emulator,
+          // 2026-08-16) and a font-size change is the same three steps. Warning on the middle of it
+          // is what taught the reader to skip the line — it cried once per connect and the day it
+          // meant something nobody would have looked.
+          //
+          // The bug it exists for does not settle: 17pt of an 18pt cell, fit after fit, on every
+          // keyboard close. So the report arms it and the next report disarms it; only a box still
+          // off with nothing following says anything.
+          clearTimeout(offBoxTimer.current);
           if (__DEV__ && was !== null && topInset >= 2 && cellH > 0)
-            console.warn(
-              `[terminal] box off by ${topInset.toFixed(1)}pt of a ${cellH.toFixed(1)}pt cell — ` +
-                'the stage and the webview disagree; see `rowRemainder`',
-            );
+            offBoxTimer.current = setTimeout(() => {
+              console.warn(
+                `[terminal] box off by ${topInset.toFixed(1)}pt of a ${cellH.toFixed(1)}pt cell — ` +
+                  'the stage and the webview disagree; see `rowRemainder`',
+              );
+            }, 600); // 4× the 150ms report throttle, so a settling never outruns it
           lastFit.current = { cols, rows, top: topInset };
           if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
             // Gated: this branch's condition is "a zoom is in flight", so it only ever logged
@@ -676,6 +691,9 @@ export default function SessionScreen() {
   const probeT0 = useRef(0);
   /** The last size the webview reported, so the probe can print what changed, not what was seen. */
   const lastFit = useRef<{ cols: number; rows: number; top: number } | null>(null);
+  /** Armed by a report whose box is off by a row's worth, disarmed by the next one — see `onResize`. */
+  const offBoxTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(offBoxTimer.current), []);
   const probe = (what: string) => {
     if (!GESTURE_LOG || probeT0.current === 0) return;
     const dt = Date.now() - probeT0.current;
