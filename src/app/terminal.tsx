@@ -196,7 +196,8 @@ export default function SessionScreen() {
     return () => clearTimeout(timer);
   }, [kbSettle]);
   /** The listener's math, off the keyboard's current frame instead of an event — for the doors
-   *  that unfreeze the pad with no keyboard move left to re-report it. */
+   *  that unfreeze the pad with no keyboard move left to re-report it. Mid-hide it reads the
+   *  departing keyboard (see the `keyboardDidHide` listener below, which is what corrects that). */
   const syncPad = () => {
     if (Platform.OS !== 'ios') return;
     const frame = Keyboard.metrics();
@@ -226,6 +227,28 @@ export default function SessionScreen() {
         // overlaps nothing, which is the hide. `keyboardWillHide` says the same thing later.
         setKeyboardPad(overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0);
         setKbSettle(false); // the keyboard we were waiting for: this is the final geometry
+      }),
+      // The backstop for a pad reconciled MID-HIDE. `Keyboard.metrics()` is not "where the
+      // keyboard is", it is the last frame it was SHOWN at: RN keeps `_currentlyShowing` from
+      // `keyboardDidShow` and clears it on `keyboardDidHide`, at the END of the hide animation
+      // (react-native/Libraries/Components/Keyboard/Keyboard.js). So a `syncPad` landing while the
+      // keyboard is on its way out reads the departing frame and writes its overlap back — and on
+      // the way out of the grid nothing is left to correct it, because the hide's own
+      // `keyboardWillChangeFrame` was frozen out above. That is a key bar parked at its
+      // keyboard-up position over dead space, for good (BUGS.md, "search view keeps the zoom's
+      // chrome"); `springBack` dodges the same trap by not calling `syncPad` at all. The end of the
+      // hide is the one unambiguous moment: no keyboard, no pad.
+      //
+      // It corrects rather than prevents: the probe walk (device, 2026-08-15) shows the pad going
+      // 286 → 0 on every such exit, which is the bar sitting raised for the rest of the hide.
+      // Reading the last ANNOUNCED frame instead of `metrics()` would never write the 286 at all —
+      // see the "key bar is up before the keyboard is" entry in BUGS.md, which wants the same
+      // change and its own device walk.
+      Keyboard.addListener('keyboardDidHide', () => {
+        // Same freeze as above — the zoom owns the stage's box while it runs, and `finishClose`
+        // reconciles on the way out (by which time `metrics()` is null and syncPad reads 0).
+        if (swRef.current !== 'closed') return;
+        setKeyboardPad(0);
       }),
     ];
     return () => subs.forEach((sub) => sub.remove());
@@ -622,13 +645,14 @@ export default function SessionScreen() {
   const finishClose = () => {
     probe('landed');
     setSw('closed');
-    // The keys come back exactly as they were left (`keysWereUp`) — except onto an armed search
-    // hit, where you came to read, not type (T14). The size hold outlives the zoom by exactly
-    // that keyboard: released at the end of the animation it measures a stage with no keyboard in
-    // it, reports that, and is corrected ~250ms later — two reflows of every pane on the host,
-    // landing just as the terminal comes back into view (device). Nothing is raised, nothing to
-    // wait for.
-    if (!searchRef.current.on && keysWereUp.current) {
+    // The keys come back exactly as they were left (`keysWereUp`), with no exception — T14's "an
+    // armed search hit is for reading, not typing" was overruled on device: whatever the keyboard
+    // was doing before the grid, it is doing again after it (user, 2026-08-15). The size hold
+    // outlives the zoom by exactly that keyboard: released at the end of the animation it measures
+    // a stage with no keyboard in it, reports that, and is corrected ~250ms later — two reflows of
+    // every pane on the host, landing just as the terminal comes back into view (device). Nothing
+    // is raised, nothing to wait for.
+    if (keysWereUp.current) {
       setKbSettle(true);
       setFocusSignal((n) => n + 1);
     } else {
@@ -1583,6 +1607,15 @@ export default function SessionScreen() {
    *  2026-08-11, screenshot). A bar swipe is the exception: there the page IS the card. */
   const kbSquare = keyboardPad > 0 && pageSwipe === null;
   const pageRB = kbSquare ? 0 : pageR;
+  /** The page's TOP corners, square while the search row is up — the mirror of `kbSquare`, for the
+   *  mirror of its reason: that edge is not the top of anything, it is where the search bar cuts
+   *  the page off, and a 24pt corner hanging in mid-screen under the bar reads as the grid's card
+   *  left behind (BUGS.md #1). Nothing is stale there — `pageRadius` is the screen's radius at rest
+   *  too, and its "0 at rest" wording is the stale part; the corner is simply in plain sight once
+   *  the row has pushed the page below the notch. Same bar-swipe exception: there the page IS the
+   *  card. */
+  const searchSquare = search.on && pageSwipe === null;
+  const pageRT = searchSquare ? 0 : pageR;
   const roundR = 0.1 * (stage?.w ?? 390);
   // The card's edge: in the dark flavours base and crust are nearly the same ink, so the gap
   // alone does not separate card from backdrop (user, 2026-08-11, screenshot) — the same
@@ -1910,9 +1943,10 @@ export default function SessionScreen() {
     'worklet';
     const r = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value).radius;
     const rb = kbSquare ? 0 : r;
+    const rt = searchSquare ? 0 : r;
     return {
-      borderTopLeftRadius: r,
-      borderTopRightRadius: r,
+      borderTopLeftRadius: rt,
+      borderTopRightRadius: rt,
       borderBottomLeftRadius: rb,
       borderBottomRightRadius: rb,
     };
@@ -2244,8 +2278,8 @@ export default function SessionScreen() {
             // is no longer detached); stating it twice is deliberate, and the two agree by
             // construction: `zoomFrame`'s radius at t=0 is `SCREEN_R * stage.w`, which is
             // `pageRadius`, and `pageRB` carries the same `kbSquare` the worklet applies.
-            borderTopLeftRadius: pageR,
-            borderTopRightRadius: pageR,
+            borderTopLeftRadius: pageRT,
+            borderTopRightRadius: pageRT,
             borderBottomLeftRadius: pageRB,
             borderBottomRightRadius: pageRB,
           },
@@ -2258,7 +2292,7 @@ export default function SessionScreen() {
         style={[
           StyleSheet.absoluteFill,
           styles.pageEdge,
-          { borderColor: theme.accent, borderRadius: pageR, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
+          { borderColor: theme.accent, borderRadius: pageR, borderTopLeftRadius: pageRT, borderTopRightRadius: pageRT, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
           cardRadiiStyle,
           pageEdgeStyle,
         ]}

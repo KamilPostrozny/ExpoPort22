@@ -3,37 +3,30 @@
 Found on device during the T-perf accept walk (2026-08-15). Everything here is reproducible on a
 real phone against a live tmux session; where a cause was in doubt it was settled by checking out
 `fa4cb78` (the commit before the perf work), reloading, and reproducing the fault with the changes
-absent. Everything settled that way is pre-existing — bug 6 is the one item still suspected of being
+absent. Everything settled that way is pre-existing — bug 5 is the one item still suspected of being
 a regression from the performance branch, and it names the experiment that would confirm it.
 
 Fixed and confirmed the same session, for context on what is *not* in this list: `less` refusing to
 scroll (root-table wheel bindings missing from the pushed tmux conf), and the grid's tabs vanishing
 and refilling while typing a query (`windowSurvives` treated "grep still in flight" as "no match").
 
----
-
-## 1. Terminal search view keeps the zoom's chrome after leaving the grid
-
-**Repro.** Open the tabs grid, arm the search, leave the grid back to the terminal.
-
-**Symptom.** Two things stay behind that belong to the grid/zoom state:
-
-- the pane keeps its rounded corners under the search bar, instead of squaring off to the screen
-  edge at rest;
-- the key bar sits raised, at its keyboard-up position, with no keyboard on screen and dead space
-  below it.
-
-**Where to look.** `pageRadius(stageW)` in `src/barswipe-model.ts` is documented as "0 at rest", so
-a non-zero radius means the page card still believes a swipe or zoom is live. The raised key bar is
-the same shape of problem on the inset: something that is set on the way *into* the grid is not
-being unset on this particular way out. The exit path taken when search is armed is the suspect —
-the ordinary exit does not do this.
-
-**Not yet investigated.** No instrumentation has been added for this one.
+Also gone, walked on device 2026-08-15: **the search view keeping the zoom's chrome after leaving
+the grid** — the pane's rounded corners under the search bar and the key bar parked at its
+keyboard-up position over dead space. Neither was leftover zoom state. The corner is what
+`pageRadius` always returns (its "0 at rest" wording is the stale part); an armed search row simply
+pushes the page below the notch, where a 60pt corner is in plain sight — so the top corners now
+square while the row is up, the mirror of `kbSquare`. The key bar was `syncPad` reading
+`Keyboard.metrics()`, which is the last frame the keyboard was *shown* at, not where it is: RN
+clears `_currentlyShowing` only on `keyboardDidHide`, at the END of the hide, so a reconcile landing
+mid-hide wrote the departing keyboard's overlap back — with nothing left to correct it, because the
+hide's own `keyboardWillChangeFrame` was the event the zoom's freeze dropped. A `keyboardDidHide`
+listener under the same freeze now closes it: the end of a hide is unambiguous. `finishClose` also
+stopped making an exception of an armed search: the keys come back exactly as they were before the
+grid (user, overruling T14).
 
 ---
 
-## 2. Search does not scroll to the current hit
+## 1. Search does not scroll to the current hit
 
 **Repro.** Arm the terminal search, type a query with matches off-screen, tap `∨`.
 
@@ -52,12 +45,12 @@ decoration. In `@xterm/addon-search` 0.16.0 the scroll is done by `_selectResult
 (`SearchAddon.ts`), which scrolls only when `noScroll` is falsy — and the app passes no
 `internalSearchOptions` at all from `handle.searchNext`, so `noScroll` is `undefined` and it should
 scroll. Worth checking next whether `_selectResult` is reaching its scroll branch, and whether
-`terminal.select()` is landing, since bug 3 suggests the active decoration's element may never be
+`terminal.select()` is landing, since bug 2 suggests the active decoration's element may never be
 rendered at all. **These two are probably one bug.**
 
 ---
 
-## 3. No distinct highlight on the current hit
+## 2. No distinct highlight on the current hit
 
 **Repro.** As above. Every match draws the same flat grey; the current one is not distinguishable.
 
@@ -90,11 +83,11 @@ match, both via `registerDecoration`.
 **Next step.** Stop depending on the addon's active decoration. The app already receives the hit
 index through `onDidChangeResults`, and `SearchEngine` returns a `{col, row, size}` for the match;
 marking the current hit ourselves (our own decoration, or a rendered overlay) removes both this bug
-and, probably, bug 2. The alternative is vendoring `SearchAddon`.
+and, probably, bug 1. The alternative is vendoring `SearchAddon`.
 
 ---
 
-## 4. The outgoing card shows the incoming tab's contents for a frame
+## 3. The outgoing card shows the incoming tab's contents for a frame
 
 **Repro.** Switch tabs with any swipe. Watch the moment the switch is almost complete.
 
@@ -125,7 +118,7 @@ rather than when it ends.
 
 ---
 
-## 5. `git log` cannot be scrolled with a finger
+## 4. `git log` cannot be scrolled with a finger
 
 **Repro.** Run `git log` in a tmux pane, drag up or down over the output.
 
@@ -149,7 +142,7 @@ own.
 
 ---
 
-## 6. Neighbour cards do not reliably leave during the swipe up
+## 5. Neighbour cards do not reliably leave during the swipe up
 
 **Repro.** Swipe a tab upward (the zoom toward the grid), slowly. Screenshot: 2026-08-15, 21:51.
 
@@ -177,12 +170,12 @@ comment saying why, or to find what the compiler is memoizing that should not be
 render, a value whose identity is load-bearing for visibility).
 
 If the flashing persists with the directive in place, it is pre-existing and the compiler is
-exonerated — then check the zoom's own visibility gating, since bug 4 shows the same transition
+exonerated — then check the zoom's own visibility gating, since bug 3 shows the same transition
 already releases things a frame early.
 
 ---
 
-## 7. Terminal search only sees the visible screen, not the session's scrollback
+## 6. Terminal search only sees the visible screen, not the session's scrollback
 
 **Repro.** Flood a pane (`yes "…" | head -200000`), then search the terminal for a word from the
 flood. Expect thousands of hits; get about **20** (device, 2026-08-15).
@@ -221,6 +214,34 @@ tmux; it only earns its memory on a bare shell without tmux.
 ---
 
 ## Also open, found the same session, lower priority
+
+### The key bar is up before the keyboard is
+
+**Repro.** With the keyboard up, open the tabs grid, then come back to the terminal.
+
+**Symptom.** The key bar is *already* at its keyboard-up position when the terminal appears, sitting
+over an empty band, and the keyboard then slides up to meet it. It should start at the bottom and
+travel up with the keyboard (user, 2026-08-15).
+
+**Where to look.** `finishClose`'s `keysWereUp` branch raises the keys (`kbSettle` + `focusSignal`)
+but never touches `keyboardPad`, which the grid froze at whatever it was before the open — a full
+keyboard's worth. So the bar renders raised on the landing frame, hundreds of ms before the keyboard
+it is making room for exists.
+
+Zeroing the pad on that branch would put the bar back at the bottom, but `syncPad()` cannot be what
+does it: it reads `Keyboard.metrics()`, which mid-hide still reports the departing keyboard (the
+same trap the fixed chrome bug hit, and why a `keyboardDidHide` backstop had to be added). The
+honest version is to record the pad the last `keyboardWillChangeFrame` ANNOUNCED — the listener
+already computes it, and the freeze only needs to skip the render, not the record — and have
+`syncPad` read that. It removes the backstop's own 286 → 0 flicker at the same time (device probe,
+2026-08-15: the bar sits raised for the rest of every such hide). Written and then withdrawn
+unverified in that session; it wants its own device walk.
+
+That write is a plain `setState`, though, and iOS fires the event *before* the animation — so the
+bar would still lead the keyboard by an animation, rather than travelling with it. Genuinely
+together is an animated pad on the keyboard's own curve, which is the KeyboardAvoidingView
+behaviour `keyboardPad`'s note at the top of the file deliberately does not use; read that note
+before choosing which of the two this wants.
 
 ### Grid tap intermittently does nothing
 
