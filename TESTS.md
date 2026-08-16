@@ -594,10 +594,18 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
   `@expo/dom-webview`'s prop list (`DomWebView.types.d.ts`) has no `textZoom`; the app does not use
   `react-native-webview` (optional dep, not installed), so the `DOMProps extends RNWebViewProps`
   type is misleading — the props that actually arrive are the Expo webview's.
-- **Route still open**: divide the size we ask for by the scale being applied, i.e. pass
-  `PixelRatio.getFontScale()` into the DOM component and set the xterm `fontSize` to
-  `settings.fontSize / fontScale`, so the rendered glyph is the size intended. `getFontScale()`
-  reflects the user's text-size preference on BOTH platforms (`PixelRatio.js:95-100`).
+- **Route still open, and its arithmetic is now CONFIRMED on Android**: divide the size we ask for
+  by the scale being applied, i.e. pass `PixelRatio.getFontScale()` into the DOM component and set
+  the xterm `fontSize` to `settings.fontSize / fontScale`. Probed on device 2026-08-16 —
+
+  | `font_scale` | `getFontScale()` | measured cell |
+  |---|---|---|
+  | 1.0 | 1 | 7.7964 |
+  | 1.5 | 1.5 | 11.6964 |
+
+  the factor RN reports is exactly the factor the WebView applies, so the division cancels it
+  rather than approximating it. `getFontScale()` reflects the user's text-size preference on BOTH
+  platforms (`PixelRatio.js:95-100`).
 - **BLOCKED on one measurement, and it is the whole design of the fix**: does iOS's WKWebView
   scale CSS px with Dynamic Type at all? iOS was only ever measured at the DEFAULT text size. If
   it does not scale, dividing unconditionally would wrongly SHRINK the iOS terminal and the
