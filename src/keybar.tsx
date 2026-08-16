@@ -69,7 +69,7 @@ import {
   barGrabbed,
   KEYS_DROP_DY,
   rowJoins,
-  ROW_MAX_PROG,
+  rowLowNext,
   ROW_OUT_MS,
   ROW_STILL_FRAMES,
   controlByte,
@@ -655,7 +655,7 @@ function KeyBarInner(props: KeyBarProps) {
         // the finger is no exception (user, 2026-08-14). So the row is EARNED once (held and
         // stopped, or the swipe started) and DRAWN only while the card is low.
         if (sv.heldAir.value === 1 || held.value === 1) {
-          const low = sv.prog.value <= ROW_MAX_PROG ? 1 : 0;
+          const low = rowLowNext(sv.prog.value, rowLow.value);
           if (low !== rowLow.value) {
             rowLow.value = low;
             if (low === 1) {

@@ -1557,7 +1557,12 @@ export default function SessionScreen() {
       const slots = windows.length + (air ? 0 : 1);
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true, slots };
       rowLiveSV.value = 1;
-      rowVisSV.value = 1;
+      // Not in the air: there the worklet's own ceiling latch owns `rowVis`, and this call is a
+      // `runOnJS` hop behind it. A sideways move that crosses `ROW_AIR_DX` a frame or two before
+      // the climb crosses `ROW_MAX_PROG` therefore landed here AFTER the fade-out had started and
+      // put the row straight back on — with the latch already at 0, nothing was left to take it
+      // off again, so the neighbours rode all the way up to the grid (user, 2026-08-16).
+      if (!air) rowVisSV.value = 1;
       rowPosSV.value = pos;
       rowCountSV.value = slots;
       setOpen('none');

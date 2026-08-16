@@ -17,7 +17,9 @@ import {
   barGrabbed,
   rowJoins,
   ROW_AIR_PROG,
+  ROW_BACK_PROG,
   ROW_MAX_PROG,
+  rowLowNext,
   controlByte,
   ctrlTap,
   diffInput,
@@ -207,6 +209,15 @@ test('a card still climbing, or held high, keeps its neighbours away', () => {
   expect(rowJoins(60, -120, 0.1, false)).toBe(false); // the hand has not stopped: no row
   expect(rowJoins(60, -120, ROW_MAX_PROG, true)).toBe(true); // the last of the low half
   expect(rowJoins(60, -120, ROW_MAX_PROG + 0.01, true)).toBe(false); // above it: one card, alone
+});
+
+test('the ceiling is latched, so a wobbling prog cannot flicker the row', () => {
+  expect(rowLowNext(0.1, -1)).toBe(1); // undecided: asked at the ceiling
+  expect(rowLowNext(ROW_MAX_PROG, 1)).toBe(1);
+  expect(rowLowNext(ROW_MAX_PROG + 0.01, 1)).toBe(0); // over the ceiling: they leave
+  // …and a wobble back under it does not bring them straight back.
+  expect(rowLowNext(ROW_MAX_PROG - 0.01, 0)).toBe(0);
+  expect(rowLowNext(ROW_BACK_PROG, 0)).toBe(1); // a deliberate move back down does
 });
 
 test('nothing about the vertical is judged mid-gesture any more', () => {

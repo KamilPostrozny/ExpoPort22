@@ -193,6 +193,23 @@ export const ROW_AIR_PROG = 0.05;
  *  the card alone. Tried at 0.5 first, still tight (user, same day). This is the knob. */
 export const ROW_MAX_PROG = 0.65;
 
+/** Once the row has LEFT, how far back down the card must come to gather it again.
+ *
+ *  `prog` is not monotonic in the finger: its dead zone grows 1.3pt per pt of sideways travel
+ *  (`zoomProgress`), so a thumb that drifts as it climbs makes progress wobble by several points
+ *  of travel a frame. Against a bare ceiling that is a threshold re-crossed several times a
+ *  second, and every crossing restarts the spring in / fade out pair — the neighbours flickering
+ *  while the card is pulled further up (user, 2026-08-16). A tenth of the pull of hysteresis is
+ *  wider than the wobble and still well inside one deliberate move back down. */
+export const ROW_BACK_PROG = 0.55;
+
+/** The ceiling, latched: `was` is the last answer (-1 = undecided, so the first is asked at the
+ *  ceiling itself). Leaving takes `ROW_MAX_PROG`, coming back takes `ROW_BACK_PROG`. */
+export function rowLowNext(prog: number, was: number): number {
+  'worklet';
+  return prog <= (was === 0 ? ROW_BACK_PROG : ROW_MAX_PROG) ? 1 : 0;
+}
+
 /** How long the neighbours take to leave when the card climbs past the ceiling: they unseat and
  *  fade on the same clock, because vanishing on the frame read as a dropped frame, not a decision
  *  (user, 2026-08-14). Coming back down is the entrance spring, unchanged. */
