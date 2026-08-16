@@ -59,15 +59,28 @@ export type UploadSheetProps = {
   onSave: (dir: string, filename: string) => void;
 };
 
-/** Category (1), API that exists on one platform only: `presentationStyle="pageSheet"` is an iOS
- *  Modal mode; Android ignores it and would render edge-to-edge, so the sheet is hand-drawn there
- *  out of a transparent Modal. It must come out at the same corner radius, the same shadow, the
- *  same scrim and the same top gap as the iOS sheet. */
+/**
+ * Behaviour only. Nothing below this line branches on how the sheet LOOKS.
+ *
+ * It used to: iOS presented a system `pageSheet` and Android hand-drew a replica out of a
+ * transparent Modal — thirteen `ANDROID ?` arms for a scrim, a slide, a top spacer and a corner,
+ * all reproducing what one platform got from the system. Measured on device 2026-08-16 the replica
+ * was not close and could not be: the system sheet sat 69.0pt from the top where the hand-built one
+ * sat 97.9 (`insets.top + 46`, a number nothing ever chose), and iOS's corner is ~35 drawn with
+ * CONTINUOUS curvature, which RN cannot express at all — so the 24 here was chasing a shape it
+ * could never reach.
+ *
+ * `src/settings-sheet.tsx` had already solved this and written down why: a transparent Modal with
+ * our own reanimated slide, on both platforms, no branch. Its note — "the system sheet detaches
+ * from the screen edge and brings a system grabber that dismisses without telling reanimated" — is
+ * a functional objection to `pageSheet`, not a cosmetic one, and this file simply never got the
+ * memo. So the upload sheet is now built the same way, and its geometry is `SHEET_RADIUS` on both
+ * platforms because we draw it, rather than because we guessed at what iOS drew.
+ */
 const ANDROID = Platform.OS === 'android';
 
-/** The hand-built Android slide, in settings-sheet's numbers so the app's two sheets move alike:
- *  the window's own height is the one travel guaranteed to clear a sheet of any height, and the
- *  curve is the one that file measured against the system sheet. */
+/** The slide, in settings-sheet's numbers so the app's two sheets move alike: the window's own
+ *  height is the one travel guaranteed to clear a sheet of any height. */
 const TRAVEL = Dimensions.get('window').height;
 const SLIDE = { duration: 340, easing: Easing.bezier(0.32, 0.72, 0.3, 1) };
 
@@ -88,9 +101,8 @@ export default function UploadSheet(props: UploadSheetProps) {
    * keyboard's own height the exact padding needed, with nothing to measure.
    */
   const [keyboardPad, setKeyboardPad] = useState(0);
-  /** How far the hand-built Android sheet is pushed off the bottom; the scrim's opacity is read
-   *  back off it, so the dimming rides the slide instead of blinking on. Unread on iOS, where the
-   *  system draws both the slide and the dim. */
+  /** How far the sheet is pushed off the bottom; the scrim's opacity is read back off it, so the
+   *  dimming rides the slide instead of blinking on. Both platforms, one slide. */
   const ty = useSharedValue(TRAVEL);
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: ty.value }] }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: 1 - ty.value / TRAVEL }));
@@ -196,21 +208,19 @@ export default function UploadSheet(props: UploadSheetProps) {
     </Pressable>
   );
 
-  /** Every dismiss goes through here. iOS's pageSheet animates its own way off the screen, so the
-   *  caller may unmount immediately; the Android sheet is ours to move, and telling the caller on
-   *  the press would unmount it mid-slide and snap it away. */
+  /** Every dismiss goes through here. The sheet is ours to move on both platforms now, so the
+   *  caller is told when the slide lands — telling it on the press would unmount mid-slide and
+   *  snap the sheet away. */
   const close = () => {
-    if (!ANDROID) return props.onCancel();
     ty.value = withTiming(TRAVEL, SLIDE, (done) => {
       if (done) runOnJS(props.onCancel)();
     });
   };
 
-  // Category (2), hardware affordance: Android has a system back button, and it walks the browser
-  // up one directory first, dismissing only from the top ('/', where the `..` row also stops).
-  // iOS reaches `onRequestClose` solely from the pageSheet pull-down, which has already dismissed
-  // natively, so walking up a directory there would leave the component alive with a changed dir
-  // while the OS tears the sheet down.
+  // Category (2), hardware affordance: Android has a system back button and iOS has no twin. It
+  // walks the browser up one directory first, dismissing only from the top ('/', where the `..`
+  // row also stops). `onRequestClose` never fires on iOS now that there is no pageSheet pull-down,
+  // so the guard is what keeps this an Android-only ladder rather than a behaviour iOS inherits.
   const systemBack = () => {
     if (ANDROID && dir !== null && dir !== '/') setDir(parentPath(dir));
     else close();
@@ -218,38 +228,28 @@ export default function UploadSheet(props: UploadSheetProps) {
 
   return (
     <Modal
-      // `slide` is the system's dismissal for a pageSheet; the Android arm animates itself, and a
-      // system slide on top of ours would move the scrim with the sheet instead of fading it.
-      animationType={ANDROID ? 'none' : 'slide'}
-      presentationStyle={ANDROID ? undefined : 'pageSheet'}
-      transparent={ANDROID}
-      // Load-bearing on Android beyond the look: without it the Modal's window stops below the
-      // status bar and the gap below is measured from the wrong origin.
+      // Settings-sheet's construction exactly: transparent so the terminal stays visible, no system
+      // animation because the slide is ours, and `statusBarTranslucent` so the Modal's window
+      // starts at the screen's top rather than under the status bar.
+      transparent
+      animationType="none"
       statusBarTranslucent
       onRequestClose={systemBack}
       visible>
-      {/* The dim iOS's pageSheet puts over the terminal for free; the same layer, opacity tied to
-          the slide, so the terminal is not sitting undimmed in the gap above the sheet. */}
-      {ANDROID && (
-        <Animated.View
-          style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}>
-          <Pressable style={styles.fill} onPress={close} />
-        </Animated.View>
-      )}
-      <Animated.View style={[styles.fill, ANDROID && sheetStyle]}>
-        {/* The gap that keeps the sheet off the top of the screen — with no `presentationStyle`
-            there is nothing to draw it on Android. Inert: the scrim behind it owns the dismiss,
-            one tap target for the whole exposed strip.
-            The 46 is UNVERIFIED: it came off the deleted Android frames, never off the iOS sheet.
-            It stands only until someone measures the pageSheet's top edge on device and puts that
-            number here — it is not a value anything chose. */}
-        {ANDROID && <View style={{ height: insets.top + 46 }} />}
-        {/* The SAVE AS field sits at the bottom of the sheet, so a raised keyboard covers both it
-            and the Save button unless the content is lifted (found on device, T13/T8.9). */}
+      {/* The dim over the terminal, opacity tied to the slide so it fades rather than blinking on.
+          Tapping it dismisses — one target for the whole strip above the sheet. */}
+      <Animated.View
+        style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}>
+        <Pressable style={styles.fill} onPress={close} />
+      </Animated.View>
+      {/* The sheet stops short of the top by taking the safe-area inset plus the app's own gutter,
+          which is a number we choose rather than one we were guessing at off a system sheet.
+          The SAVE AS field sits at the bottom, so a raised keyboard covers both it and the Save
+          button unless the content is lifted (found on device, T13/T8.9). */}
+      <Animated.View style={[styles.fill, { paddingTop: insets.top + SPACE.sm }]} pointerEvents="box-none">
         <View
           style={[
             styles.sheet,
-            ANDROID && styles.sheetAndroid,
             { backgroundColor: theme.panel, paddingBottom: keyboardPad },
           ]}>
           <View style={styles.grabberRow}>
@@ -314,12 +314,14 @@ export default function UploadSheet(props: UploadSheetProps) {
             style={[
               styles.footer,
               { backgroundColor: theme.panel, borderTopColor: theme.border },
-              // Category (2), hardware affordance: Android's edge-to-edge puts the gesture pill
-              // inside this Modal's own window, where iOS's pageSheet is already system-inset above
-              // the home indicator; without this the Save button sits under the pill. The
-              // `keyboardPad === 0` guard is required either way — with the keyboard up,
-              // `insets.bottom` is already inside the keyboard's height and would double-count.
-              ANDROID && keyboardPad === 0 && { paddingBottom: insets.bottom + 12 },
+              // Both platforms, no branch. This used to be Android-only on the premise that "iOS's
+              // pageSheet is already system-inset above the home indicator" — true then, dead now:
+              // there is no pageSheet, and a transparent `statusBarTranslucent` Modal fills the
+              // window on both, so the gesture pill and the home indicator sit inside it equally.
+              // `settings-sheet.tsx` reached the same answer and pads unconditionally.
+              // The `keyboardPad === 0` guard stays and is not about platform: with the keyboard
+              // up, `insets.bottom` is already inside the keyboard's height and would double-count.
+              keyboardPad === 0 && { paddingBottom: insets.bottom + 12 },
             ]}>
             <Text style={[styles.saveAs, { color: theme.muted }]}>
               SAVE AS{collision ? ' — replaces the existing file' : ''}
@@ -363,11 +365,11 @@ export default function UploadSheet(props: UploadSheetProps) {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  sheet: { flex: 1 },
-  /* Only Android draws its own sheet — iOS's pageSheet is drawn by the system — so this reproduces
-     the iOS card: `SHEET_RADIUS` corners, the app's one sheet shadow, clipped. `overflow` is
-     load-bearing: it is what cuts the FlatList's top rows to the corner. */
-  sheetAndroid: {
+  /* We draw the sheet on both platforms now, so these are the sheet's own numbers rather than a
+     reproduction of the system's: `SHEET_RADIUS` corners, the app's one sheet shadow, clipped.
+     `overflow` is load-bearing: it is what cuts the FlatList's top rows to the corner. */
+  sheet: {
+    flex: 1,
     borderTopLeftRadius: SHEET_RADIUS,
     borderTopRightRadius: SHEET_RADIUS,
     overflow: 'hidden',

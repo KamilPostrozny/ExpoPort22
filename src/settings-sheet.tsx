@@ -77,6 +77,7 @@ import {
   SHEET_RADIUS,
   SPACE,
   TEXT,
+  TINT,
 } from '@/style';
 import {
   ALL_THEMES,
@@ -104,6 +105,31 @@ const GRABBER_ZONE = 40;
 /** The swatch strip's six chips, in the prototype's order — now ANSI slots rather than Catppuccin
  *  names, because those six are the one thing every scheme is guaranteed to have. */
 const SWATCHES = [1, 2, 3, 4, 5, 6];
+
+/**
+ * The switch's three colours, so both platforms take them from the theme instead of from whatever
+ * the OS picks.
+ *
+ * `Switch` is a native control — UISwitch on iOS, Material's on Android — and it is meant to be:
+ * its proportions are the platform's business and are NOT a divergence to chase (a hand-rolled
+ * switch would be, and is explicitly not wanted). What IS ours is the palette, and left alone
+ * Android took its thumb from the Material default — a teal that appears nowhere in this app,
+ * measured against iOS's white on 2026-08-16.
+ *
+ * Only `trackColor.true` had ever been set, so both the off-track and the grip were the OS's.
+ * `thumbColor` is the pale end of the scheme on both appearances, which is what UISwitch draws on
+ * every flavour; `onAccent` would have been the tidy-looking role and is wrong here — it is
+ * `base`, so on a dark scheme it paints a dark grip on a light accent track, the inverse of iOS.
+ *
+ * Setting `thumbColor` costs iOS the grip's drop shadow (RN documents this). That is accepted: one
+ * prop set the same way on both beats a branch, and it moves the two builds closer, not further.
+ */
+const switchColors = (theme: Theme) => ({
+  trackColor: { false: TINT.track, true: theme.accent },
+  thumbColor: theme.isDark ? theme.foreground : theme.background,
+  /** Android ignores this; iOS paints the off-track's ground behind `trackColor.false`. */
+  ios_backgroundColor: TINT.track,
+});
 
 export default function SettingsSheet({
   theme,
@@ -323,7 +349,7 @@ export default function SettingsSheet({
                   <Switch
                     value={settings.followSystem}
                     onValueChange={toggleFollow}
-                    trackColor={{ true: theme.accent }}
+                    {...switchColors(theme)}
                   />
                 </View>
                 {/* Straight under the switch that decides how many of these rows there are — the
@@ -368,7 +394,7 @@ export default function SettingsSheet({
                     <Switch
                       value={settings.tmuxExtras}
                       onValueChange={toggleExtras}
-                      trackColor={{ true: theme.accent }}
+                      {...switchColors(theme)}
                     />
                   </View>
                   <Text style={[styles.note, { color: theme.placeholder }]}>
