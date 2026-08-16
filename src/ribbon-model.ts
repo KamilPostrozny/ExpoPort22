@@ -36,6 +36,9 @@ export type RibbonCore = {
    *  the job is suspended rather than exited. */
   candidate: string | null;
   candidateAt: number | null;
+  /** Clock ms at the first beat that stopped seeing `command`, or null while it is being seen.
+   *  The poll blinks (see `RIBBON_HOLD_MS`), so "gone" is a claim that has to survive a beat. */
+  goneAt: number | null;
 };
 
 export const RIBBON_IDLE: RibbonCore = {
@@ -46,7 +49,25 @@ export const RIBBON_IDLE: RibbonCore = {
   suspended: null,
   candidate: null,
   candidateAt: null,
+  goneAt: null,
 };
+
+/**
+ * How long the foreground has to stay gone before we believe it.
+ *
+ * `tmux display-message -p` is issued with no target, so tmux answers for whatever it considers
+ * the current window — and on a host where anything else is working in another window, that
+ * alternates beat to beat. Measured on device 2026-08-16: `windowIndex` flapped 6 → 7 → 6 → 7
+ * every ~2s with `claude` / null / `claude` / null behind it. Taken literally that unmounts and
+ * remounts the band forever, restarts its clock every beat, and — because a re-detection used to
+ * be a new instance — makes `RIBBON_MIN_RUN_MS` unreachable, so a plain `sleep 30` could never
+ * appear at all (user: "it didn't show up for sleep").
+ *
+ * A bit over one beat, so one blink costs nothing and a process that really ended still clears
+ * within a beat of the truth. The right fix is for the poll to name its target; this is the
+ * ribbon refusing to believe a signal that contradicts itself, which it should do regardless.
+ */
+export const RIBBON_HOLD_MS = 2500;
 
 /** How long a sent ^Z stays a suspension candidate — a bit over two poll beats, so one missed
  *  poll does not lose it, and a ^Z swallowed by a TUI hours ago cannot mark a later idle shell
@@ -82,12 +103,19 @@ export function ribbonPoll(
         suspended: core.candidate,
         candidate: null,
         candidateAt: null,
+        goneAt: null,
       };
     }
-    return { ...core, command: null, candidate: null, candidateAt: null };
+    // Not gone until it has stayed gone (`RIBBON_HOLD_MS`). One blink of the poll used to unmount
+    // the band and restart the process's identity, which is what made a plain `sleep` unable to
+    // outlive the gate and made the band animate in twice around a window hop.
+    if (core.goneAt === null) return { ...core, goneAt: now };
+    if (now - core.goneAt < RIBBON_HOLD_MS) return core; // same object: the quiet beat re-renders nothing
+    return { ...core, command: null, candidate: null, candidateAt: null, goneAt: null };
   }
   if (foreground.command === core.command && foreground.pid === core.pid && core.suspended === null) {
-    return core;
+    // Back after a blink is not a new run: the clock and the instance carry on.
+    return core.goneAt === null ? core : { ...core, goneAt: null };
   }
   // The pid catching up with a command a window switch already named: the same process, so the
   // instance and its timer carry on.
@@ -110,6 +138,17 @@ export function ribbonPoll(
     candidate: null,
     candidateAt: null,
   };
+}
+
+/**
+ * A hop landed on a window the list says is idle. Unlike a poll's null this is authoritative —
+ * we are looking at the window, not asking about it — so it clears now rather than waiting out
+ * `RIBBON_HOLD_MS`, and the band leaves with the slide instead of flashing on the tab it does
+ * not belong to (user, 2026-08-16).
+ */
+export function ribbonSwitchedToIdle(core: RibbonCore): RibbonCore {
+  if (core.command === null) return core;
+  return { ...core, command: null, candidate: null, candidateAt: null, goneAt: null };
 }
 
 /** Bytes left the key bar for the PTY. A ^Z while something runs makes that something a

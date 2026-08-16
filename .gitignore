@@ -1,7 +1,10 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
 # dependencies
-node_modules/
+# No trailing slash: a git worktree gets no node_modules of its own, and Metro only serves what is
+# under the project root, so working in one means symlinking the main checkout's copy in — and
+# `node_modules/` matches a directory, not a symlink to one.
+node_modules
 
 # Expo
 .expo/

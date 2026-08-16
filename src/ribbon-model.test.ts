@@ -5,6 +5,7 @@
 import { expect, test } from 'bun:test';
 
 import {
+  RIBBON_HOLD_MS,
   RIBBON_IDLE,
   RIBBON_MIN_RUN_MS,
   Z_CANDIDATE_MS,
@@ -13,6 +14,7 @@ import {
   matchRecipe,
   ribbonPoll,
   ribbonResumed,
+  ribbonSwitchedToIdle,
   ribbonSent,
   selectRecipe,
   type RibbonCore,
@@ -88,14 +90,40 @@ test('a new foreground is a new instance with a fresh timer', () => {
   expect(next.startedAt).toBe(5000);
 });
 
-test('the same command through an idle gap is a new instance', () => {
+test('the same command through a real idle gap is a new instance', () => {
   const core = running('vim');
-  const idle = ribbonPoll(core, null, 3000);
+  // One null is not "gone" yet — it starts the hold. Only a null that outlives RIBBON_HOLD_MS
+  // clears the command.
+  const blink = ribbonPoll(core, null, 3000);
+  expect(pick(blink, false)?.id).toBe('vim');
+  const idle = ribbonPoll(blink, null, 3000 + RIBBON_HOLD_MS);
   expect(pick(idle, false)).toBeNull();
-  const again = ribbonPoll(idle, fg('vim'), 5000);
-  expect(again.instance).toBe(core.instance + 2 - 1); // idle did not bump, the return did
+  const again = ribbonPoll(idle, fg('vim'), 9000);
   expect(again.instance).toBeGreaterThan(core.instance);
-  expect(again.startedAt).toBe(5000);
+  expect(again.startedAt).toBe(9000);
+});
+
+test('a blinking poll is the same run: same instance, same clock, no re-render', () => {
+  // The device case that motivated the hold: an untargeted `display-message` answers about
+  // another window every other beat, so the foreground reads claude / null / claude / null.
+  const core = running('claude');
+  const blink = ribbonPoll(core, null, 2000);
+  const back = ribbonPoll(blink, fg('claude'), 3000);
+  expect(back.instance).toBe(core.instance); // NOT a new run
+  expect(back.startedAt).toBe(core.startedAt); // so the clock never restarts
+  expect(pick(back, false)?.id).toBe('agent');
+  // And a second quiet beat is the same object again, so React re-renders nothing.
+  expect(ribbonPoll(back, fg('claude'), 5000)).toBe(back);
+  // The gate can therefore actually elapse — this is why `sleep` never appeared.
+  const slow = ribbonPoll(ribbonPoll(running('sleep'), null, 2000), fg('sleep'), 3000);
+  expect(selectRecipe(slow, false, 1000 + RIBBON_MIN_RUN_MS)?.id).toBe('running');
+});
+
+test('a window hop to an idle window drops the band now, without waiting out the hold', () => {
+  const core = running('claude');
+  const left = ribbonSwitchedToIdle(core);
+  expect(pick(left, false)).toBeNull();
+  expect(ribbonSwitchedToIdle(left)).toBe(left); // already idle: the same object
 });
 
 test('formatElapsed', () => {
@@ -114,14 +142,18 @@ test('^Z then a shell poll = suspended; without the ^Z it just exited', () => {
   expect(pick(stopped, false)).toEqual({ id: 'suspended', proc: 'sleep' });
   expect(stopped.instance).toBe(core.instance + 1); // the stop is its own instance
 
-  const exited = ribbonPoll(core, null, 3000); // no ^Z was ever sent
+  // No ^Z was ever sent: it exited, which takes one null to notice and the hold to believe.
+  const exited = ribbonPoll(ribbonPoll(core, null, 3000), null, 3000 + RIBBON_HOLD_MS);
   expect(pick(exited, false)).toBeNull();
 });
 
 test('a stale ^Z candidate expires', () => {
   const zed = ribbonSent(running('sleep'), '\x1a', 2000);
-  const late = ribbonPoll(zed, null, 2000 + Z_CANDIDATE_MS + 1);
+  const gone = 2000 + Z_CANDIDATE_MS + 1;
+  // Too late to be a suspension, so it is an exit — and an exit still has to outlive the hold.
+  const late = ribbonPoll(ribbonPoll(zed, null, gone), null, gone + RIBBON_HOLD_MS);
   expect(pick(late, false)).toBeNull();
+  expect(late.suspended).toBeNull();
 });
 
 test('^Z at an idle shell tracks nothing', () => {
@@ -172,9 +204,9 @@ test('cap byte sequences', () => {
   expect(cap('agent', '⇧⇥').bytes).toBe('\x1b[Z');
   expect(cap('agent', '/clear').bytes).toBe('/clear\r');
   expect(cap('agent', '^C ^C')).toMatchObject({ bytes: '\x03', arm: true, danger: true });
-  // headers are rows, not taps.
-  expect(RECIPES.agent.caps.filter((c) => c.header !== undefined).map((c) => c.header))
-    .toEqual(['SESSION', 'COMMANDS', 'NOW']);
+  // One flat row: every entry is a tap, no section markers eating 44pt of thumb reach.
+  expect(RECIPES.agent.caps.every((c) => c.label !== undefined)).toBe(true);
+  expect(RECIPES.agent.caps.length).toBe(10);
 });
 
 test('matchRecipe misses cleanly', () => {

@@ -19,9 +19,6 @@ import type { DotName } from '@/theme';
 export type RecipeId = 'running' | 'suspended' | 'vim' | 'pager' | 'htop' | 'agent';
 
 export type Cap = {
-  /** A section marker (the agent recipe's SESSION/COMMANDS/NOW) — an inert chip on the recessed
-   *  ground between two groups, not a cap. Every other field is ignored on a header. */
-  header?: string;
   /** The mono key text on the cap (`^C`, `:w`, `/clear`…). */
   label?: string;
   /** The caption beside it. Absent on the slash caps — the label says it all. */
@@ -132,17 +129,18 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     pulse: true,
     sf: 'sparkles',
     mark: 'A',
+    // One flat row, no section markers: rotated into a band they were three inert chips taking
+    // 44pt of thumb-reach each to label groups the caps already spell out (user, 2026-08-16).
+    // The order still carries the grouping — quit first (furthest from the thumb), then the
+    // slash commands, then the three "now" keys nearest the chip.
     caps: [
-      { header: 'SESSION' },
       { label: '^C ^C', caption: 'quit', bytes: '\x03', arm: true, danger: true },
-      { header: 'COMMANDS' },
       { label: '/clear', bytes: '/clear\r' },
       { label: '/context', bytes: '/context\r' },
       { label: '/model', bytes: '/model\r' },
       { label: '/usage', bytes: '/usage\r' },
       { label: '/config', bytes: '/config\r' },
       { label: '/plugins', bytes: '/plugins\r' },
-      { header: 'NOW' },
       { label: '📎', caption: 'attach', action: 'attach' },
       { label: '⇧⇥', caption: 'plan mode', bytes: '\x1b[Z' },
       { label: '⎋', caption: 'stop', bytes: '\x1b' },

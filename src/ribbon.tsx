@@ -57,14 +57,22 @@ const ARM_MS = 2800;
 /** The band, and the row of 44pt controls inside its 1pt perimeter. */
 const BAND_H = 52;
 const ROW_H = 44;
+/** The scroll gutters the ‹ › live in, when there is anything to scroll to. */
+const CHEV_W = 14;
 /**
  * The C40 perimeter (https://www.w3.org/WAI/WCAG22/Techniques/css/C40): two adjacent strokes of
  * opposite neutrals, so whatever the pane is drawing, one of them clears 3:1 against it — the
  * pair bottoms out at ≈4.2:1 around relative luminance 0.165, where they cross. Deliberately
  * OUTSIDE the theme's gamut: `border`, `scrim` and `foreground` can each land on themselves.
  */
-const EDGE_DARK = 'rgba(0,0,0,0.9)';
-const EDGE_LIGHT = 'rgba(255,255,255,0.9)';
+const EDGE_DARK = 'rgba(0,0,0,0.75)';
+// ponytail: the light half is a HAIRLINE at 0.45, not 1pt at 0.9. At 3x the specced value drew a
+// 3px near-white ring — louder than any text on a dark theme, and it read as a debug border
+// (user, 2026-08-16, device screenshot). That trades the C40 floor at the worst-case crossover
+// luminance (a mid grey pane) for a surface that does not shout; the dark stroke still carries
+// bright content, and the opaque plate carries most of the separation on its own. Put the alpha
+// back to 0.9 if a real mid-grey background ever proves unreadable.
+const EDGE_LIGHT = 'rgba(255,255,255,0.45)';
 /** Android's bar docks 8pt from the edge; iOS lets the trailing edge do the aiming (Parhi). */
 const EDGE_INSET = ANDROID ? 8 : 0;
 /** The house slide easing (settings sheet, name pills). */
@@ -239,22 +247,6 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
       : null;
 
   const renderCap = (c: Cap, i: number) => {
-    if (c.header !== undefined)
-      return (
-        // A recess between groups, not a cap: an opaque chip on the backmost ground, inert.
-        // (The old bare letterspaced 9.5pt header with a text-shadow was a display-type rescue
-        // that never worked over a wall of text.)
-        <View
-          key={i}
-          accessibilityRole="header"
-          style={[styles.marker, { backgroundColor: theme.scrim }]}>
-          <Text
-            maxFontSizeMultiplier={1.3}
-            style={[styles.markerText, { color: rgba(theme.foreground, 0.78) }]}>
-            {c.header}
-          </Text>
-        </View>
-      );
     const arm = c.arm === true && armed;
     const danger = c.danger === true || arm;
     const attachBusy = busy && c.action === 'attach';
@@ -340,7 +332,11 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
           {/* Fixed width, so the plate's own layout never re-resolves while the clip animates. */}
           <View style={[styles.plate, { width: bandW, backgroundColor: theme.panel }]}>
             <Animated.View
-              style={[styles.capsRegion, capsStyle]}
+              // The chevrons live in GUTTERS, not on top of the caps. Overlaying them sliced
+              // `COMMANDS` and `/clear` mid-word, which reads as a rendering bug rather than as
+              // "there is more" (user, 2026-08-16). Inset the scroll viewport instead: content is
+              // clipped by its own edge, immediately beside the arrow.
+              style={[styles.capsRegion, { paddingHorizontal: overflows ? CHEV_W : 0 }, capsStyle]}
               pointerEvents={open ? 'auto' : 'none'}>
               <Animated.ScrollView
                 horizontal
@@ -365,15 +361,11 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
               </Animated.ScrollView>
               {overflows && (
                 <>
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[styles.chevron, { left: 0, backgroundColor: theme.panel }, leftChevron]}>
-                    <Text style={[styles.chevronText, { color: rgba(theme.foreground, 0.78) }]}>‹</Text>
+                  <Animated.View pointerEvents="none" style={[styles.chevron, { left: 0 }, leftChevron]}>
+                    <Text style={[styles.chevronText, { color: rgba(theme.foreground, 0.6) }]}>‹</Text>
                   </Animated.View>
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[styles.chevron, { right: 0, backgroundColor: theme.panel }, rightChevron]}>
-                    <Text style={[styles.chevronText, { color: rgba(theme.foreground, 0.78) }]}>›</Text>
+                  <Animated.View pointerEvents="none" style={[styles.chevron, { right: 0 }, rightChevron]}>
+                    <Text style={[styles.chevronText, { color: rgba(theme.foreground, 0.6) }]}>›</Text>
                   </Animated.View>
                 </>
               )}
@@ -448,7 +440,7 @@ const styles = StyleSheet.create({
     top: 0,
     right: 0,
     bottom: 0,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderRightWidth: 0,
     borderTopLeftRadius: 25,
     borderBottomLeftRadius: 25,
@@ -474,7 +466,7 @@ const styles = StyleSheet.create({
   chevron: {
     position: 'absolute',
     top: 0,
-    width: 16,
+    width: CHEV_W,
     height: ROW_H,
     alignItems: 'center',
     justifyContent: 'center',
@@ -511,12 +503,4 @@ const styles = StyleSheet.create({
   chipName: { fontFamily: MONO, fontSize: 12, maxWidth: 96 },
   // Tabular figures, or the clock jitters every second as the digits change width.
   chipMeta: { fontFamily: MONO, fontSize: 12, fontVariant: ['tabular-nums'] },
-  marker: {
-    height: ROW_H,
-    borderRadius: 22,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  markerText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
 });

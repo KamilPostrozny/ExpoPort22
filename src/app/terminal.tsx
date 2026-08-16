@@ -59,6 +59,7 @@ import {
   ribbonPoll,
   ribbonResumed,
   ribbonSent,
+  ribbonSwitchedToIdle,
   selectRecipe,
 } from '@/ribbon-model';
 import { type Cap } from '@/ribbon-recipes';
@@ -1628,7 +1629,7 @@ export default function SessionScreen() {
   const ribbonForWindow = (win: TmuxWindow) => {
     const idle = IDLE_SHELLS.has(win.command);
     setRibbonCore((c) =>
-      ribbonPoll(c, idle ? null : { command: win.command, pid: null }, Date.now()),
+      idle ? ribbonSwitchedToIdle(c) : ribbonPoll(c, { command: win.command, pid: null }, Date.now()),
     );
   };
 
