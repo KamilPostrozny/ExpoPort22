@@ -124,6 +124,30 @@ rather than when it ends.
 
 ---
 
+## 5. `git log` cannot be scrolled with a finger
+
+**Repro.** Run `git log` in a tmux pane, drag up or down over the output.
+
+**Symptom.** The pager does not move. The pane scrolls into tmux's own history instead, taking the
+git log off screen. Only the arrow keys scroll the log.
+
+**Where to look.** `generateConf` in `src/tmux-model.ts:77` — the same root-table wheel binding that
+fixed `less` and `man`. Its three cases are: the app asked for the mouse → `send -M`; `alternate_on`
+→ one arrow per notch; otherwise → `copy-mode -e`. Git runs its pager with `LESS=FRX` by default,
+and `-X` suppresses the termcap init/deinit — so **this** `less` never switches to the alternate
+screen. `alternate_on` is false, so the notch falls through to the third case and opens copy mode,
+which is exactly the reported symptom. Plain `less foo` takes the second case and works; that is why
+the earlier fix looked complete.
+
+Suspected, not yet confirmed on device — check `#{alternate_on}` and `#{pane_current_command}` in a
+pane sitting in `git log` first. If it holds, the fix is to widen the second case's condition to
+match a pager by name as well as by alternate screen, e.g.
+`#{||:#{alternate_on},#{m:less,#{pane_current_command}}}`, plus a `tmux-model.test.ts` case. Setting
+`LESS` for the user is the other option and is worse: it rewrites an environment the app does not
+own.
+
+---
+
 ## Also open, found the same session, lower priority
 
 ### Grid tap intermittently does nothing
