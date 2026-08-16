@@ -325,10 +325,30 @@ export function pollDelay(attached: boolean, ticks: number): number {
  * attached while the phone sits at a plain shell would fool it; telling *whose* client it is
  * means walking `#{pane_tty}` against our own PTY, the upgrade if it ever matters.
  */
-export const POLL =
-  `tmux display-message -p '` +
-  ['#{session_attached}', '#{window_index}', '#{pane_pid}', '#{pane_current_command}'].join(SEP) +
-  `' 2>/dev/null; true`;
+/**
+ * Untargeted, `display-message` answers about whatever session and window tmux last considered
+ * current — which on a host running other tmux sessions alternates beat to beat. Measured on
+ * device 2026-08-16, the user sitting still in one window: `windowIndex` walked 6 → 7 → 8 → 7 → 6
+ * with a different `pane_current_command` behind each, so the ribbon showed another window's
+ * process, the badge flickered, and the app's own `activePosIn` (which reads this) kept changing
+ * its mind about which card was active.
+ *
+ * `=name:` names the session we attached to, its current window, its active pane — which is what
+ * our client is looking at. `=` means "exact name, no prefix match", so a session called `port22x`
+ * cannot answer for `port22`.
+ */
+export function pollCommand(session: string | null): string {
+  const target = session === null ? '' : ` -t ${shellQuote(`=${session}:`)}`;
+  return (
+    `tmux display-message${target} -p '` +
+    ['#{session_attached}', '#{window_index}', '#{pane_pid}', '#{pane_current_command}'].join(SEP) +
+    `' 2>/dev/null; true`
+  );
+}
+
+/** The untargeted form, still the fallback when we cannot name the session (`custom` start mode,
+ *  or an `attach` that never picked one) and when a targeted poll answers nothing. */
+export const POLL = pollCommand(null);
 
 export type TmuxPoll = {
   attached: boolean;

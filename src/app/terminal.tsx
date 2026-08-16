@@ -1005,7 +1005,7 @@ export default function SessionScreen() {
     console.log('[switcher] select', win.id);
     probeT0.current = Date.now();
     probe(`tap ${win.id} (${win.index === tmux.windowIndex ? 'same' : 'switch'})`);
-    ribbonForWindow(win); // as with the bar swipe: under the zoom, not a beat after it
+    ribbonForWindow(win, 'card tap'); // as with the bar swipe: under the zoom, not a beat after it
     void selectWindow(win.index); // §7: no haptic on tab select
     // The accent outline is `win.active`, which only the ~2s list beat refreshes — flipped
     // optimistically here (as a kill removes its card), or the old tab stays haloed through
@@ -1113,7 +1113,7 @@ export default function SessionScreen() {
           setSw('open');
           return;
         }
-        ribbonForWindow(wins[pos]); // as with a select: under the zoom, not a beat after it
+        ribbonForWindow(wins[pos], 'new window'); // as with a select: under the zoom, not a beat after it
         setZoomId(wins[pos].id);
         // The new card is the last row, possibly below the fold — reveal it on the frame after
         // its row has laid out, then give the eye a beat to see it exist before the flight.
@@ -1526,7 +1526,7 @@ export default function SessionScreen() {
           console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
         // The handle changes with the slide, not a poll beat after it — and it costs no height,
         // so nothing refits. A window we are about to create runs an idle shell: no handle.
-        if (win) ribbonForWindow(win);
+        if (win) ribbonForWindow(win, 'bar swipe commit');
         else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
         // The settle's redraw-wait counts from here, not from the settle: on a LAN tmux's redraw
         // beats the slide home.
@@ -1603,24 +1603,12 @@ export default function SessionScreen() {
   rbOpenRef.current = rbOpen;
   const fgCommand = tmux.foreground?.command ?? null;
   const fgPid = tmux.foreground?.pid ?? null;
-  /** Which window the band is speaking for. The poll asks `display-message` with no target, so it
-   *  answers about whatever window tmux last considered current — on a busy host that is a
-   *  different window every other beat (BUGS.md). Believing those answers put claude's chip on a
-   *  tab where nothing was running and left it there (user, 2026-08-16: "the pill stayed"). Every
-   *  in-app hop goes through `ribbonForWindow`, so that is the truth; an answer about any other
-   *  window is not ours to act on. A window switched from OUTSIDE the app therefore leaves the
-   *  band on the old recipe until the next in-app hop — the honest cost of a poll that will not
-   *  say whose window it is describing. */
-  const ribbonWindow = useRef<number | null>(null);
   useEffect(() => {
     // Not while anything is sliding: after a committed hop the very next display-message answer
     // carries the NEW window's foreground, and this flipped the handle ~100ms into every slide.
     // `ribbonForWindow` already set the right recipe at the commit; when the freeze lifts this
     // re-applies the latest poll, a no-op whenever the two agree.
     if (frozen) return;
-    if (tmux.windowIndex === null) return;
-    if (ribbonWindow.current === null) ribbonWindow.current = tmux.windowIndex; // first answer wins
-    if (tmux.windowIndex !== ribbonWindow.current) return; // somebody else's window
     setRibbonCore((c) =>
       ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
     );
@@ -1641,8 +1629,8 @@ export default function SessionScreen() {
   /** The recipe for a window we are switching to, named from the list rather than waited for,
    *  so the handle changes with the transition instead of a poll beat after it. Every switch
    *  goes through here — a committed bar swipe, a card tap, a new window. */
-  const ribbonForWindow = (win: TmuxWindow) => {
-    ribbonWindow.current = win.index; // the hop is authoritative; the poll is not
+  const ribbonForWindow = (win: TmuxWindow, why: string) => {
+    console.log(`[ribbon] forWindow ${win.index} ${win.command} (${why})`);
     const idle = IDLE_SHELLS.has(win.command);
     setRibbonCore((c) =>
       idle ? ribbonSwitchedToIdle(c) : ribbonPoll(c, { command: win.command, pid: null }, Date.now()),
