@@ -48,7 +48,6 @@ import {
   SEARCH_RADIUS,
   SPACE,
   TEXT,
-  TINT,
 } from '@/style';
 import {
   DESIGN_W,
@@ -445,7 +444,11 @@ function SwitcherInner(props: SwitcherProps) {
                 // scales with the stage (`CARD_RADIUS * u`), and a flat radius in the stylesheet
                 // gave the dashed slot a different corner from the card it stands in for on every
                 // width but 402.
-                { borderColor: theme.border, borderRadius: CARD_RADIUS * (stageW / DESIGN_W) },
+                {
+                  borderColor: theme.border,
+                  backgroundColor: theme.surface,
+                  borderRadius: CARD_RADIUS * (stageW / DESIGN_W),
+                },
                 frameStyle(slotFrame(dragPos, stageW)),
               ]}
             />
@@ -515,7 +518,7 @@ function SwitcherInner(props: SwitcherProps) {
                 { backgroundColor: theme.accent },
                 pressed && PRESSED_KEY,
               ]}>
-              <Text style={[styles.fabGlyph, { color: theme.background }]}>+</Text>
+              <Text style={[styles.fabGlyph, { color: theme.onAccent }]}>+</Text>
             </Pressable>
           </>
         ) : (
@@ -1175,7 +1178,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    backgroundColor: TINT.ghost,
+    // The fill is a role, set at the call site with the corner: a fixed overlay grey is invisible
+    // on a light scheme, which is the whole point of the theme-fidelity pass.
   },
   card: {
     shadowColor: '#000',

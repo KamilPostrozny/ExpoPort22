@@ -2143,7 +2143,11 @@ export default function SessionScreen() {
             counter sees (user, 2026-08-13: laggy inside the animation). */}
         {zoomActive && (
           <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, gridBlurStyle]}>
-            <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+            <BlurView
+              intensity={30}
+              tint={theme.isDark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFill}
+            />
           </Animated.View>
         )}
         </Animated.View>

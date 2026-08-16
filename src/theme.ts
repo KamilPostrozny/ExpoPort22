@@ -8,16 +8,24 @@
  * the foreground, the cursor, the selection and the 16 ANSI slots and leaves the ~28 KB of
  * syntax-token data behind (see that file for what else was looked at and why it did not fit).
  *
+ * A shiki theme is an *editor* theme, though, and VS Code's key set has nowhere to put "the accent
+ * colour" and no opinion about which grey is a hairline. Where a scheme's author publishes a
+ * terminal port or a named role table that says otherwise, that document wins: those values ride
+ * along on `SchemeData` as optional fields and are applied below in preference to any arithmetic.
+ *
  * A scheme is its terminal colours and nothing else. Every chrome role below is computed from
  * them, which is what makes a new scheme one line in the generator and no decisions here.
  *
  * Views ask for a colour by the job it does — `panel`, `scrim`, `border` — never by slot index, so
  * nothing outside this file knows that a Catppuccin scrim is `crust` and a Nord one is arithmetic.
  *
- * The Catppuccin package also ships an `ansiColors` set (the official spec, with bright slots on
- * their own hues). It is deliberately not used: those four flavours follow the alacritty mapping,
- * where bright repeats the normal hue and only the grey ramp steps, which is what the reference
- * app's terminal was tuned against. The generated schemes carry their own authors' 16, as shipped.
+ * The Catppuccin package also ships an `ansiColors` set. It is deliberately not used: the four
+ * flavours here follow the official *ports* — bright repeats the normal hue and only the grey ramp
+ * steps — which is what the reference app's terminal was tuned against, and which is what
+ * catppuccin/kitty and catppuccin/alacritty actually install. The ports and the style guide's own
+ * ANSI table disagree about `color7`/`color15` and the brights; the ports win here. Latte's ramp
+ * inversion below comes from the guide and from catppuccin/kitty — not from catppuccin/alacritty,
+ * whose latte port is the outlier upstream. The generated schemes carry their own authors' 16.
  */
 
 import { flavorEntries, flavors } from '@catppuccin/palette';
@@ -176,24 +184,118 @@ function mix(a: string, b: string, t: number): string {
 }
 
 /** A theme colour at an alpha — the prototype's `hexA()`. Every caller passes a `#rrggbb` off a
- *  `Theme`, which is why it lives here and not in a view: the views only ever tint these. */
+ *  `Theme`, which is why it lives here and not in a view: the views only ever tint these.
+ *  Prefer a role outright: alpha over an unknown backdrop is how a light theme ends up with an
+ *  invisible hairline. */
 export function rgba(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
+const luminance = (hex: string) =>
+  channels(hex)
+    .map((v) => v / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+    .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+
+/** WCAG 2.1 contrast, which is symmetric — the order of the arguments does not matter. */
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** CIE L*, the perceptual lightness. Used for the layer stack, where what matters is "a visible
+ *  step back" rather than a text-contrast ratio — the two disagree badly near black. */
+function lightness(hex: string): number {
+  const y = luminance(hex);
+  return y <= 216 / 24389 ? (y * 24389) / 27 : Math.cbrt(y) * 116 - 16;
+}
+
+/** The smallest `mix(from, to, t)` that satisfies `ok`, or `to` if nothing does. `ok` has to be
+ *  monotonic in `t`, which both callers below are: contrast and lightness-distance only grow. */
+function search(from: string, to: string, ok: (hex: string) => boolean): string {
+  if (ok(from)) return from;
+  if (!ok(to)) return to;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 12; i++) {
+    const m = (lo + hi) / 2;
+    if (ok(mix(from, to, m))) hi = m;
+    else lo = m;
+  }
+  return mix(from, to, hi);
+}
+
 /**
- * The ratios come from measuring Catppuccin: `overlay0` sits 45% of the way from `base` to `text`,
- * `overlay1` 55%, `subtext0` 78%, and `mantle`/`crust` are the background pulled toward black by
- * about a fifth and two fifths on a dark flavour, a twentieth and a twelfth on a light one — a
- * light scheme's layers darken as they go back too, which is the part that is easy to get wrong.
+ * The floors, and where they come from.
+ *
+ * Every number here is the *minimum* the four Catppuccin flavours already hit, measured rather than
+ * chosen — Latte is the binding case for all of them. That is deliberate: this file's promise is one
+ * shape from two sources, so a generated scheme should be no quieter than the tuned family, and no
+ * louder either. WCAG's 4.5 and 3.0 are not the targets, because Catppuccin does not meet them
+ * either (Latte's `overlay0` hairline is 2.30:1 and its yellow is 2.31:1) and a hairline drawn to
+ * 3:1 on twenty-two schemes would be visibly heavier than the family it is supposed to match.
+ *
+ * A floor only ever lifts. A scheme already above one keeps the colour its author chose, and an
+ * author's own published value (`SchemeData`'s optional fields) skips the floor entirely — upstream
+ * outranks our arithmetic even when upstream is dimmer.
  */
+const FLOOR = {
+  /** `subtext0` on `base`: 4.37 (latte) … 7.37 (mocha). */
+  muted: 4.4,
+  /** `overlay1` on `base`: 2.83 … 4.44. */
+  placeholder: 2.8,
+  /** `overlay0` on `base`: 2.30 … 3.36. */
+  border: 2.3,
+  /** A filled dot is a graphical object, not a hairline, so it gets the UI floor of its own. */
+  dot: 3.0,
+  /** `blue` on `base`: 4.34 … 7.79. Carries `onAccent` on top of it, and contrast is symmetric. */
+  accent: 4.3,
+  /** `red` on `base`: 4.65 … 7.08. */
+  danger: 4.5,
+};
+
+/** How far back a layer sits, in L*. `mantle` is 2.82–3.68 behind `base` across the four flavours
+ *  and `crust` 6.01–6.93, on the light flavour as much as the dark ones. */
+const LAYER = { panel: 3.2, scrim: 6.5 };
+
+/** A field `drop` L* behind `bg`. Toward black where there is room and toward the text where there
+ *  is not: on GitHub Dark's #0d1117 a fifth of the way to black moves 1.14 L*, and a sheet over the
+ *  terminal stops reading as a sheet at all. Three schemes take the second branch. */
+const layer = (bg: string, fg: string, drop: number) =>
+  search(bg, lightness(bg) >= drop ? '#000000' : fg, (h) => Math.abs(lightness(h) - lightness(bg)) >= drop);
+
+/**
+ * `c`, brightened or darkened until it clears `target` against `bg`.
+ *
+ * Toward white on a dark scheme and black on a light one — never toward the foreground, which is a
+ * grey on plenty of schemes: Solarized's is #839496, and lifting its red that way lands on #898e8f,
+ * a grey error state. Mixing with white or black keeps the hue and spends only saturation.
+ */
+const lift = (c: string, bg: string, dark: boolean, target: number) =>
+  search(c, dark ? '#ffffff' : '#000000', (h) => contrast(h, bg) >= target);
+
+/**
+ * A step `t0` of the way from `bg` to `fg`, pushed further only if it misses its floor — and never
+ * closer than a tenth of the way from the text, so secondary text stays tellable from primary.
+ *
+ * That cap binds on exactly one scheme: Solarized Light's own body text is 4.13:1 against its own
+ * background, so nothing derived from it can reach 4.4 and the honest answer is to stop short rather
+ * than to hand `muted` the foreground's hex.
+ */
+const step = (bg: string, fg: string, t0: number, target: number) =>
+  search(mix(bg, fg, t0), mix(bg, fg, 0.9), (h) => contrast(h, bg) >= target);
+
 function fromScheme(s: SchemeData): Theme {
   const { background: bg, foreground: fg, dark } = s;
   // The normal half, never the bright one. ANSI only pins down what slots 1–6 mean; what a scheme
   // does with 9–14 is its own business, and Solarized spends them on its base greys — so a confirm
   // button read out of "bright blue" is #839496 there, and a warning out of "bright yellow" is a
   // blue-grey. Catppuccin's own four take their chrome from the same half, tuned.
+  //
+  // Where a scheme publishes the colour outright — gruvbox branches its whole accent tier on
+  // dark-vs-light, Nord names nord8 "main color for primary UI elements", ayu's identity is its
+  // gold — the generator carries it and it wins here. See `OVERRIDES` in scripts/gen-themes.ts.
   const [, red, green, yellow, blue, magenta] = s.ansi;
   return {
     name: s.name,
@@ -206,25 +308,30 @@ function fromScheme(s: SchemeData): Theme {
     selection: s.selection,
     ansi: s.ansi,
 
-    accent: blue,
+    accent: s.accent ?? lift(blue, bg, dark, FLOOR.accent),
     accentAlternate: magenta,
-    muted: mix(bg, fg, 0.78),
-    danger: red,
-    warning: yellow,
+    muted: s.muted ?? step(bg, fg, 0.78, FLOOR.muted),
+    danger: s.danger ?? lift(red, bg, dark, FLOOR.danger),
+    // No floor. Latte's own yellow is 2.31:1, so one here would put twenty-two schemes above the
+    // family they match. The schemes whose authors publish a warning token carry it instead.
+    warning: s.warning ?? yellow,
     surface: s.selection,
-    panel: mix(bg, '#000000', dark ? 0.2 : 0.04),
-    scrim: mix(bg, '#000000', dark ? 0.42 : 0.08),
-    border: mix(bg, fg, 0.45),
-    placeholder: mix(bg, fg, 0.55),
+    panel: layer(bg, fg, LAYER.panel),
+    scrim: layer(bg, fg, LAYER.scrim),
+    border: s.border ?? step(bg, fg, 0.45, FLOOR.border),
+    placeholder: s.placeholder ?? step(bg, fg, 0.55, FLOOR.placeholder),
     onAccent: bg,
     dots: {
       green,
-      grey: mix(bg, fg, 0.45),
+      // One step up from the hairline, and on its own floor: this one is filled, not drawn.
+      grey: step(bg, fg, 0.55, FLOOR.dot),
       mauve: magenta,
       blue,
       yellow,
-      // No ANSI slot is orange, and the red one is the closest most schemes get.
-      peach: red,
+      // No ANSI slot is orange. Nine of these palettes publish one anyway and the generator carries
+      // it; the rest split the difference, because falling back to red made this dot and `danger`
+      // the same hex on all twenty-two.
+      peach: s.orange ?? mix(red, yellow, 0.45),
     },
 
     colorSchemeNotification: notify(dark),

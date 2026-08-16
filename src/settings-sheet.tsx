@@ -78,7 +78,6 @@ import {
   SHEET_RADIUS,
   SPACE,
   TEXT,
-  TINT,
 } from '@/style';
 import {
   ALL_THEMES,
@@ -248,7 +247,8 @@ export default function SettingsSheet({
           style={({ pressed }) => [
             styles.row,
             styles.rowLine,
-            pressed && { backgroundColor: TINT.track },
+            { borderTopColor: theme.border },
+            pressed && { backgroundColor: theme.surface },
           ]}>
           <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
           <Text style={[styles.value, { color: theme.muted }]} numberOfLines={1}>
@@ -270,7 +270,8 @@ export default function SettingsSheet({
                 styles.row,
                 styles.subRow,
                 styles.rowLine,
-                pressed && { backgroundColor: TINT.track },
+                { borderTopColor: theme.border },
+                pressed && { backgroundColor: theme.surface },
               ]}>
               <Text style={[styles.label, { color: theme.foreground }]} numberOfLines={1}>
                 {t.label}
@@ -293,7 +294,7 @@ export default function SettingsSheet({
     <Modal transparent statusBarTranslucent animationType="none" onRequestClose={close}>
       {/* RNGH needs its own root inside a Modal's native window. */}
       <GestureHandlerRootView style={styles.fill}>
-        <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, scrimStyle]}>
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}>
           <Pressable style={styles.fill} onPress={close} />
         </Animated.View>
 
@@ -342,16 +343,16 @@ export default function SettingsSheet({
                 ) : (
                   themeRow('Theme', ALL_THEMES, 'theme')
                 )}
-                <View style={[styles.row, styles.rowLine]}>
+                <View style={[styles.row, styles.rowLine, { borderTopColor: theme.border }]}>
                   <Text style={[styles.label, { color: theme.foreground }]}>Font size</Text>
                   <Text style={[styles.value, { color: theme.muted }]}>{settings.fontSize} pt</Text>
-                  <View style={styles.stepper}>
+                  <View style={[styles.stepper, { backgroundColor: theme.surface }]}>
                     <Pressable
                       onPress={() => stepFont(-1)}
                       style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}>
                       <Text style={[styles.stepGlyph, { color: theme.foreground }]}>−</Text>
                     </Pressable>
-                    <View style={styles.stepDivider} />
+                    <View style={[styles.stepDivider, { backgroundColor: theme.border }]} />
                     <Pressable
                       onPress={() => stepFont(1)}
                       style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}>
@@ -388,7 +389,7 @@ export default function SettingsSheet({
                   onPress={onDisconnect}
                   style={({ pressed }) => [
                     styles.actionRow,
-                    pressed && { backgroundColor: TINT.track },
+                    pressed && { backgroundColor: theme.surface },
                   ]}>
                   <Text style={[styles.label, { color: theme.accent }]}>Disconnect</Text>
                 </Pressable>
@@ -397,7 +398,8 @@ export default function SettingsSheet({
                   style={({ pressed }) => [
                     styles.actionRow,
                     styles.rowLine,
-                    pressed && { backgroundColor: TINT.track },
+                    { borderTopColor: theme.border },
+                    pressed && { backgroundColor: theme.surface },
                   ]}>
                   <Text style={[styles.label, { color: theme.danger }]}>Forget host key</Text>
                 </Pressable>
@@ -412,7 +414,6 @@ export default function SettingsSheet({
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  scrim: { backgroundColor: 'rgba(0,0,0,0.35)' },
   sheet: {
     position: 'absolute',
     left: 0,
@@ -446,7 +447,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACE.gutter,
     paddingVertical: 7,
   },
-  rowLine: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: TINT.line },
+  /** The rule's colour is `theme.border`, passed at each call site: a fixed overlay grey is the
+   *  wrong grey on most of twenty-six schemes, and invisible on some. */
+  rowLine: { borderTopWidth: StyleSheet.hairlineWidth },
   /** A theme inside an expanded list, indented off the disclosure row that opened it. */
   subRow: { paddingLeft: SPACE.xxl },
   label: { flex: 1, fontSize: TEXT.label },
@@ -462,16 +465,12 @@ const styles = StyleSheet.create({
   },
   chip: { width: 9, height: 13, borderRadius: 2.5 },
   checkSlot: { width: 18, alignItems: 'flex-end' },
-  // Likewise the stepper: a 9pt track around 38×30 keys, the prototype's alone.
-  stepper: {
-    flexDirection: 'row',
-    borderRadius: 9,
-    overflow: 'hidden',
-    backgroundColor: TINT.track,
-  },
+  // Likewise the stepper: a 9pt track around 38×30 keys, the prototype's alone. Its track and
+  // divider are roles, passed at the call site.
+  stepper: { flexDirection: 'row', borderRadius: 9, overflow: 'hidden' },
   stepKey: { width: 38, height: 30, ...CENTER },
   stepGlyph: { fontSize: 20, lineHeight: 24 },
-  stepDivider: { width: 1, backgroundColor: TINT.edge },
+  stepDivider: { width: 1 },
   note: {
     fontSize: TEXT.caption,
     lineHeight: leading(TEXT.caption),

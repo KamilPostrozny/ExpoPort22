@@ -98,7 +98,6 @@ import {
   RADIUS,
   SPACE,
   TEXT,
-  TINT,
   leading,
 } from '@/style';
 import { zoomProgress } from '@/switcher-model';
@@ -203,12 +202,26 @@ export type KeyBarProps = {
 
 /* --- §3's glass recipe --- */
 
-/** The glass's edge, one per appearance. The prototype defines the pair together (`--glassBd`);
- *  only the dark half had ever been written, so a light scheme drew a white line at 0.12 over a
- *  near-white surface — the tint two lines below it has always been branched, and now both are. */
-const glassBorder = (isDark: boolean) => (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)');
 /** The glass's hairline. */
 const GLASS_BORDER_W = Platform.OS === 'android' ? 0 : 0.5;
+
+/**
+ * The prototype's tints, as fractions of the theme's own ink rather than as literals.
+ *
+ * These were three Catppuccin Mocha values — `overlay1` at 16% and 25%, and white at 12% — written
+ * when there were four flavours and three of them dark. Across twenty-six they do not hold: a pale
+ * grey tint over pale glass is invisible on the nine light schemes, and a white edge on a white
+ * sheet has no edge at all. They stay translucent on purpose, because an opaque role would paint
+ * over the blur they are supposed to sit on.
+ *
+ * `glassEdge` supersedes a two-value `glassBorder(isDark)`: the prototype defines the edge pair
+ * together (`--glassBd`) and only the dark half had ever been written, so a light scheme drew a
+ * white line over a near-white surface. Branching on appearance fixed that with two more literals;
+ * taking it off `foreground` fixes it once for every scheme.
+ */
+const keyTint = (t: Theme) => rgba(t.foreground, 0.14);
+const hairline = (t: Theme) => rgba(t.foreground, 0.22);
+const glassEdge = (t: Theme) => rgba(t.foreground, 0.12);
 
 /** Every popover in this file rises and leaves the same way — one decision, not five copies of it.
  *  Out is quicker than in: a dismissal should be gone before the finger is. */
@@ -259,7 +272,7 @@ export function Glass({
           borderRadius: radius,
           overflow: 'hidden',
           borderWidth: GLASS_BORDER_W,
-          borderColor: glassBorder(theme.isDark),
+          borderColor: glassEdge(theme),
         },
         style,
       ]}>
@@ -271,7 +284,14 @@ export function Glass({
       <View
         style={[
           StyleSheet.absoluteFill,
-          { backgroundColor: theme.isDark ? 'rgba(205,214,244,0.08)' : 'rgba(255,255,255,0.55)' },
+          // Lift the blur toward the theme's own ink on a dark scheme and toward its own ground on a
+          // light one. The branch is the glass recipe, not a colour choice — both sides are the
+          // theme's, where this was Mocha's `text` at 8% and a flat white at 55%.
+          {
+            backgroundColor: theme.isDark
+              ? rgba(theme.foreground, 0.08)
+              : rgba(theme.background, 0.55),
+          },
         ]}
       />
       {children}
@@ -786,13 +806,13 @@ function KeyBarInner(props: KeyBarProps) {
               <SymbolView
                 name="ellipsis"
                 size={20}
-                tintColor={props.sending ? theme.background : theme.foreground}
+                tintColor={props.sending ? theme.onAccent : theme.foreground}
                 fallback={
                   <Text
                     style={[
                       keyLabel,
                       { fontSize: 18 },
-                      props.sending && { color: theme.background },
+                      props.sending && { color: theme.onAccent },
                     ]}>
                     ⋯
                   </Text>
@@ -1043,13 +1063,13 @@ export function ArrowsPopover({
         <View style={styles.dpad}>
           <View style={styles.dpadRow}>
             <View style={styles.dpadHole} />
-            {arrow('up', '↑', [styles.dpadKey, { backgroundColor: TINT.fill }])}
+            {arrow('up', '↑', [styles.dpadKey, { backgroundColor: keyTint(theme) }])}
             <View style={styles.dpadHole} />
           </View>
           <View style={styles.dpadRow}>
-            {arrow('left', '←', [styles.dpadKey, { backgroundColor: TINT.fill }])}
-            {arrow('down', '↓', [styles.dpadKey, { backgroundColor: TINT.fill }])}
-            {arrow('right', '→', [styles.dpadKey, { backgroundColor: TINT.fill }])}
+            {arrow('left', '←', [styles.dpadKey, { backgroundColor: keyTint(theme) }])}
+            {arrow('down', '↓', [styles.dpadKey, { backgroundColor: keyTint(theme) }])}
+            {arrow('right', '→', [styles.dpadKey, { backgroundColor: keyTint(theme) }])}
           </View>
         </View>
         <View style={[styles.popDivider, { backgroundColor: theme.border }]} />
@@ -1120,16 +1140,21 @@ export function BarMenu({
             onPress={() => onUpload(kind)}
             style={({ pressed }) => [
               styles.menuRow,
+              { borderTopColor: hairline(theme) },
               i === 0 && styles.menuRowFirst,
-              pressed && { backgroundColor: TINT.line },
+              pressed && { backgroundColor: keyTint(theme) },
             ]}>
             <Text style={[styles.menuLabel, { color: theme.foreground }]}>{label}</Text>
           </Pressable>
         ))}
-        <View style={styles.menuBreak} />
+        <View style={[styles.menuBreak, { backgroundColor: theme.scrim }]} />
         <Pressable
           onPress={onOpenSettings}
-          style={({ pressed }) => [styles.menuRow, pressed && { backgroundColor: TINT.line }]}>
+          style={({ pressed }) => [
+            styles.menuRow,
+            { borderTopColor: hairline(theme) },
+            pressed && { backgroundColor: keyTint(theme) },
+          ]}>
           <Text style={[styles.menuLabel, { color: theme.foreground }]}>Settings</Text>
         </Pressable>
       </Glass>
@@ -1176,9 +1201,9 @@ export function ClipboardPopover({
       onPress={onPick}
       style={({ pressed }) => [
         styles.clipRow,
-        { borderTopColor: TINT.line },
+        { borderTopColor: hairline(theme) },
         highlight && { backgroundColor: rgba(theme.accent, 0.12) },
-        pressed && { backgroundColor: TINT.fill },
+        pressed && { backgroundColor: keyTint(theme) },
       ]}>
       <View style={styles.clipBody}>
         <Text numberOfLines={1} style={[styles.clipText, { color: theme.foreground }]}>
@@ -1213,7 +1238,7 @@ export function ClipboardPopover({
         ))}
         {pasteboard !== null && row(pasteboard, false, pinPasteboard, () => type(pasteboard.text))}
         {slots.length === 0 && pasteboard === null && (
-          <Text style={[styles.clipEmpty, { color: theme.muted }]}>Nothing yanked or copied yet.</Text>
+          <Text style={[styles.clipEmpty, { color: theme.muted, borderTopColor: hairline(theme) }]}>Nothing yanked or copied yet.</Text>
         )}
       </Glass>
     </Animated.View>
@@ -1315,12 +1340,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: SPACE.md,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: TINT.line,
   },
   /** The first row sits under the header, where the prototype draws no rule. */
   menuRowFirst: { borderTopWidth: 0 },
   menuLabel: { fontSize: TEXT.label },
-  menuBreak: { height: 6, backgroundColor: 'rgba(0,0,0,0.14)' },
+  menuBreak: { height: 6 },
 
   /* clipboard popover — centered, 300pt, 20pt corners per the prototype */
   clipPop: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
@@ -1350,7 +1374,6 @@ const styles = StyleSheet.create({
     paddingVertical: SPACE.md,
     fontSize: TEXT.note,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: TINT.line,
   },
 
   /* the invisible keyboard owner */
