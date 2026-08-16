@@ -320,15 +320,25 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
         />
       )}
       <GestureDetector gesture={swipeOpen}>
+        {/* Two views, and for the same reason the switcher's card is two (see its JSX): the
+            entrance is a LAYOUT animation, and `FadeInDown`/`FadeOutDown` glide by writing
+            `translateY` — the very property `clipStyle` writes its nudge into. On one view they
+            take turns and the last writer wins, which is Reanimated's "Property transform … may be
+            overwritten by a layout animation" (16 of them in one device log, every one on the beat
+            the band mounted). It is not theoretical here: `nudge` starts on the same mount the
+            entrance does, so the arrival glide and the attention cue spent the first 180ms
+            fighting. The wrapper owns the position and the entrance; the clip owns its width and
+            its nudge. */}
         <Animated.View
           entering={(reduceMotion ? FadeIn : FadeInDown).duration(180)}
           // 180 out as well as in: a 140 exit against a 180 entry read as the ribbon blinking
           // out while the arrival glided (aae62fe, 2026-08-11).
           exiting={(reduceMotion ? FadeOut : FadeOutDown).duration(180)}
+          style={[styles.clipPos, { bottom }]}>
+        <Animated.View
           style={[
             styles.clip,
             {
-              bottom,
               borderColor: EDGE_DARK,
               // Opaque on the clip itself, so iOS draws the shadow from the rounded layer rather
               // than as a rectangle around a transparent one.
@@ -429,6 +439,7 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
           {/* The inner half of the C40 pair, over the plate's outermost point. */}
           <View pointerEvents="none" style={[styles.innerStroke, { borderColor: EDGE_LIGHT }]} />
         </Animated.View>
+        </Animated.View>
       </GestureDetector>
     </>
   );
@@ -437,9 +448,16 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
 const styles = StyleSheet.create({
   /** Square right corners hard against the trailing edge — the edge does the aiming, and the
    *  visible left end is what unrolls. */
-  clip: {
+  /** Where the band sits — the wrapper's half, so the entrance animates a box that writes no
+   *  transform of its own. Width comes from the clip inside it, right-aligned. */
+  clipPos: {
     position: 'absolute',
     right: 0,
+    height: BAND_H,
+    alignItems: 'flex-end',
+  },
+  /** What the band looks like, and the only view that clips: `width` and the nudge both land here. */
+  clip: {
     height: BAND_H,
     overflow: 'hidden',
     alignItems: 'flex-end',
