@@ -200,6 +200,13 @@ export function send(text: string): void {
 }
 
 export function setSize(cols: number, rows: number): void {
+  // A size that has not changed is not sent. The webview re-reports on purpose — coming out of a
+  // hold it cannot know which of its reports the screen dropped mid-zoom, so it says the size again
+  // (see `resize(force)` in terminal.tsx) — and every switcher open is one such release. Unguarded,
+  // each of those became an SSH window-change for a window that had not changed, and the shell gets
+  // a SIGWINCH per tab glance. This side is the one that knows what the shell was last told, which
+  // is why the guard belongs here rather than in the caller that cannot know.
+  if (size.cols === cols && size.rows === rows) return;
   size = { cols, rows };
   if (shellOpen) ExpoSSH.resize(cols, rows).catch(() => {});
 }

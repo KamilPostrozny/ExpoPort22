@@ -452,7 +452,12 @@ export default function SessionScreen() {
             if (GESTURE_LOG) console.log('[terminal] size held, not sent:', cols, '×', rows);
             return;
           }
-          if (cellW > 0 && cellH > 0) setCell({ w: cellW, h: cellH });
+          // Same object back when nothing moved, so React bails out instead of re-rendering: a
+          // re-report carries the cell it already carried, and a fresh `{w,h}` is a new identity
+          // every time — which re-ran this screen, and `rowRemainder` and the insets with it, once
+          // per switcher open for a cell that had not changed.
+          if (cellW > 0 && cellH > 0)
+            setCell((c) => (c.w === cellW && c.h === cellH ? c : { w: cellW, h: cellH }));
           if (cols > 0) setLiveCols(cols);
           setPadTop(topInset);
           setSize(cols, rows);

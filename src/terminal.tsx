@@ -632,9 +632,12 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       el.style.paddingTop = `${padTop}px`;
       fitAddon.fit();
     };
+    let forced = false;
     const report = () => {
-      if (term.cols === reported.cols && term.rows === reported.rows && padTop === reported.padTop)
-        return;
+      const same =
+        term.cols === reported.cols && term.rows === reported.rows && padTop === reported.padTop;
+      if (same && !forced) return;
+      forced = false;
       reported = { cols: term.cols, rows: term.rows, padTop };
       const { w, h } = cell();
       console.log(
@@ -643,6 +646,11 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         // a point multiplied by fifty columns, and two places cannot show it.
         'cell', w.toFixed(4), '×', h.toFixed(2),
         'padTop', padTop.toFixed(2),
+        // Says which kind of line this is, because a run of identical ones reads as a bug and is
+        // not: every switcher open ends a hold and re-reports, and unlabelled that cost an evening
+        // (2026-08-16). The re-report is still sent — the host is the one that knows whether it
+        // changes anything, and `setSize` drops it when it does not.
+        same ? '(re-report, nothing moved)' : '',
       );
       latest.current.onResize(term.cols, term.rows, w, h, padTop);
     };
@@ -650,7 +658,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // release from a hold, and during that hold a report may have been dropped in flight (see
     // the screen's own guard) — so what the host last heard is not knowable from here.
     const resize = (force?: boolean) => {
-      if (force) reported = { cols: 0, rows: 0, padTop: -1 };
+      if (force) forced = true;
       // probe (T10, temporary): the pane steps up a beat after a zoom lands and nothing on the
       // React side moves — no refit reported, no bytes held back. Text moving up by rows is the
       // BUFFER scrolling, so this watches what only this side can see: where the viewport sits in

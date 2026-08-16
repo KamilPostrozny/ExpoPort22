@@ -8,6 +8,9 @@
 /// <reference types="bun" />
 import { beforeEach, expect, mock, test } from 'bun:test';
 
+/** Every window-change the module actually sent, so the dedupe in `setSize` is observable. */
+const resizes: [number, number][] = [];
+
 /** Captured from `addListener`, so the test can play the native side. */
 const handlers: Record<string, (payload: unknown) => void> = {};
 
@@ -34,12 +37,14 @@ mock.module('../modules/expo-ssh/src/ExpoSSHModule', () => ({
     disconnect: async () => {},
     startShell: async () => {},
     send: async () => {},
-    resize: async () => {},
+    resize: async (cols: number, rows: number) => {
+      resizes.push([cols, rows]);
+    },
     exec: async () => '',
   },
 }));
 
-const { attachTerminal, disconnect } = await import('@/session');
+const { attachTerminal, connect, disconnect, setSize } = await import('@/session');
 
 // The session is a module singleton, so the replay buffer outlives a test. `disconnect` is the
 // real thing that empties it — the same path the Disconnect button takes.
@@ -88,4 +93,22 @@ test('output arriving with no terminal attached is replayed to the next one', as
   const detach = attachTerminal((chunks) => seen.push(chunks));
   expect(seen.flat()).toContain('offscreen');
   detach();
+});
+
+/** The webview re-reports a size it has already reported — coming out of a hold it cannot know
+ *  which of its reports the screen dropped mid-zoom, and every switcher open is one such release.
+ *  Unguarded that was an SSH window-change, and a SIGWINCH in the shell, per tab glance. */
+test('a size the shell already has is not sent again', async () => {
+  await connect();
+  resizes.length = 0;
+
+  setSize(100, 40);
+  setSize(100, 40); // the re-report
+  expect(resizes).toEqual([[100, 40]]);
+
+  setSize(100, 41); // a real change still goes
+  expect(resizes).toEqual([
+    [100, 40],
+    [100, 41],
+  ]);
 });
