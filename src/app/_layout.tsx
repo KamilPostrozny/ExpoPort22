@@ -1,3 +1,9 @@
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+} from '@expo-google-fonts/inter';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -9,14 +15,21 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { hydratePins } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
 import { hydrateSettings } from '@/settings';
-import { MONO, MONO_BOLD } from '@/theme';
+import { MONO, MONO_BOLD, SANS, SANS_BOLD, SANS_MEDIUM, SANS_SEMIBOLD } from '@/theme';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  // One face per registered family — see `src/fonts.ts`. A numeric `fontWeight` beside a one-face
+  // custom family fake-bolds on Android and no-ops on iOS, so weight is picked by family name and
+  // the four Inter faces are registered separately rather than as one `Inter` with an axis.
   const [fontsLoaded] = useFonts({
     [MONO]: require('../../assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf'),
     [MONO_BOLD]: require('../../assets/fonts/JetBrainsMonoNerdFontMono-Bold.ttf'),
+    [SANS]: Inter_400Regular,
+    [SANS_MEDIUM]: Inter_500Medium,
+    [SANS_SEMIBOLD]: Inter_600SemiBold,
+    [SANS_BOLD]: Inter_700Bold,
   });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 

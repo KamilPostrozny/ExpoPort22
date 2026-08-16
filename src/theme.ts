@@ -370,4 +370,4 @@ export function resolveTheme(name: ThemeName): Theme {
 
 /** The font names live in `fonts.ts` — a leaf, so the DOM terminal can take them without dragging
  *  the palette into the webview bundle. Re-exported here because this is where they read. */
-export { MONO, MONO_BOLD } from '@/fonts';
+export { MONO, MONO_BOLD, SANS, SANS_BOLD, SANS_MEDIUM, SANS_SEMIBOLD } from '@/fonts';

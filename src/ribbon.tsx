@@ -24,7 +24,6 @@
  * open gesture.
  */
 
-import { SymbolView } from 'expo-symbols';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -48,7 +47,7 @@ import { Key } from '@/keybar';
 import { formatElapsed } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
 import { TEXT } from '@/style';
-import { MONO, MONO_BOLD, rgba, type Theme } from '@/theme';
+import { MONO, MONO_BOLD, rgba, SANS, type Theme } from '@/theme';
 
 const ANDROID = Platform.OS === 'android';
 /** Horizontal travel that counts as the open swipe (the prototype's 28). */
@@ -74,8 +73,6 @@ const EDGE_DARK = 'rgba(0,0,0,0.75)';
 // bright content, and the opaque plate carries most of the separation on its own. Put the alpha
 // back to 0.9 if a real mid-grey background ever proves unreadable.
 const EDGE_LIGHT = 'rgba(255,255,255,0.45)';
-/** Android's bar docks 8pt from the edge; iOS lets the trailing edge do the aiming (Parhi). */
-const EDGE_INSET = ANDROID ? 8 : 0;
 /** The house slide easing (settings sheet, name pills). */
 const EASE = Easing.bezier(0.32, 0.72, 0.3, 1);
 
@@ -227,9 +224,11 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
     AccessibilityInfo.announceForAccessibility(`${recipe.proc} actions available`);
   }, [recipe.id, recipe.proc]);
 
-  // The leftward swipe still opens the band on iOS — fluent, already learned, and never the only
-  // route. Not on Android: the back gesture owns both edges, exclusion is capped at 200dp and
-  // refused at the bottom, and RNGH will not arbitrate against system edge gestures (#833).
+  // Category (2), hardware/OS affordance: Android's back gesture owns both screen edges,
+  // exclusion is capped at 200dp and refused at the bottom, and RNGH will not arbitrate against
+  // system edge gestures (#833). Nothing visual crosses this branch, and the tap route to open
+  // the band exists on both platforms. The leftward swipe stays on iOS — fluent, already learned,
+  // and never the only route.
   // Closing has no swipe: the caps' own horizontal scroll is the better claimant of that axis.
   const swipeOpen = useMemo(
     () =>
@@ -287,12 +286,10 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
             // Colour is never the only signal (WCAG 1.4.1) — and the bold weight below is what
             // rescues Latte's #d20f39, which is 4.46:1 on the plate: it fails the 4.5 floor at a
             // regular weight and passes the 3:1 one at 14pt bold.
-            <SymbolView
-              name="exclamationmark.triangle.fill"
-              size={10}
-              tintColor={theme.danger}
-              fallback={<Text style={[styles.capWarn, { color: theme.danger }]}>!</Text>}
-            />
+            // nf-fa-warning (U+F071), the bundled Nerd Font's filled triangle-with-a-bang: the
+            // same picture on both platforms, where an SF Symbol drew the triangle on iOS and
+            // dropped to a bare `!` on Android — losing the shape that is the whole signal.
+            <Text style={[styles.capWarn, { color: theme.danger }]}>{''}</Text>
           )}
           <Text
             numberOfLines={1}
@@ -399,7 +396,7 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
             <Pressable
               onLayout={(e) => setChipW(e.nativeEvent.layout.width)}
               onPress={() => onOpenChange(!open)}
-              hitSlop={{ top: 10, bottom: 10, left: 6, right: EDGE_INSET + 8 }}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 16 }}
               accessibilityRole="button"
               accessibilityLabel={`${recipe.proc} actions`}
               accessibilityHint={open ? 'Hides the actions' : `Shows the actions for ${recipe.proc}`}
@@ -409,14 +406,11 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
                 { backgroundColor: theme.surface },
                 pressed && { opacity: 0.5 },
               ]}>
-              <SymbolView
-                name={data.sf}
-                size={15}
-                tintColor={theme.dots[data.dot]}
-                fallback={
-                  <Text style={[styles.mark, { color: theme.dots[data.dot] }]}>{data.mark}</Text>
-                }
-              />
+              {/* One Nerd Font glyph per recipe, not an SF Symbol with a letter behind it: the
+                  fallback was what Android always drew, so the two builds carried different
+                  pictures. 13pt against the 15pt symbol it replaces — a Nerd Font icon sits on a
+                  mono advance and reads ~15% smaller at the same nominal size. */}
+              <Text style={[styles.mark, { color: theme.dots[data.dot] }]}>{data.glyph}</Text>
               <Text
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.3}
@@ -445,7 +439,7 @@ const styles = StyleSheet.create({
    *  visible left end is what unrolls. */
   clip: {
     position: 'absolute',
-    right: EDGE_INSET,
+    right: 0,
     height: BAND_H,
     overflow: 'hidden',
     alignItems: 'flex-end',
@@ -454,9 +448,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRightWidth: 0,
   },
-  // iOS gets no shadow: on a rounded overlay it draws as a RECTANGLE here (user, 2026-08-12) —
-  // the C40 perimeter carries the figure/ground separation alone.
-  androidShadow: { boxShadow: '0 2px 6px rgba(0,0,0,0.5)' },
   innerStroke: {
     position: 'absolute',
     left: 0,
@@ -468,9 +459,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 25,
     borderBottomLeftRadius: 25,
   },
-  /** Opaque. No Glass, no BlurView, no rgba(surface, 0.62) — that is the whole redesign in one
-   *  line, and it is also why Reduce Transparency is a no-op here and why Android (where
-   *  expo-blur cannot cross the WebView's window boundary) gets the same thing iOS does. */
+  /** Opaque. No blur, no rgba(surface, 0.62) — that is the whole redesign in one line, and it is
+   *  why Reduce Transparency is a no-op here. This band reached that answer first, for its own
+   *  contrast reasons; `Plate` in `src/keybar.tsx` later took it app-wide, for parity ones. */
   plate: {
     height: BAND_H - 2,
     flexDirection: 'row',
@@ -508,9 +499,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   capKeyRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  capKey: { fontFamily: MONO, fontSize: TEXT.mono, fontWeight: '500', lineHeight: 17 },
+  capKey: { fontFamily: MONO, fontSize: TEXT.mono, lineHeight: 17 },
   capKeyDanger: { fontFamily: MONO_BOLD },
-  capCaption: { fontSize: 10, lineHeight: 12 },
+  capCaption: { fontFamily: SANS, fontSize: 10, lineHeight: 12 },
   capWarn: { fontFamily: MONO_BOLD, fontSize: 10 },
 
   chip: {

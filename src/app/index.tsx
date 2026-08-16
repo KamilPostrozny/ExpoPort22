@@ -16,7 +16,7 @@ import {
   type StartMode,
 } from '@/settings';
 import { CENTER, PRESSED, RADIUS, SECTION_HEADER, SPACE, TEXT, TINT, leading } from '@/style';
-import { MONO } from '@/theme';
+import { MONO, SANS, SANS_BOLD, SANS_SEMIBOLD } from '@/theme';
 
 /** §4.1's start section, in the order a user would try them. The tmux pair first: they are the
  *  ones with the app's features attached. */
@@ -141,7 +141,7 @@ export default function Setup() {
                 <Text style={[styles.modeNote, { color: theme.muted }]}>{note}</Text>
               </View>
               {settings.startMode === mode && (
-                <Text style={[styles.tick, { color: theme.accent }]}>✓</Text>
+                <Text style={[styles.tick, { color: theme.accent }]}>{'\uF00C'}</Text>
               )}
             </Pressable>
           ))}
@@ -166,7 +166,7 @@ export default function Setup() {
                   {name ?? MOST_RECENT}
                 </Text>
                 {settings.attachSession === name && (
-                  <Text style={[styles.tick, { color: theme.accent }]}>✓</Text>
+                  <Text style={[styles.tick, { color: theme.accent }]}>{'\uF00C'}</Text>
                 )}
               </Pressable>
             ))}
@@ -213,8 +213,8 @@ export default function Setup() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { padding: SPACE.xl, gap: SPACE.md },
-  title: { fontSize: 34, fontWeight: '700' },
-  caption: { fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
+  title: { fontFamily: SANS_BOLD, fontSize: 34 },
+  caption: { fontFamily: SANS, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
   /** The label over a card, drawn the way the settings sheet draws its own group headers. */
   header: { ...SECTION_HEADER, paddingHorizontal: SPACE.gutter, paddingBottom: 7 },
   card: { borderRadius: RADIUS.card, overflow: 'hidden' },
@@ -229,16 +229,23 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   modeRow: { paddingHorizontal: SPACE.gutter, paddingVertical: 9 },
   modeText: { flex: 1 },
-  modeLabel: { fontSize: TEXT.label },
-  modeNote: { fontSize: 12, lineHeight: 16 },
-  tick: { fontSize: TEXT.label, fontWeight: '700' },
-  label: { width: 88, paddingLeft: SPACE.gutter, fontSize: TEXT.label },
-  input: { flex: 1, paddingVertical: 13, paddingRight: SPACE.gutter, fontSize: 16 },
-  problem: { fontSize: 14, lineHeight: 19 },
+  modeLabel: { fontFamily: SANS, fontSize: TEXT.label },
+  modeNote: { fontFamily: SANS, fontSize: 12, lineHeight: 16 },
+  /** The bundled Nerd Font check, not `✓` U+2713 — see the call sites. */
+  tick: { fontFamily: MONO, fontSize: TEXT.label },
+  label: { fontFamily: SANS, width: 88, paddingLeft: SPACE.gutter, fontSize: TEXT.label },
+  input: {
+    fontFamily: SANS,
+    flex: 1,
+    paddingVertical: 13,
+    paddingRight: SPACE.gutter,
+    fontSize: 16,
+  },
+  problem: { fontFamily: SANS, fontSize: 14, lineHeight: 19 },
   // The design pins its one filled button at 48 tall, so the height is set rather than left to
   // whatever the label plus a padding comes to.
   connect: { borderRadius: RADIUS.button, height: 48, ...CENTER },
-  connectLabel: { fontSize: TEXT.button, fontWeight: '600' },
+  connectLabel: { fontFamily: SANS_SEMIBOLD, fontSize: TEXT.button },
   key: { fontFamily: MONO, fontSize: 11, lineHeight: 16, padding: SPACE.gutter },
   copy: {
     alignSelf: 'flex-start',
@@ -248,5 +255,5 @@ const styles = StyleSheet.create({
     paddingVertical: SPACE.sm,
     borderRadius: RADIUS.button,
   },
-  copyLabel: { fontSize: 14, fontWeight: '600' },
+  copyLabel: { fontFamily: SANS_SEMIBOLD, fontSize: 14 },
 });

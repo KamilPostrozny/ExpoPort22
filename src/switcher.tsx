@@ -10,12 +10,10 @@
  * grid sits behind.
  */
 
-import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { SymbolView } from 'expo-symbols';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -68,7 +66,7 @@ import {
 } from '@/switcher-model';
 import { capturePane, listWindows, searchPane } from '@/tmux';
 import { POLL_MS, type TmuxWindow } from '@/tmux-model';
-import { MONO, MONO_BOLD, type Theme } from '@/theme';
+import { MONO, MONO_BOLD, rgba, SANS, type Theme } from '@/theme';
 
 /** One captured pane, with the column count it was captured at — the two travel together because
  *  the type size is derived from the columns, and pairing a fresh capture with a stale width (or
@@ -490,39 +488,10 @@ function SwitcherInner(props: SwitcherProps) {
         </View>
       </ScrollView>
 
-      {/* The bottom bar. iOS (§4.5): + circle | "N Tabs" | Done ✓. Android (§4.10, design §5c):
-          Done as a text button | Roboto count | the 56dp FAB the container transform births
-          from — same handlers, Material chrome. */}
+      {/* The bottom bar: + circle | "N Tabs" | Done ✓. */}
       <View
         style={[styles.bar, { marginBottom: props.insetBottom }]}
         onLayout={(e) => setBarH(e.nativeEvent.layout.height)}>
-        {Platform.OS === 'android' ? (
-          <>
-            <Pressable
-              onPress={interactive ? props.onDone : undefined}
-              style={({ pressed }) => [
-                styles.doneText,
-                pressed && { backgroundColor: `${theme.accent}24` }, // the prototype's 14% accent wash
-              ]}>
-              <Text style={[styles.doneLabel, { color: theme.accent }]}>Done</Text>
-            </Pressable>
-            <Text style={[styles.countAndroid, { color: theme.muted }]}>
-              {filtered
-                ? `${display.length} of ${props.total} tabs`
-                : `${display.length} ${display.length === 1 ? 'tab' : 'tabs'}`}
-            </Text>
-            <Pressable
-              onPress={interactive ? props.onNew : undefined}
-              style={({ pressed }) => [
-                styles.fab,
-                { backgroundColor: theme.accent },
-                pressed && PRESSED_KEY,
-              ]}>
-              <Text style={[styles.fabGlyph, { color: theme.onAccent }]}>+</Text>
-            </Pressable>
-          </>
-        ) : (
-          <>
         <Pressable
           onPress={interactive ? props.onNew : undefined}
           style={({ pressed }) => [
@@ -530,12 +499,10 @@ function SwitcherInner(props: SwitcherProps) {
             { backgroundColor: theme.surface },
             pressed && PRESSED_KEY,
           ]}>
-          <SymbolView
-            name="plus"
-            size={20}
-            tintColor={theme.foreground}
-            fallback={<Text style={{ color: theme.foreground, fontSize: 22 }}>+</Text>}
-          />
+          {/* The bundled Nerd Font draws both bar glyphs, so the two circles hold the same mark
+              from the same face on both platforms. 18/16pt is the size the icon set this replaced
+              drew at, minus 2 — the conversion the tabs circle already established. */}
+          <Text style={{ fontFamily: MONO, fontSize: 18, color: theme.foreground }}>{''}</Text>
         </Pressable>
         <Text style={[styles.count, { color: theme.foreground }]}>
           {filtered
@@ -549,15 +516,8 @@ function SwitcherInner(props: SwitcherProps) {
             { backgroundColor: theme.accent },
             pressed && PRESSED_KEY,
           ]}>
-          <SymbolView
-            name="checkmark"
-            size={18}
-            tintColor={theme.onAccent}
-            fallback={<Text style={{ color: theme.onAccent, fontSize: 18 }}>✓</Text>}
-          />
+          <Text style={{ fontFamily: MONO, fontSize: 16, color: theme.onAccent }}>{''}</Text>
         </Pressable>
-          </>
-        )}
       </View>
       {/* T14: the search field. Same string as the terminal view's bar; the ✕ disarms both.
           LAST among these siblings on purpose — that is what puts it over the grid. `zIndex` says
@@ -565,27 +525,19 @@ function SwitcherInner(props: SwitcherProps) {
           past its ancestor's siblings: the field drew over the live terminal, from a switcher
           nobody had opened (user, 2026-08-12, screenshot). Paint order cannot leak. */}
       <View style={[styles.searchWrap, { paddingTop: props.insetTop }]} pointerEvents="box-none">
-        {/* The cards pass under this strip rather than stopping at it, so it frosts them instead
-            of hiding them — and it frosts them by degrees, clear where the field begins and
-            thickest at the very top (user, 2026-08-12). */}
-        {/* Begins halfway down the field and thickens all the way to the top of the screen (user,
-            2026-08-12). Its weakest edge is therefore behind the pill, which is opaque. */}
+        {/* The cards pass under this strip rather than stopping at it, so it veils them by
+            degrees: clear halfway down the field, solid at the very top of the screen (user,
+            2026-08-12). Its weakest edge is therefore behind the field, which is opaque. */}
         {props.zoomActive && (
-          <BlurRamp
+          <ScrollUnderRamp
             height={props.insetTop + SEARCH_FIELD_H / 2}
-            tint={theme.isDark ? 'dark' : 'light'}
+            ground={theme.background}
           />
         )}
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
-          <SymbolView
-            name="magnifyingglass"
-            size={14}
-            tintColor={theme.muted}
-            //  is the Nerd Font magnifier, already bundled — the Android face of the icon.
-            fallback={
-              <Text style={{ color: theme.muted, fontSize: 13, fontFamily: MONO }}>{''}</Text>
-            }
-          />
+          {/*  is the Nerd Font magnifier, already bundled — the icon itself, on both platforms.
+              13pt is the 14pt symbol it replaces minus 2, the conversion the bar circles use too. */}
+          <Text style={{ color: theme.muted, fontSize: 13, fontFamily: MONO }}>{''}</Text>
           <TextInput
             value={props.query}
             onChangeText={props.onQuery}
@@ -615,53 +567,32 @@ function SwitcherInner(props: SwitcherProps) {
 export default memo(SwitcherInner);
 
 /**
- * A blur that ramps rather than a strip that starts: `LAYERS` backdrop blurs stacked from the top,
- * each shorter than the last, so the top of the screen is seen through all of them and the bottom
- * of the ramp through one. Each layer blurs what the ones over it already blurred.
+ * The strip that the grid scrolls under: clear where the search field begins, solid at the top of
+ * the screen, so cards pass beneath it by degrees instead of hitting an invisible edge
+ * (user, 2026-08-12).
  *
- * Two things have to hold, and each one cost a device round to learn:
+ * This was twelve stacked backdrop blurs, each shorter and stronger than the last, with the
+ * intensities ramping as `√(2i+1)` because blur radii compound as the root of the sum of their
+ * squares. That whole apparatus is gone with the blur itself: a backdrop blur is not something
+ * both platforms can do from one code path (see `Plate` in `src/keybar.tsx` for the long version),
+ * and half of what those twelve layers were doing was fighting to look like a smooth ramp.
  *
- * 1. The exposed bottom edge is a step of the TALLEST layer's own intensity — there is no blur
- *    below it to fade into. So the intensities ramp opposite to the heights: tallest is weakest.
- *    Equal intensities read as a cut through a row of text, twice (user, 2026-08-12).
- * 2. Radii compound as the root of the sum of their squares, so intensities rising in a straight
- *    line make the compounded total rise as depth to the 3/2 — measured on device, all the blur
- *    sat in the top third and the bottom half of the ramp did nothing. A total rising in a
- *    straight line needs each layer to be the difference of two squares, which is `√(2i+1)`:
- *    `TOP/LAYERS` at the exposed edge, `TOP` where all of them overlap.
+ * A fade to the screen's own ground is the same read and is one element on both platforms.
+ * `expo-linear-gradient` is a first-party Expo package with a single shared JS surface and no
+ * per-platform props — the thing the blur could never be. It replaces twelve overlapping layers
+ * that re-composited every frame of the zoom, so this is cheaper as well as identical.
  *
- * A real gradient mask is the other way to do this, and it wants `@react-native-masked-view` plus
- * `expo-linear-gradient` — two native dependencies, so a full rebuild, for a ramp the height of
- * the notch inset. Android takes no blur at all, as everywhere else (§4.10).
- *
- * ponytail: twelve steps, not a mask. If banding ever shows on a busier flavour, raise `LAYERS` —
- * `TOP` is the total either way, so the steps just get finer.
+ * Transparent at the bottom edge and opaque at the top, which is the direction the blur ramped:
+ * the weakest edge sits behind the field, which is opaque anyway.
  */
-
-const LAYERS = 12;
-/** Where the ramp ends up, at the top of the screen. Keybar's glass is 40, for scale. */
-const TOP = 48;
-
-function BlurRamp({ height, tint }: { height: number; tint: 'dark' | 'light' }) {
-  if (Platform.OS === 'android' || height <= 0) return null;
+function ScrollUnderRamp({ height, ground }: { height: number; ground: string }) {
+  if (height <= 0) return null;
   return (
-    <>
-      {Array.from({ length: LAYERS }, (_, i) => (
-        <BlurView
-          key={i}
-          // Tallest layer, weakest blur: `i` counts up as the layers get shorter.
-          intensity={Math.round((TOP / LAYERS) * Math.sqrt(2 * i + 1))}
-          tint={tint}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: (height * (LAYERS - i)) / LAYERS,
-          }}
-        />
-      ))}
-    </>
+    <LinearGradient
+      colors={[ground, rgba(ground, 0)]}
+      style={{ position: 'absolute', top: 0, left: 0, right: 0, height }}
+      pointerEvents="none"
+    />
   );
 }
 
@@ -892,7 +823,10 @@ function WindowCard({
     // The card is the same picture, so it can be solid the moment the surface starts fading: the
     // surface still covers its slot there, which is the whole reason the fade waits 180ms.
     opacity: swipeOpacity(swipeX.value, stageW) * (flying && fade.value >= 1 ? 0 : 1),
-    shadowOpacity: 0.55 * lift.value,
+    // `boxShadow` is the shadow both platforms render. The iOS-only `shadow*` set this replaces is
+    // why the lift threw no shadow at all off iOS — Android implements none of those props (bar
+    // `shadowColor`, and only as the tint of an `elevation`), so the drag simply had no lift there.
+    boxShadow: `0 18px 30px rgba(0,0,0,${0.55 * lift.value})`,
   }));
 
   const ring = dragged
@@ -961,7 +895,7 @@ function WindowCard({
           { position: 'absolute', left: 0, top: 0, width: slot.w, zIndex: dragged ? 10 : 1 },
           posStyle,
         ]}>
-      <Animated.View style={[styles.card, style]}>
+      <Animated.View style={style}>
         <View
           style={[
             styles.shot,
@@ -1143,8 +1077,8 @@ const styles = StyleSheet.create({
     paddingBottom: SEARCH_BAR_H - SEARCH_FIELD_H,
     overflow: 'hidden', // the blur strip is a child, and it ends where this does
   },
-  // iOS is the prototype's 13pt radius; Android takes Material's 16dp (§5d: buttons 16) —
-  // `SEARCH_RADIUS.switcher` is that pair.
+  // The corner is `SEARCH_RADIUS.switcher` rather than a number here: the terminal's own search
+  // bar is the same pill and the two must not drift.
   searchField: {
     height: SEARCH_FIELD_H,
     borderRadius: SEARCH_RADIUS.switcher,
@@ -1153,15 +1087,18 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
   },
-  // Android chrome text is Roboto by setting no fontFamily (T7A's finding, zero code).
-  searchInput: { flex: 1, fontSize: 14, paddingVertical: 0 },
+  searchInput: { flex: 1, fontFamily: SANS, fontSize: 14, paddingVertical: 0 },
   searchClear: {
     width: 19,
     height: 19,
     borderRadius: 10,
     ...CENTER,
   },
-  searchClearGlyph: { fontSize: 9, fontWeight: '700' },
+  // MONO for the ✕ (U+2715, in the bundled font): left to the system it resolves through Apple
+  // Symbols on one platform and Noto Sans Symbols on the other, which is two different marks. The
+  // `fontWeight: '700'` that used to sit here synthesised on neither and is gone with it; the
+  // wider mono advance re-centres itself inside the 19pt CENTER box.
+  searchClearGlyph: { fontFamily: MONO, fontSize: 9 },
   noHits: {
     position: 'absolute',
     top: 0,
@@ -1171,7 +1108,7 @@ const styles = StyleSheet.create({
     ...CENTER,
     gap: 8,
   },
-  noHitsLead: { fontSize: TEXT.label },
+  noHitsLead: { fontFamily: SANS, fontSize: TEXT.label },
   noHitsQuery: { fontFamily: MONO, fontSize: TEXT.mono },
   // No radius here: it scales with the stage, so it is passed at the call site (see there).
   placeholder: {
@@ -1180,12 +1117,6 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     // The fill is a role, set at the call site with the corner: a fixed overlay grey is invisible
     // on a light scheme, which is the whole point of the theme-fidelity pass.
-  },
-  card: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 18 },
-    shadowRadius: 30,
-    shadowOpacity: 0,
   },
   shot: { overflow: 'hidden' },
   close: {
@@ -1198,7 +1129,9 @@ const styles = StyleSheet.create({
     ...CENTER,
     opacity: 0.88,
   },
-  closeGlyph: { fontSize: 10, fontWeight: '700' },
+  // Same ✕, same reason as `searchClearGlyph`: the bundled font draws it, so both platforms draw
+  // the same mark. It sits in a 22pt CENTER box, which absorbs the mono advance.
+  closeGlyph: { fontFamily: MONO, fontSize: 10 },
   bar: {
     position: 'absolute',
     bottom: 0,
@@ -1207,22 +1140,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    ...Platform.select({
-      android: { paddingHorizontal: 12, paddingTop: 6, paddingBottom: 14 },
-      default: { paddingHorizontal: 34, paddingTop: 5, paddingBottom: 10 },
-    }),
+    // 34 pushes the two circles in to where the prototype's are; the 5/10 split hangs the row a
+    // touch above the home-bar inset the call site adds. `barH` is measured by `onLayout`, so the
+    // grid's content height follows whatever these come to.
+    paddingHorizontal: 34,
+    paddingTop: 5,
+    paddingBottom: 10,
   },
   // §3's 49pt bar circle; its 25 was exactly half of that, which is `RADIUS.pill` said properly.
   circle: { width: BAR.circle, height: BAR.circle, borderRadius: RADIUS.pill, ...CENTER },
   count: { fontFamily: MONO, fontSize: TEXT.mono },
-  // Android chrome text is Roboto by setting no fontFamily (T7A's finding, zero code).
-  countAndroid: { fontSize: 14, fontWeight: '500' },
-  doneText: { height: 40, paddingHorizontal: 16, borderRadius: 20, justifyContent: 'center' },
-  doneLabel: { fontSize: 14, fontWeight: '500' },
-  // 12dp corner per the working prototype (the §5c still shows 18 — the prototype wins, same
-  // tie-break T7A used). Elevation is the Material shadow; iOS never renders this branch.
-  fab: { width: 56, height: 56, borderRadius: 12, ...CENTER, elevation: 6 },
-  fabGlyph: { fontSize: 30, lineHeight: 34 },
   name: { textAlign: 'center', fontFamily: MONO, fontSize: 12, marginTop: 7 },
   sub: { textAlign: 'center', fontFamily: MONO, fontSize: 10, marginTop: 2 },
 });

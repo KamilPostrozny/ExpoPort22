@@ -46,16 +46,35 @@ FILL = {
 
 ADVANCE = 600  # 0.6em at 1000upm — a substitute on any other advance would break the cell
 
-#: The icons our own chrome draws in MONO — the `fallback=` half of every <SymbolView>, which is
-#: the only half Android ever renders (expo-symbols is iOS-only). A codepoint missing here does not
-#: fail loudly: RN falls through to Noto and the button quietly comes out a different weight and
-#: shape from the keys beside it, which is how ▣ U+25A3 and ✛ U+271B shipped as the tabs and dpad
-#: icons until 2026-08-16. Prefer a Nerd Font icon that draws the SF Symbol's shape; FILL above is
-#: for what the *host* writes into the pane, and is not the lever for these.
+#: Every icon our own chrome draws, now that there is one icon set instead of two: SymbolView is
+#: gone (expo-symbols was iOS-only, so its `fallback=` half was the only half Android ever drew),
+#: and both platforms render these Nerd Font codepoints out of MONO / MONO_BOLD. A codepoint
+#: missing here does not fail loudly: RN falls through to Noto and the button quietly comes out a
+#: different weight and shape from the keys beside it, which is how ▣ U+25A3 and ✛ U+271B shipped
+#: as the tabs and dpad icons until 2026-08-16. This dict is the guard against a repeat — add the
+#: codepoint here in the same commit that draws it. FILL above is for what the *host* writes into
+#: the pane, and is not the lever for these.
 CHROME = {
     0xF002: 'magnifyingglass — switcher search field',
-    0xF24D: 'square.on.square — the tabs circle',
-    0xF047: 'dpad — the arrows key',
+    0xF00C: 'check — the settings theme tick and the switcher Done circle',
+    0xF040: 'pencil — the vim recipe chip',
+    0xF047: 'arrows — the arrows key',
+    0xF04B: 'play — the running recipe chip',
+    0xF04C: 'pause — the suspended recipe chip',
+    0xF067: 'plus — the switcher new-tab circle',
+    0xF071: 'warning — the ribbon cap danger mark and the cannot-connect overlay',
+    0xF077: 'chevron-up — the settings disclosure, open',
+    0xF078: 'chevron-down — the settings disclosure, closed',
+    0xF07B: 'folder — the upload browser rows',
+    0xF080: 'chart-bar — the htop recipe chip',
+    0xF08D: 'thumbtack — the clipboard slot pin',
+    0xF09B: 'github — not drawn as an icon; the pane measures it to prove the face loaded',
+    0xF0D0: 'wand-magic — the agent recipe chip',
+    0xF0F6: 'file-text — the pager recipe chip',
+    0xF141: 'ellipsis — the ⋯ menu key',
+    0xF15B: 'file — the upload browser rows',
+    0xF1E6: 'plug — the disconnected overlay',
+    0xF24D: 'clone — the tabs circle',
 }
 
 #: The characters that are supposed to tile — box drawing and block elements. Everything else in a

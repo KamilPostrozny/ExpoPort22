@@ -48,3 +48,6 @@ example
 # sideload artifacts
 *.ipa
 Payload/
+
+# Gradle output from the local module build (`/android` is ignored above; this one is not under it)
+modules/*/android/build/

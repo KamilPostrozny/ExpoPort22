@@ -13,20 +13,16 @@
  * (Setup, the browse sheet, the status block) now pick from that instead of inventing a fourth.
  *
  * What is deliberately NOT here: anything the prototype fixes for a single element. The 9×13
- * swatch chip, the 38×30 stepper key, and the two bottom sheets' *different* drop shadows all
- * stay at their call sites — the browse sheet's `0 -10px 30px rgba(0,0,0,0.5)` and the settings
- * sheet's `0 -12px 40px rgba(0,0,0,0.45)` are both drawn that way on purpose, and folding them
- * into one constant would be inventing a consistency the design does not have. A vocabulary is
- * the words used twice.
+ * swatch chip and the 38×30 stepper key stay at their call sites — a number set once belongs
+ * beside the thing it sizes, and hoisting it would invent a vocabulary out of a single word. A
+ * vocabulary is the words used twice.
  *
  * The pinned block at the bottom is geometry PLAN.md §3 or the prototype fixes outright, named
  * here only so it stops being a magic number in three files at once. It is not up for snapping:
  * a 49pt bar circle rounded to 48 is not consistency, it is a redesign.
  */
 
-import { Platform } from 'react-native';
-
-const ANDROID = Platform.OS === 'android';
+import { SANS_SEMIBOLD } from '@/fonts';
 
 /* --- type --- */
 
@@ -50,7 +46,7 @@ export const TEXT = {
   mono: 14,
   /** A row's own label. The size the prototype sets more often than any other. */
   label: 15,
-  /** A filled button's label — always with weight 600. */
+  /** A filled button's label — always in `SANS_SEMIBOLD`. */
   button: 16,
 } as const;
 
@@ -68,8 +64,8 @@ export const leading = (size: number) => Math.round(size * 1.4);
  * those their own sizes, and they keep them.
  */
 export const SECTION_HEADER = {
+  fontFamily: SANS_SEMIBOLD,
   fontSize: TEXT.note,
-  fontWeight: '600',
   letterSpacing: 0.6,
 } as const;
 
@@ -141,7 +137,7 @@ const GREY = (a: number) => `rgba(127,132,156,${a})`;
 export const TINT = {
   /** A shape that is barely there: the switcher's drop placeholder. */
   ghost: GREY(0.08),
-  /** A filled control on glass — a d-pad key. */
+  /** A filled control on a plate — a d-pad key. */
   fill: GREY(0.16),
   /** The stepper's track. */
   track: GREY(0.25),
@@ -154,8 +150,9 @@ export const TINT = {
 /* --- pinned: the design's fixed geometry, named so it stops being magic --- */
 
 /**
- * The key bar, PLAN.md §3. The 49pt circles and pill, the 35pt keys and the 7pt gap between them
- * are the same on both platforms; only the corners and the side margin take the Material skin.
+ * The key bar, PLAN.md §3. 49pt circles and pill, 35pt keys with an 18pt corner, a 7pt gap, a 24.5
+ * capsule on every plate (half of 49, so the bar's pill is a true capsule) and a 24pt
+ * inset from each screen edge. One set of numbers for both platforms.
  */
 export const BAR = {
   circle: 49,
@@ -163,35 +160,36 @@ export const BAR = {
   /** The prototype's `padding:0 5px` on a key — the code had drifted to 8. */
   keyPad: 5,
   gap: 7,
-  keyRadius: ANDROID ? 12 : 18,
-  sideMargin: ANDROID ? 8 : 24,
-  radius: ANDROID ? 16 : 24.5,
+  keyRadius: 18,
+  sideMargin: 24,
+  radius: 24.5,
 } as const;
 
 /**
- * The ⋯ menu's shell: the prototype's 26 on iOS, and 16 on Android — where PLAN §3's blanket
- * "popovers capped at 20" does not apply, because the Android prototype draws this one shell at 16.
+ * The ⋯ menu's shell corners at 26 — this popover's own decision, not PLAN §3's blanket "popovers
+ * capped at 20".
  *
- * Only this popover is named here. The arrows cluster and the chord strip carry the prototype's own
- * 22, and the clipboard its 20; those are three separate decisions the design made per surface, not
- * one value with exceptions, so they stay literals beside the comments that cite them.
+ * Only this popover is named here. The arrows cluster and the chord strip carry 22, and the
+ * clipboard 20; those are three separate per-surface decisions, not one value with exceptions, so
+ * they stay literals beside the comments that cite them.
  */
-export const MENU_RADIUS = ANDROID ? 16 : 26;
+export const MENU_RADIUS = 26;
 
-/** A bottom sheet's top corners: Material's 28 on Android, the prototype's 24 on iOS (§5d). */
-export const SHEET_RADIUS = ANDROID ? 28 : 24;
+/** A bottom sheet's top corners. The settings sheet draws this itself on both platforms; the
+ *  upload sheet's hand-built Android shell takes the same number so it comes out matching the
+ *  system pageSheet iOS presents there. */
+export const SHEET_RADIUS = 24;
 
-/** The switcher's grid card — 14 on both platforms, no skin branch (PLAN.md §T7A). It coincides
- *  with `RADIUS.button`; they are two decisions that landed on one number, not one decision. */
+/** The switcher's grid card — 14 on both platforms (PLAN.md §T7A). It coincides with
+ *  `RADIUS.button`; they are two decisions that landed on one number, not one decision. */
 export const CARD_RADIUS = 14;
 
 /**
- * The two search fields. Only the Android arm is shared: Material's 16 (§5d buttons-16) is the
- * same for both, and was typed out at three call sites. The iOS arm is *not* one number — the
- * prototype draws the switcher's 40pt field at 13 and the terminal's 38pt field at 12, sized to
- * each box, so collapsing them would be inventing a consistency the design does not have.
+ * The two search fields: two fields, two boxes, two corners. The switcher's 40pt field takes 13
+ * and the terminal's 38pt field (and its 34×38 stepper keys) takes 12, each sized to its own box,
+ * so collapsing them would be inventing a consistency the design does not have.
  */
-export const SEARCH_RADIUS = { switcher: ANDROID ? 16 : 13, terminal: ANDROID ? 16 : 12 } as const;
+export const SEARCH_RADIUS = { switcher: 13, terminal: 12 } as const;
 
 /** The caption under a chord cap. The design's own (§3), and the one place the app draws type
  *  smaller than anything else in the chrome. */

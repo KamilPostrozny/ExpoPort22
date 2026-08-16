@@ -24,7 +24,6 @@
  */
 
 import * as Haptics from 'expo-haptics';
-import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -85,6 +84,7 @@ import {
   LIGHT_THEMES,
   MONO,
   resolveTheme,
+  SANS,
   type Theme,
   type ThemeName,
 } from '@/theme';
@@ -220,14 +220,9 @@ export default function SettingsSheet({
       ],
     );
 
-  const check = (
-    <SymbolView
-      name="checkmark"
-      size={15}
-      tintColor={theme.accent}
-      fallback={<Text style={{ fontSize: 14, fontWeight: '700', color: theme.accent }}>✓</Text>}
-    />
-  );
+  //  is the Nerd Font tick, pinned to MONO so both platforms draw the same one — the switcher's
+  // Done tick is the same glyph in the same family, and the two must not drift apart.
+  const check = <Text style={{ fontFamily: MONO, fontSize: 13, color: theme.accent }}>{''}</Text>;
 
   /**
    * A disclosure row naming the theme in that slot, and its list underneath while it is open.
@@ -254,12 +249,11 @@ export default function SettingsSheet({
           <Text style={[styles.value, { color: theme.muted }]} numberOfLines={1}>
             {resolveTheme(settings[field]).label}
           </Text>
-          <SymbolView
-            name={isOpen ? 'chevron.up' : 'chevron.down'}
-            size={12}
-            tintColor={theme.muted}
-            fallback={<Text style={{ fontSize: 12, color: theme.muted }}>{isOpen ? '⌃' : '⌄'}</Text>}
-          />
+          {/*  / , the Nerd Font chevrons, in MONO: the U+2304 this used to fall back to is in
+              neither Roboto nor Noto Sans, so it drew a tofu box on Android. */}
+          <Text style={{ fontFamily: MONO, fontSize: 12, color: theme.muted }}>
+            {isOpen ? '' : ''}
+          </Text>
         </Pressable>
         {isOpen &&
           list.map((t) => (
@@ -419,9 +413,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    // Design §5d: Material sheets corner at 28; everything else here — mantle ground, surface0
-    // cards at `RADIUS.card`, the `GRABBER` bar — is what the Android frames already show, through
-    // the same theme roles, so the radius is the whole Android skin.
+    // `SHEET_RADIUS` — the same top corner the upload sheet's hand-built Android shell draws, and
+    // the same one iOS's pageSheet presents there.
     borderTopLeftRadius: SHEET_RADIUS,
     borderTopRightRadius: SHEET_RADIUS,
     paddingHorizontal: SPACE.wide,
@@ -452,7 +445,7 @@ const styles = StyleSheet.create({
   rowLine: { borderTopWidth: StyleSheet.hairlineWidth },
   /** A theme inside an expanded list, indented off the disclosure row that opened it. */
   subRow: { paddingLeft: SPACE.xxl },
-  label: { flex: 1, fontSize: TEXT.label },
+  label: { flex: 1, fontFamily: SANS, fontSize: TEXT.label },
   value: { fontFamily: MONO, fontSize: TEXT.base, marginRight: SPACE.md },
   // The swatch strip and its chips are the prototype's own one-off geometry (gap:3, padding:3,
   // 9×13 chips at 2.5) — a single element's numbers, deliberately not in the shared vocabulary.
@@ -469,9 +462,12 @@ const styles = StyleSheet.create({
   // divider are roles, passed at the call site.
   stepper: { flexDirection: 'row', borderRadius: 9, overflow: 'hidden' },
   stepKey: { width: 38, height: 30, ...CENTER },
-  stepGlyph: { fontSize: 20, lineHeight: 24 },
+  // MONO not for the shape but for the picker: − (U+2212) and + are both in the bundled font,
+  // and pinning the family is what stops each platform choosing its own fallback face.
+  stepGlyph: { fontFamily: MONO, fontSize: 20, lineHeight: 24 },
   stepDivider: { width: 1 },
   note: {
+    fontFamily: SANS,
     fontSize: TEXT.caption,
     lineHeight: leading(TEXT.caption),
     paddingHorizontal: SPACE.gutter,

@@ -12,8 +12,6 @@
  * PTY, so `/clear\r` is "type /clear and press Return".
  */
 
-import type { SFSymbol } from 'expo-symbols';
-
 import type { DotName } from '@/theme';
 
 export type RecipeId = 'running' | 'suspended' | 'vim' | 'pager' | 'htop' | 'agent';
@@ -51,10 +49,10 @@ export type Recipe = {
    *  nothing. (It used to mean "the handle breathes". The breath is gone: an infinite animation
    *  the user never started is a WCAG 2.2.2 failure — docs/ribbon-redesign.md §2.) */
   pulse: boolean;
-  /** The chip's identity glyph. An SF Symbol, with one mono letter behind it — `SymbolView`
-   *  renders the fallback wherever the symbol does not exist, Android included. */
-  sf: SFSymbol;
-  mark: string;
+  /** The chip's identity glyph, a codepoint in the bundled JetBrains Mono Nerd Font — one
+   *  drawing on both platforms, rendered as plain text (see `src/ribbon.tsx`). The Nerd Font is
+   *  already loaded for the terminal grid, so this costs no asset. */
+  glyph: string;
 };
 
 export const RECIPES: Record<RecipeId, Recipe> = {
@@ -62,8 +60,7 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: [],
     dot: 'green',
     pulse: true,
-    sf: 'play.fill',
-    mark: 'R',
+    glyph: '',
     caps: [
       { label: 'kill', caption: 'force', action: 'kill', danger: true },
       { label: '^Z bg', caption: 'background', action: 'bg' },
@@ -74,8 +71,7 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: [],
     dot: 'grey',
     pulse: false,
-    sf: 'pause.fill',
-    mark: 'Z',
+    glyph: '',
     caps: [
       { label: 'kill', caption: 'force', action: 'kill', danger: true },
       { label: 'bg', caption: 'run behind', action: 'bg2' },
@@ -86,8 +82,7 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: ['vim', 'nvim', 'vi'],
     dot: 'mauve',
     pulse: false,
-    sf: 'pencil',
-    mark: 'V',
+    glyph: '',
     caps: [
       { label: ':q!', caption: 'discard', bytes: '\x1b:q!\r', danger: true },
       { label: ':q', caption: 'quit', bytes: '\x1b:q\r' },
@@ -100,8 +95,7 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: ['less', 'man', 'bat', 'delta'],
     dot: 'blue',
     pulse: false,
-    sf: 'doc.plaintext',
-    mark: 'P',
+    glyph: '',
     caps: [
       { label: 'q', caption: 'quit', bytes: 'q' },
       { label: 'G', caption: 'end', bytes: 'G' },
@@ -114,8 +108,7 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: ['htop', 'top', 'btop'],
     dot: 'yellow',
     pulse: false,
-    sf: 'chart.bar.fill',
-    mark: 'H',
+    glyph: '',
     caps: [
       { label: 'F9', caption: 'kill', bytes: '\x1b[20~', danger: true },
       { label: 'q', caption: 'quit', bytes: 'q' },
@@ -127,8 +120,7 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: ['claude', 'codex', 'aider', 'gemini'],
     dot: 'peach',
     pulse: true,
-    sf: 'sparkles',
-    mark: 'A',
+    glyph: '',
     // One flat row, no section markers: rotated into a band they were three inert chips taking
     // 44pt of thumb-reach each to label groups the caps already spell out (user, 2026-08-16).
     // The order still carries the grouping — quit first (furthest from the thumb), then the

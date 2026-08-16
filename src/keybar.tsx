@@ -1,6 +1,6 @@
 /**
- * The key bar (§4.4): ⋯ circle | glass pill Ctrl · Esc · Tab · Paste ‖ arrows | tabs circle,
- * with the chord strip and the popovers stacking above it. Geometry and glass follow
+ * The key bar (§4.4): ⋯ circle | keys pill Ctrl · Esc · Tab · Paste ‖ arrows | tabs circle,
+ * with the chord strip and the popovers stacking above it. Geometry follows
  * the prototype, now deleted (the iOS build is the spec wherever PLAN prose disagrees): 49pt circles
  * and pill, 35pt keys at 18pt radius, 24pt side margins, 48pt chord caps with 8.5pt captions,
  * arrows popover at 22pt corners, menu at 26pt.
@@ -13,18 +13,10 @@
  * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
  * lives in `src/keybar-model.ts`, tested; this file renders and executes.
  *
- * Android used to restyle all of that to Material — no blur, 16pt bar corners, 12pt keys, 20pt
- * popovers, 8pt side margins — on the strength of an Android design frame that is now deleted.
- * **That is over** (2026-08-16 — AGENTS.md, "One app, two platforms"): Android takes the iOS
- * numbers and the iOS surfaces. The `if (ANDROID)` early return in `Glass` below and the
- * `ANDROID ?` metrics in `src/style.ts` are the last of it, and they are debt, not spec.
- * (PLAN §3's "40pt buttons, 8–12pt radii, mantle" line predates the Android design frames, which
- * kept the 49pt bar; the design wins.) Those metrics now live in `src/style.ts` as `BAR`.
+ * Geometry lives in `src/style.ts` as `BAR`.
  */
 
-import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
-import { SymbolView } from 'expo-symbols';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
@@ -103,7 +95,7 @@ import {
   leading,
 } from '@/style';
 import { zoomProgress } from '@/switcher-model';
-import { MONO, rgba, type Theme } from '@/theme';
+import { MONO, rgba, SANS, SANS_SEMIBOLD, type Theme } from '@/theme';
 
 export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
 
@@ -181,9 +173,10 @@ export type KeyBarProps = {
   };
   /** The tab-name pills that replace the bar keys during a page swipe (§4.4). `x` is the
    *  screen's page offset, `pitch` its page step — the pills derive the continuous position.
-   *  Passed whenever tabs are reachable, NOT just mid-swipe: each pill is a BlurView, and
-   *  mounting the set on the swipe's first frame was the hitch at the start of every swipe
-   *  (user, 2026-08-11) — pre-mounted and hidden, `live` merely flips opacities. */
+   *  Passed whenever tabs are reachable, NOT just mid-swipe: mounting the set on the swipe's
+   *  first frame was the hitch at the start of every swipe (user, 2026-08-11) — pre-mounted and
+   *  hidden, `live` merely flips opacities. Cheaper now that a pill is a plain plate rather than
+   *  a blur, but the pre-mount stays: it is what makes the first frame free. */
   pills?: {
     names: string[];
     /** Shared values, not numbers, and `x` never swaps: each pill runs two `useAnimatedStyle`
@@ -202,44 +195,62 @@ export type KeyBarProps = {
   } | null;
 };
 
-/* --- §3's glass recipe --- */
+/* --- the chrome's one surface --- */
 
-/** The glass's hairline. */
-const GLASS_BORDER_W = Platform.OS === 'android' ? 0 : 0.5;
+/** The plate's hairline. */
+const PLATE_BORDER_W = 0.5;
 
 /**
  * The prototype's tints, as fractions of the theme's own ink rather than as literals.
  *
  * These were three Catppuccin Mocha values — `overlay1` at 16% and 25%, and white at 12% — written
  * when there were four flavours and three of them dark. Across twenty-six they do not hold: a pale
- * grey tint over pale glass is invisible on the nine light schemes, and a white edge on a white
- * sheet has no edge at all. They stay translucent on purpose, because an opaque role would paint
- * over the blur they are supposed to sit on.
+ * grey tint over a pale plate is invisible on the nine light schemes, and a white edge on a white
+ * sheet has no edge at all. They stay translucent on purpose: they are tints ON the plate `Plate`
+ * paints, so they have to let its `surface` through — an opaque role here would be a second plate.
  *
- * `glassEdge` supersedes a two-value `glassBorder(isDark)`: the prototype defines the edge pair
+ * `plateEdge` supersedes a two-value `glassBorder(isDark)`: the prototype defines the edge pair
  * together (`--glassBd`) and only the dark half had ever been written, so a light scheme drew a
  * white line over a near-white surface. Branching on appearance fixed that with two more literals;
  * taking it off `foreground` fixes it once for every scheme.
  */
 const keyTint = (t: Theme) => rgba(t.foreground, 0.14);
 const hairline = (t: Theme) => rgba(t.foreground, 0.22);
-const glassEdge = (t: Theme) => rgba(t.foreground, 0.12);
+const plateEdge = (t: Theme) => rgba(t.foreground, 0.12);
 
 /** Every popover in this file rises and leaves the same way — one decision, not five copies of it.
  *  Out is quicker than in: a dismissal should be gone before the finger is. */
 const POP_IN = FadeInDown.duration(180);
 const POP_OUT = FadeOutDown.duration(140);
 
-/* --- the Android skin's metrics (see the header): same sizes, Material corners --- */
-const ANDROID = Platform.OS === 'android';
-/** How this bar hides a glass layer it wants to keep mounted. Never `opacity: 0` — see the two
+/** How this bar hides a plate it wants to keep mounted. Never `opacity: 0` — see the two
  *  call sites; the frozen object keeps the style array's identity stable across renders. */
 const DISPLAY_NONE = { display: 'none' } as const;
 
-/** One glass surface: blur, tint, border — §3's recipe. `blur(14px) saturate(160%)` maps onto
- *  BlurView's 0–100 intensity scale (≈40); the inset specular highlight has no RN equivalent, so
- *  the border carries the edge alone. Exported for the edge handle's caps — the same glass. */
-export function Glass({
+/**
+ * One chrome surface: opaque plate, hairline edge, the caller's corner. No blur, on either
+ * platform.
+ *
+ * It used to be a real `BlurView` on iOS and a flat plate on Android, which is the exact shape of
+ * divergence this app no longer ships. A backdrop blur is not a thing both platforms can do: iOS's
+ * `UIVisualEffectView` samples the window and needs nothing, while expo-blur on Android is Dimezis,
+ * which cannot read the window at all — it re-draws one nominated view's subtree into an offscreen
+ * canvas every frame, so it needs a `blurTarget` ref, an explicit `blurMethod`, three runtime forks
+ * at API 31 (`ExpoBlurView.kt:70,103,133`) and an API 31 floor, and with no target expo-blur
+ * silently coerces the method to `'none'` and paints a hardcoded near-black film
+ * (`BlurView.js:54`). On top of that the bar sits over the terminal, which is a WebView compositing
+ * on its own surface — quite possibly not capturable into that canvas at all. Two platforms, two
+ * mechanisms, one of them unverifiable without hardware: that is a workaround, not a shared design.
+ *
+ * So the glass goes, and `src/ribbon.tsx` gets its precedent applied everywhere rather than only to
+ * itself — it reached this conclusion first, for its own band, and the note there is still the
+ * shortest statement of it. `theme.surface` is opaque on purpose: translucency without blur just
+ * shows the terminal's own text through the bar, which is worse than either. Reduce Transparency is
+ * now a no-op app-wide, which is a small accessibility win the blur was costing us.
+ *
+ * Exported for the edge handle's caps — the same surface.
+ */
+export function Plate({
   theme,
   radius,
   style,
@@ -250,52 +261,18 @@ export function Glass({
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
 }) {
-  // §4.10: no blur on Android — the design's "elevated tonal surface container" (`surface0` plus
-  // a small shadow) takes the recipe's place, popover corners capped at the prototype's 20.
-  if (ANDROID)
-    return (
-      <View
-        style={[
-          {
-            borderRadius: Math.min(radius, 20),
-            overflow: 'hidden',
-            backgroundColor: theme.surface,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.45)',
-          },
-          style,
-        ]}>
-        {children}
-      </View>
-    );
   return (
     <View
       style={[
         {
           borderRadius: radius,
           overflow: 'hidden',
-          borderWidth: GLASS_BORDER_W,
-          borderColor: glassEdge(theme),
+          borderWidth: PLATE_BORDER_W,
+          borderColor: plateEdge(theme),
+          backgroundColor: theme.surface,
         },
         style,
       ]}>
-      <BlurView
-        intensity={40}
-        tint={theme.isDark ? 'dark' : 'light'}
-        style={StyleSheet.absoluteFill}
-      />
-      <View
-        style={[
-          StyleSheet.absoluteFill,
-          // Lift the blur toward the theme's own ink on a dark scheme and toward its own ground on a
-          // light one. The branch is the glass recipe, not a colour choice — both sides are the
-          // theme's, where this was Mocha's `text` at 8% and a flat white at 55%.
-          {
-            backgroundColor: theme.isDark
-              ? rgba(theme.foreground, 0.08)
-              : rgba(theme.background, 0.55),
-          },
-        ]}
-      />
       {children}
     </View>
   );
@@ -735,12 +712,13 @@ function KeyBarInner(props: KeyBarProps) {
       }
     }), [panSV]);
 
-  // Weight 500, as every monospaced cap in the prototype is.
+  // No `fontWeight` beside `MONO`: it is a one-face family, so a numeric weight selects nothing
+  // on iOS and risks minikin's synthetic bold on Android — a divergence for a weight the bundled
+  // face does not have. `MONO_BOLD` is how this codebase asks for bold.
   const keyLabel = {
     color: theme.foreground,
     fontFamily: MONO,
     fontSize: TEXT.mono,
-    fontWeight: '500' as const,
   };
 
   const ctrlStyle: StyleProp<ViewStyle> =
@@ -766,7 +744,7 @@ function KeyBarInner(props: KeyBarProps) {
           entering={POP_IN}
           exiting={POP_OUT}
           style={styles.chordWrap}>
-          <Glass theme={theme} radius={22} style={styles.chordPill}>
+          <Plate theme={theme} radius={22} style={styles.chordPill}>
             {CHORD_STRIP.map(({ letter, caption }) => (
               <Key
                 key={letter}
@@ -776,7 +754,7 @@ function KeyBarInner(props: KeyBarProps) {
                 <Text style={[styles.capCaption, { color: theme.muted }]}>{caption}</Text>
               </Key>
             ))}
-          </Glass>
+          </Plate>
         </Animated.View>
       )}
 
@@ -785,12 +763,12 @@ function KeyBarInner(props: KeyBarProps) {
           {/* §4.6: during an upload the circle tints accent and goes inert — the whole progress
               UI. The Pressable disables, so a tap during a send does nothing at all. */}
           <Key onPress={props.sending ? undefined : () => toggle('menu')} style={styles.circleSlot}>
-            <Glass
+            <Plate
               theme={theme}
               radius={BAR.radius}
               style={styles.circle}>
-              {/* §4.6's busy tint, drawn *over* the glass rather than under it. As the container's
-                  backgroundColor it sat beneath Glass's blur and its light-mode white overlay,
+              {/* §4.6's busy tint, drawn *over* the plate rather than under it. As the container's
+                  backgroundColor it sat beneath the plate's own fill,
                   which washed the accent out to a pale wash and left the glyph — painted in
                   `theme.background` for contrast against a saturated accent — nearly invisible in
                   Latte (seen on device, T13/T8.14). */}
@@ -805,37 +783,35 @@ function KeyBarInner(props: KeyBarProps) {
                   ]}
                 />
               )}
-              <SymbolView
-                name="ellipsis"
-                size={20}
-                tintColor={props.sending ? theme.onAccent : theme.foreground}
-                fallback={
-                  <Text
-                    style={[
-                      keyLabel,
-                      { fontSize: 18 },
-                      props.sending && { color: theme.onAccent },
-                    ]}>
-                    ⋯
-                  </Text>
-                }
-              />
-            </Glass>
+              {/* U+F141 (nf-fa-ellipsis_h): three ROUND dots, which is what SF's `ellipsis` draws —
+                  U+22EF's are square and read as a different mark at 18pt. The bundled face carries
+                  it on both platforms; §4.6's busy tint rides the glyph's colour. */}
+              <Text
+                style={[
+                  keyLabel,
+                  { fontSize: 18 },
+                  props.sending && { color: theme.onAccent },
+                ]}>
+                {'\uF141'}
+              </Text>
+            </Plate>
           </Key>
 
-          {/* The middle slot. The keys live in one glass pill; during a bar swipe that WHOLE
-              glass hides and each tab name is its own glass pill riding the strip — Safari's
-              morph is the pill itself shrinking and growing, and scaling only the text inside a
-              static glass read as no morph at all (user, 2026-08-11). */}
+          {/* The middle slot. The keys live in one pill; during a bar swipe that WHOLE pill
+              hides and each tab name is its own pill riding the strip — Safari's morph is the
+              pill itself shrinking and growing, and scaling only the text inside a static pill
+              read as no morph at all (user, 2026-08-11). */}
           <View style={styles.pill} onLayout={(e) => setPillW(e.nativeEvent.layout.width)}>
-            {/* `display: 'none'`, not `opacity: 0`: a UIVisualEffectView keeps re-rendering its
-                backdrop under a zero opacity (terminal.tsx's grid blur learned this on device).
-                A hidden view is not composited, and it stays mounted either way — which is the
-                whole point of keeping it here, so the swipe's first frame builds no glass. */}
+            {/* `display: 'none'`, not `opacity: 0`: a hidden view is not composited, where a
+                zero-opacity one still is. It stays mounted either way — which is the whole point
+                of keeping it here, so the swipe's first frame builds no plates. (The rule outlived
+                its original reason: it was a UIVisualEffectView that kept re-rendering its backdrop
+                under a zero opacity. The blur is gone; not compositing a hidden view is still
+                free.) */}
             <View
               style={[StyleSheet.absoluteFill, props.pills?.live && DISPLAY_NONE]}
               pointerEvents={props.pills?.live ? 'none' : 'auto'}>
-            <Glass theme={theme} radius={BAR.radius} style={styles.pillGlass}>
+            <Plate theme={theme} radius={BAR.radius} style={styles.pillPlate}>
             <View style={styles.keysRow}>
               <View style={styles.keysGroup}>
                 <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
@@ -866,19 +842,15 @@ function KeyBarInner(props: KeyBarProps) {
                     borderColor: rgba(theme.accent, 0.9),
                   },
                 ]}>
-                <SymbolView
-                  name="dpad"
-                  size={20}
-                  tintColor={theme.foreground}
-                  // U+F047 (nf-fa-arrows): the bundled four-way. ✛ is in no bundled
-                  // face either, same Noto fall-through as the tabs circle above.
-                  fallback={<Text style={[keyLabel, { fontSize: 18 }]}>{'\uF047'}</Text>}
-                />
+                {/* U+F047 (nf-fa-arrows) is the four-way on both platforms now: it is in the
+                    bundled face, where ✛ is in none at all and fell through to Noto at another
+                    weight — see `MONO` in fonts.ts. */}
+                <Text style={[keyLabel, { fontSize: 18 }]}>{'\uF047'}</Text>
               </Key>
             </View>
-            </Glass>
+            </Plate>
             </View>
-            {/* §4.4: during a bar swipe the tab-name glass pills replace the keys. Mounted from
+            {/* §4.4: during a bar swipe the tab-name pills replace the keys. Mounted from
                 the moment tabs are reachable — see the pills prop — visible only while live. */}
             {props.pills != null && pillW > 0 && (
               <View
@@ -897,30 +869,23 @@ function KeyBarInner(props: KeyBarProps) {
           <Key
             onPress={props.showTabs ? props.onTabsTap : () => toggle('tabsHint')}
             style={styles.circleSlot}>
-            <Glass
+            <Plate
               theme={theme}
               radius={BAR.radius}
               style={[styles.circle, !props.showTabs && styles.circleOff]}>
-              <SymbolView
-                name="square.on.square"
-                size={24}
-                tintColor={props.showTabs ? theme.foreground : theme.placeholder}
-                // U+F24D (nf-fa-clone) is the Android face of the icon: two offset squares, the
-                // shape `square.on.square` draws. The old ▣ is in no bundled face at all, so it
-                // fell through to Noto at a different weight — see `MONO` in fonts.ts. Sized to
-                // the SF Symbol above, not to a text cap, or it lands 40% short.
-                fallback={
-                  <Text
-                    style={[
-                      keyLabel,
-                      { fontSize: 22 },
-                      !props.showTabs && { color: theme.placeholder },
-                    ]}>
-                    {'\uF24D'}
-                  </Text>
-                }
-              />
-            </Glass>
+              {/* U+F24D (nf-fa-clone) is the icon on both platforms now: two offset squares, the
+                  shape SF's `square.on.square` drew. The old ▣ is in no bundled face at all, so
+                  it fell through to Noto at a different weight — see `MONO` in fonts.ts. Sized
+                  to the 24pt symbol it replaces, not to a text cap, or it lands 40% short. */}
+              <Text
+                style={[
+                  keyLabel,
+                  { fontSize: 22 },
+                  !props.showTabs && { color: theme.placeholder },
+                ]}>
+                {'\uF24D'}
+              </Text>
+            </Plate>
           </Key>
         </View>
       </GestureDetector>
@@ -948,7 +913,8 @@ function KeyBarInner(props: KeyBarProps) {
         caretHidden
         contextMenuHidden
         multiline={false}
-        // iOS-only values, guarded: Android (T3's sibling task) falls back to its default layout.
+        // Category (1), iOS-only API: `ascii-capable` is an iOS `keyboardType` value with no
+        // Android equivalent; Android takes its default layout. Nothing visual crosses this branch.
         keyboardType={Platform.OS === 'ios' ? 'ascii-capable' : 'default'}
         keyboardAppearance={theme.isDark ? 'dark' : 'light'} // iOS-only prop, ignored elsewhere
       />
@@ -958,10 +924,10 @@ function KeyBarInner(props: KeyBarProps) {
 
 /**
  * The bar re-rendered on every render of the terminal screen — which is every phase of every
- * gesture, every keyboard step, every ~2s tmux poll — and it is not a small tree: three `Glass`
- * BlurViews, the chord strip, the keys with their SymbolViews, the TextInput, and one `NamePill`
- * per window (two `useAnimatedStyle` hooks and another BlurView each), all deliberately mounted at
- * rest so a swipe never pays to build them. None of that changes unless a prop does, so: memo.
+ * gesture, every keyboard step, every ~2s tmux poll — and it is not a small tree: three `Plate`s,
+ * the chord strip, the keys with their glyphs, the TextInput, and one `NamePill` per
+ * window (two `useAnimatedStyle` hooks each), all deliberately mounted at rest so a swipe never
+ * pays to build them. None of that changes unless a prop does, so: memo.
  *
  * It only bites because the screen hands over stable identities — every handler through a ref
  * trampoline and `pills` through a `useMemo` (see the `kbH`/`kb_*` block there). React Compiler
@@ -1010,7 +976,7 @@ function NamePill({
   const { pos, hold, x, pitch } = pills;
   const style = useAnimatedStyle(() => {
     const d = pillDist(i, pillCont(pos.value, hold.value === 1 ? 0 : x.value, pitch));
-    // Grown = the WHOLE slot, exactly the keys glass it crossfades with at the end — the old
+    // Grown = the WHOLE slot, exactly the keys pill it crossfades with at the end — the old
     // strip's PILL_ITEM (94% of the slot) left a visible size jump at the swap back to the
     // keys (user, 2026-08-11, screenshots).
     return { width: width * pillWidthFrac(d), opacity: pillOpacity(d) };
@@ -1025,19 +991,19 @@ function NamePill({
         ? ('flex-start' as const)
         : ('flex-end' as const),
   }));
-  // A whole glass pill per name, morphing Safari's way: the capsule SQUEEZES sideways — animated
-  // width, height untouched, text clipped by the glass — and grows back out at its window.
+  // A whole pill per name, morphing Safari's way: the capsule SQUEEZES sideways — animated
+  // width, height untouched, text clipped by the plate — and grows back out at its window.
   // No ‹ › hints, the morph is the indicator (user, 2026-08-11).
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, styles.namePillSlot, anchor]}
       pointerEvents="none">
       <Animated.View style={[styles.namePillClip, style]}>
-        <Glass theme={theme} radius={BAR.radius} style={styles.namePill}>
+        <Plate theme={theme} radius={BAR.radius} style={styles.namePill}>
           <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
             {name}
           </Text>
-        </Glass>
+        </Plate>
       </Animated.View>
     </Animated.View>
   );
@@ -1074,7 +1040,7 @@ export function ArrowsPopover({
       entering={POP_IN}
       exiting={POP_OUT}
       style={[styles.arrowsPop, { bottom }]}>
-      <Glass theme={theme} radius={22} style={styles.arrowsGlass}>
+      <Plate theme={theme} radius={22} style={styles.arrowsPlate}>
         <View style={styles.dpad}>
           <View style={styles.dpadRow}>
             <View style={styles.dpadHole} />
@@ -1092,7 +1058,7 @@ export function ArrowsPopover({
           {arrow('home', 'Home', styles.homeEndKey, styles.homeEndGlyph)}
           {arrow('end', 'End', styles.homeEndKey, styles.homeEndGlyph)}
         </View>
-      </Glass>
+      </Plate>
     </Animated.View>
   );
 }
@@ -1115,9 +1081,9 @@ export function TabsHintPopover({
       entering={POP_IN}
       exiting={POP_OUT}
       style={[styles.hintPop, { bottom }]}>
-      <Glass theme={theme} radius={16} style={styles.hintGlass}>
+      <Plate theme={theme} radius={16} style={styles.hintPlate}>
         <Text style={[styles.hintText, { color: theme.foreground }]}>{text}</Text>
-      </Glass>
+      </Plate>
     </Animated.View>
   );
 }
@@ -1146,8 +1112,7 @@ export function BarMenu({
       entering={POP_IN}
       exiting={POP_OUT}
       style={[styles.menuPop, { bottom }]}>
-      {/* The one popover the Android prototype corners at 16 rather than the shared 20. */}
-      <Glass theme={theme} radius={MENU_RADIUS}>
+      <Plate theme={theme} radius={MENU_RADIUS}>
         <Text style={[styles.menuHeader, { color: theme.muted }]}>UPLOAD FILE</Text>
         {UPLOAD_ROWS.map(({ label, kind }, i) => (
           <Pressable
@@ -1172,7 +1137,7 @@ export function BarMenu({
           ]}>
           <Text style={[styles.menuLabel, { color: theme.foreground }]}>Settings</Text>
         </Pressable>
-      </Glass>
+      </Plate>
     </Animated.View>
   );
 }
@@ -1227,16 +1192,17 @@ export function ClipboardPopover({
         <Text style={[styles.clipMeta, { color: theme.border }]}>{provenance(slot, now)}</Text>
       </View>
       <Pressable onPress={onPin} hitSlop={8} style={styles.clipPin}>
-        <SymbolView
-          name={slot.pinned ? 'pin.fill' : 'pin'}
-          size={15}
-          tintColor={slot.pinned ? theme.accentAlternate : theme.placeholder}
-          fallback={
-            <Text style={{ fontSize: 13, color: slot.pinned ? theme.accentAlternate : theme.placeholder }}>
-              {slot.pinned ? '●' : '○'}
-            </Text>
-          }
-        />
+        {/* U+F08D (nf-fa-thumb-tack). One glyph, two colours: the colour carries pinned vs not,
+            as the symbol's tint did. `fontFamily` is load-bearing — without it Android falls
+            through to Noto Sans Symbols and draws another pin at another weight. */}
+        <Text
+          style={{
+            fontFamily: MONO,
+            fontSize: 13,
+            color: slot.pinned ? theme.accentAlternate : theme.placeholder,
+          }}>
+          {'\uF08D'}
+        </Text>
       </Pressable>
     </Pressable>
   );
@@ -1246,7 +1212,7 @@ export function ClipboardPopover({
       entering={POP_IN}
       exiting={POP_OUT}
       style={[styles.clipPop, { bottom }]}>
-      <Glass theme={theme} radius={20} style={styles.clipGlass}>
+      <Plate theme={theme} radius={20} style={styles.clipPlate}>
         <Text style={[styles.clipHeader, { color: theme.border }]}>CLIPBOARD</Text>
         {slots.map((slot, i) => (
           <View key={`${slot.at}-${i}`}>{row(slot, i === 0, () => togglePin(i), () => type(slot.text))}</View>
@@ -1255,7 +1221,7 @@ export function ClipboardPopover({
         {slots.length === 0 && pasteboard === null && (
           <Text style={[styles.clipEmpty, { color: theme.muted, borderTopColor: hairline(theme) }]}>Nothing yanked or copied yet.</Text>
         )}
-      </Glass>
+      </Plate>
     </Animated.View>
   );
 }
@@ -1272,11 +1238,11 @@ const styles = StyleSheet.create({
   },
   circleSlot: { width: BAR.circle, height: BAR.circle },
   circle: { width: BAR.circle, height: BAR.circle, ...CENTER },
-  /** Disabled, not hidden — the glyph is already `placeholder`; this takes the glass down with it
+  /** Disabled, not hidden — the glyph is already `placeholder`; this takes the plate down with it
    *  so the whole control reads inert rather than just faintly drawn. */
   circleOff: { opacity: 0.5 },
   pill: { flex: 1, height: BAR.circle },
-  pillGlass: { flex: 1 },
+  pillPlate: { flex: 1 },
   keysRow: {
     flex: 1,
     flexDirection: 'row',
@@ -1299,7 +1265,7 @@ const styles = StyleSheet.create({
   namePillSlot: { justifyContent: 'center' },
   namePillClip: { height: '100%' },
   namePill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
-  namePillText: { fontFamily: MONO, fontSize: 14, fontWeight: '500', flexShrink: 1 },
+  namePillText: { fontFamily: MONO, fontSize: 14, flexShrink: 1 },
   arrowsButton: {
     width: BAR.key,
     height: BAR.key,
@@ -1317,13 +1283,12 @@ const styles = StyleSheet.create({
     paddingTop: 5,
     paddingBottom: 4,
   },
-  /** Every monospaced cap in the prototype is weight 500 — the bar keys, these, the arrows. */
-  capLetter: { fontFamily: MONO, fontSize: TEXT.button, fontWeight: '500' },
-  capCaption: { fontSize: CAP_CAPTION },
+  capLetter: { fontFamily: MONO, fontSize: TEXT.button },
+  capCaption: { fontFamily: SANS, fontSize: CAP_CAPTION },
 
   /* popovers, hanging off the popBase anchor */
   arrowsPop: { position: 'absolute', right: BAR.sideMargin },
-  arrowsGlass: { flexDirection: 'row', gap: BAR.gap, padding: 6 },
+  arrowsPlate: { flexDirection: 'row', gap: BAR.gap, padding: 6 },
   dpad: { gap: SPACE.xs },
   dpadRow: { flexDirection: 'row', gap: SPACE.xs },
   dpadHole: { width: 44, height: 34 },
@@ -1331,14 +1296,14 @@ const styles = StyleSheet.create({
   /** The prototype draws these two clusters at two sizes — a 17pt arrow and a 12pt word — and one
    *  style for both had split the difference at 15, which is neither. Both boxes are fixed, so
    *  nothing reflows. */
-  arrowGlyph: { fontFamily: MONO, fontSize: 17, fontWeight: '500' },
-  homeEndGlyph: { fontFamily: MONO, fontSize: TEXT.note, fontWeight: '500' },
+  arrowGlyph: { fontFamily: MONO, fontSize: 17 },
+  homeEndGlyph: { fontFamily: MONO, fontSize: TEXT.note },
   popDivider: { width: 1, opacity: 0.5, marginVertical: 3 },
   homeEnd: { gap: SPACE.xs },
   homeEndKey: { width: 56, height: 34, borderRadius: 13, ...CENTER },
   hintPop: { position: 'absolute', right: BAR.sideMargin, maxWidth: 240 },
-  hintGlass: { paddingHorizontal: 14, paddingVertical: 10 },
-  hintText: { fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
+  hintPlate: { paddingHorizontal: 14, paddingVertical: 10 },
+  hintText: { fontFamily: SANS, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
   menuPop: { position: 'absolute', left: BAR.sideMargin, width: 256 },
   // The ⋯ menu's own header and rows keep the prototype's 11pt/0.5 and 18pt gutter — its numbers
   // are not the settings sheet's, and `SECTION_HEADER` deliberately does not reach here.
@@ -1346,8 +1311,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 11,
     paddingBottom: 6,
+    fontFamily: SANS_SEMIBOLD,
     fontSize: TEXT.caption,
-    fontWeight: '600',
     letterSpacing: 0.5,
     opacity: 0.8,
   },
@@ -1358,18 +1323,18 @@ const styles = StyleSheet.create({
   },
   /** The first row sits under the header, where the prototype draws no rule. */
   menuRowFirst: { borderTopWidth: 0 },
-  menuLabel: { fontSize: TEXT.label },
+  menuLabel: { fontFamily: SANS, fontSize: TEXT.label },
   menuBreak: { height: 6 },
 
   /* clipboard popover — centered, 300pt, 20pt corners per the prototype */
   clipPop: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  clipGlass: { width: 300 },
+  clipPlate: { width: 300 },
   clipHeader: {
     paddingHorizontal: 14,
     paddingTop: 9,
     paddingBottom: 7,
+    fontFamily: SANS_SEMIBOLD,
     fontSize: TEXT.caption,
-    fontWeight: '600',
     letterSpacing: 0.4,
   },
   clipRow: {
@@ -1382,11 +1347,12 @@ const styles = StyleSheet.create({
   },
   clipBody: { flex: 1, minWidth: 0 },
   clipText: { fontFamily: MONO, fontSize: TEXT.note },
-  clipMeta: { fontSize: TEXT.micro, marginTop: 1 },
+  clipMeta: { fontFamily: SANS, fontSize: TEXT.micro, marginTop: 1 },
   clipPin: { padding: 2 },
   clipEmpty: {
     paddingHorizontal: 14,
     paddingVertical: SPACE.md,
+    fontFamily: SANS,
     fontSize: TEXT.note,
     borderTopWidth: StyleSheet.hairlineWidth,
   },

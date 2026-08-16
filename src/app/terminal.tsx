@@ -1,5 +1,4 @@
 import * as Clipboard from 'expo-clipboard';
-import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { router, Stack } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -108,7 +107,7 @@ import {
   tabsHint,
   type TmuxWindow,
 } from '@/tmux-model';
-import { MONO, type Theme } from '@/theme';
+import { MONO, rgba, SANS, SANS_BOLD, SANS_SEMIBOLD, type Theme } from '@/theme';
 import { pick, quickAttach, sendFile, useUploadBusy, type UploadKind } from '@/upload';
 import { joinPath, sanitizeFilename, stampName } from '@/upload-model';
 import UploadSheet from '@/upload-sheet';
@@ -199,14 +198,20 @@ export default function SessionScreen() {
    *  that unfreeze the pad with no keyboard move left to re-report it. Mid-hide it reads the
    *  departing keyboard (see the `keyboardDidHide` listener below, which is what corrects that). */
   const syncPad = () => {
+    // Same categories as the listener below — (3) Android's window resizes itself for the IME,
+    // (1) there is no Android `keyboardWillChangeFrame` for this to reconcile against.
     if (Platform.OS !== 'ios') return;
     const frame = Keyboard.metrics();
     const overlap = frame ? Dimensions.get('window').height - frame.screenY : 0;
     setKeyboardPad(overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0);
   };
   useEffect(() => {
-    // Android has no Will* events, and its window already resizes for Gboard (§4.10's docking):
-    // padding here would subtract the keyboard twice.
+    // Category (3), an OS behaviour that would otherwise double up: Android's activity window
+    // already resizes itself for the IME, so padding the stage here would subtract the keyboard
+    // height twice and leave a dead strip the height of Gboard (it would also drive a wrong
+    // `resize-window` to tmux). Category (1) on top: `keyboardWillChangeFrame` has no Android
+    // twin. Note the deliberate asymmetry with `src/upload-sheet.tsx`, which DOES pad on Android —
+    // a `statusBarTranslucent` Modal window does not adjustResize.
     if (Platform.OS !== 'ios') return;
     const subs = [
       Keyboard.addListener('keyboardWillChangeFrame', (e) => {
@@ -1248,16 +1253,16 @@ export default function SessionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
 
-  // §4.10: Android system back closes the grid back into the active pane — it must never pop
-  // the route out from under an open switcher. Subscribed only while the switcher is up;
-  // mid-transition the press is swallowed, the running zoom owns the screen. This is the
-  // BackHandler half only: `predictiveBackGestureEnabled` stays false in app.json because RN
-  // 0.86's ReactActivity opts back into legacy dispatch itself — an always-enabled
-  // OnBackPressedCallback ("Due to enforced predictive back on targetSdk 36, 'onBackPressed()'
-  // is disabled by default. Using a workaround to trigger it manually") — so the flag buys no
-  // OS peek animation for JS-handled backs, and BackHandler works either way.
-  // T12A folds the rest of §5d's back ladder into the same subscription: switcher first (as
-  // T10A wired it), then an open popover/⋯ menu, and at the terminal itself back is "home" —
+  // Category (2), hardware affordance: Android has a system back button and iOS has no twin.
+  // System back closes the grid back into the active pane — it must never pop the route out from
+  // under an open switcher. Mid-transition the press is swallowed, the running zoom owns the
+  // screen. This is the BackHandler half only: `predictiveBackGestureEnabled` stays false in
+  // app.json because RN 0.86's ReactActivity opts back into legacy dispatch itself — an
+  // always-enabled OnBackPressedCallback ("Due to enforced predictive back on targetSdk 36,
+  // 'onBackPressed()' is disabled by default. Using a workaround to trigger it manually") — so
+  // the flag buys no OS peek animation for JS-handled backs, and BackHandler works either way.
+  // The rest of the ladder rides the same subscription: switcher first, then an open popover/⋯
+  // menu, and at the terminal itself back is "home" —
   // `exitApp` invokes the activity's default back, which on a task-root activity backgrounds
   // the app (moveTaskToBack) rather than finishing it; §4.9's lifecycle owns what follows. It
   // deliberately never pops the route to Setup: that pop skipped `leave()`'s disconnect, and
@@ -2137,18 +2142,23 @@ export default function SessionScreen() {
           zoomId={zoomId}
           fade={alpha}
         />
-        {/* Mounted only while the zoom is live: a UIVisualEffectView re-renders its backdrop
-            continuously and does NOT stop costing GPU because a parent's opacity is zero — a
-            full-screen one sitting under everything that moves is a per-frame cost no CPU
-            counter sees (user, 2026-08-13: laggy inside the animation). */}
+        {/* The grid recedes behind the flying card. This was a backdrop blur; it is a wash of the
+            screen's own ground now, because a backdrop blur is not something both platforms can
+            draw from one code path (see `Plate` in `src/keybar.tsx`). The wash reads the same at
+            this scale — the grid is already small and moving — and it is a flat fill, so the
+            per-frame cost the blur had is simply gone. That cost was real and measured: a
+            UIVisualEffectView re-renders its backdrop continuously and does NOT stop costing GPU
+            because a parent's opacity is zero (user, 2026-08-13: laggy inside the animation),
+            which is why this still mounts only while the zoom is live. */}
         {zoomActive && (
-          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, gridBlurStyle]}>
-            <BlurView
-              intensity={30}
-              tint={theme.isDark ? 'dark' : 'light'}
-              style={StyleSheet.absoluteFill}
-            />
-          </Animated.View>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: rgba(theme.background, 0.55) },
+              gridBlurStyle,
+            ]}
+          />
         )}
         </Animated.View>
       )}
@@ -2243,7 +2253,7 @@ export default function SessionScreen() {
                   { backgroundColor: theme.surface, opacity: occ === null || occ.n === 0 ? 0.35 : 1 },
                   pressed && PRESSED,
                 ]}>
-                <Text style={{ color: theme.foreground, fontSize: 13, fontWeight: '600' }}>
+                <Text style={{ color: theme.foreground, fontFamily: SANS_SEMIBOLD, fontSize: 13 }}>
                   {dir === 'prev' ? '∧' : '∨'}
                 </Text>
               </Pressable>
@@ -2773,8 +2783,8 @@ function Status({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  // T14's terminal-side search bar (design: 38pt field, `SEARCH_RADIUS.terminal` corner — the
-  // prototype's 12 on iOS, Android 16dp per §5d).
+  // T14's terminal-side search bar: a 38pt field and two 34×38 stepper keys at
+  // `SEARCH_RADIUS.terminal`, sized to the box.
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2793,7 +2803,7 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 11,
   },
-  searchInput: { flex: 1, fontSize: 13, paddingVertical: 0 },
+  searchInput: { flex: 1, fontFamily: SANS, fontSize: 13, paddingVertical: 0 },
   searchCount: { fontFamily: MONO, fontSize: 11 },
   /** One stepper key. The pair sits in a 2pt-gap group of its own (see the row's JSX) so it reads
    *  as one segmented control, which is how the prototype draws them. */
@@ -2803,7 +2813,7 @@ const styles = StyleSheet.create({
     borderRadius: SEARCH_RADIUS.terminal,
     ...CENTER,
   },
-  searchDone: { fontSize: 15, paddingHorizontal: 2 },
+  searchDone: { fontFamily: SANS, fontSize: 15, paddingHorizontal: 2 },
   stageWrapper: { position: 'absolute', top: 0, left: 0, overflow: 'hidden' },
   /** The shared zoom container — deliberately NOT clipping: the cards beside the live one live a
    *  pitch outside it and each brings its own crop. */
@@ -2827,11 +2837,16 @@ const styles = StyleSheet.create({
     padding: SPACE.xxl,
   },
   glyph: { fontFamily: MONO, fontSize: 44 },
-  headline: { fontSize: 24, fontWeight: '700' },
-  sentence: { fontSize: TEXT.label, lineHeight: leading(TEXT.label), textAlign: 'center' },
+  headline: { fontFamily: SANS_BOLD, fontSize: 24 },
+  sentence: {
+    fontFamily: SANS,
+    fontSize: TEXT.label,
+    lineHeight: leading(TEXT.label),
+    textAlign: 'center',
+  },
   actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: SPACE.sm },
   /** A filled button, wearing the app's button corner rather than the field's — these three had
    *  drifted to 12, which is what a field is. */
   action: { paddingHorizontal: SPACE.wide, paddingVertical: SPACE.md, borderRadius: RADIUS.button },
-  actionLabel: { fontSize: TEXT.button, fontWeight: '600' },
+  actionLabel: { fontFamily: SANS_SEMIBOLD, fontSize: TEXT.button },
 });
