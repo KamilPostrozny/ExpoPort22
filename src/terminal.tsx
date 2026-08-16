@@ -184,6 +184,13 @@ const FONT_FACES = ['Regular', 'Bold']
 const CSS = `
   ${FONT_FACES}
   html, body { margin: 0; height: 100%; overflow: hidden; }
+  /* text-size-adjust is NOT the lever for the system font scale, tried and measured 2026-08-16:
+     with html { -webkit-text-size-adjust: 100%; text-size-adjust: 100% } set, Android at
+     font_scale 1.5 still rendered the cell at 11.6964 instead of 7.7964. That property governs
+     font BOOSTING (text autosizing in wide layouts), which is a different mechanism from the
+     WebView's textZoom. The documented lever is WebSettings.setTextZoom(100) and
+     @expo/dom-webview does not expose it, so the correction has to happen in the font size we
+     ask for. NO BACKTICKS IN THIS BLOCK — the whole thing is a template literal. */
   /* The webview and the snapshot draw the same font at the same size on the same pitch, and the
      glyphs still do not weigh the same: WebKit's default is subpixel-antialiased, which dilates
      stems, while RN's <Text> goes through UIKit's plain grayscale AA. So the swipe's snapshot

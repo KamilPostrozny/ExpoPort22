@@ -584,9 +584,28 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
   stacks a *display size* multiplier on top of font scale, so it reaches extreme values sooner.
 - **Where the guard already is**: only 5 of ~70 `Text` nodes cap the multiplier
   (`maxFontSizeMultiplier={1.3}`, all in `src/ribbon.tsx`).
-- **Likely fix, unverified**: `allowFontScaling={false}` on the fixed-geometry chrome, and
-  `textZoom` / `-webkit-text-size-adjust` on the WebView. Touches the terminal, so it wants its
-  own pass rather than riding along with a styling change.
+- **Attempted 2026-08-16, one route ruled OUT by measurement.** `-webkit-text-size-adjust: 100%`
+  plus `text-size-adjust: 100%` on `html` changes nothing: with both set, Android at font_scale
+  1.5 still reported `cell 11.6964 x 17.14` where 1.0 gives `7.7964`. That property governs font
+  BOOSTING (text autosizing in wide layouts), which is a different mechanism from the WebView's
+  textZoom. Reverted; the finding is recorded in the CSS block in `src/terminal.tsx` so nobody
+  spends the afternoon on it twice.
+- **The documented lever is `WebSettings.setTextZoom(100)`, and it is not reachable from here.**
+  `@expo/dom-webview`'s prop list (`DomWebView.types.d.ts`) has no `textZoom`; the app does not use
+  `react-native-webview` (optional dep, not installed), so the `DOMProps extends RNWebViewProps`
+  type is misleading — the props that actually arrive are the Expo webview's.
+- **Route still open**: divide the size we ask for by the scale being applied, i.e. pass
+  `PixelRatio.getFontScale()` into the DOM component and set the xterm `fontSize` to
+  `settings.fontSize / fontScale`, so the rendered glyph is the size intended. `getFontScale()`
+  reflects the user's text-size preference on BOTH platforms (`PixelRatio.js:95-100`).
+- **BLOCKED on one measurement, and it is the whole design of the fix**: does iOS's WKWebView
+  scale CSS px with Dynamic Type at all? iOS was only ever measured at the DEFAULT text size. If
+  it does not scale, dividing unconditionally would wrongly SHRINK the iOS terminal and the
+  correction has to be Android-only — a legitimate category (3) branch, "an OS behaviour that
+  would otherwise double up", the same shape as the keyboard guard in `src/app/terminal.tsx`. If
+  it does scale, the division is unconditional and there is no branch. **Do not write this fix
+  before setting iOS Settings > Display & Brightness > Text Size to a large value and reading the
+  `[terminal] ... cell` line.**
 - Android: [ ]
 
 ### T7A.3 — Icons render via text fallback (no blank keys)
