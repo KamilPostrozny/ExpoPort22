@@ -359,3 +359,43 @@ push" design in disguise.
 
 The Android emulator harness on this box means every Android divergence these specs concede — no
 swipe, edge-gesture collisions, no blur — is **testable today** rather than assumed.
+
+---
+
+## 8. What actually shipped, and what the phone changed
+
+Built 2026-08-16 on `worktree-ribbon-design-research`. The shape survived contact with the device;
+four details did not, and one bug was found that no amount of design could have prevented.
+
+**Deviations from the spec, all driven by what the screen showed:**
+
+1. **No section markers.** SESSION / COMMANDS / NOW each cost a 44pt slot of thumb reach to label
+   groups the caps already spell out, and on `theme.scrim` over `theme.panel` they read as empty
+   dark blobs. The agent recipe is one flat row of ten caps; the grouping survives as order.
+2. **The C40 light stroke is a hairline at 0.45, not 1pt at 0.9.** At 3× the specced value draws
+   three pixels of near-white — louder than any text on a dark theme, and it read as a debug
+   border. This trades the worked-out floor at the worst-case crossover luminance for a surface
+   that does not shout; the ceiling is written at the constant.
+3. **The chevrons live in gutters, not over the caps.** Overlaid, they sliced `COMMANDS` and
+   `/clear` mid-word, which reads as a rendering fault rather than as "there is more".
+4. **Light schemes need a shadow.** §4.1's "opaque plate makes every contrast figure a constant"
+   is true of the *text* and false of the *plate*: `theme.panel` is `mix(bg, black, 0.04)` on the
+   22 generated schemes — 4%, against 20% on dark ones — so on Rose Pine Dawn the band was
+   invisible against the pane it floated over, and Latte's mantle on base is 1.05:1. An opaque
+   plate cannot separate itself from a ground it matches. The band now floats on a shadow on both
+   platforms, plus a 6% black ground on light schemes only. **The study measured figure against
+   plate and never measured plate against pane** — that is the gap this pass found.
+
+**The bug none of the specs could have caught.** `POLL` is `tmux display-message -p` with no
+target, so tmux answers about whichever session/window it last considered current. On a host with
+other work going on, that alternates every beat — measured, one poller, the user sitting still:
+`win 7 null → win 6 claude → win 7 null → win 6 claude`. Every design in this document consumes
+that signal, so every one of them would have flickered. Worse, §6's minimum-lifetime gate — the
+recommendation this document is proudest of — was *unreachable* under it: each reappearance looked
+like a new run with a fresh clock, so `now - startedAt` never reached three seconds and a plain
+`sleep 30` could never appear at all. The ribbon now ignores answers about windows it is not
+showing, and holds a null for a beat before believing it. The poll itself is filed in BUGS.md.
+
+The lesson generalises past this feature: **a design study can measure everything it draws and
+still be defeated by the truthfulness of the signal it reacts to.** None of the fourteen agents
+asked whether the poll was answering about the right window.
