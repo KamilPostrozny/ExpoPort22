@@ -1192,6 +1192,80 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   had: it was measured only against an idle prompt, which is how it shipped at 1.69:1.
 - [ ]
 
+*(T11.18–T11.22 cover the five fixes made after the redesign landed, none of which the cases above
+can catch: the clock was frozen at 0:00 by the React Compiler and restarted by every window hop,
+the poll answered about other people's windows, a hop's stale answers revived the old window's
+process on the new tab, and light schemes had a plate the eye could not find. See BUGS.md's
+"foreground poll" entry and docs/ribbon-redesign.md §8.)*
+
+### T11.18 — The chip's clock ticks, and a hop away and back does not restart it
+- **Setup**: two windows, window 1 at a prompt, window 2 idle.
+- **Steps**: in window 1 run `sleep 300⏎`; watch the chip for 30s without touching anything;
+  then bar-swipe to window 2, wait ~5s there, and swipe back. Watch the clock for 10s more.
+- **Expect**: the clock **advances once a second** — `0:04`, `0:05`, `0:06` — for the whole 30s.
+  (It used to sit at `0:00` for an entire session: `Date.now()` read in the render body is
+  memoised by the React Compiler against props that a tick does not change.) The digits do not
+  jitter as they change — the meta text is tabular. On window 2 the band leaves. Back on window
+  1 the chip returns reading roughly **where it left off** (`0:38`, not `0:00`): it may show
+  `0:00` for up to one poll beat while the pid catches up, and must then jump to the true
+  elapsed time and keep ticking from there. Log: `[ribbon] forWindow 2 … (bar swipe commit)`,
+  `[ribbon] forWindow 1 sleep …`, `[ribbon] run #…`.
+- [ ]
+
+### T11.19 — The poll names our session: no flicker while other windows work
+- **Setup**: on the host, before connecting — `tmux new -d -s other 'htop'`, and in the port22
+  session put something long-running in window 3 (`sleep 999`). Connect and sit on window 1.
+- **Steps**: read the log line printed once at connect. Then run `sleep 300⏎` in window 1 and
+  sit perfectly still for 60s, watching the chip, the tabs badge, and the `[tmux]` lines.
+- **Expect**: `[tmux] poll aimed at session port22`. Over the 60s the chip stays `sleep` with a
+  monotonic clock — it never leaves and comes back, never swaps to another window's process,
+  never animates in twice — and `[tmux]` reports the **same** `windowIndex` on every beat with
+  the badge steady. (Untargeted, `display-message` answered about whichever window tmux last
+  considered current: measured 6 → 7 → 6 → 7 every ~2s with `claude` / null behind it, which
+  unmounted and remounted the band forever and made `sleep` unable to outlive the 3s gate.) In
+  `custom` or `shell` start mode the log instead says `poll aimed at nothing (untargeted)` and
+  the flap is expected there — that is the documented ceiling, not a regression.
+- [ ]
+
+### T11.20 — A hop's stale answers are ignored: the band leaves with the slide
+- **Setup**: window 1 running `sleep 300` (chip up), window 2 idle at a prompt.
+- **Steps**: bar-swipe from window 1 to window 2 and watch the trailing edge closely for the
+  three seconds after the slide lands. Repeat the hop five or six times, both directions.
+- **Expect**: the band goes out **with the slide** and stays gone — it must not reappear a beat
+  later on the idle tab and then leave again ("the pill stayed"). `select-window` is
+  asynchronous, so for a beat or two the poll still describes the window you left; those answers
+  are ignored until the window you hopped to answers. Hopping back raises the chip with the
+  slide too (T11.18 owns its clock). No case where the band belongs to a window you are not
+  looking at.
+- [ ]
+
+### T11.21 — Light schemes: the plate separates itself from the pane
+- **Setup**: Settings → a *light* scheme. Do Latte first, then a generated one — Rose Pine Dawn
+  is the worst case, and any light scheme from the generated set will do.
+- **Steps**: at a prompt with plenty of pale output on screen (`bat CLAUDE.md`, or just `ls`
+  a few times), raise the band with `sleep 100` and open it.
+- **Expect**: the band is **findable** — its foot casts a soft shadow onto the pane and the
+  plate reads a touch darker than the background behind it. (`theme.panel` is only
+  `mix(bg, black, 0.04)` on the 22 generated schemes — 4%, against 20% on the dark ones — so the
+  band was invisible against the pane it floated over, and Latte's mantle on base is 1.05:1. An
+  opaque plate cannot separate itself from a ground it matches: it now floats on a shadow on
+  both platforms, plus a 6% black ground on light schemes only.) The shadow must not read as a
+  dark bar or a border; the caps' own contrast is T11.17's business.
+- 📸 one shot per light scheme, band open.
+- [ ]
+
+### T11.22 — Reduce Motion: nothing moves, and everything is visible
+- **Setup**: iOS Settings → Accessibility → Motion → Reduce Motion **on**. (Android:
+  Settings → Accessibility → Remove animations.)
+- **Steps**: run `sleep 100⏎` and watch the arrival; open and close the band twice.
+- **Expect**: the chip **fades** in rather than gliding up, plays **no** sideways nudge, and is
+  fully visible and perfectly still. Open and close are instant — the width jumps, the caps do
+  not fade in. Nothing is missing or invisible: the old design's failure mode was the opposite
+  (Reanimated resolves a neutered `withRepeat` to its end value, which made the shipped handle
+  *brighter* under Reduce Motion). Turn the setting back off and confirm the nudge returns: three
+  cycles on arrival, then still forever — it must never oscillate indefinitely (WCAG 2.2.2).
+- [ ]
+
 ## T12 — Settings sheet + polish pass
 
 All cases: connected to a real host unless said otherwise. The sheet's decisions (dictation
