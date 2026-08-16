@@ -15,6 +15,7 @@ import {
   validate,
   type StartMode,
 } from '@/settings';
+import { CENTER, PRESSED, RADIUS, SECTION_HEADER, SPACE, TEXT, TINT, leading } from '@/style';
 import { MONO } from '@/theme';
 
 /** §4.1's start section, in the order a user would try them. The tmux pair first: they are the
@@ -113,7 +114,7 @@ export default function Setup() {
           One host, one key. The private half never leaves this phone.
         </Text>
 
-        <View style={[styles.fields, { backgroundColor: theme.border }]}>
+        <View style={styles.fields}>
           {field('Host', settings.host, (host) => updateSettings({ host }), 'hostname or IP')}
           {field(
             'Port',
@@ -128,8 +129,8 @@ export default function Setup() {
           {field('User', settings.username, (username) => updateSettings({ username }), 'login name')}
         </View>
 
-        <Text style={[styles.caption, { color: theme.muted }]}>Start</Text>
-        <View style={[styles.fields, { backgroundColor: theme.border }]}>
+        <Text style={[styles.header, { color: theme.muted }]}>Start</Text>
+        <View style={styles.fields}>
           {START_ROWS.map(({ mode, label, note }) => (
             <Pressable
               key={mode}
@@ -155,7 +156,7 @@ export default function Setup() {
         </View>
 
         {settings.startMode === 'attach' && (
-          <View style={[styles.fields, { backgroundColor: theme.border }]}>
+          <View style={styles.fields}>
             {[null, ...settings.knownSessions].map((name) => (
               <Pressable
                 key={name ?? MOST_RECENT}
@@ -174,7 +175,13 @@ export default function Setup() {
 
         {problem !== null && <Text style={[styles.problem, { color: theme.danger }]}>{problem}</Text>}
 
-        <Pressable onPress={start} style={[styles.connect, { backgroundColor: theme.accent }]}>
+        <Pressable
+          onPress={start}
+          style={({ pressed }) => [
+            styles.connect,
+            { backgroundColor: theme.accent },
+            pressed && PRESSED,
+          ]}>
           <Text style={[styles.connectLabel, { color: theme.onAccent }]}>Connect</Text>
         </Pressable>
 
@@ -188,7 +195,11 @@ export default function Setup() {
           <Pressable
             onPress={copyKey}
             disabled={key === null}
-            style={[styles.copy, { backgroundColor: theme.surface }]}>
+            style={({ pressed }) => [
+              styles.copy,
+              { backgroundColor: theme.surface },
+              pressed && PRESSED,
+            ]}>
             <Text style={[styles.copyLabel, { color: theme.foreground }]}>
               {copied ? 'Copied' : 'Copy'}
             </Text>
@@ -201,32 +212,41 @@ export default function Setup() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { padding: 24, gap: 12 },
+  content: { padding: SPACE.xl, gap: SPACE.md },
   title: { fontSize: 34, fontWeight: '700' },
-  caption: { fontSize: 13, lineHeight: 18 },
-  card: { borderRadius: 12, overflow: 'hidden' },
-  // The dividers are the gaps: the container is painted in the border colour and each row covers
+  caption: { fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
+  /** The label over a card, drawn the way the settings sheet draws its own group headers. */
+  header: { ...SECTION_HEADER, paddingHorizontal: SPACE.gutter, paddingBottom: 7 },
+  card: { borderRadius: RADIUS.card, overflow: 'hidden' },
+  // The dividers are the gaps: the container is painted in the divider tint and each row covers
   // its own share of it, which is one hairline between rows and none against the card's edges.
-  fields: { borderRadius: 12, overflow: 'hidden', gap: StyleSheet.hairlineWidth },
+  fields: {
+    backgroundColor: TINT.line,
+    borderRadius: RADIUS.card,
+    overflow: 'hidden',
+    gap: StyleSheet.hairlineWidth,
+  },
   row: { flexDirection: 'row', alignItems: 'center' },
-  modeRow: { paddingLeft: 14, paddingRight: 16, paddingVertical: 9 },
+  modeRow: { paddingHorizontal: SPACE.gutter, paddingVertical: 9 },
   modeText: { flex: 1 },
-  modeLabel: { fontSize: 15 },
+  modeLabel: { fontSize: TEXT.label },
   modeNote: { fontSize: 12, lineHeight: 16 },
-  tick: { fontSize: 15, fontWeight: '700' },
-  label: { width: 88, paddingLeft: 14, fontSize: 15 },
-  input: { flex: 1, paddingVertical: 13, paddingRight: 14, fontSize: 16 },
+  tick: { fontSize: TEXT.label, fontWeight: '700' },
+  label: { width: 88, paddingLeft: SPACE.gutter, fontSize: TEXT.label },
+  input: { flex: 1, paddingVertical: 13, paddingRight: SPACE.gutter, fontSize: 16 },
   problem: { fontSize: 14, lineHeight: 19 },
-  connect: { borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
-  connectLabel: { fontSize: 17, fontWeight: '600' },
-  key: { fontFamily: MONO, fontSize: 11, lineHeight: 16, padding: 14 },
+  // The design pins its one filled button at 48 tall, so the height is set rather than left to
+  // whatever the label plus a padding comes to.
+  connect: { borderRadius: RADIUS.button, height: 48, ...CENTER },
+  connectLabel: { fontSize: TEXT.button, fontWeight: '600' },
+  key: { fontFamily: MONO, fontSize: 11, lineHeight: 16, padding: SPACE.gutter },
   copy: {
     alignSelf: 'flex-start',
-    marginHorizontal: 14,
+    marginHorizontal: SPACE.gutter,
     marginBottom: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 10,
+    paddingHorizontal: SPACE.gutter,
+    paddingVertical: SPACE.sm,
+    borderRadius: RADIUS.button,
   },
   copyLabel: { fontSize: 14, fontWeight: '600' },
 });

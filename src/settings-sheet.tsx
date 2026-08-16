@@ -32,7 +32,6 @@ import {
   Modal,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -70,6 +69,18 @@ import {
   usesTmux,
 } from '@/settings';
 import {
+  CENTER,
+  GRABBER,
+  leading,
+  PRESSED,
+  RADIUS,
+  SECTION_HEADER,
+  SHEET_RADIUS,
+  SPACE,
+  TEXT,
+  TINT,
+} from '@/style';
+import {
   ALL_THEMES,
   DARK_THEMES,
   LIGHT_THEMES,
@@ -85,20 +96,11 @@ import {
  *  strip of sheet still showing, and only vanished when the Modal unmounted underneath it (user,
  *  2026-08-14: "settings briefly stop at the bottom and then hide"). */
 const TRAVEL = Dimensions.get('window').height;
-/** Design §5d: Material sheets corner at 28; everything else here — mantle ground, surface0 cards
- *  at 16, the 36×5 overlay grabber — is what the Android frames already show, through the same
- *  theme roles, so the radius is the whole Android skin. */
-const SHEET_RADIUS = Platform.OS === 'android' ? 28 : 24;
 const SLIDE = { duration: 340, easing: Easing.bezier(0.32, 0.72, 0.3, 1) };
 /** How far down the sheet counts as "the grabber" for a drag: `paddingTop` 8 + the 5pt bar + its
  *  12pt padding is 25, rounded up to a thumb. Generous on purpose — it laps a little over the
  *  APPEARANCE header, where a downward drag has nothing else to mean. */
 const GRABBER_ZONE = 40;
-
-/** The prototype's cross-flavour neutrals (overlay-grey at fixed alpha, same literal on all four
- *  flavours — the same family the key bar uses). */
-const HAIRLINE = 'rgba(127,132,156,0.3)';
-const STEPPER_TINT = 'rgba(127,132,156,0.25)';
 
 /** The swatch strip's six chips, in the prototype's order — now ANSI slots rather than Catppuccin
  *  names, because those six are the one thing every scheme is guaranteed to have. */
@@ -246,7 +248,7 @@ export default function SettingsSheet({
           style={({ pressed }) => [
             styles.row,
             styles.rowLine,
-            pressed && { backgroundColor: STEPPER_TINT },
+            pressed && { backgroundColor: TINT.track },
           ]}>
           <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
           <Text style={[styles.value, { color: theme.muted }]} numberOfLines={1}>
@@ -268,7 +270,7 @@ export default function SettingsSheet({
                 styles.row,
                 styles.subRow,
                 styles.rowLine,
-                pressed && { backgroundColor: STEPPER_TINT },
+                pressed && { backgroundColor: TINT.track },
               ]}>
               <Text style={[styles.label, { color: theme.foreground }]} numberOfLines={1}>
                 {t.label}
@@ -346,13 +348,13 @@ export default function SettingsSheet({
                   <View style={styles.stepper}>
                     <Pressable
                       onPress={() => stepFont(-1)}
-                      style={({ pressed }) => [styles.stepKey, pressed && { opacity: 0.5 }]}>
+                      style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}>
                       <Text style={[styles.stepGlyph, { color: theme.foreground }]}>−</Text>
                     </Pressable>
                     <View style={styles.stepDivider} />
                     <Pressable
                       onPress={() => stepFont(1)}
-                      style={({ pressed }) => [styles.stepKey, pressed && { opacity: 0.5 }]}>
+                      style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}>
                       <Text style={[styles.stepGlyph, { color: theme.foreground }]}>+</Text>
                     </Pressable>
                   </View>
@@ -386,7 +388,7 @@ export default function SettingsSheet({
                   onPress={onDisconnect}
                   style={({ pressed }) => [
                     styles.actionRow,
-                    pressed && { backgroundColor: STEPPER_TINT },
+                    pressed && { backgroundColor: TINT.track },
                   ]}>
                   <Text style={[styles.label, { color: theme.accent }]}>Disconnect</Text>
                 </Pressable>
@@ -395,7 +397,7 @@ export default function SettingsSheet({
                   style={({ pressed }) => [
                     styles.actionRow,
                     styles.rowLine,
-                    pressed && { backgroundColor: STEPPER_TINT },
+                    pressed && { backgroundColor: TINT.track },
                   ]}>
                   <Text style={[styles.label, { color: theme.danger }]}>Forget host key</Text>
                 </Pressable>
@@ -416,9 +418,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    // Design §5d: Material sheets corner at 28; everything else here — mantle ground, surface0
+    // cards at `RADIUS.card`, the `GRABBER` bar — is what the Android frames already show, through
+    // the same theme roles, so the radius is the whole Android skin.
     borderTopLeftRadius: SHEET_RADIUS,
     borderTopRightRadius: SHEET_RADIUS,
-    paddingHorizontal: 20,
+    paddingHorizontal: SPACE.wide,
+    // The 8 that opens GRABBER_ZONE's 8 + 5 + 12.
     paddingTop: 8,
     // Twenty-six theme rows are taller than any phone, so the sheet stops short of the status bar
     // and the list inside it scrolls.
@@ -426,41 +432,51 @@ const styles = StyleSheet.create({
     boxShadow: '0 -12px 40px rgba(0,0,0,0.45)',
   },
   scroll: { flexShrink: 1 },
+  // The 12 that closes GRABBER_ZONE's 8 + 5 + 12.
   grabberZone: { alignItems: 'center', paddingBottom: 12 },
-  grabber: { width: 36, height: 5, borderRadius: 3 },
-  header: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.6,
-    paddingHorizontal: 16,
-    paddingBottom: 7,
-  },
+  grabber: GRABBER,
+  header: { ...SECTION_HEADER, paddingHorizontal: SPACE.gutter, paddingBottom: 7 },
   headerGap: { paddingTop: 14 },
-  card: { borderRadius: 16, overflow: 'hidden' },
+  card: { borderRadius: RADIUS.card, overflow: 'hidden' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    // The row's own padding computes to about 33; this lifts it to the 44pt tap target.
     minHeight: 44,
-    paddingHorizontal: 16,
+    paddingHorizontal: SPACE.gutter,
     paddingVertical: 7,
   },
-  rowLine: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HAIRLINE },
+  rowLine: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: TINT.line },
   /** A theme inside an expanded list, indented off the disclosure row that opened it. */
-  subRow: { paddingLeft: 32 },
-  label: { flex: 1, fontSize: 15 },
-  value: { fontFamily: MONO, fontSize: 13, marginRight: 12 },
-  swatch: { flexDirection: 'row', gap: 3, borderRadius: 6, padding: 3, marginRight: 12 },
+  subRow: { paddingLeft: SPACE.xxl },
+  label: { flex: 1, fontSize: TEXT.label },
+  value: { fontFamily: MONO, fontSize: TEXT.base, marginRight: SPACE.md },
+  // The swatch strip and its chips are the prototype's own one-off geometry (gap:3, padding:3,
+  // 9×13 chips at 2.5) — a single element's numbers, deliberately not in the shared vocabulary.
+  swatch: {
+    flexDirection: 'row',
+    gap: 3,
+    borderRadius: RADIUS.small,
+    padding: 3,
+    marginRight: SPACE.md,
+  },
   chip: { width: 9, height: 13, borderRadius: 2.5 },
   checkSlot: { width: 18, alignItems: 'flex-end' },
+  // Likewise the stepper: a 9pt track around 38×30 keys, the prototype's alone.
   stepper: {
     flexDirection: 'row',
     borderRadius: 9,
     overflow: 'hidden',
-    backgroundColor: STEPPER_TINT,
+    backgroundColor: TINT.track,
   },
-  stepKey: { width: 38, height: 30, alignItems: 'center', justifyContent: 'center' },
+  stepKey: { width: 38, height: 30, ...CENTER },
   stepGlyph: { fontSize: 20, lineHeight: 24 },
-  stepDivider: { width: 1, backgroundColor: 'rgba(127,132,156,0.4)' },
-  note: { fontSize: 11.5, lineHeight: 15, paddingHorizontal: 16, paddingTop: 6 },
-  actionRow: { paddingHorizontal: 16, paddingVertical: 12 },
+  stepDivider: { width: 1, backgroundColor: TINT.edge },
+  note: {
+    fontSize: TEXT.caption,
+    lineHeight: leading(TEXT.caption),
+    paddingHorizontal: SPACE.gutter,
+    paddingTop: 6,
+  },
+  actionRow: { paddingHorizontal: SPACE.gutter, paddingVertical: SPACE.md },
 });

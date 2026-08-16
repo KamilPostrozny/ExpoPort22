@@ -15,8 +15,9 @@
  *
  * Android (§4.10, design §5a + `Port22-Android-Prototype.dc.html`) keeps this exact geometry and
  * hands only the system layer to Material: no blur — an elevated `surface0` container — 16pt bar
- * corners, 12pt keys, 20pt popovers, 8pt side margins. (PLAN §3's "40pt buttons, 8–12pt radii,
- * mantle" line predates the Android design frames, which kept the 49pt bar; the design wins.)
+ * corners, 12pt keys, 20pt popovers (the ⋯ menu alone at 16, `MENU_RADIUS`), 8pt side margins.
+ * (PLAN §3's "40pt buttons, 8–12pt radii, mantle" line predates the Android design frames, which
+ * kept the 49pt bar; the design wins.) Those metrics now live in `src/style.ts` as `BAR`.
  */
 
 import { BlurView } from 'expo-blur';
@@ -34,6 +35,7 @@ import {
   type NativeSyntheticEvent,
   type StyleProp,
   type TextInputSelectionChangeEventData,
+  type TextStyle,
   type ViewStyle,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -87,8 +89,20 @@ import {
   type CtrlMode,
   type NavKey,
 } from '@/keybar-model';
+import {
+  BAR,
+  CAP_CAPTION,
+  CENTER,
+  MENU_RADIUS,
+  PRESSED_KEY,
+  RADIUS,
+  SPACE,
+  TEXT,
+  TINT,
+  leading,
+} from '@/style';
 import { zoomProgress } from '@/switcher-model';
-import { MONO, type Theme } from '@/theme';
+import { MONO, rgba, type Theme } from '@/theme';
 
 export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
 
@@ -189,31 +203,23 @@ export type KeyBarProps = {
 
 /* --- §3's glass recipe --- */
 
-const GLASS_BORDER = 'rgba(255,255,255,0.12)';
+/** The glass's edge, one per appearance. The prototype defines the pair together (`--glassBd`);
+ *  only the dark half had ever been written, so a light scheme drew a white line at 0.12 over a
+ *  near-white surface — the tint two lines below it has always been branched, and now both are. */
+const glassBorder = (isDark: boolean) => (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)');
 /** The glass's hairline. */
 const GLASS_BORDER_W = Platform.OS === 'android' ? 0 : 0.5;
-/** The prototype's neutral key tint (overlay-grey at low alpha, same literal on all flavours). */
-const KEY_TINT = 'rgba(127,132,156,0.16)';
-const HAIRLINE = 'rgba(127,132,156,0.25)';
+
+/** Every popover in this file rises and leaves the same way — one decision, not five copies of it.
+ *  Out is quicker than in: a dismissal should be gone before the finger is. */
+const POP_IN = FadeInDown.duration(180);
+const POP_OUT = FadeOutDown.duration(140);
 
 /* --- the Android skin's metrics (see the header): same sizes, Material corners --- */
 const ANDROID = Platform.OS === 'android';
-/** The 49pt circles and pill: iOS capsules, Android's 16pt Material corners. */
-const BAR_RADIUS = ANDROID ? 16 : 24.5;
-/** The 35pt keys inside the pill (and the arrows button). */
-const KEY_RADIUS = ANDROID ? 12 : 18;
-/** The bar row's side margins — Android's bar docks 8pt from the edges (design §5a). */
-const SIDE_MARGIN = ANDROID ? 8 : 24;
-
 /** How this bar hides a glass layer it wants to keep mounted. Never `opacity: 0` — see the two
  *  call sites; the frozen object keeps the style array's identity stable across renders. */
 const DISPLAY_NONE = { display: 'none' } as const;
-
-/** Exported for the ribbon, which had a byte-identical copy of it. */
-export function rgba(hex: string, alpha: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
-}
 
 /** One glass surface: blur, tint, border — §3's recipe. `blur(14px) saturate(160%)` maps onto
  *  BlurView's 0–100 intensity scale (≈40); the inset specular highlight has no RN equivalent, so
@@ -253,7 +259,7 @@ export function Glass({
           borderRadius: radius,
           overflow: 'hidden',
           borderWidth: GLASS_BORDER_W,
-          borderColor: GLASS_BORDER,
+          borderColor: glassBorder(theme.isDark),
         },
         style,
       ]}>
@@ -319,7 +325,7 @@ export function Key({
       delayLongPress={delayLongPress}
       style={({ pressed }) => [
         style,
-        pressed && { opacity: 0.5, transform: [{ scale: 0.93 }] },
+        pressed && PRESSED_KEY,
       ]}>
       {children}
     </Pressable>
@@ -707,7 +713,13 @@ function KeyBarInner(props: KeyBarProps) {
       }
     }), [panSV]);
 
-  const keyLabel = { color: theme.foreground, fontFamily: MONO, fontSize: 14 };
+  // Weight 500, as every monospaced cap in the prototype is.
+  const keyLabel = {
+    color: theme.foreground,
+    fontFamily: MONO,
+    fontSize: TEXT.mono,
+    fontWeight: '500' as const,
+  };
 
   const ctrlStyle: StyleProp<ViewStyle> =
     ctrl === 'armed'
@@ -729,8 +741,8 @@ function KeyBarInner(props: KeyBarProps) {
     <View onLayout={(e) => props.onHeight(e.nativeEvent.layout.height)}>
       {ctrl !== 'off' && (
         <Animated.View
-          entering={FadeInDown.duration(180)}
-          exiting={FadeOutDown.duration(140)}
+          entering={POP_IN}
+          exiting={POP_OUT}
           style={styles.chordWrap}>
           <Glass theme={theme} radius={22} style={styles.chordPill}>
             {CHORD_STRIP.map(({ letter, caption }) => (
@@ -753,7 +765,7 @@ function KeyBarInner(props: KeyBarProps) {
           <Key onPress={props.sending ? undefined : () => toggle('menu')} style={styles.circleSlot}>
             <Glass
               theme={theme}
-              radius={BAR_RADIUS}
+              radius={BAR.radius}
               style={styles.circle}>
               {/* §4.6's busy tint, drawn *over* the glass rather than under it. As the container's
                   backgroundColor it sat beneath Glass's blur and its light-mode white overlay,
@@ -767,7 +779,7 @@ function KeyBarInner(props: KeyBarProps) {
                   // the circle's edge on device even inside `overflow: 'hidden'` (T13/T8.14).
                   style={[
                     StyleSheet.absoluteFill,
-                    { backgroundColor: theme.accent, borderRadius: BAR_RADIUS },
+                    { backgroundColor: theme.accent, borderRadius: BAR.radius },
                   ]}
                 />
               )}
@@ -801,7 +813,7 @@ function KeyBarInner(props: KeyBarProps) {
             <View
               style={[StyleSheet.absoluteFill, props.pills?.live && DISPLAY_NONE]}
               pointerEvents={props.pills?.live ? 'none' : 'auto'}>
-            <Glass theme={theme} radius={BAR_RADIUS} style={styles.pillGlass}>
+            <Glass theme={theme} radius={BAR.radius} style={styles.pillGlass}>
             <View style={styles.keysRow}>
               <View style={styles.keysGroup}>
                 <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
@@ -863,7 +875,7 @@ function KeyBarInner(props: KeyBarProps) {
             style={styles.circleSlot}>
             <Glass
               theme={theme}
-              radius={BAR_RADIUS}
+              radius={BAR.radius}
               style={[styles.circle, !props.showTabs && styles.circleOff]}>
               <SymbolView
                 name="square.on.square"
@@ -986,7 +998,7 @@ function NamePill({
       style={[StyleSheet.absoluteFill, styles.namePillSlot, anchor]}
       pointerEvents="none">
       <Animated.View style={[styles.namePillClip, style]}>
-        <Glass theme={theme} radius={BAR_RADIUS} style={styles.namePill}>
+        <Glass theme={theme} radius={BAR.radius} style={styles.namePill}>
           <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
             {name}
           </Text>
@@ -1012,33 +1024,38 @@ export function ArrowsPopover({
   bottom: number;
   sendBytes: (bytes: string) => void;
 }) {
-  const arrow = (key: NavKey, glyph: string, style: StyleProp<ViewStyle>) => (
+  const arrow = (
+    key: NavKey,
+    glyph: string,
+    style: StyleProp<ViewStyle>,
+    text: StyleProp<TextStyle> = styles.arrowGlyph,
+  ) => (
     <Key key={key} onPress={() => sendBytes(navKey(key, decckm))} style={style}>
-      <Text style={[styles.arrowGlyph, { color: theme.foreground }]}>{glyph}</Text>
+      <Text style={[text, { color: theme.foreground }]}>{glyph}</Text>
     </Key>
   );
   return (
     <Animated.View
-      entering={FadeInDown.duration(180)}
-      exiting={FadeOutDown.duration(140)}
+      entering={POP_IN}
+      exiting={POP_OUT}
       style={[styles.arrowsPop, { bottom }]}>
       <Glass theme={theme} radius={22} style={styles.arrowsGlass}>
         <View style={styles.dpad}>
           <View style={styles.dpadRow}>
             <View style={styles.dpadHole} />
-            {arrow('up', '↑', [styles.dpadKey, { backgroundColor: KEY_TINT }])}
+            {arrow('up', '↑', [styles.dpadKey, { backgroundColor: TINT.fill }])}
             <View style={styles.dpadHole} />
           </View>
           <View style={styles.dpadRow}>
-            {arrow('left', '←', [styles.dpadKey, { backgroundColor: KEY_TINT }])}
-            {arrow('down', '↓', [styles.dpadKey, { backgroundColor: KEY_TINT }])}
-            {arrow('right', '→', [styles.dpadKey, { backgroundColor: KEY_TINT }])}
+            {arrow('left', '←', [styles.dpadKey, { backgroundColor: TINT.fill }])}
+            {arrow('down', '↓', [styles.dpadKey, { backgroundColor: TINT.fill }])}
+            {arrow('right', '→', [styles.dpadKey, { backgroundColor: TINT.fill }])}
           </View>
         </View>
         <View style={[styles.popDivider, { backgroundColor: theme.border }]} />
         <View style={styles.homeEnd}>
-          {arrow('home', 'Home', styles.homeEndKey)}
-          {arrow('end', 'End', styles.homeEndKey)}
+          {arrow('home', 'Home', styles.homeEndKey, styles.homeEndGlyph)}
+          {arrow('end', 'End', styles.homeEndKey, styles.homeEndGlyph)}
         </View>
       </Glass>
     </Animated.View>
@@ -1060,8 +1077,8 @@ export function TabsHintPopover({
   return (
     <Animated.View
       pointerEvents="none"
-      entering={FadeInDown.duration(180)}
-      exiting={FadeOutDown.duration(140)}
+      entering={POP_IN}
+      exiting={POP_OUT}
       style={[styles.hintPop, { bottom }]}>
       <Glass theme={theme} radius={16} style={styles.hintGlass}>
         <Text style={[styles.hintText, { color: theme.foreground }]}>{text}</Text>
@@ -1091,23 +1108,28 @@ export function BarMenu({
 }) {
   return (
     <Animated.View
-      entering={FadeInDown.duration(180)}
-      exiting={FadeOutDown.duration(140)}
+      entering={POP_IN}
+      exiting={POP_OUT}
       style={[styles.menuPop, { bottom }]}>
-      <Glass theme={theme} radius={26}>
+      {/* The one popover the Android prototype corners at 16 rather than the shared 20. */}
+      <Glass theme={theme} radius={MENU_RADIUS}>
         <Text style={[styles.menuHeader, { color: theme.muted }]}>UPLOAD FILE</Text>
-        {UPLOAD_ROWS.map(({ label, kind }) => (
+        {UPLOAD_ROWS.map(({ label, kind }, i) => (
           <Pressable
             key={kind}
             onPress={() => onUpload(kind)}
-            style={({ pressed }) => [styles.menuRow, pressed && { backgroundColor: KEY_TINT }]}>
+            style={({ pressed }) => [
+              styles.menuRow,
+              i === 0 && styles.menuRowFirst,
+              pressed && { backgroundColor: TINT.line },
+            ]}>
             <Text style={[styles.menuLabel, { color: theme.foreground }]}>{label}</Text>
           </Pressable>
         ))}
         <View style={styles.menuBreak} />
         <Pressable
           onPress={onOpenSettings}
-          style={({ pressed }) => [styles.menuRow, pressed && { backgroundColor: KEY_TINT }]}>
+          style={({ pressed }) => [styles.menuRow, pressed && { backgroundColor: TINT.line }]}>
           <Text style={[styles.menuLabel, { color: theme.foreground }]}>Settings</Text>
         </Pressable>
       </Glass>
@@ -1154,15 +1176,15 @@ export function ClipboardPopover({
       onPress={onPick}
       style={({ pressed }) => [
         styles.clipRow,
-        { borderTopColor: HAIRLINE },
+        { borderTopColor: TINT.line },
         highlight && { backgroundColor: rgba(theme.accent, 0.12) },
-        pressed && { backgroundColor: KEY_TINT },
+        pressed && { backgroundColor: TINT.fill },
       ]}>
       <View style={styles.clipBody}>
         <Text numberOfLines={1} style={[styles.clipText, { color: theme.foreground }]}>
           {slot.text}
         </Text>
-        <Text style={[styles.clipMeta, { color: theme.muted }]}>{provenance(slot, now)}</Text>
+        <Text style={[styles.clipMeta, { color: theme.border }]}>{provenance(slot, now)}</Text>
       </View>
       <Pressable onPress={onPin} hitSlop={8} style={styles.clipPin}>
         <SymbolView
@@ -1181,11 +1203,11 @@ export function ClipboardPopover({
 
   return (
     <Animated.View
-      entering={FadeInDown.duration(180)}
-      exiting={FadeOutDown.duration(140)}
+      entering={POP_IN}
+      exiting={POP_OUT}
       style={[styles.clipPop, { bottom }]}>
       <Glass theme={theme} radius={20} style={styles.clipGlass}>
-        <Text style={[styles.clipHeader, { color: theme.placeholder }]}>CLIPBOARD</Text>
+        <Text style={[styles.clipHeader, { color: theme.border }]}>CLIPBOARD</Text>
         {slots.map((slot, i) => (
           <View key={`${slot.at}-${i}`}>{row(slot, i === 0, () => togglePin(i), () => type(slot.text))}</View>
         ))}
@@ -1203,32 +1225,31 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: SIDE_MARGIN,
+    gap: BAR.gap,
+    paddingHorizontal: BAR.sideMargin,
     paddingTop: BAR_PAD_TOP,
     paddingBottom: 6,
   },
-  circleSlot: { width: 49, height: 49 },
-  circle: { width: 49, height: 49, alignItems: 'center', justifyContent: 'center' },
+  circleSlot: { width: BAR.circle, height: BAR.circle },
+  circle: { width: BAR.circle, height: BAR.circle, ...CENTER },
   /** Disabled, not hidden — the glyph is already `placeholder`; this takes the glass down with it
    *  so the whole control reads inert rather than just faintly drawn. */
   circleOff: { opacity: 0.5 },
-  pill: { flex: 1, height: 49 },
+  pill: { flex: 1, height: BAR.circle },
   pillGlass: { flex: 1 },
   keysRow: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 7,
+    gap: SPACE.xs,
+    paddingHorizontal: BAR.gap,
   },
   keysGroup: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 3 },
   key: {
-    height: 35,
-    paddingHorizontal: 8,
-    borderRadius: KEY_RADIUS,
-    alignItems: 'center',
-    justifyContent: 'center',
+    height: BAR.key,
+    paddingHorizontal: BAR.keyPad,
+    borderRadius: BAR.keyRadius,
+    ...CENTER,
   },
   pillDivider: { width: 1, height: 27 },
   // No overflow clip: a pill mid-slide is partly outside the slot, and the clip sheared its
@@ -1240,51 +1261,65 @@ const styles = StyleSheet.create({
   namePill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
   namePillText: { fontFamily: MONO, fontSize: 14, fontWeight: '500', flexShrink: 1 },
   arrowsButton: {
-    width: 35,
-    height: 35,
-    borderRadius: KEY_RADIUS,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: BAR.key,
+    height: BAR.key,
+    borderRadius: BAR.keyRadius,
+    ...CENTER,
   },
 
   /* chord strip */
-  chordWrap: { alignItems: 'center', paddingTop: 2, paddingBottom: 8 },
-  chordPill: { flexDirection: 'row', gap: 4, padding: 6 },
-  cap: { width: 48, borderRadius: 14, alignItems: 'center', paddingTop: 5, paddingBottom: 4 },
-  capLetter: { fontFamily: MONO, fontSize: 16 },
-  capCaption: { fontSize: 8.5 },
+  chordWrap: { alignItems: 'center', paddingTop: 2, paddingBottom: SPACE.sm },
+  chordPill: { flexDirection: 'row', gap: SPACE.xs, padding: 6 },
+  cap: {
+    width: 48,
+    borderRadius: RADIUS.button,
+    alignItems: 'center',
+    paddingTop: 5,
+    paddingBottom: 4,
+  },
+  /** Every monospaced cap in the prototype is weight 500 — the bar keys, these, the arrows. */
+  capLetter: { fontFamily: MONO, fontSize: TEXT.button, fontWeight: '500' },
+  capCaption: { fontSize: CAP_CAPTION },
 
   /* popovers, hanging off the popBase anchor */
-  arrowsPop: { position: 'absolute', right: SIDE_MARGIN },
-  arrowsGlass: { flexDirection: 'row', gap: 7, padding: 6 },
-  dpad: { gap: 4 },
-  dpadRow: { flexDirection: 'row', gap: 4 },
+  arrowsPop: { position: 'absolute', right: BAR.sideMargin },
+  arrowsGlass: { flexDirection: 'row', gap: BAR.gap, padding: 6 },
+  dpad: { gap: SPACE.xs },
+  dpadRow: { flexDirection: 'row', gap: SPACE.xs },
   dpadHole: { width: 44, height: 34 },
-  dpadKey: { width: 44, height: 34, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  arrowGlyph: { fontFamily: MONO, fontSize: 15 },
+  dpadKey: { width: 44, height: 34, borderRadius: 13, ...CENTER },
+  /** The prototype draws these two clusters at two sizes — a 17pt arrow and a 12pt word — and one
+   *  style for both had split the difference at 15, which is neither. Both boxes are fixed, so
+   *  nothing reflows. */
+  arrowGlyph: { fontFamily: MONO, fontSize: 17, fontWeight: '500' },
+  homeEndGlyph: { fontFamily: MONO, fontSize: TEXT.note, fontWeight: '500' },
   popDivider: { width: 1, opacity: 0.5, marginVertical: 3 },
-  homeEnd: { gap: 4 },
-  homeEndKey: { width: 56, height: 34, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  hintPop: { position: 'absolute', right: SIDE_MARGIN, maxWidth: 240 },
+  homeEnd: { gap: SPACE.xs },
+  homeEndKey: { width: 56, height: 34, borderRadius: 13, ...CENTER },
+  hintPop: { position: 'absolute', right: BAR.sideMargin, maxWidth: 240 },
   hintGlass: { paddingHorizontal: 14, paddingVertical: 10 },
-  hintText: { fontSize: 13, lineHeight: 18 },
-  menuPop: { position: 'absolute', left: SIDE_MARGIN, width: 256 },
+  hintText: { fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
+  menuPop: { position: 'absolute', left: BAR.sideMargin, width: 256 },
+  // The ⋯ menu's own header and rows keep the prototype's 11pt/0.5 and 18pt gutter — its numbers
+  // are not the settings sheet's, and `SECTION_HEADER` deliberately does not reach here.
   menuHeader: {
     paddingHorizontal: 18,
     paddingTop: 11,
     paddingBottom: 6,
-    fontSize: 11,
+    fontSize: TEXT.caption,
     fontWeight: '600',
     letterSpacing: 0.5,
     opacity: 0.8,
   },
   menuRow: {
     paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingVertical: SPACE.md,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HAIRLINE,
+    borderTopColor: TINT.line,
   },
-  menuLabel: { fontSize: 15 },
+  /** The first row sits under the header, where the prototype draws no rule. */
+  menuRowFirst: { borderTopWidth: 0 },
+  menuLabel: { fontSize: TEXT.label },
   menuBreak: { height: 6, backgroundColor: 'rgba(0,0,0,0.14)' },
 
   /* clipboard popover — centered, 300pt, 20pt corners per the prototype */
@@ -1294,7 +1329,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 9,
     paddingBottom: 7,
-    fontSize: 11,
+    fontSize: TEXT.caption,
     fontWeight: '600',
     letterSpacing: 0.4,
   },
@@ -1307,15 +1342,15 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   clipBody: { flex: 1, minWidth: 0 },
-  clipText: { fontFamily: MONO, fontSize: 12 },
-  clipMeta: { fontSize: 10, marginTop: 1 },
+  clipText: { fontFamily: MONO, fontSize: TEXT.note },
+  clipMeta: { fontSize: TEXT.micro, marginTop: 1 },
   clipPin: { padding: 2 },
   clipEmpty: {
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 12,
+    paddingVertical: SPACE.md,
+    fontSize: TEXT.note,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: HAIRLINE,
+    borderTopColor: TINT.line,
   },
 
   /* the invisible keyboard owner */

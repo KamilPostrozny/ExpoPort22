@@ -44,10 +44,11 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { Key, rgba } from '@/keybar';
+import { Key } from '@/keybar';
 import { formatElapsed } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
-import { MONO, MONO_BOLD, type Theme } from '@/theme';
+import { TEXT } from '@/style';
+import { MONO, MONO_BOLD, rgba, type Theme } from '@/theme';
 
 const ANDROID = Platform.OS === 'android';
 /** Horizontal travel that counts as the open swipe (the prototype's 28). */
@@ -507,7 +508,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   capKeyRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  capKey: { fontFamily: MONO, fontSize: 14, fontWeight: '500', lineHeight: 17 },
+  capKey: { fontFamily: MONO, fontSize: TEXT.mono, fontWeight: '500', lineHeight: 17 },
   capKeyDanger: { fontFamily: MONO_BOLD },
   capCaption: { fontSize: 10, lineHeight: 12 },
   capWarn: { fontFamily: MONO_BOLD, fontSize: 10 },

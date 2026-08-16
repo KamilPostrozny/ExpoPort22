@@ -99,6 +99,7 @@ import {
   type Frame,
 } from '@/switcher-model';
 import SettingsSheet from '@/settings-sheet';
+import { CENTER, PRESSED, RADIUS, SEARCH_RADIUS, SPACE, TEXT, leading } from '@/style';
 import TerminalView, { type TerminalHandle } from '@/terminal';
 import { exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
 import {
@@ -2186,26 +2187,30 @@ export default function SessionScreen() {
                     : `${occ.n}`}
             </Text>
           </View>
-          {(['prev', 'next'] as const).map((dir) => (
-            <Pressable
-              key={dir}
-              disabled={occ === null || occ.n === 0}
-              onPress={() => {
-                const q = search.q.trim();
-                if (q === '') return;
-                if (dir === 'prev') terminal.current?.searchPrev?.(q);
-                else terminal.current?.searchNext?.(q);
-              }}
-              style={({ pressed }) => [
-                styles.searchStep,
-                { backgroundColor: theme.surface, opacity: occ === null || occ.n === 0 ? 0.35 : 1 },
-                pressed && { opacity: 0.6 },
-              ]}>
-              <Text style={{ color: theme.foreground, fontSize: 13, fontWeight: '600' }}>
-                {dir === 'prev' ? '∧' : '∨'}
-              </Text>
-            </Pressable>
-          ))}
+          {/* The pair, in a group of its own: they are one segmented control, so they sit closer
+              to each other than the row's own gap puts them — and Done stays outside it. */}
+          <View style={{ flexDirection: 'row', gap: 2 }}>
+            {(['prev', 'next'] as const).map((dir) => (
+              <Pressable
+                key={dir}
+                disabled={occ === null || occ.n === 0}
+                onPress={() => {
+                  const q = search.q.trim();
+                  if (q === '') return;
+                  if (dir === 'prev') terminal.current?.searchPrev?.(q);
+                  else terminal.current?.searchNext?.(q);
+                }}
+                style={({ pressed }) => [
+                  styles.searchStep,
+                  { backgroundColor: theme.surface, opacity: occ === null || occ.n === 0 ? 0.35 : 1 },
+                  pressed && PRESSED,
+                ]}>
+                <Text style={{ color: theme.foreground, fontSize: 13, fontWeight: '600' }}>
+                  {dir === 'prev' ? '∧' : '∨'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
           <Pressable onPress={disarmSearch} hitSlop={8}>
             <Text style={[styles.searchDone, { color: theme.accent }]}>Done</Text>
           </Pressable>
@@ -2659,7 +2664,12 @@ function Status({
   onSetup: () => void;
 }) {
   const button = (label: string, colour: string, textColour: string, onPress: () => void) => (
-    <Pressable key={label} onPress={onPress} style={[styles.action, { backgroundColor: colour }]}>
+    <Pressable
+      key={label}
+      onPress={onPress}
+      // The same touch-down every other button in the app answers with — these three sat in a
+      // fixed box and answered with nothing at all.
+      style={({ pressed }) => [styles.action, { backgroundColor: colour }, pressed && PRESSED]}>
       <Text style={[styles.actionLabel, { color: textColour }]}>{label}</Text>
     </Pressable>
   );
@@ -2725,18 +2735,21 @@ function Status({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  // T14's terminal-side search bar (design: 38pt field, 12pt radius; Android 16dp per §5d).
+  // T14's terminal-side search bar (design: 38pt field, `SEARCH_RADIUS.terminal` corner — the
+  // prototype's 12 on iOS, Android 16dp per §5d).
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    // The prototype's row gap. The field is flex:1, so it absorbs the two points; the row's
+    // height is `searchRowH`'s business and is untouched by this.
+    gap: SPACE.sm,
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
   searchField: {
     flex: 1,
     height: 38,
-    borderRadius: Platform.OS === 'android' ? 16 : 12,
+    borderRadius: SEARCH_RADIUS.terminal,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
@@ -2744,12 +2757,13 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 13, paddingVertical: 0 },
   searchCount: { fontFamily: MONO, fontSize: 11 },
+  /** One stepper key. The pair sits in a 2pt-gap group of its own (see the row's JSX) so it reads
+   *  as one segmented control, which is how the prototype draws them. */
   searchStep: {
     width: 34,
     height: 38,
-    borderRadius: Platform.OS === 'android' ? 16 : 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: SEARCH_RADIUS.terminal,
+    ...CENTER,
   },
   searchDone: { fontSize: 15, paddingHorizontal: 2 },
   stageWrapper: { position: 'absolute', top: 0, left: 0, overflow: 'hidden' },
@@ -2770,15 +2784,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    padding: 32,
+    ...CENTER,
+    gap: SPACE.md,
+    padding: SPACE.xxl,
   },
   glyph: { fontFamily: MONO, fontSize: 44 },
   headline: { fontSize: 24, fontWeight: '700' },
-  sentence: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 8 },
-  action: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
-  actionLabel: { fontSize: 16, fontWeight: '600' },
+  sentence: { fontSize: TEXT.label, lineHeight: leading(TEXT.label), textAlign: 'center' },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: SPACE.sm },
+  /** A filled button, wearing the app's button corner rather than the field's — these three had
+   *  drifted to 12, which is what a field is. */
+  action: { paddingHorizontal: SPACE.wide, paddingVertical: SPACE.md, borderRadius: RADIUS.button },
+  actionLabel: { fontSize: TEXT.button, fontWeight: '600' },
 });

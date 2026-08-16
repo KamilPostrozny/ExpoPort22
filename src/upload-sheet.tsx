@@ -28,6 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { RemoteEntry } from '../modules/expo-ssh/src/ExpoSSH.types';
 import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
+import { GRABBER, PRESSED, RADIUS, SHEET_RADIUS, SPACE, TEXT } from '@/style';
 import { MONO, type Theme } from '@/theme';
 import {
   breadcrumb,
@@ -284,7 +285,7 @@ export default function UploadSheet(props: UploadSheetProps) {
             style={({ pressed }) => [
               styles.save,
               { backgroundColor: theme.accent },
-              (pressed || dir === null) && { opacity: 0.6 },
+              (pressed || dir === null) && PRESSED,
             ]}>
             <Text style={[styles.saveLabel, { color: theme.onAccent }]}>Save here</Text>
             {dir !== null && (
@@ -301,20 +302,24 @@ export default function UploadSheet(props: UploadSheetProps) {
 
 const styles = StyleSheet.create({
   sheet: { flex: 1 },
-  /* §5d: Material sheets corner at 28. */
+  /* §5d: Material sheets corner at 28 — only Android draws its own, so the iOS arm of
+     SHEET_RADIUS is never read here, but the number is the same decision.
+     The shadow is deliberately NOT the settings sheet's `0 -12px 40px rgba(0,0,0,0.45)`: the
+     Android prototype specifies this one for the BROWSE sheet. Two shadows on purpose — don't
+     fold them into one constant. */
   sheetAndroid: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: SHEET_RADIUS,
+    borderTopRightRadius: SHEET_RADIUS,
     overflow: 'hidden',
     boxShadow: '0 -10px 30px rgba(0,0,0,0.5)',
   },
   grabberRow: { alignItems: 'center', paddingTop: 8, paddingBottom: 2 },
-  grabber: { width: 36, height: 5, borderRadius: 3 },
+  grabber: GRABBER,
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 18,
+    paddingHorizontal: SPACE.wide,
     paddingTop: 6,
     paddingBottom: 10,
   },
@@ -324,7 +329,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 18,
+    paddingHorizontal: SPACE.wide,
     paddingBottom: 10,
     flexWrap: 'nowrap',
     overflow: 'hidden',
@@ -336,7 +341,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 11,
-    paddingHorizontal: 18,
+    paddingHorizontal: SPACE.wide,
     paddingVertical: 11,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
@@ -346,7 +351,7 @@ const styles = StyleSheet.create({
   chevron: { fontSize: 16 },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 18,
+    paddingHorizontal: SPACE.wide,
     paddingTop: 12,
     paddingBottom: 26,
     gap: 10,
@@ -354,21 +359,24 @@ const styles = StyleSheet.create({
   saveAs: { fontSize: 10, fontWeight: '600', letterSpacing: 0.6 },
   nameField: {
     height: 42,
-    borderRadius: 12,
+    borderRadius: RADIUS.control,
     borderWidth: 1,
     paddingHorizontal: 12,
+    // The box is a fixed height and centres its own text; RN's default vertical padding would
+    // fight that, as it does in every other fixed-height field here. The prototype: padding:0 12px.
+    paddingVertical: 0,
     fontFamily: MONO,
     fontSize: 14.5,
   },
   save: {
     height: 48,
-    borderRadius: 14,
+    borderRadius: RADIUS.button,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 16,
   },
-  saveLabel: { fontSize: 16, fontWeight: '600' },
+  saveLabel: { fontSize: TEXT.button, fontWeight: '600' },
   savePath: { fontFamily: MONO, fontSize: 12, opacity: 0.65, flexShrink: 1 },
 });

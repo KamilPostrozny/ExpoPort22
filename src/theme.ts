@@ -175,6 +175,13 @@ function mix(a: string, b: string, t: number): string {
   );
 }
 
+/** A theme colour at an alpha — the prototype's `hexA()`. Every caller passes a `#rrggbb` off a
+ *  `Theme`, which is why it lives here and not in a view: the views only ever tint these. */
+export function rgba(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
 /**
  * The ratios come from measuring Catppuccin: `overlay0` sits 45% of the way from `base` to `text`,
  * `overlay1` 55%, `subtext0` 78%, and `mantle`/`crust` are the background pulled toward black by
