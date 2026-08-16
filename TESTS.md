@@ -535,16 +535,58 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
   from BOTH platforms and `expo-blur` uninstalled; `src/ribbon.tsx` had already reached the same
   answer for its own contrast reasons. **The iOS build changed here too** — if the iOS shot still
   shows blur, it is the stale build, not the reference.
-- Android: [ ]
+- Android: [x] — 2026-08-16, iPhone (device) vs Pixel 7 AVD (API 36), both Mocha, both at
+  b427712+. Opaque plates on both, no blur either side, `Glass` now `Plate`. Run widths along the
+  bar agree: iOS `18.7 / 1.0 / 1.0 / 18.7 / 60.3 … 48.3`, Android `18.7 / 0.8 / 0.8 / 19.4 /
+  60.2 … 49.1` — the first four are the ⋯ circle with its three dots interrupting the scan, i.e.
+  the same glyph in the same place. All three bar glyphs (`\uF141` ellipsis, `\uF047` arrows,
+  `\uF24D` tabs) render from the bundled face on both; `nerd-glyph=7.8000` in the terminal log
+  equals the mono cell advance on both, so none fell through to a system face. The only visible
+  difference in the side-by-side was the tabs glyph dimmer on Android — correct disabled state,
+  that session was a plain shell.
 
-### T7A.2 — INVERTED (2026-08-16): metrics are the iOS metrics
+### T7A.2 — Metrics are the iOS metrics
 - **Setup**: bar on screen, keyboard up. An iOS screenshot of the same state — **ask the user**.
 - **Steps**: screenshot both, crop the bar at native resolution, measure corner radius, key
   radius, side margin and bar height against the iOS shot.
 - **Expect**: every number is the iOS number — 18pt key radius, 24pt side margins, 24.5pt bar
   radius, capsule circles. The old Expect here ("16pt corners, visibly squarer than iOS
   capsules, 8pt side margins, docked not floating") came from the deleted Android prototype and
-  is exactly the divergence to remove; `ANDROID ?` in `src/style.ts` is where it lives.
+  was exactly the divergence to remove; the `ANDROID ?` arms in `src/style.ts` are deleted and
+  the file no longer imports `Platform`.
+- Android: [x] — 2026-08-16, measured off native-res PNGs (iOS 3.0x, Android 2.625x):
+
+  | | iOS | Android | old Android |
+  |---|---|---|---|
+  | plate height | 48.3 | 48.8 | 49 |
+  | left margin | 24.3 | 24.0 | 8 |
+  | right margin | 24.3 | 24.0 | 8 |
+  | gap circle→pill | — | 7.2 | 7 |
+  | tabs circle radius | — | 24.4 (arc fit r=64px) | 16 |
+  | ⋯ popover radius | ~26 (arc fit) | ~26 | 16, clamped to 20 |
+  | ⋯ popover margin | 24.3 | 24.0 | 8 |
+
+  The side margin moving 8 → 24 is the clearest single proof the `style.ts` deletions reached the
+  Android build. `Glass`'s silent `Math.min(radius, 20)` clamp is gone too, so passed corners are
+  no longer overridden.
+
+### T7A.2a — OPEN FINDING: Android font scale distorts the terminal and overflows the bar
+- **Not caused by the parity work; found while verifying it (2026-08-16), unfixed.**
+- **Steps**: `adb shell settings put system font_scale 1.5`, relaunch, connect, look at the grid
+  and the bar. Reset with `1.0`.
+- **Observed**: the terminal cell scaled in WIDTH by exactly 1.5 (7.7964 → 11.6964) while the row
+  height stayed 17.14 and the column count stayed 50 — so 50 x 11.7 = 585dp of grid on a 411dp
+  screen. Text runs off the right edge and rows collide vertically. Separately the key bar held
+  its 48.8dp plate correctly, but the labels scaled inside their fixed-width keys until "Paste"
+  collided with the arrows glyph.
+- **Why it is a divergence**: Android's WebView applies the system font scale to CSS text; iOS's
+  WKWebView does not apply Dynamic Type to CSS px. Same code, different result. Android also
+  stacks a *display size* multiplier on top of font scale, so it reaches extreme values sooner.
+- **Where the guard already is**: only 5 of ~70 `Text` nodes cap the multiplier
+  (`maxFontSizeMultiplier={1.3}`, all in `src/ribbon.tsx`).
+- **Likely fix, unverified**: `allowFontScaling={false}` on the fixed-geometry chrome, and
+  `textZoom` / `-webkit-text-size-adjust` on the WebView. Touches the terminal, so it wants its
+  own pass rather than riding along with a styling change.
 - Android: [ ]
 
 ### T7A.3 — Icons render via text fallback (no blank keys)
@@ -1097,7 +1139,10 @@ misbehaves.
   case used to demand ("Done" text button, Roboto count, 56dp FAB). The
   `Platform.OS === 'android'` branch that rendered the alternate bar is deleted (b427712), so
   there is one code path and a difference here means a rendering bug, not a branch.
-- Android: [ ]
+- Android: [x] — 2026-08-16. Done circle 49.0 x 49.0 at 34.0 right margin on iOS, 49.1 x 49.1 at
+  33.9 on Android; the old Android drew a 56dp FAB at a 12dp margin, so both the control and the
+  `Platform.select` padding are gone. Count reads `2 Tabs` in JetBrains Mono on both. Side-by-side
+  at matched logical scale is indistinguishable.
 
 ### T10A.3 — The + circle births a window out of itself (was: the FAB)
 - **Steps**: with 3 windows open the switcher, tap the FAB; on the laptop run
@@ -1728,7 +1773,24 @@ really 24. One side-by-side screenshot settles all three.
   void — see T7A.1 for why blur left both builds). The swipe-dismiss rides the finger and releases exactly as on
   iOS (same tested rule). System back dismisses the sheet with the slide-out — it never pops the route
   or reaches the terminal. Log: `[settings] sheet closed`.
-- Android: [ ]
+- Android: [ ] — **look verified 2026-08-16, behaviour NOT.** The corner is confirmed: the arcs
+  are the same curve on both, iOS inset `10.7 / 5.0 / 2.3 / 0.0` at dy `4.0 / 9.3 / 13.3 / 21.3`
+  against Android `9.9 / 5.0 / 2.3 / 0.0` at dy `4.6 / 9.1 / 13.7 / 21.7`, both fitting r=24.
+  Material's 28 is gone. Grabber, section headers, mono values and the accent/red action rows all
+  match; no blur either side. Heights are not comparable in that run and it is not a defect — the
+  two were in different states (iOS on tmux so it drew a TMUX section, Android on a plain shell;
+  iOS with Follow-system off so it drew one Theme row where Android drew Dark + Light).
+  **Still to walk: the drag-past-a-third release and the system-back dismiss.** Neither was
+  exercised — an unrelated error closed the sheet before back was pressed, so the press that was
+  observed landed on the terminal, not the sheet.
+- **Finding, switch colours (fixed).** The `Switch` is a native control on both — UISwitch and
+  Material's — and its PROPORTIONS differing is expected and not chased (user, 2026-08-16: native
+  differences are fine, do not build custom components). Its colours are ours, and were not being
+  set: only `trackColor.true` was, so Android took its thumb from the Material default — a teal
+  that appears nowhere in this app, against iOS's white. Now routed through `switchColors()` in
+  `src/settings-sheet.tsx`: themed track (both states) and a thumb that is the pale end of the
+  scheme on both. Re-check the colours here on the next pass; the shapes will still differ, by
+  design.
 
 ### T12A.2 — Upload sheet: bottom-sheet look, browse, back goes up a directory
 - **Setup**: connected; a host directory tree at least two levels deep under `$HOME`.
@@ -1739,7 +1801,22 @@ really 24. One side-by-side screenshot settles all three.
   allowed; the *result* must match iOS. **Ask the user for the iOS shot** to set the corner.) Each back walks up exactly one directory (breadcrumb and
   listing follow, same as tapping `..`); from `/` — where the `..` row also disappears — back
   dismisses the sheet instead. Nothing typed into the session at any point.
-- Android: [ ]
+- Android: [ ] — **look verified 2026-08-16 and the construction changed underneath this case;
+  behaviour NOT walked.** The sheet no longer imitates a system surface: `presentationStyle=
+  "pageSheet"` is gone from iOS and both platforms build it the way `src/settings-sheet.tsx`
+  already did (374d156). That was forced by measurement — the hand-built Android replica sat at
+  97.9dp from the top where iOS's system sheet sat 69.0pt (`insets.top + 46`, a number this file
+  had itself flagged as never measured), and iOS's system corner is ~35 drawn with CONTINUOUS
+  curvature, which RN cannot express at all. After: corner arcs identical, iOS inset
+  `10.7 / 5.3 / 2.7 / 0.7` and Android `10.7 / 5.3 / 2.7 / 0.8` at dy `4 / 9 / 13 / 18`, both
+  r=24; the top gap is one formula on both (`insets.top + SPACE.sm`, 76.0 vs 59.8) and the
+  residual is each device's own safe area. Thirteen `ANDROID` branches became four, all
+  behaviour. **Still to walk: descending two directories, back walking up one at a time, and the
+  dismiss from `/`.** Android's listing could not be read in that run — see the note below.
+- **Known race, not a design issue.** `[upload] sheet could not resolve a start dir: Call to
+  function 'ExpoSSH.exec' has been rejected` on Android: the system document picker foregrounds
+  itself, the session disconnects behind it, and the sheet opens before the reconnect lands. iOS
+  resolved `/ tmp › port22` in the same run. Pre-existing and separate from the parity work.
 
 ### T12A.3 — Back closes popovers and the ⋯ menu first
 - **Setup**: connected, keyboard up.

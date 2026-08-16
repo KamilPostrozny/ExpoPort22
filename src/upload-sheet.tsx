@@ -119,6 +119,24 @@ export default function UploadSheet(props: UploadSheetProps) {
   // keyboard resizes under a language switch or a floating-to-docked change.
   // Padding is needed on Android at all — where `src/app/terminal.tsx` deliberately adds none —
   // because a `statusBarTranslucent` Modal window does not adjustResize.
+  //
+  // "Surely something exposes one keyboard API for both platforms?" — asked and checked
+  // (2026-08-16), so here is the answer rather than the next reader re-deriving it:
+  //
+  //   * Expo does not. There is no keyboard module in SDK 57, in `expo` or beside it.
+  //   * React Native itself cannot. `Keyboard.d.ts:82` says outright that "only `keyboardDidShow`
+  //     and `keyboardDidHide` events will be available on Android" — `keyboardWillChangeFrame` is
+  //     a UIKit notification and Android's IME reports after the fact, not before.
+  //   * Reanimated's `useAnimatedKeyboard` DOES unify it, and is already installed — but in 4.5.1
+  //     it is `@deprecated`, pointing at `react-native-keyboard-controller`, which is a new native
+  //     dependency wanting a `KeyboardProvider` at the root and a rebuild.
+  //
+  // So the unification costs a native dependency and buys these two lines. Note it would NOT buy
+  // the branch in `src/app/terminal.tsx`, which is category (3), not (1): that one returns early
+  // on Android because it must not ACT on the keyboard (the window already resized), not because
+  // it cannot READ it — a unified height changes nothing there. Revisit if
+  // `react-native-keyboard-controller` earns its way in for some other reason, or if Expo adopts
+  // it; it is where Reanimated is sending everyone.
   useEffect(() => {
     const height = (frame: { screenY: number; height: number }) =>
       // A keyboard parked off-screen (hidden, or the hardware-keyboard bar) reports a screenY at
