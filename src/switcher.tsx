@@ -839,13 +839,18 @@ function WindowCard({
       ? { borderWidth: CARD_RING, borderColor: theme.accent }
       : { borderWidth: CARD_RING_IDLE, borderColor: theme.border };
 
-  // The border is part of the inset, not extra: RN lays a view's content out inside it, so a 2pt
-  // ring plus the full padding put the snapshot 2pt further in than the terminal's own inset lands
-  // — a constant down-and-right step at the crossfade, in both axes, and the last one (device).
-  const shotPad = Math.max(0, SHOT_PAD * u - ring.borderWidth);
+  // Plain insets, because the ring is drawn OVER the card rather than laid out inside it (see the
+  // overlay at the end of the shot). It used to be a real border, which RN lays content out inside,
+  // so both of these subtracted it back off and the bottom edge carried a negative margin to match
+  // — three compensations for one structural choice, and the top one could not hold: `padTop` is
+  // 0.00 on nearly every fit, so `max(0, 0 * ratio - 2)` clamped to 0 and left the content sitting
+  // at the border's 2pt instead of at 0. That is the content stepping DOWN a couple of points on
+  // the landing frame (user, 2026-08-17). A clamp cannot express an inset smaller than the border;
+  // not spending the border on layout can.
+  const shotPad = SHOT_PAD * u;
   // Vertically the terminal's inset is not a constant (it swallows half the row remainder), so
   // the card's is that one seen through the zoom rather than a number of its own.
-  const shotPadTop = Math.max(0, padTop * (slot.w / stageW) - ring.borderWidth);
+  const shotPadTop = padTop * (slot.w / stageW);
 
   // The emulator's cell, shrunk by exactly what the zoom shrinks the stage by — so the card draws
   // the pane the size the flying surface hands over at.
@@ -862,7 +867,7 @@ function WindowCard({
     cell,
     slot.w / stageW,
     liveCols > 0 ? Math.min(cols, liveCols) : cols,
-    slot.w - 2 * (shotPad + ring.borderWidth),
+    slot.w - 2 * shotPad, // the ring is an overlay now: it costs the content no width
   );
   const directory = card.win.path.split('/').filter(Boolean).pop() ?? '/';
 
@@ -903,7 +908,6 @@ function WindowCard({
         <View
           style={[
             styles.shot,
-            ring,
             {
               height: slot.h,
               borderRadius: CARD_RADIUS * u,
@@ -913,18 +917,21 @@ function WindowCard({
               paddingBottom: shotPad,
             },
           ]}>
-          {/* The ring is part of the inset (RN lays content out inside a border), so hanging the
-              snapshot off the padding box puts its last row that far above where the terminal's
-              lands — the same constant step `shotPadTop` subtracts on the top edge. */}
-          <View style={{ marginBottom: -ring.borderWidth }}>
-            <Snapshot lines={shownLines} theme={theme} {...type} />
-          </View>
+          <Snapshot lines={shownLines} theme={theme} {...type} />
           {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
           {closable && (
             <View style={[styles.close, { backgroundColor: theme.foreground }]}>
               <Text style={[styles.closeGlyph, { color: theme.background }]}>✕</Text>
             </View>
           )}
+          {/* The ring, drawn over the card exactly as the flying surface draws its own — an
+              absoluteFill, so it costs the content no layout and the two agree by construction
+              rather than by three subtractions that have to stay in step. Last child: on top,
+              like the flight's. */}
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, ring, { borderRadius: CARD_RADIUS * u }]}
+          />
         </View>
         <HlText
           text={card.win.name}
