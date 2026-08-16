@@ -1,9 +1,10 @@
 # Open bugs
 
 Found on device during the T-perf accept walk (2026-08-15). Everything here is reproducible on a
-real phone against a live tmux session; none of it is caused by the performance branch — where that
-was in doubt it was settled by checking out `fa4cb78` (the commit before the perf work), reloading,
-and reproducing the fault with the changes absent.
+real phone against a live tmux session; where a cause was in doubt it was settled by checking out
+`fa4cb78` (the commit before the perf work), reloading, and reproducing the fault with the changes
+absent. Everything settled that way is pre-existing — bug 6 is the one item still suspected of being
+a regression from the performance branch, and it names the experiment that would confirm it.
 
 Fixed and confirmed the same session, for context on what is *not* in this list: `less` refusing to
 scroll (root-table wheel bindings missing from the pushed tmux conf), and the grid's tabs vanishing
@@ -148,6 +149,77 @@ own.
 
 ---
 
+## 6. Neighbour cards do not reliably leave during the swipe up
+
+**Repro.** Swipe a tab upward (the zoom toward the grid), slowly. Screenshot: 2026-08-15, 21:51.
+
+**Symptom.** The neighbouring cards either side of the live one do not always go away, and during a
+slow swipe they flash — appearing and disappearing — instead of leaving once and staying gone.
+
+**Suspect: this one may be a regression from `e75141f`, and it is the strongest such suspicion of
+the whole audit.** `NeighborPage` (`src/app/terminal.tsx`) is one of exactly three components that
+began being compiled by the React Compiler as a result of that commit — the two block-form
+`eslint-disable`s were making the compiler treat every function later in the file as suppressed, and
+removing them took `PageContent`, `NeighborPage` and `Status` from `CompileError` to
+`CompileSuccess` (verified by running babel-plugin-react-compiler with its logger: 0 before, 3
+after).
+
+So `NeighborPage` is memoized now and was not before. A conditionally-rendered component that has
+just acquired automatic memoization is exactly the thing that starts rendering a frame late, or
+holding a stale visibility, or flickering as its inputs settle — which is the reported symptom.
+Nothing else in the branch touches the neighbours.
+
+**How to settle it, surgically** — better than a full baseline checkout, because it isolates the one
+component instead of the whole commit. Put `"use no memo"` at the top of `NeighborPage` and reload:
+that opts only that component out of the compiler while leaving everything else compiled. If the
+flashing stops, it is confirmed, and the fix is either to leave that one component opted out with a
+comment saying why, or to find what the compiler is memoizing that should not be (a ref read during
+render, a value whose identity is load-bearing for visibility).
+
+If the flashing persists with the directive in place, it is pre-existing and the compiler is
+exonerated — then check the zoom's own visibility gating, since bug 4 shows the same transition
+already releases things a frame early.
+
+---
+
+## 7. Terminal search only sees the visible screen, not the session's scrollback
+
+**Repro.** Flood a pane (`yes "…" | head -200000`), then search the terminal for a word from the
+flood. Expect thousands of hits; get about **20** (device, 2026-08-15).
+
+**This is not an off-by-something — it is the architecture, and it makes the feature much weaker
+than it looks.** Three numbers are involved and none of them is the one that bites:
+
+| Limit | Value | Where |
+|---|---|---|
+| xterm `scrollback` | 10 000 rows | the phone, `src/terminal.tsx` |
+| tmux `history-limit` | 50 000 lines | the host, `EXTRAS` in `src/tmux-model.ts` |
+| `DEFAULT_HIGHLIGHT_LIMIT` | 1 000 results | `@xterm/addon-search`, `SearchAddon.ts:30` |
+
+The observed 20 is far below all three, and the reason is that **under tmux the outer terminal's
+scrollback is never filled**. tmux draws each pane inside a scroll region (DECSTBM); content
+scrolling within a region does not leave the screen into the emulator's scrollback. That is the
+same reason a tmux user needs copy-mode to scroll at all, and it is why this app pushes `mouse on`
+and binds the wheel. So xterm's 10 000 configured rows sit essentially unused, and the search
+addon — which walks *xterm's* buffer — has little more than the visible ~41 rows to search.
+
+**The asymmetry worth noticing:** the *grid's* search does not have this problem. It greps the
+host's real scrollback with `capture-pane -p -e -S -` (`searchPaneCommand`, `src/search-model.ts`),
+so it sees all 50 000 lines tmux is keeping. Two searches, in the same app, over the same session,
+with completely different reach — and the one that looks like "search this window" is the shallow
+one.
+
+**Where a fix goes.** The terminal search would have to stop searching xterm's buffer and search
+what the grid already searches: one `capture-pane -S -` for the current window, matched host-side,
+with the hits mapped back to positions. That is a different feature from what T14 built, so this is
+a design question, not a patch. A cheaper honest half-measure: say so in the UI — the count is
+"20" when the truth is "20 on screen", and nothing tells the user which they are looking at.
+
+Note that `scrollback: 10_000` is therefore also close to dead weight while a session is under
+tmux; it only earns its memory on a bare shell without tmux.
+
+---
+
 ## Also open, found the same session, lower priority
 
 ### Grid tap intermittently does nothing
@@ -163,6 +235,37 @@ on both sides of the race. The file's own T10.9 note at `:765` already describes
 by itself on the next touch"), which matches the symptom exactly, including the self-recovery.
 
 Reproduced on `fa4cb78` as well as on the perf branch.
+
+### One exec per grid open fails, and kills fail the same way
+
+Opening the tabs grid logs `[switcher] N of M captures failed` with **N always exactly 1** — 1 of
+25, 1 of 18, 1 of 8 — and `[switcher] kill failed` throws the identical error:
+
+```
+Citadel.SSHClient.CommandFailed error 1
+  (at ExpoModulesCore/ConcurrentFunctionDefinition.swift:90)
+```
+
+**Refuted:** SSH channel saturation. OpenSSH's `MaxSessions` defaults to 10 and the switcher opens
+one exec channel per window, so 18–25 windows looked like an obvious cause — until the same single
+failure appeared with only 8 windows open. Concurrency is not it; do not re-run that hypothesis.
+
+**Current hypothesis, unverified:** a stale window index. Commands address windows by index, tmux
+renumbers, and a command aimed at a window that no longer exists makes tmux exit 1, which Citadel
+surfaces as `CommandFailed`. `killCard` already anticipates exactly this — "A renumber race can
+leave the index stale — log, re-list, move on" — which is why the kill path degrades gracefully
+and the capture path merely counts the loss. That "always exactly one" is what a single stale entry
+in the list would look like.
+
+**Why this one matters more than the cosmetic bugs above:** every other item here looks wrong. This
+one is an action that does not happen. A kill that reports failure is survivable; a kill that
+appears to succeed while the window lives would not be, and nothing has established which of those
+is occurring.
+
+**Where to look.** `killWindowCommand`/`capturePaneCommand` in `src/tmux-model.ts` take an index;
+`src/switcher.tsx` schedules the captures. Logging the index alongside the failure would settle it
+in one grid open — if the failing index is always one that is not in the current list, it is
+confirmed.
 
 ### `DOM ERROR null` on every refit
 
@@ -232,3 +335,19 @@ Two things this did NOT fix, both handled in the ribbon:
   hopped to appears, and gives up after three answers so it cannot strand.
 - The badge and `activePosIn` still read `windowIndex` directly; they are correct now for the
   targeted modes, and still exposed in the untargetable ones.
+
+---
+
+## Not a bug: the one perf change nobody has measured
+
+`package.json` carries `reanimated.staticFeatureFlags.IOS_SYNCHRONOUSLY_UPDATE_UI_PROPS: true`
+(added in `e75141f`). It is compiled into the native build, so it only takes effect in a fresh IPA.
+
+It is recorded here because it is the single change from the performance audit with **no
+measurement behind it**, and that fact is easy to lose. On the build where it first became active
+the app "felt solid" and JS sat around 50 — but the flag targets the *UI* thread, not JS, and the
+comparison was against a quieter session, so neither number says anything about it. It has not been
+shown to help and has not been shown to hurt.
+
+Either measure it — the perf overlay's UI figure, same session, same load, flag on and off — or
+take it out. Do not leave it sitting here as something everyone assumes was justified.
