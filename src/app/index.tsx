@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import AppearanceCard from '@/appearance';
 import { useTheme } from '@/hooks/use-theme';
 import { loadOrCreateKey, type KeyPair } from '@/keys';
 import { connect, listHostSessions } from '@/session';
@@ -205,6 +206,12 @@ export default function Setup() {
             </Text>
           </Pressable>
         </View>
+
+        {/* The same card the settings sheet shows (§4.8), so the terminal can be dressed before
+            there is one to dress. Last on the screen, under Connect and the key: it is the one
+            section nobody needs to touch to get a session up. */}
+        <Text style={[styles.header, { color: theme.muted }]}>Appearance</Text>
+        <AppearanceCard theme={theme} card={theme.panel} />
       </ScrollView>
     </SafeAreaView>
   );

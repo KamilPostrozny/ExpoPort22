@@ -35,6 +35,26 @@ radius and the same colour as the iOS one.
 Where a platform genuinely cannot reach parity, that is a finding to raise, not a divergence to
 quietly ship.
 
+# Nothing is done until it has run on both
+
+**Every new implementation is tested on the Android emulator *and* on the real iPhone before it is
+reported as working.** Not one of them, not "it type-checks", not "the Android half is the same
+code so it must render the same" — both, on the actual screens, with a screenshot and a log read.
+The whole point of the rule above is that the two builds look alike, and that is a claim about
+pixels, which only a device can settle. Half the divergences this repo has found (a Material teal
+switch thumb, a tofu chevron, an Android font scale) were invisible in the source and obvious on
+the screen.
+
+The two harnesses already exist and neither needs the user's help:
+
+- Android — the `android-test` skill (`. ~/Android/env.sh`, emulator, sshd on `10.0.2.2`).
+- iOS — the `ship-and-watch` skill, which decides between a Metro reload and a full CI build plus
+  sideload and then watches the device log.
+
+Read the log and the screenshot yourself and say per platform what passed; "did it work?" is not a
+report. If one platform cannot be reached in the session, say which one and that the change is
+therefore unverified there — an untested half is a finding, not a footnote.
+
 # The reference app is a spec, not a source tree
 
 `../Port22` (branch `xtool`) is a Swift app that already does what this one has to do. It is here to

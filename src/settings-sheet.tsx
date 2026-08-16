@@ -1,14 +1,9 @@
 /**
  * The Settings quick sheet (§4.8), per the prototype: grabber, swipe-dismiss, no Done button —
  * over the live terminal, so a theme tap restyles the session behind it while it is still up.
- * Sections: APPEARANCE (the follow-the-system switch and the font-size stepper, then the theme
- * lists the switch decides between), TMUX (the comfort-settings opt-out, on a tmux session only),
- * SESSION (Disconnect in accent, Forget host key in red behind a confirm).
- *
- * The switch comes before the lists rather than sitting inside them because it changes what the
- * lists *are*: following the system asks for two answers, one per appearance, and most schemes
- * ship only one cut — so the alternative, one list with a leading "Auto" row, would be asking the
- * system to flip between a light Gruvbox that does not exist and the dark one that does.
+ * Sections: APPEARANCE (`AppearanceCard`, which Setup shows too), TMUX (the comfort-settings
+ * opt-out, on a tmux session only), SESSION (Disconnect in accent, Forget host key in red behind a
+ * confirm).
  *
  * What is deliberately NOT here: host, port, username, startup command — those live on the Setup
  * screen only, and §4.8 hides them while connected. The prototype's "All settings" row led to a
@@ -23,8 +18,7 @@
  * dismisses without telling reanimated.
  */
 
-import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   Alert,
   Dimensions,
@@ -57,38 +51,20 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import AppearanceCard, { switchColors } from '@/appearance';
 import { sheetShouldDismiss } from '@/input-model';
 import { forgetPinnedHostKey } from '@/session';
+import { endpoint, updateSettings, useSettings, usesTmux } from '@/settings';
 import {
-  clampFontSize,
-  endpoint,
-  getSettings,
-  updateSettings,
-  useSettings,
-  usesTmux,
-} from '@/settings';
-import {
-  CENTER,
   GRABBER,
   leading,
-  PRESSED,
   RADIUS,
   SECTION_HEADER,
   SHEET_RADIUS,
   SPACE,
   TEXT,
-  TINT,
 } from '@/style';
-import {
-  ALL_THEMES,
-  DARK_THEMES,
-  LIGHT_THEMES,
-  MONO,
-  resolveTheme,
-  SANS,
-  type Theme,
-  type ThemeName,
-} from '@/theme';
+import { SANS, type Theme } from '@/theme';
 
 /** How far offscreen the sheet starts and returns to. The window's own height, because that is the
  *  one number guaranteed to clear the sheet: it is capped at 88% of the screen, and the old fixed
@@ -101,35 +77,6 @@ const SLIDE = { duration: 340, easing: Easing.bezier(0.32, 0.72, 0.3, 1) };
  *  12pt padding is 25, rounded up to a thumb. Generous on purpose — it laps a little over the
  *  APPEARANCE header, where a downward drag has nothing else to mean. */
 const GRABBER_ZONE = 40;
-
-/** The swatch strip's six chips, in the prototype's order — now ANSI slots rather than Catppuccin
- *  names, because those six are the one thing every scheme is guaranteed to have. */
-const SWATCHES = [1, 2, 3, 4, 5, 6];
-
-/**
- * The switch's three colours, so both platforms take them from the theme instead of from whatever
- * the OS picks.
- *
- * `Switch` is a native control — UISwitch on iOS, Material's on Android — and it is meant to be:
- * its proportions are the platform's business and are NOT a divergence to chase (a hand-rolled
- * switch would be, and is explicitly not wanted). What IS ours is the palette, and left alone
- * Android took its thumb from the Material default — a teal that appears nowhere in this app,
- * measured against iOS's white on 2026-08-16.
- *
- * Only `trackColor.true` had ever been set, so both the off-track and the grip were the OS's.
- * `thumbColor` is the pale end of the scheme on both appearances, which is what UISwitch draws on
- * every flavour; `onAccent` would have been the tidy-looking role and is wrong here — it is
- * `base`, so on a dark scheme it paints a dark grip on a light accent track, the inverse of iOS.
- *
- * Setting `thumbColor` costs iOS the grip's drop shadow (RN documents this). That is accepted: one
- * prop set the same way on both beats a branch, and it moves the two builds closer, not further.
- */
-const switchColors = (theme: Theme) => ({
-  trackColor: { false: TINT.track, true: theme.accent },
-  thumbColor: theme.isDark ? theme.foreground : theme.background,
-  /** Android ignores this; iOS paints the off-track's ground behind `trackColor.false`. */
-  ios_backgroundColor: TINT.track,
-});
 
 export default function SettingsSheet({
   theme,
@@ -156,9 +103,6 @@ export default function SettingsSheet({
    *  twenty-six rows the list is almost never at the top, so the one handle whose entire job is
    *  dismissing was the one place dismissing did not work. */
   const fromGrabber = useSharedValue(false);
-  /** Which theme list is expanded, if any — one at a time, so the sheet never has two long lists
-   *  in it at once. */
-  const [open, setOpen] = useState<'theme' | 'themeDark' | 'themeLight' | null>(null);
   useEffect(() => {
     ty.value = withTiming(0, SLIDE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,26 +144,6 @@ export default function SettingsSheet({
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: ty.value }] }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: 1 - ty.value / TRAVEL }));
 
-  /** §4.8: restyles the live session, no reconnect. */
-  const pickTheme = (field: 'theme' | 'themeDark' | 'themeLight', name: ThemeName) => {
-    console.log(`[settings] ${field} →`, name);
-    updateSettings({ [field]: name });
-  };
-
-  const toggleFollow = (on: boolean) => {
-    console.log('[settings] followSystem →', on);
-    setOpen(null); // the rows the switch swaps in are different rows; none of them was the open one
-    updateSettings({ followSystem: on });
-  };
-
-  const stepFont = (delta: number) => {
-    const next = clampFontSize(getSettings().fontSize + delta);
-    if (next === settings.fontSize) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    console.log('[settings] fontSize →', next);
-    updateSettings({ fontSize: next }); // applied live through the terminal's fontSize prop
-  };
-
   const toggleExtras = (on: boolean) => {
     console.log('[settings] tmuxExtras →', on);
     updateSettings({ tmuxExtras: on });
@@ -245,70 +169,6 @@ export default function SettingsSheet({
         },
       ],
     );
-
-  //  is the Nerd Font tick, pinned to MONO so both platforms draw the same one — the switcher's
-  // Done tick is the same glyph in the same family, and the two must not drift apart.
-  const check = <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 13, color: theme.accent }}>{''}</Text>;
-
-  /**
-   * A disclosure row naming the theme in that slot, and its list underneath while it is open.
-   * Collapsed by default: twenty-six rows pushed the switch this row belongs with off one end of
-   * the sheet and the font stepper off the other (user, 2026-08-14: "follow system and themes
-   * should be close to each other… make theme lists collapsed, they take too much space").
-   *
-   * Picking does not close it — the log of an evening with this sheet is a dozen themes tried in a
-   * row, and a list that shut after each one would be a dozen extra taps.
-   */
-  const themeRow = (label: string, list: Theme[], field: 'theme' | 'themeDark' | 'themeLight') => {
-    const isOpen = open === field;
-    return (
-      <>
-        <Pressable
-          onPress={() => setOpen(isOpen ? null : field)}
-          style={({ pressed }) => [
-            styles.row,
-            styles.rowLine,
-            { borderTopColor: theme.border },
-            pressed && { backgroundColor: theme.surface },
-          ]}>
-          <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
-          <Text style={[styles.value, { color: theme.muted }]} numberOfLines={1}>
-            {resolveTheme(settings[field]).label}
-          </Text>
-          {/*  / , the Nerd Font chevrons, in MONO: the U+2304 this used to fall back to is in
-              neither Roboto nor Noto Sans, so it drew a tofu box on Android. */}
-          <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 12, color: theme.muted }}>
-            {isOpen ? '' : ''}
-          </Text>
-        </Pressable>
-        {isOpen &&
-          list.map((t) => (
-            <Pressable
-              key={t.name}
-              onPress={() => pickTheme(field, t.name)}
-              style={({ pressed }) => [
-                styles.row,
-                styles.subRow,
-                styles.rowLine,
-                { borderTopColor: theme.border },
-                pressed && { backgroundColor: theme.surface },
-              ]}>
-              <Text style={[styles.label, { color: theme.foreground }]} numberOfLines={1}>
-                {t.label}
-              </Text>
-              {/* The scheme's own background under its own six hues: the row is a sample of the
-                  terminal it would produce, which a name like "Kanagawa" is not. */}
-              <View style={[styles.swatch, { backgroundColor: t.background }]}>
-                {SWATCHES.map((slot) => (
-                  <View key={slot} style={[styles.chip, { backgroundColor: t.ansi[slot] }]} />
-                ))}
-              </View>
-              <View style={styles.checkSlot}>{settings[field] === t.name && check}</View>
-            </Pressable>
-          ))}
-      </>
-    );
-  };
 
   return (
     <Modal transparent statusBarTranslucent animationType="none" onRequestClose={close}>
@@ -343,44 +203,7 @@ export default function SettingsSheet({
               onScrollEndDrag={trackTop}
               onMomentumScrollEnd={trackTop}>
               <Text style={[styles.header, { color: theme.muted }]}>APPEARANCE</Text>
-              <View style={[styles.card, { backgroundColor: theme.surface }]}>
-                <View style={styles.row}>
-                  <Text style={[styles.label, { color: theme.foreground }]}>Follow system</Text>
-                  <Switch
-                    value={settings.followSystem}
-                    onValueChange={toggleFollow}
-                    {...switchColors(theme)}
-                  />
-                </View>
-                {/* Straight under the switch that decides how many of these rows there are — the
-                    font stepper used to sit between them, which put the answer two scrolls from
-                    the question. */}
-                {settings.followSystem ? (
-                  <>
-                    {themeRow('Dark theme', DARK_THEMES, 'themeDark')}
-                    {themeRow('Light theme', LIGHT_THEMES, 'themeLight')}
-                  </>
-                ) : (
-                  themeRow('Theme', ALL_THEMES, 'theme')
-                )}
-                <View style={[styles.row, styles.rowLine, { borderTopColor: theme.border }]}>
-                  <Text style={[styles.label, { color: theme.foreground }]}>Font size</Text>
-                  <Text style={[styles.value, { color: theme.muted }]}>{settings.fontSize} pt</Text>
-                  <View style={[styles.stepper, { backgroundColor: theme.surface }]}>
-                    <Pressable
-                      onPress={() => stepFont(-1)}
-                      style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}>
-                      <Text style={[styles.stepGlyph, { color: theme.foreground }]}>−</Text>
-                    </Pressable>
-                    <View style={[styles.stepDivider, { backgroundColor: theme.border }]} />
-                    <Pressable
-                      onPress={() => stepFont(1)}
-                      style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}>
-                      <Text style={[styles.stepGlyph, { color: theme.foreground }]}>+</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              </View>
+              <AppearanceCard theme={theme} card={theme.surface} />
 
               {/* Only on a tmux session: on any other the toggle governs nothing, and a row that
                   explains why it is inert is worse than no row. */}
@@ -469,29 +292,7 @@ const styles = StyleSheet.create({
   /** The rule's colour is `theme.border`, passed at each call site: a fixed overlay grey is the
    *  wrong grey on most of twenty-six schemes, and invisible on some. */
   rowLine: { borderTopWidth: StyleSheet.hairlineWidth },
-  /** A theme inside an expanded list, indented off the disclosure row that opened it. */
-  subRow: { paddingLeft: SPACE.xxl },
   label: { flex: 1, fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.label },
-  value: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.base, marginRight: SPACE.md },
-  // The swatch strip and its chips are the prototype's own one-off geometry (gap:3, padding:3,
-  // 9×13 chips at 2.5) — a single element's numbers, deliberately not in the shared vocabulary.
-  swatch: {
-    flexDirection: 'row',
-    gap: 3,
-    borderRadius: RADIUS.small,
-    padding: 3,
-    marginRight: SPACE.md,
-  },
-  chip: { width: 9, height: 13, borderRadius: 2.5 },
-  checkSlot: { width: 18, alignItems: 'flex-end' },
-  // Likewise the stepper: a 9pt track around 38×30 keys, the prototype's alone. Its track and
-  // divider are roles, passed at the call site.
-  stepper: { flexDirection: 'row', borderRadius: 9, overflow: 'hidden' },
-  stepKey: { width: 38, height: 30, ...CENTER },
-  // MONO not for the shape but for the picker: − (U+2212) and + are both in the bundled font,
-  // and pinning the family is what stops each platform choosing its own fallback face.
-  stepGlyph: { fontFamily: MONO, includeFontPadding: false, fontSize: 20, lineHeight: 24 },
-  stepDivider: { width: 1 },
   note: {
     fontFamily: SANS,
     includeFontPadding: false,
