@@ -3,22 +3,22 @@
  * recipe editor PLAN §6 promises later is a data problem, not a rewrite. `src/ribbon-model.ts`
  * owns the matching rules; `src/ribbon.tsx` renders and executes.
  *
- * Caps are the panel's column, top to bottom — the prototype puts the destructive cap at the
- * top and the most-used one at the bottom, nearest the thumb. Cap bytes are exactly what goes
+ * Caps are the band's row, leading to trailing — the array's order is unchanged from the column
+ * it used to be, and it reads correctly rotated: the destructive cap is first, i.e. furthest
+ * from a right thumb, and the most-used one is last, hard against the chip. Cap bytes are what goes
  * to the PTY. The vim caps are Esc-prefixed (§4.4: they must work from insert mode — one ESC
  * first is harmless in normal mode and decisive in insert). F6/F9 are `CSI 17~`/`CSI 20~`, the
  * xterm function-key sequences htop binds sort/kill to. `\r` is what the Return key sends on a
  * PTY, so `/clear\r` is "type /clear and press Return".
  */
 
+import type { SFSymbol } from 'expo-symbols';
+
 import type { DotName } from '@/theme';
 
 export type RecipeId = 'running' | 'suspended' | 'vim' | 'pager' | 'htop' | 'agent';
 
 export type Cap = {
-  /** A section header row (the agent recipe's SESSION/COMMANDS/NOW) — a small right-aligned
-   *  label in the column, not a capsule. Every other field is ignored on a header. */
-  header?: string;
   /** The mono key text on the cap (`^C`, `:w`, `/clear`…). */
   label?: string;
   /** The caption beside it. Absent on the slash caps — the label says it all. */
@@ -46,9 +46,15 @@ export type Recipe = {
   /** The handle's (and dot's) colour, as a theme dot role — one colour per class of process
    *  (prototype `dotFor`). */
   dot: DotName;
-  /** The handle breathes (prototype `p22edge`) while the process is live — running jobs and
-   *  agents; a stopped job or a TUI sitting there earns a still handle. */
+  /** The process is live — a running job or an agent, as against a stopped job or a TUI sitting
+   *  there. The chip carries a ticking elapsed clock for these; the rest get `· stopped` or
+   *  nothing. (It used to mean "the handle breathes". The breath is gone: an infinite animation
+   *  the user never started is a WCAG 2.2.2 failure — docs/ribbon-redesign.md §2.) */
   pulse: boolean;
+  /** The chip's identity glyph. An SF Symbol, with one mono letter behind it — `SymbolView`
+   *  renders the fallback wherever the symbol does not exist, Android included. */
+  sf: SFSymbol;
+  mark: string;
 };
 
 export const RECIPES: Record<RecipeId, Recipe> = {
@@ -56,6 +62,8 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: [],
     dot: 'green',
     pulse: true,
+    sf: 'play.fill',
+    mark: 'R',
     caps: [
       { label: 'kill', caption: 'force', action: 'kill', danger: true },
       { label: '^Z bg', caption: 'background', action: 'bg' },
@@ -66,6 +74,8 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: [],
     dot: 'grey',
     pulse: false,
+    sf: 'pause.fill',
+    mark: 'Z',
     caps: [
       { label: 'kill', caption: 'force', action: 'kill', danger: true },
       { label: 'bg', caption: 'run behind', action: 'bg2' },
@@ -76,6 +86,8 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: ['vim', 'nvim', 'vi'],
     dot: 'mauve',
     pulse: false,
+    sf: 'pencil',
+    mark: 'V',
     caps: [
       { label: ':q!', caption: 'discard', bytes: '\x1b:q!\r', danger: true },
       { label: ':q', caption: 'quit', bytes: '\x1b:q\r' },
@@ -88,6 +100,8 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: ['less', 'man', 'bat', 'delta'],
     dot: 'blue',
     pulse: false,
+    sf: 'doc.plaintext',
+    mark: 'P',
     caps: [
       { label: 'q', caption: 'quit', bytes: 'q' },
       { label: 'G', caption: 'end', bytes: 'G' },
@@ -100,6 +114,8 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: ['htop', 'top', 'btop'],
     dot: 'yellow',
     pulse: false,
+    sf: 'chart.bar.fill',
+    mark: 'H',
     caps: [
       { label: 'F9', caption: 'kill', bytes: '\x1b[20~', danger: true },
       { label: 'q', caption: 'quit', bytes: 'q' },
@@ -111,17 +127,20 @@ export const RECIPES: Record<RecipeId, Recipe> = {
     names: ['claude', 'codex', 'aider', 'gemini'],
     dot: 'peach',
     pulse: true,
+    sf: 'sparkles',
+    mark: 'A',
+    // One flat row, no section markers: rotated into a band they were three inert chips taking
+    // 44pt of thumb-reach each to label groups the caps already spell out (user, 2026-08-16).
+    // The order still carries the grouping — quit first (furthest from the thumb), then the
+    // slash commands, then the three "now" keys nearest the chip.
     caps: [
-      { header: 'SESSION' },
       { label: '^C ^C', caption: 'quit', bytes: '\x03', arm: true, danger: true },
-      { header: 'COMMANDS' },
       { label: '/clear', bytes: '/clear\r' },
       { label: '/context', bytes: '/context\r' },
       { label: '/model', bytes: '/model\r' },
       { label: '/usage', bytes: '/usage\r' },
       { label: '/config', bytes: '/config\r' },
       { label: '/plugins', bytes: '/plugins\r' },
-      { header: 'NOW' },
       { label: '📎', caption: 'attach', action: 'attach' },
       { label: '⇧⇥', caption: 'plan mode', bytes: '\x1b[Z' },
       { label: '⎋', caption: 'stop', bytes: '\x1b' },

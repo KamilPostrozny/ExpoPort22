@@ -270,3 +270,16 @@ test('shell quoting survives quotes, spaces, and stays literal', () => {
   expect(shellQuote(`don't`)).toBe(`'don'\\''t'`); // the POSIX dance, which fish parses the same
   expect(shellQuote('$(reboot); `id`')).toBe(`'$(reboot); \`id\`'`); // inert inside single quotes
 });
+
+test('the poll names its session, or asks untargeted when it cannot', () => {
+  // Untargeted is what made the ribbon show another window's process: tmux answers about whichever
+  // session it last considered current (BUGS.md).
+  expect(model.pollCommand(null)).toBe(model.POLL);
+  expect(model.POLL).not.toContain('-t');
+
+  const aimed = model.pollCommand('port22');
+  expect(aimed).toContain(`-t '=port22:'`); // exact name, that session's current window, active pane
+  expect(aimed).toContain('#{pane_current_command}');
+  // A session name is user-typed on the attach picker, so it goes through the same quoting.
+  expect(model.pollCommand('$(reboot)')).toContain(`'=$(reboot):'`);
+});

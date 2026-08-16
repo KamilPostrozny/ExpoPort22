@@ -1000,10 +1000,13 @@ lines show `capture-pane`, `select-window` and the kill-force command going out 
 channels, never through the PTY. Ribbon foreground reactions ride the ~2s poll — allow a beat
 wherever a process starts or stops; alt-screen reactions (`[session] modes`) are instant.
 
-*(2026-08-12: T11.7–T11.15 rewritten for the edge-handle redesign — the recipe now lives in a
-5pt colour tab on the terminal's right edge just above the bar; tap or swipe it left and the
-caps open as a right-aligned vertical panel over the output. The old in-bar pill, its
-expand/collapse and its swipe-down dismissal are gone. The handle never resizes the terminal.)*
+*(2026-08-16: T11.7–T11.17 rewritten for the Accessory redesign (docs/ribbon-redesign.md §7).
+The 5pt breathing tab and the vertical glass panel are both gone. The recipe now lives in ONE
+52pt opaque band pinned just above the bar: at rest a 44pt chip on the trailing edge — glyph,
+process name, live clock — which tap (iOS: or swipe-left) unrolls leftward into a horizontal row
+of 44pt caps. Worst case is best case: three caps and thirteen are the same 52pt. Two behaviours
+to check that are new rather than moved: `running` no longer appears at all until the process has
+been alive 3s, and the key bar stays LIVE while the band is open.)*
 
 ### T11.1 — Bar swipe hops a window: slide, pills, live redraw
 - **Setup**: attached, three windows, window 1 active, keyboard up.
@@ -1056,96 +1059,211 @@ expand/collapse and its swipe-down dismissal are gone. The handle never resizes 
   gesture never becomes the other mid-drag.
 - [ ]
 
-### T11.7 — `sleep 100` → green handle with timer; ^C cap kills it
-- **Steps**: type `sleep 100⏎`; wait a beat; watch the right edge; tap the tab; read the
-  panel; tap the `^C stop` cap.
-- **Expect**: within ~2s a 5pt green tab appears on the right edge just above the bar,
-  breathing (opacity + height together) — and the terminal does NOT resize or rewrap when it
-  arrives. The tap opens a right-aligned panel over the output: pulsing green dot +
-  `sleep · 0:0x` counting up, then caps top-to-bottom red `kill force` · `^Z bg background` ·
-  `^C stop`, then a green stub at the foot. The `^C` tap closes the panel, prints `^C`, the
-  prompt returns, and the handle leaves on the next poll beat — again with no terminal
-  reflow. Log: `[ribbon] open sleep`, `[ribbon] cap ^C`.
+### T11.7 — `sleep 100` → green chip with a ticking clock; ^C cap kills it
+- **Steps**: type `sleep 100⏎`; watch the trailing edge for ~5s; tap the chip; read the band;
+  tap the `^C stop` cap.
+- **Expect**: nothing for the first 3s (T11.16 owns that gate), then a 44pt opaque chip fades
+  up just above the bar, flush to the trailing edge: ▶ glyph in green, `sleep`, ` · 0:0x`
+  ticking once a second. It nudges sideways ~2.5pt three times and then holds perfectly still
+  — it must never oscillate indefinitely. The terminal does NOT resize or rewrap when it
+  arrives. The tap unrolls the band leftward over the bottom ~3 rows: an opaque plate carrying
+  `! kill force` (red, bold, with a ⚠) · `^Z bg background` · `^C stop`, right-aligned hard
+  against a divider and the chip. The `^C` tap rolls the band back up, prints `^C`, the prompt
+  returns, and the chip leaves on the next poll beat — again with no reflow. Log:
+  `[ribbon] open sleep`, `[ribbon] cap ^C`.
 - [ ]
 
-### T11.8 — ^Z from the chord strip → grey handle; fg resumes
-- **Steps**: `sleep 100⏎`; arm Ctrl, tap the chord strip's `Z`; wait a beat; open the handle;
+### T11.8 — ^Z from the chord strip → grey `· stopped` chip; fg resumes
+- **Steps**: `sleep 100⏎`; arm Ctrl, tap the chord strip's `Z`; wait a beat; tap the chip;
   tap `fg resume`.
-- **Expect**: the shell shows `[1]+ Stopped`; within ~2s the handle swaps to grey (still, no
-  breath). The panel reads `sleep · stopped` with caps red `kill force` · `bg run behind` ·
-  `fg resume`. The `fg` tap closes the panel, types and runs `fg`, and the green running
-  handle (fresh timer) is back on the next beat. The ^Z watch works identically for Ctrl+Z
-  typed on the keyboard.
+- **Expect**: the shell shows `[1]+ Stopped`; within ~2s the chip swaps to a grey ⏸ glyph and
+  reads `sleep · stopped` (no clock — the job is not running), and it appears at ONCE, with no
+  3s wait: the gate is `running`'s alone. Caps: `! kill force` · `bg run behind` · `fg resume`.
+  The `fg` tap closes the band, types and runs `fg`, and the green running chip (fresh clock)
+  is back on the next beat. Identical for a Ctrl+Z typed on the keyboard.
 - [ ]
 
-### T11.9 — Open and close are gestures too; vim caps work from insert mode
-- **Steps**: `vim /tmp/t11.txt⏎`; press `i` and type a line (stay in insert mode). Swipe the
-  mauve tab left; tap the terminal (panel closes); swipe the tab left again and swipe the
-  panel right; open once more and tap the stub at the panel's foot. Then open and tap `:w`;
-  type more; open, tap `ZZ`. Re-open vim, dirty the buffer, tap the red `:q!`.
-- **Expect**: vim keeps its full screen — the mauve tab floats over it, still (no breath).
-  All three closes work: terminal tap, panel swipe right, stub tap — and closing never
-  moves the terminal. Caps: `:q! discard` (red, top) · `:q quit` · `/ search` ·
-  `ZZ save+quit` · `:w save`. `:w` saves *from insert mode* (the Esc prefix does it); `ZZ`
-  saves and quits; `:q!` discards. Every cap tap closes the panel on its way out.
+### T11.9 — Open, close, and the key bar staying live; vim caps work from insert mode
+- **Steps**: `vim /tmp/t11.txt⏎`; press `i` and type a line (stay in insert mode). Open the
+  band by tapping the chip; **while it is open, tap `Esc` on the key bar**; open again and tap
+  the chip to close; open again and tap the terminal well above the band; on iOS open once
+  more by swiping the chip left; on Android open it and press hardware back. Then open and tap
+  `:w`; type more; open, tap `ZZ`. Re-open vim, dirty the buffer, tap the red `:q!`.
+- **Expect**: vim keeps its full screen — the band floats over the bottom rows and never
+  reflows it. **The `Esc` tap fires Esc**: the dismiss catcher stops at the band's top edge, so
+  the bar is live while the band is open (the old full-screen scrim ate that tap — this is the
+  fix, and combining a cap with Ctrl is now possible). All four closes work: chip tap, terminal
+  tap, back (Android), cap tap. Caps left→right: `! :q! discard` (red) · `:q quit` ·
+  `/ search` · `ZZ save+quit` · `:w save`, the last hard against the chip. On a 375pt phone the
+  row scrolls ~46pt and a `›` chevron shows at the leading edge; on a wider phone it does not
+  scroll at all. `:w` saves *from insert mode*; `ZZ` saves and quits; `:q!` discards.
 - [ ]
 
-### T11.10 — less: q, / raises the keyboard, g/G jump
-- **Steps**: `man ls⏎`; open the blue handle; tap `G`, reopen and tap `g`, reopen and tap `/`
-  (type `SYNOPSIS⏎`), reopen and tap `q`.
+### T11.10 — less: q, / raises the keyboard and the band stays open, g/G jump
+- **Steps**: `man ls⏎`; open the band; tap `G`, reopen and tap `g`, then tap `/` (type
+  `SYNOPSIS⏎`), then — without reopening — tap `n`; finally tap `q`.
 - **Expect**: caps `q quit` · `G end` · `g top` · `n next hit` · `/ search`. `G` jumps to the
-  end, `g` back to the top; `/` puts less's search prompt up **and raises the keyboard** so
-  the term can be typed; `q` exits and the handle leaves.
+  end, `g` back to the top. `/` puts less's search prompt up, **raises the keyboard, and the
+  band stays open and rides up with the bar in one step** — so `n` is one tap away on the
+  keyboard's top edge, with no independent animation and no gap or overlap against the bar.
+  `q` exits and the band leaves.
 - [ ]
 
 ### T11.11 — htop: q, / filter, F6 sort, F9 kill
-- **Steps**: `htop⏎`; open the yellow handle; tap `/`, type a name, Esc; reopen, tap `F9`;
-  Esc; reopen, tap `F6`; Esc; reopen, tap `q`.
-- **Expect**: `/` opens htop's filter with the keyboard raised; the red `F9` cap opens htop's
-  SendSignal column and `F6` its sort column (`CSI 20~` / `CSI 17~` — the caps that prove
-  function keys); `q` exits.
+- **Steps**: `htop⏎`; open the band; tap `/`, type a name, Esc; tap `F9`; Esc; reopen, tap
+  `F6`; Esc; reopen, tap `q`.
+- **Expect**: `/` opens htop's filter with the keyboard raised and the band still up; the red
+  `! F9 kill` cap opens htop's SendSignal column and `F6` its sort column (`CSI 20~` /
+  `CSI 17~`); `q` exits. Four caps fit without scrolling on any phone.
 - [ ]
 
-### T11.12 — Agent panel: sections, slash commands, ⇧⇥, 📎, and the two-tap quit
+### T11.12 — Agent band: the scroll tape, ⇧⇥, 📎, and the two-tap quit
 - **Setup**: `claude` (or any process whose `pane_current_command` is on the agent list)
   running in the pane.
-- **Steps**: open the peach handle (it breathes — agents are live); read the panel; tap
-  `/context`; reopen and tap `⇧⇥ plan mode`; reopen, tap `📎 attach`, pick a photo, watch;
-  reopen and tap the red `^C ^C quit` once, read it, tap it again.
-- **Expect**: the panel is sectioned SESSION / COMMANDS / NOW (small right-aligned headers).
-  `/context` types the command and presses Return — claude shows its context panel — and the
-  panel closes. `⇧⇥` cycles claude's plan mode. `📎` opens the picker; during the send the
-  ⋯ circle tints accent and goes inert; then the remote path + one trailing space is typed —
-  no Return (T8.16's flow). The first `^C ^C` tap sends one interrupt, keeps the panel open
-  and re-labels the cap `tap again` (stronger red ring; it disarms itself after ~3s); the
-  second tap sends the second interrupt, claude exits, the panel closes. Log:
-  `[ribbon] cap /context`, `[ribbon] cap ^C ^C`, `[upload] quick-attach typed …`.
+- **Steps**: tap the peach ✳ chip (it carries a ticking clock — agents are live); read the
+  band; flick the row left and right; tap `/context`; reopen and tap `⇧⇥ plan mode`; reopen,
+  tap `📎 attach`, pick a photo, watch; reopen and tap the red `^C ^C quit` once, read it,
+  then tap `/clear` instead; reopen and arm it again, this time tapping it twice.
+- **Expect**: the band is still exactly 52pt tall — the same as `sleep`'s three caps. Ten caps in
+  ONE flat row, no section markers (2026-08-16: they cost 44pt of reach each to label groups the
+  caps already spell out). It rests at the leading end with `! ^C^C quit` · `/clear` · `/context`
+  visible and a `›` chevron in its own gutter saying there is more — the chevron must never sit on
+  top of a cap and slice its label. One flick reaches the rest of the slash commands, two reach
+  📎 / ⇧⇥ / ⎋. The row never scrolls vertically and a
+  near-vertical drag on it does nothing. `/context` types the command and presses Return and
+  the band closes. `⇧⇥` cycles plan mode. `📎` opens the picker; during the send that cap
+  alone tints accent and goes inert while the others stay live; then the remote path + one
+  trailing space is typed — no Return (T8.16). The first `^C ^C` tap sends one interrupt,
+  keeps the band open and re-labels the cap `tap again` (stronger red ring, disarms itself
+  after ~3s); **tapping `/clear` instead disarms it without sending the second interrupt** and
+  runs /clear. Two taps in a row quits claude and closes the band. Log:
+  `[ribbon] cap /context`, `[ribbon] cap ^C ^C`, `[ribbon] band 9xx/2xx scroll=true`.
 - [ ]
 
 ### T11.13 — The silences: idle shell, REPL, unknown TUI
 - **Steps**: sit at the prompt 5s; run `python3` and sit at `>>>` 5s; `exit()`; run an
   alt-screen app not on any list (e.g. `nano` or `nethack`) 5s.
-- **Expect**: no handle in any of the three — shell is idle, a REPL at its prompt is not a
-  job, an unknown TUI gets no caps (§4.4). The `[tmux]` log shows the foreground changing,
-  so the silence is a decision, not a missed poll.
+- **Expect**: no chip in any of the three — shell is idle, a REPL at its prompt is not a job,
+  an unknown TUI gets no caps (§4.4). The `[tmux]` log shows the foreground changing, so the
+  silence is a decision, not a missed poll.
 - [ ]
 
-### T11.14 — The handle rides the chrome and never touches the terminal
-- **Steps**: `sleep 100⏎`; raise and dismiss the keyboard; arm Ctrl (chord strip up);
-  disarm; open the panel with the keyboard up and pick `/` in a `man ls` window if handy.
-- **Expect**: the tab always sits just above the bar stack — it rides up with the keyboard
-  and the chord strip and back down, and the panel opens above whatever the chrome height is.
-  Through all of it the terminal's rows never rewrap (`[terminal] size` stays quiet except
-  for the keyboard's own refit — the handle itself contributes nothing).
+### T11.14 — The band rides the chrome and never touches the terminal
+- **Steps**: `sleep 100⏎`; raise and dismiss the keyboard; arm Ctrl (chord strip up); disarm;
+  open the band with the keyboard up; open it and start a bar swipe-up into the switcher.
+- **Expect**: the band always sits 6pt above the bar stack — it rides up with the keyboard and
+  with the chord strip (bottom chrome then stacks to ~172pt, which is a lot but transient) and
+  back down, in the same step as the bar, never lagging on its own baseline. Grabbing the bar
+  for the switcher closes the band and fades it out with the bar; it is never left hanging
+  mid-zoom. Through all of it the terminal's rows never rewrap (`[terminal] size` stays quiet
+  except for the keyboard's own refit).
 - [ ]
 
 ### T11.15 — Kill force: pgrep + kill -9, observable in the log
-- **Steps**: `sleep 100⏎`; open the handle; tap the red `kill force` cap; read the log and
+- **Steps**: `sleep 100⏎`; open the band; tap the red `! kill force` cap; read the log and
   the terminal.
 - **Expect**: the log shows `[ribbon] kill-force: pgrep -P <pane_pid> | xargs kill -9 …` and
-  the `[ssh] exec` line for it — an exec channel, nothing typed into the PTY. The shell
-  prints `Killed`, the prompt returns, the handle leaves on the next beat. Same cap from the
-  suspended handle (T11.8's setup) kills the stopped job.
+  the `[ssh] exec` line for it — an exec channel, nothing typed into the PTY. The shell prints
+  `Killed`, the prompt returns, the band leaves on the next beat. Same cap from the suspended
+  chip (T11.8's setup) kills the stopped job.
+- [ ]
+
+### T11.16 — The lifetime gate: short commands never raise the band at all
+- **Steps**: at a prompt, run `ls`, `git status`, `git log --oneline -5`, `echo hi` — a dozen
+  quick commands in a row. Then run `sleep 10⏎` and watch a clock.
+- **Expect**: **not one chip appears** for any of the quick commands, however many you run:
+  `running` matches every non-shell foreground, and ungated it would flash in and out dozens
+  of times an hour, which is what makes an unrequested surface feel intrusive. `sleep 10`
+  raises the chip ~3s in — by which point kill / bg / stop are the caps you actually want —
+  and it fades out when the command ends. A named recipe (`vim`, `less`, `htop`, `claude`) is
+  never gated: it appears on the first poll beat.
+- [ ]
+
+### T11.17 — Adversarial readability: the band over the worst content there is
+- **Steps**: on a many-core box run `htop` (full-width colour bars); open the band and
+  screenshot. Then `bat CLAUDE.md` (dense syntax colour) and repeat. Switch to Latte and
+  repeat both outdoors, or at full brightness.
+- **Expect**: the plate is fully opaque in every shot — no colour bar, no syntax highlight and
+  no bright background shows through it or changes any of its colours, and no cap is harder to
+  read in one shot than another. The band's edge stays visible against every one of them (a
+  dark stroke with a light one immediately inside it: at least one of the two always separates
+  it from what is behind). Danger caps read as red **bold** with a ⚠ — legible on Latte, where
+  red on the plate is the tightest ratio in the design. This is the case the old design never
+  had: it was measured only against an idle prompt, which is how it shipped at 1.69:1.
+- [ ]
+
+*(T11.18–T11.22 cover the five fixes made after the redesign landed, none of which the cases above
+can catch: the clock was frozen at 0:00 by the React Compiler and restarted by every window hop,
+the poll answered about other people's windows, a hop's stale answers revived the old window's
+process on the new tab, and light schemes had a plate the eye could not find. See BUGS.md's
+"foreground poll" entry and docs/ribbon-redesign.md §8.)*
+
+### T11.18 — The chip's clock ticks, and a hop away and back does not restart it
+- **Setup**: two windows, window 1 at a prompt, window 2 idle.
+- **Steps**: in window 1 run `sleep 300⏎`; watch the chip for 30s without touching anything;
+  then bar-swipe to window 2, wait ~5s there, and swipe back. Watch the clock for 10s more.
+- **Expect**: the clock **advances once a second** — `0:04`, `0:05`, `0:06` — for the whole 30s.
+  (It used to sit at `0:00` for an entire session: `Date.now()` read in the render body is
+  memoised by the React Compiler against props that a tick does not change.) The digits do not
+  jitter as they change — the meta text is tabular. On window 2 the band leaves. Back on window
+  1 the chip returns reading roughly **where it left off** (`0:38`, not `0:00`): it may show
+  `0:00` for up to one poll beat while the pid catches up, and must then jump to the true
+  elapsed time and keep ticking from there. Log: `[ribbon] forWindow 2 … (bar swipe commit)`,
+  `[ribbon] forWindow 1 sleep …`, `[ribbon] run #…`.
+- [ ]
+
+### T11.19 — The poll names our session: no flicker while other windows work
+- **Setup**: on the host, before connecting — `tmux new -d -s other 'htop'`, and in the port22
+  session put something long-running in window 3 (`sleep 999`). Connect and sit on window 1.
+- **Steps**: read the log line printed once at connect. Then run `sleep 300⏎` in window 1 and
+  sit perfectly still for 60s, watching the chip, the tabs badge, and the `[tmux]` lines.
+- **Expect**: `[tmux] poll aimed at session port22`. Over the 60s the chip stays `sleep` with a
+  monotonic clock — it never leaves and comes back, never swaps to another window's process,
+  never animates in twice — and `[tmux]` reports the **same** `windowIndex` on every beat with
+  the badge steady. (Untargeted, `display-message` answered about whichever window tmux last
+  considered current: measured 6 → 7 → 6 → 7 every ~2s with `claude` / null behind it, which
+  unmounted and remounted the band forever and made `sleep` unable to outlive the 3s gate.) In
+  `custom` or `shell` start mode the log instead says `poll aimed at nothing (untargeted)` and
+  the flap is expected there — that is the documented ceiling, not a regression.
+- [ ]
+
+### T11.20 — A hop's stale answers are ignored: the band leaves with the slide
+- **Setup**: window 1 running `sleep 300` (chip up), window 2 idle at a prompt.
+- **Steps**: bar-swipe from window 1 to window 2 and watch the trailing edge closely for the
+  three seconds after the slide lands. Repeat the hop five or six times, both directions.
+- **Expect**: the band goes out **with the slide** and stays gone — it must not reappear a beat
+  later on the idle tab and then leave again ("the pill stayed"). `select-window` is
+  asynchronous, so for a beat or two the poll still describes the window you left; those answers
+  are ignored until the window you hopped to answers. Hopping back raises the chip with the
+  slide too (T11.18 owns its clock). No case where the band belongs to a window you are not
+  looking at.
+- [ ]
+
+### T11.21 — Light schemes: the plate separates itself from the pane
+- **Setup**: Settings → a *light* scheme. Do Latte first, then a generated one — Rose Pine Dawn
+  is the worst case, and any light scheme from the generated set will do.
+- **Steps**: at a prompt with plenty of pale output on screen (`bat CLAUDE.md`, or just `ls`
+  a few times), raise the band with `sleep 100` and open it.
+- **Expect**: the band is **findable** — its foot casts a soft shadow onto the pane and the
+  plate reads a touch darker than the background behind it. (`theme.panel` is only
+  `mix(bg, black, 0.04)` on the 22 generated schemes — 4%, against 20% on the dark ones — so the
+  band was invisible against the pane it floated over, and Latte's mantle on base is 1.05:1. An
+  opaque plate cannot separate itself from a ground it matches: it now floats on a shadow on
+  both platforms, plus a 6% black ground on light schemes only.) The shadow must not read as a
+  dark bar or a border; the caps' own contrast is T11.17's business.
+- 📸 one shot per light scheme, band open.
+- [ ]
+
+### T11.22 — Reduce Motion: nothing moves, and everything is visible
+- **Setup**: iOS Settings → Accessibility → Motion → Reduce Motion **on**. (Android:
+  Settings → Accessibility → Remove animations.)
+- **Steps**: run `sleep 100⏎` and watch the arrival; open and close the band twice.
+- **Expect**: the chip **fades** in rather than gliding up, plays **no** sideways nudge, and is
+  fully visible and perfectly still. Open and close are instant — the width jumps, the caps do
+  not fade in. Nothing is missing or invisible: the old design's failure mode was the opposite
+  (Reanimated resolves a neutered `withRepeat` to its end value, which made the shipped handle
+  *brighter* under Reduce Motion). Turn the setting back off and confirm the nudge returns: three
+  cycles on arrival, then still forever — it must never oscillate indefinitely (WCAG 2.2.2).
 - [ ]
 
 ## T12 — Settings sheet + polish pass

@@ -140,6 +140,18 @@ export function decode(raw: unknown): Settings {
 /** The line the session types into the fresh shell, or `null` for none. One line that fish, bash
  *  and zsh parse identically — `&&`/`||`, `2>/dev/null` and a bare word are the common ground the
  *  tmux side-channel's commands already stand on. */
+/**
+ * Which session the poll should ask about, or `null` when we cannot know. `session` mode always
+ * makes or attaches ours; `attach` mode knows it only once the user has picked one (a null pick
+ * means "the most recent", which has no name to give). A `custom` line may or may not be tmux at
+ * all, and `shell` never is.
+ */
+export function pollSession(s: Settings): string | null {
+  if (s.startMode === 'session') return SESSION_NAME;
+  if (s.startMode === 'attach') return s.attachSession;
+  return null;
+}
+
 export function startupLine(s: Settings): string | null {
   const create = `tmux new-session -A -D -s ${SESSION_NAME}`;
   switch (s.startMode) {

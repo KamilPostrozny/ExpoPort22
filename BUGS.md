@@ -187,3 +187,48 @@ should not allocate on the keystroke path.
 
 A first attempt at catching only `onResize` did **not** silence it, so confirm which call is
 actually rejecting before fixing — and log the rejection reason, because `null` says nothing.
+
+### The foreground poll answers about a window you are not looking at — FIXED 2026-08-16
+
+`POLL` (`src/tmux-model.ts`) is `tmux display-message -p '…'` with **no target**. An exec channel
+has no client and no current window of its own, so tmux resolves "current" against whichever
+session/window it last considered current — which, on a host where anything else is working in
+another window, alternates beat to beat.
+
+Measured on device 2026-08-16, one poller at the normal 2s beat:
+
+```
+[tmux] {"windowIndex":7,"foreground":null}
+[tmux] {"windowIndex":6,"foreground":{"command":"claude","pid":2299967}}
+[tmux] {"windowIndex":7,"foreground":null}
+[tmux] {"windowIndex":6,"foreground":{"command":"claude","pid":2299967}}
+```
+
+The user was on one window throughout. Everything downstream inherits the flap:
+
+- **the badge** and `activePosIn` (`src/app/terminal.tsx:550`) read `tmux.windowIndex`, so the app's
+  own idea of which window is active alternates too;
+- **the ribbon** mounted and unmounted every beat, animating in twice around every window hop and
+  flashing onto tabs with nothing running (user, 2026-08-16);
+- **`ribbon-model`'s instance identity** treated each reappearance as a new run, restarting the
+  elapsed clock — and, once `RIBBON_MIN_RUN_MS` existed, making it unreachable, so a plain
+  `sleep 30` could never raise the band at all.
+
+The ribbon now defends itself (`RIBBON_HOLD_MS`: a null has to survive one beat before it is
+believed), which fixes the visible symptoms — but the badge is still wrong on those beats, and the
+poll is still answering a question about somebody else's window.
+
+**Fixed**: `pollCommand(session)` targets `=<session>:` — that session, its current window, its
+active pane — with the untargeted form as a fallback so a renamed or killed session cannot drop
+`attached` and take the tabs button with it. `pollSession` (settings.ts) supplies the name in
+`session` mode (always `port22`) and in `attach` mode once a session has been picked; `custom` and
+`shell` have no name to give, so the flap can still happen there. `[tmux] poll aimed at …` says
+which it is.
+
+Two things this did NOT fix, both handled in the ribbon:
+
+- `select-window` is asynchronous, so for a beat after a hop the poll still describes the window
+  you left. `awaiting` (app/terminal.tsx) ignores answers about other windows until the one we
+  hopped to appears, and gives up after three answers so it cannot strand.
+- The badge and `activePosIn` still read `windowIndex` directly; they are correct now for the
+  targeted modes, and still exposed in the untargetable ones.
