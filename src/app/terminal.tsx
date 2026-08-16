@@ -1603,16 +1603,28 @@ export default function SessionScreen() {
   rbOpenRef.current = rbOpen;
   const fgCommand = tmux.foreground?.command ?? null;
   const fgPid = tmux.foreground?.pid ?? null;
+  /** Which window the band is speaking for. The poll asks `display-message` with no target, so it
+   *  answers about whatever window tmux last considered current — on a busy host that is a
+   *  different window every other beat (BUGS.md). Believing those answers put claude's chip on a
+   *  tab where nothing was running and left it there (user, 2026-08-16: "the pill stayed"). Every
+   *  in-app hop goes through `ribbonForWindow`, so that is the truth; an answer about any other
+   *  window is not ours to act on. A window switched from OUTSIDE the app therefore leaves the
+   *  band on the old recipe until the next in-app hop — the honest cost of a poll that will not
+   *  say whose window it is describing. */
+  const ribbonWindow = useRef<number | null>(null);
   useEffect(() => {
     // Not while anything is sliding: after a committed hop the very next display-message answer
     // carries the NEW window's foreground, and this flipped the handle ~100ms into every slide.
     // `ribbonForWindow` already set the right recipe at the commit; when the freeze lifts this
     // re-applies the latest poll, a no-op whenever the two agree.
     if (frozen) return;
+    if (tmux.windowIndex === null) return;
+    if (ribbonWindow.current === null) ribbonWindow.current = tmux.windowIndex; // first answer wins
+    if (tmux.windowIndex !== ribbonWindow.current) return; // somebody else's window
     setRibbonCore((c) =>
       ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
     );
-  }, [fgCommand, fgPid, frozen]);
+  }, [fgCommand, fgPid, frozen, tmux.windowIndex]);
   /** One re-render as `RIBBON_MIN_RUN_MS` elapses. `selectRecipe` reads the clock, and a quiet
    *  poll deliberately returns the same core object (no re-render), so without this the band for
    *  a slow job would wait for whatever happened to render next. 50ms of slack: the timeout must
@@ -1627,6 +1639,7 @@ export default function SessionScreen() {
    *  so the handle changes with the transition instead of a poll beat after it. Every switch
    *  goes through here — a committed bar swipe, a card tap, a new window. */
   const ribbonForWindow = (win: TmuxWindow) => {
+    ribbonWindow.current = win.index; // the hop is authoritative; the poll is not
     const idle = IDLE_SHELLS.has(win.command);
     setRibbonCore((c) =>
       idle ? ribbonSwitchedToIdle(c) : ribbonPoll(c, { command: win.command, pid: null }, Date.now()),

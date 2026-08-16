@@ -325,12 +325,30 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
           exiting={(reduceMotion ? FadeOut : FadeOutDown).duration(180)}
           style={[
             styles.clip,
-            { bottom, borderColor: EDGE_DARK },
-            ANDROID && styles.androidShadow,
+            {
+              bottom,
+              borderColor: EDGE_DARK,
+              // Opaque on the clip itself, so iOS draws the shadow from the rounded layer rather
+              // than as a rectangle around a transparent one.
+              backgroundColor: theme.panel,
+              // A shadow on BOTH platforms now. On light schemes the plate cannot separate itself:
+              // `panel` is `mix(bg, black, 0.04)` on the generated ones — 4% — so on Rose Pine Dawn
+              // the band was invisible against the pane (user, 2026-08-16), and Latte's mantle over
+              // base is only 1.05:1. Light chrome floats on a shadow; dark chrome floats on tone.
+              boxShadow: theme.isDark
+                ? '0 2px 8px rgba(0,0,0,0.5)'
+                : '0 3px 14px rgba(0,0,0,0.28)',
+            },
             clipStyle,
           ]}>
           {/* Fixed width, so the plate's own layout never re-resolves while the clip animates. */}
           <View style={[styles.plate, { width: bandW, backgroundColor: theme.panel }]}>
+            {/* The light-scheme ground. `panel` is a 4% darkening of the background on the 22
+                generated schemes, which is no separation at all; this composites it to something
+                the eye can find without inventing a colour the theme does not have. */}
+            {!theme.isDark && (
+              <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.lightGround]} />
+            )}
             <Animated.View
               // The chevrons live in GUTTERS, not on top of the caps. Overlaying them sliced
               // `COMMANDS` and `/clear` mid-word, which reads as a rendering bug rather than as
@@ -454,6 +472,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 4,
   },
+  lightGround: { backgroundColor: 'rgba(0,0,0,0.06)' },
   capsRegion: { flex: 1, height: ROW_H, overflow: 'hidden' },
   capsRow: {
     flexGrow: 1,

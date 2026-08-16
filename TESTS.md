@@ -1117,17 +1117,19 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   `CSI 17~`); `q` exits. Four caps fit without scrolling on any phone.
 - [ ]
 
-### T11.12 — Agent band: markers, the scroll tape, ⇧⇥, 📎, and the two-tap quit
+### T11.12 — Agent band: the scroll tape, ⇧⇥, 📎, and the two-tap quit
 - **Setup**: `claude` (or any process whose `pane_current_command` is on the agent list)
   running in the pane.
 - **Steps**: tap the peach ✳ chip (it carries a ticking clock — agents are live); read the
   band; flick the row left and right; tap `/context`; reopen and tap `⇧⇥ plan mode`; reopen,
   tap `📎 attach`, pick a photo, watch; reopen and tap the red `^C ^C quit` once, read it,
   then tap `/clear` instead; reopen and arm it again, this time tapping it twice.
-- **Expect**: the band is still exactly 52pt tall — the same as `sleep`'s three caps. It rests
-  at the leading end: `SESSION` marker (recessed, darker ground) · `! ^C^C quit` · `/clear` ·
-  `/context` visible, with a `›` chevron saying there is more; one flick reaches the rest of
-  the COMMANDS group, two reach `NOW` (📎 / ⇧⇥ / ⎋). The row never scrolls vertically and a
+- **Expect**: the band is still exactly 52pt tall — the same as `sleep`'s three caps. Ten caps in
+  ONE flat row, no section markers (2026-08-16: they cost 44pt of reach each to label groups the
+  caps already spell out). It rests at the leading end with `! ^C^C quit` · `/clear` · `/context`
+  visible and a `›` chevron in its own gutter saying there is more — the chevron must never sit on
+  top of a cap and slice its label. One flick reaches the rest of the slash commands, two reach
+  📎 / ⇧⇥ / ⎋. The row never scrolls vertically and a
   near-vertical drag on it does nothing. `/context` types the command and presses Return and
   the band closes. `⇧⇥` cycles plan mode. `📎` opens the picker; during the send that cap
   alone tints accent and goes inert while the others stay live; then the remote path + one
