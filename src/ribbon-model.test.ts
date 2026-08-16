@@ -119,6 +119,21 @@ test('a blinking poll is the same run: same instance, same clock, no re-render',
   expect(selectRecipe(slow, false, 1000 + RIBBON_MIN_RUN_MS)?.id).toBe('running');
 });
 
+test('hopping away and back keeps the clock: same pid is the same run', () => {
+  // The device symptom: the chip sat at 0:00 forever, because a hop names the command from the
+  // window list with NO pid, which read as a brand-new foreground every time.
+  const core = ribbonPoll(RIBBON_IDLE, fg('claude', 4242), 1000);
+  const away = ribbonSwitchedToIdle(core);
+  const back = ribbonPoll(away, { command: 'claude', pid: null }, 60_000); // the hop: no pid yet
+  const settled = ribbonPoll(back, fg('claude', 4242), 62_000); // the poll fills it in
+  expect(settled.startedAt).toBe(1000); // 61 seconds of uptime, not 0:00
+  expect(formatElapsed(62_000 - settled.startedAt)).toBe('1:01');
+
+  // A DIFFERENT window running the same command is still a different run — the pid says so.
+  const elsewhere = ribbonPoll(back, fg('claude', 9999), 62_000);
+  expect(elsewhere.startedAt).toBe(60_000);
+});
+
 test('a window hop to an idle window drops the band now, without waiting out the hold', () => {
   const core = running('claude');
   const left = ribbonSwitchedToIdle(core);

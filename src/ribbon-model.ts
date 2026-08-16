@@ -39,7 +39,21 @@ export type RibbonCore = {
   /** Clock ms at the first beat that stopped seeing `command`, or null while it is being seen.
    *  The poll blinks (see `RIBBON_HOLD_MS`), so "gone" is a claim that has to survive a beat. */
   goneAt: number | null;
+  /** The last process we had a pid for, so a hop away and back can be recognised as the SAME run
+   *  and keep its clock. A window switch names the command from the window list but has no pid
+   *  (`ribbonForWindow`), which reads as a new foreground and reset the timer — on device the
+   *  chip therefore sat at 0:00 forever, since every hop restarted it. Matching on the pid keeps
+   *  "a different window running the same command is a different run" true, which a match on the
+   *  name alone would break. */
+  last: { command: string; pid: number; startedAt: number } | null;
 };
+
+/** What this core will want to recognise later: the run it is watching, if it has a pid for it. */
+function remember(core: RibbonCore): RibbonCore['last'] {
+  return core.command !== null && core.pid !== null
+    ? { command: core.command, pid: core.pid, startedAt: core.startedAt }
+    : core.last;
+}
 
 export const RIBBON_IDLE: RibbonCore = {
   instance: 0,
@@ -50,6 +64,7 @@ export const RIBBON_IDLE: RibbonCore = {
   candidate: null,
   candidateAt: null,
   goneAt: null,
+  last: null,
 };
 
 /**
@@ -111,7 +126,7 @@ export function ribbonPoll(
     // outlive the gate and made the band animate in twice around a window hop.
     if (core.goneAt === null) return { ...core, goneAt: now };
     if (now - core.goneAt < RIBBON_HOLD_MS) return core; // same object: the quiet beat re-renders nothing
-    return { ...core, command: null, candidate: null, candidateAt: null, goneAt: null };
+    return { ...core, last: remember(core), command: null, candidate: null, candidateAt: null, goneAt: null };
   }
   if (foreground.command === core.command && foreground.pid === core.pid && core.suspended === null) {
     // Back after a blink is not a new run: the clock and the instance carry on.
@@ -125,11 +140,15 @@ export function ribbonPoll(
     foreground.command === core.command &&
     core.suspended === null
   ) {
-    return { ...core, pid: foreground.pid };
+    // If the pid is one we were already timing, this is that same run come back into view — a hop
+    // away and back, not a restart — so its clock picks up where it left off instead of at zero.
+    const same = core.last !== null && core.last.pid === foreground.pid && core.last.command === foreground.command;
+    return { ...core, pid: foreground.pid, startedAt: same ? core.last!.startedAt : core.startedAt };
   }
   // A new foreground (or the suspended job back in front): a new instance, timer from now.
   return {
     ...core,
+    last: remember(core),
     instance: core.instance + 1,
     command: foreground.command,
     pid: foreground.pid,
@@ -137,6 +156,7 @@ export function ribbonPoll(
     suspended: null,
     candidate: null,
     candidateAt: null,
+    goneAt: null,
   };
 }
 
@@ -148,7 +168,8 @@ export function ribbonPoll(
  */
 export function ribbonSwitchedToIdle(core: RibbonCore): RibbonCore {
   if (core.command === null) return core;
-  return { ...core, command: null, candidate: null, candidateAt: null, goneAt: null };
+  // Remember what we were watching: hopping back to it is the same run, and its clock should say so.
+  return { ...core, last: remember(core), command: null, candidate: null, candidateAt: null, goneAt: null };
 }
 
 /** Bytes left the key bar for the PTY. A ^Z while something runs makes that something a
