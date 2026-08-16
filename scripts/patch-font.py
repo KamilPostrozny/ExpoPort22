@@ -46,6 +46,18 @@ FILL = {
 
 ADVANCE = 600  # 0.6em at 1000upm — a substitute on any other advance would break the cell
 
+#: The icons our own chrome draws in MONO — the `fallback=` half of every <SymbolView>, which is
+#: the only half Android ever renders (expo-symbols is iOS-only). A codepoint missing here does not
+#: fail loudly: RN falls through to Noto and the button quietly comes out a different weight and
+#: shape from the keys beside it, which is how ▣ U+25A3 and ✛ U+271B shipped as the tabs and dpad
+#: icons until 2026-08-16. Prefer a Nerd Font icon that draws the SF Symbol's shape; FILL above is
+#: for what the *host* writes into the pane, and is not the lever for these.
+CHROME = {
+    0xF002: 'magnifyingglass — switcher search field',
+    0xF24D: 'square.on.square — the tabs circle',
+    0xF047: 'dpad — the arrows key',
+}
+
 #: The characters that are supposed to tile — box drawing and block elements. Everything else in a
 #: terminal is a letter in the middle of its cell, where a hair of space on either side is what you
 #: want; these two ranges are drawings that continue into the neighbouring cell, and a hair of space
@@ -137,6 +149,11 @@ def patch(path: Path) -> tuple[int, int]:
             added += 1
 
     cmap = font.getBestCmap()
+    for codepoint, what in CHROME.items():
+        if codepoint not in cmap:
+            sys.exit(f'{path.name}: U+{codepoint:04X} ({what}) is not in the face — it would fall '
+                     f'through to a system font and draw at the wrong weight')
+
     tiling = {cmap[cp] for low, high in TILING for cp in range(low, high + 1) if cp in cmap}
     bled = sum(bleed(font, name) for name in sorted(tiling))
 

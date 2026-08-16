@@ -4,8 +4,8 @@
  * `theme.ts` answers "what colour"; this answers everything else about how the chrome is drawn.
  *
  * **These are the design's numbers, not a scale invented here.** That distinction is the whole
- * file. `docs/design/Port22-Prototype.dc.html` is a working prototype with concrete CSS on every
- * element, and it is hand-tuned rather than built on a grid: it legitimately spends 7 *and* 8 on
+ * file. They were read off a working prototype with concrete CSS on every element (that file is
+ * deleted — AGENTS.md; the iOS build is the reference now), and it was hand-tuned rather than built on a grid: it legitimately spends 7 *and* 8 on
  * gaps, 11.5 and 12.5 on captions, and nine different alphas of one grey. Snapping that onto a
  * 4pt ladder would be tidier and would be a different design, so what is collected here is only
  * what the prototype itself uses more than once — a 15pt row label (its most-set size), a 16pt

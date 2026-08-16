@@ -1,8 +1,8 @@
 /**
  * The bar-swipe window hop's brain (§4.4): horizontal swipe on the bar slides page cards between
- * tmux windows without opening the switcher. Every number is the prototype's
- * (`docs/design/Port22-Prototype.dc.html` — `barMove`/`barUp` and the `pagesSty`/`namePills`
- * render): pages at full design width with a 28pt gap, rubber-band at a third past the ends,
+ * tmux windows without opening the switcher. Every number came from the prototype's `barMove`/
+ * `barUp` and `pagesSty`/`namePills` render (that file is deleted — AGENTS.md; the numbers stand,
+ * and the iOS build is what they are checked against now): pages at full design width with a 28pt gap, rubber-band at a third past the ends,
  * commit at 70pt of travel or a 30pt flick under 250ms, name pills at 228/242 pitch scaling
  * 0.85–1 and fading 0.6–1 with distance from the continuous position. Pure — tested in
  * `src/barswipe-model.test.ts`; the screen and the bar render and execute.

@@ -1,7 +1,7 @@
 /**
  * The key bar (§4.4): ⋯ circle | glass pill Ctrl · Esc · Tab · Paste ‖ arrows | tabs circle,
  * with the chord strip and the popovers stacking above it. Geometry and glass follow
- * `docs/design/Port22-Prototype.dc.html` (the spec wherever PLAN prose disagrees): 49pt circles
+ * the prototype, now deleted (the iOS build is the spec wherever PLAN prose disagrees): 49pt circles
  * and pill, 35pt keys at 18pt radius, 24pt side margins, 48pt chord caps with 8.5pt captions,
  * arrows popover at 22pt corners, menu at 26pt.
  *
@@ -13,9 +13,11 @@
  * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
  * lives in `src/keybar-model.ts`, tested; this file renders and executes.
  *
- * Android (§4.10, design §5a + `Port22-Android-Prototype.dc.html`) keeps this exact geometry and
- * hands only the system layer to Material: no blur — an elevated `surface0` container — 16pt bar
- * corners, 12pt keys, 20pt popovers (the ⋯ menu alone at 16, `MENU_RADIUS`), 8pt side margins.
+ * Android used to restyle all of that to Material — no blur, 16pt bar corners, 12pt keys, 20pt
+ * popovers, 8pt side margins — on the strength of an Android design frame that is now deleted.
+ * **That is over** (2026-08-16 — AGENTS.md, "One app, two platforms"): Android takes the iOS
+ * numbers and the iOS surfaces. The `if (ANDROID)` early return in `Glass` below and the
+ * `ANDROID ?` metrics in `src/style.ts` are the last of it, and they are debt, not spec.
  * (PLAN §3's "40pt buttons, 8–12pt radii, mantle" line predates the Android design frames, which
  * kept the 49pt bar; the design wins.) Those metrics now live in `src/style.ts` as `BAR`.
  */
@@ -868,7 +870,9 @@ function KeyBarInner(props: KeyBarProps) {
                   name="dpad"
                   size={20}
                   tintColor={theme.foreground}
-                  fallback={<Text style={keyLabel}>✛</Text>}
+                  // U+F047 (nf-fa-arrows): the bundled four-way. ✛ is in no bundled
+                  // face either, same Noto fall-through as the tabs circle above.
+                  fallback={<Text style={[keyLabel, { fontSize: 18 }]}>{'\uF047'}</Text>}
                 />
               </Key>
             </View>
@@ -901,8 +905,19 @@ function KeyBarInner(props: KeyBarProps) {
                 name="square.on.square"
                 size={24}
                 tintColor={props.showTabs ? theme.foreground : theme.placeholder}
+                // U+F24D (nf-fa-clone) is the Android face of the icon: two offset squares, the
+                // shape `square.on.square` draws. The old ▣ is in no bundled face at all, so it
+                // fell through to Noto at a different weight — see `MONO` in fonts.ts. Sized to
+                // the SF Symbol above, not to a text cap, or it lands 40% short.
                 fallback={
-                  <Text style={[keyLabel, !props.showTabs && { color: theme.placeholder }]}>▣</Text>
+                  <Text
+                    style={[
+                      keyLabel,
+                      { fontSize: 22 },
+                      !props.showTabs && { color: theme.placeholder },
+                    ]}>
+                    {'\uF24D'}
+                  </Text>
                 }
               />
             </Glass>

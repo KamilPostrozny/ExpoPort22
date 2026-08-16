@@ -3,8 +3,8 @@
  * slot geometry, the drag-reorder mapping (array position vs tmux index — windows can have
  * gapped indices), the swipe-to-close thresholds, and the zoom interpolation the terminal
  * follows into its card slot. Every number is the prototype's
- * (`docs/design/Port22-Prototype.dc.html`), scaled from its 402pt design width to the real
- * screen. `src/switcher.tsx` and the screen only render and execute what these say.
+ * (deleted — AGENTS.md; the numbers stand, and the iOS build is what they are checked against
+ * now), scaled from its 402pt design width to the real screen. `src/switcher.tsx` and the screen only render and execute what these say.
  */
 
 import type { TmuxWindow } from '@/tmux-model';

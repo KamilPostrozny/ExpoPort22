@@ -7,9 +7,10 @@ https://docs.expo.dev/versions/v57.0.0/ before writing code in any session (AGEN
 
 Sources of truth:
 - **Functionality**: distilled from the reference Swift app (`../Port22`, branch `xtool`) — described here; do not copy its implementation.
-- **Design & interactions**: Claude Design project `16acd697-dc0e-491d-8792-667f1beaf6af`
-  (`Port22 Prototype.dc.html` = live interaction spec, `Port22 Design.dc.html` = visual spec
-  incl. Android variants). Where the old app and the design disagree, **the design wins**.
+- **Design & interactions**: ~~Claude Design project `16acd697-…`~~ — **retired 2026-08-16.** The
+  design files are deleted and are not to be re-fetched (AGENTS.md, "One app, two platforms").
+  The shipped **iOS build is the visual and interaction spec**, and Android is an exact copy of
+  it. Where this file's prose and the iOS build disagree, the build wins.
 
 ---
 
@@ -54,11 +55,13 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
   border `0.5px rgba(255,255,255,0.12)`.
 - Bar geometry: 49pt circles, 49pt pill, 35pt keys (18pt radius), 24pt side margins,
   hairline divider before the arrows button; popovers 26pt corners; ribbon/chord caps ~50pt wide with 8.5pt captions.
-- Android: same Catppuccin roles and the **same geometry** — the design's Android frames (§5a +
-  `Port22-Android-Prototype.dc.html`) keep the 49pt bar and supersede this file's older
-  "40pt buttons, mantle" summary. Elevated `surface0` containers instead of glass (no blur, small
-  shadow), 16pt bar corners, 12pt keys, 20pt popovers, 8pt side margins, bar docked flush to
-  Gboard; FAB for new tab, gesture pill, Roboto for chrome text, JBMono for terminal.
+- Android: **identical to iOS** — same Catppuccin roles, same geometry, same surfaces, same
+  glass. The Android design frames this bullet used to cite are deleted (2026-08-16). What follows
+  in strikethrough is the old divergence, kept only so it is recognisable when found in code:
+  ~~elevated `surface0` containers instead of glass (no blur, small shadow), 16pt bar corners,
+  12pt keys, 20pt popovers, 8pt side margins, bar docked flush to
+  Gboard; FAB for new tab, Roboto for chrome text.~~ The gesture pill and Gboard docking are
+  system facts and still apply; JBMono for the terminal was never a divergence — iOS uses it too.
 
 ---
 

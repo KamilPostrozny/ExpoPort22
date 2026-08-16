@@ -2,6 +2,39 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
 
+# One app, two platforms — iOS is the spec
+
+**The design files are gone** (`docs/design/`, deleted 2026-08-16) and they are not coming back. Do
+not look for them, do not re-fetch them from the Claude Design project, and do not treat a surviving
+reference to `Port22-Prototype.dc.html` or `Port22-Android-Prototype.dc.html` in an old comment as
+authority — those comments are stale by definition, and the Android one is now the opposite of the
+rule. There is no separate Android design. There is no "Material skin". There is one app.
+
+**The iOS build is the spec.** Android has to be an exact copy of it: the same icons, the same
+fonts, the same buttons, the same colours, the same corner radii, the same spacing, the same
+animations. If the two builds sit side by side and anything reads as different, that is a bug on the
+Android side, and the fix is to match iOS — never to pick a value that "suits Android better".
+
+**No `Platform.OS` branching unless it is completely necessary.** Necessary means the system leaves
+no choice:
+
+- an API that exists on one platform only (`keyboardWillChangeFrame` has no Android twin;
+  `presentationStyle="pageSheet"` is an iOS Modal mode; `ascii-capable` is an iOS `keyboardType`),
+- a hardware or OS affordance the other platform does not have (Android's system back button, the
+  gesture-nav edge, runtime permission prompts),
+- an OS-level behaviour that would otherwise double up (Android resizes its own window for the
+  keyboard, so iOS's manual padding would subtract it twice).
+
+A branch that exists to make something *look* different is not necessary — delete it and take the
+iOS value. When you do add a necessary branch, say in a comment which of the three it is and what
+breaks without it; "Android is different" is not a reason, and neither is a design doc that no
+longer exists. The look on both sides of a necessary branch still has to match: an Android sheet may
+have to be built out of a different Modal mode, but it must come out the same size, the same corner
+radius and the same colour as the iOS one.
+
+Where a platform genuinely cannot reach parity, that is a finding to raise, not a divergence to
+quietly ship.
+
 # The reference app is a spec, not a source tree
 
 `../Port22` (branch `xtool`) is a Swift app that already does what this one has to do. It is here to
