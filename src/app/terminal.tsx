@@ -895,32 +895,14 @@ export default function SessionScreen() {
    *  the release is dropped, the render lands on `drag`, and nothing is left to end it. That is a
    *  frozen app (user, 2026-08-11), and it is the same shape as the two before it. */
   const dragging = useRef(false);
-  /**
-   * Is this gesture's card held in the air? Written by the bar's worklet — 0 at every grab, 1 at
-   * the settle latch — and read on the same thread by the page row's own style.
-   *
-   * A shared value and not React state, and that is the whole point. The latch sets `rowVis` and
-   * this in ONE frame; routing the same fact through a `setState` put React a commit behind, so
-   * the blank new-tab page beside a held card became visible and then vanished a frame or two
-   * later (user, 2026-08-13). What reveals the row has to be what hides that page.
-   *
-   * It decides only DRAWING. Reach is `windows + 1` either way — see `onBarSwipe`.
-   */
-  const heldAirSV = useSharedValue(0);
-  /** The held join's approach, 0→1 on a clamped spring the moment the hand settles. A Reanimated
-   *  `entering` did this job and flickered: layout animations under a scaled, translated parent
-   *  paint their first frame at the final position before jumping to the start (user,
-   *  2026-08-13, "flickeringly show up"). A shared value through the same seat term the swipe
-   *  join uses cannot. */
-  const joinSV = useSharedValue(0);
   /** Is the page row on screen? Opacity, not mounting: the cards stay mounted for the life of the
    *  terminal view because each is a snapshot tree of Text runs, and building one costs 53-93ms of
    *  React on the JS thread — the hitch at the start of every swipe the original code was written
    *  to avoid, which mounting them per gesture brought back (perf, 2026-08-13). */
   const rowVisSV = useSharedValue(0);
 
-  /** The grab, one JS call per gesture: the open's one-off costs. Everything per-frame — prog,
-   *  dragX, the settle latch — runs in the bar's worklet against the shared values above. */
+  /** The grab, one JS call per gesture: the open's one-off costs. Everything per-frame — prog and
+   *  dragX — runs in the bar's worklet against the shared values above. */
   const onZoomGrab = (dx: number, dy: number) => {
     if (stage === null) return;
     setRbOpen(false); // the band fades out with the bar; it must not be open where the flight lands
@@ -1012,14 +994,10 @@ export default function SessionScreen() {
       draggingSV.value = 0;
       // The row goes back out to the sides so the card flies to the grid alone — unless a hop is
       // landing, whose own clear cuts it (see `clearBarSwipe`).
-      if (swipeInfo.current?.live !== true) {
-        joinSV.value = withTiming(0, { duration: 160 });
-        rowVisSV.value = withTiming(0, { duration: 160 });
-      }
-      // The hop is asked FIRST: with the card held in the air `prog` sits past ZOOM_COMMIT the
-      // whole time, so asking the grid first meant every release went to the grid and a sideways
-      // hop could never win (user, 2026-08-13). The grid takes the release only when the
-      // horizontal axis decides nothing.
+      if (swipeInfo.current?.live !== true) rowVisSV.value = withTiming(0, { duration: 160 });
+      // The hop is asked FIRST: a hop's own arc can carry `prog` past ZOOM_COMMIT, so asking the
+      // grid first meant a sideways release could be taken as a lift (user, 2026-08-13). The grid
+      // takes the release only when the horizontal axis decides nothing.
       const info = swipeInfo.current;
       const hopWould =
         info?.live === true &&
@@ -1432,7 +1410,6 @@ export default function SessionScreen() {
     rowLiveSV.value = 0;
     // A cut, not a fade: the landed card and the live terminal under it are the same picture.
     rowVisSV.value = 0;
-    joinSV.value = 0;
     setPageSwipe(null);
     swipeX.value = 0;
     roundSV.value = 0; // x is already 0 here, so the travel factor has faded the edge out too
@@ -1506,7 +1483,6 @@ export default function SessionScreen() {
       swipeX,
       prog,
       dragX,
-      join: joinSV,
       zoomReady: zoomReadySV,
       zoomBase: zoomBaseSV,
       zoomFromX: zoomFromXSV,
@@ -1518,14 +1494,13 @@ export default function SessionScreen() {
       rowVis: rowVisSV,
       rowPos: rowPosSV,
       rowCount: rowCountSV,
-      heldAir: heldAirSV,
       stage: stageSV,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- every member is a stable shared value
     [],
   );
 
-  const onBarSwipe = (phase: 'start' | 'end', dx: number, air = false) => {
+  const onBarSwipe = (phase: 'start' | 'end', dx: number) => {
     if (stage === null) return;
     if (phase === 'start') {
       // `drag` is a swipe that has ALREADY lifted — Safari's card can be paged sideways after it
@@ -1550,19 +1525,13 @@ export default function SessionScreen() {
       // A lift that never went sideways leaves the flag set — no 'end' arrives on this axis to
       // read it — so every swipe starts by clearing it rather than trusting the last one to.
       gridTookIt.current = false;
-      // A held card's row ends at the last window — nothing drawn past it and nothing to commit
-      // onto (user, 2026-08-13). `air` is the worklet's own `heldAir` latch, which is also what
-      // hides the page, so the two cannot disagree. A flat swipe is unchanged: the slot past the
-      // last tab is there, and committing onto it births a window.
-      const slots = windows.length + (air ? 0 : 1);
+      // One slot past the last tab, always: committing onto it births a window. It used to be
+      // withheld from a card held in the air, which had no new-tab page to land on; that whole
+      // path went on 2026-08-17.
+      const slots = windows.length + 1;
       swipeInfo.current = { windows, pos, t0: Date.now(), live: true, slots };
       rowLiveSV.value = 1;
-      // Not in the air: there the worklet's own ceiling latch owns `rowVis`, and this call is a
-      // `runOnJS` hop behind it. A sideways move that crosses `ROW_AIR_DX` a frame or two before
-      // the climb crosses `ROW_MAX_PROG` therefore landed here AFTER the fade-out had started and
-      // put the row straight back on — with the latch already at 0, nothing was left to take it
-      // off again, so the neighbours rode all the way up to the grid (user, 2026-08-16).
-      if (!air) rowVisSV.value = 1;
+      rowVisSV.value = 1;
       rowPosSV.value = pos;
       rowCountSV.value = slots;
       setOpen('none');
@@ -1575,7 +1544,7 @@ export default function SessionScreen() {
           'snaps', cards.map((c) => (c.snap ? '#' : '.')).join(''),
         );
       setPageSwipe({
-        names: [...windows.map((w) => w.name), ...(air ? [] : [NEW_TAB_NAME])],
+        names: [...windows.map((w) => w.name), NEW_TAB_NAME],
         pos,
         target: pos,
         phase: 'drag',
@@ -1964,20 +1933,16 @@ export default function SessionScreen() {
       // a dependent of prog, dragX, slotSV and flight, so it recomputed on every value the zoom
       // touches instead of only on the ones that move the row.
       const pitch = stageSV.value.w * (1 + PAGE_GAP);
-      // The swipe join's approach, locked to the TRAVEL rather than a clock: the card starts a
-      // little beyond its pitch and closes in as the finger uncovers the gap, fully seated by
-      // 130pt — slow and firm, and it can never lag the swipe or pop (user, 2026-08-13, after
-      // instant read as harsh and every timed entrance was either too quick or too slow). A held
-      // join seats immediately; its entrance is the clamped spring on the mount instead.
-      // One distance for every swipe. It used to shrink with the swipe's speed — the quicker the
-      // swipe, the faster the slide-in (user, 2026-08-13) — and that coupling was withdrawn a day
-      // later: the neighbours are to arrive at one speed whatever the hand did (user, 2026-08-14).
-      const seat = Math.max(joinSV.value, Math.min(Math.abs(swipeX.value) / ROW_REACH, 1));
+      // The join's approach, locked to the TRAVEL rather than a clock: the card starts a little
+      // beyond its pitch and closes in as the finger uncovers the gap, fully seated by 130pt —
+      // slow and firm, and it can never lag the swipe or pop (user, 2026-08-13, after instant read
+      // as harsh and every timed entrance was either too quick or too slow). One distance for
+      // every swipe. It used to shrink with the swipe's speed — the quicker the swipe, the faster
+      // the slide-in (user, 2026-08-13) — and that coupling was withdrawn a day later: the
+      // neighbours are to arrive at one speed whatever the hand did (user, 2026-08-14).
+      const seat = Math.min(Math.abs(swipeX.value) / ROW_REACH, 1);
       return {
-        // `phantom` is the new-tab page — the one past the last window, which a card held in the
-        // air must not be given. Read off the worklet's own latch so it is dark on the very frame
-        // the row is revealed, never a commit later.
-        opacity: rowVisSV.value * (phantom && heldAirSV.value === 1 ? 0 : 1),
+        opacity: rowVisSV.value,
         transform: [{ translateX: side * (pitch + 44 * (1 - seat)) }],
       };
     });
@@ -2426,16 +2391,12 @@ export default function SessionScreen() {
             </Animated.View>
           )}
           {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
-              empty pane the shell about to be born will draw into. A FLAT swipe gets it, exactly
-              as it always did — that blank page is what covers the moment the new shell is being
-              drawn, and taking it away left the arrival blinking dark with the card's accent edge
-              standing on it (user, 2026-08-13). A card held in the air gets nothing on this side:
-              there the new tab is not a page you slide onto.
-              MOUNTED for both, and hidden for one — the difference is `heldAir` inside the style,
-              not a condition here. Unmounting it on a React commit is a frame or two behind the
-              worklet that reveals the row, which is precisely long enough to see the page appear
-              and then go (user, 2026-08-13). Either way the slot is reachable and births a
-              window; this is only about what is drawn. */}
+              empty pane the shell about to be born will draw into. That blank page is what covers
+              the moment the new shell is being drawn, and taking it away left the arrival blinking
+              dark with the card's accent edge standing on it (user, 2026-08-13). It used to be
+              withheld from a card held in the air — hidden by `heldAir` inside the style rather
+              than unmounted here, because a React commit lags the worklet by long enough to see it
+              appear and then go; that whole path went on 2026-08-17. */}
           {anchor < cards.length && (
             <Animated.View pointerEvents="none" style={[
                 styles.stageWrapper,

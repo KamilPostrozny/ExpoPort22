@@ -631,8 +631,10 @@ Within it they are drawn **in front of** the live card, with the key bar moved o
 of them: behind it they were laid out perfectly (420×912 at the right offset, every number checked
 on device) and simply never drawn, because a transparent parent still owns its subtree. Three
 fixes aimed at backgrounds and tree order missed that; `onLayout` said it in one line. They join
-on `pageSwipe` — a card held up alone has no row until the finger starts moving sideways — and
+on `pageSwipe` — a card lifted off the bar has no row at all, it goes to the grid alone — and
 leave on the commit, or they fly into the grid a pitch behind the card: tabs arriving in pairs.
+(A held card *did* gather them once the hand settled, and push them away again past a ceiling;
+removed 2026-08-17 after three fixes for the same flicker report each missed.)
 After a
 commit the slide lands on the snapshot, a **settle overlay** holds that snapshot ~350ms while
 tmux's redraw reaches the PTY, then drops (ponytail: fixed hold; dropping on first shell data is

@@ -17,9 +17,6 @@ import {
   barGrabbed,
   rowJoins,
   ROW_AIR_PROG,
-  ROW_BACK_PROG,
-  ROW_MAX_PROG,
-  rowLowNext,
   controlByte,
   ctrlTap,
   diffInput,
@@ -192,32 +189,23 @@ test('the grab is either axis — from there both are live and neither is a deci
   expect(barGrabbed(0, -11)).toBe(true); // a pull straight up is a grab too
 });
 
-test('the row joins at the slop on the bar, but wants intent in the air', () => {
-  expect(rowJoins(5, 0, 0, false)).toBe(false);
-  expect(rowJoins(11, 0, 0, false)).toBe(true);
+test('the row joins at the slop on the bar, and only there', () => {
+  expect(rowJoins(5, 0, 0)).toBe(false);
+  expect(rowJoins(11, 0, 0)).toBe(true);
   // The flat hop is on the bar however much its own arc lifts: the arc is what `prog`'s dead zone
-  // discounts, and a hop reads as zero there — it must never wait for a settle it will not make.
-  expect(rowJoins(-60, -26, 0, false)).toBe(true);
-  expect(rowJoins(60, -26, ROW_AIR_PROG, false)).toBe(true);
+  // discounts, and a hop reads as zero there.
+  expect(rowJoins(-60, -26, 0)).toBe(true);
+  expect(rowJoins(60, -26, ROW_AIR_PROG)).toBe(true);
   // But a rising thumb's own drift is not a hop, low or not: sideways has to LEAD.
-  expect(rowJoins(11, -25, 0, false)).toBe(false);
-  expect(rowJoins(20, -120, 0.1, true)).toBe(false); // and in the air it must be deliberate
-  expect(rowJoins(49, -120, 0.1, true)).toBe(true); // deliberate sideways while held: it arrives
+  expect(rowJoins(11, -25, 0)).toBe(false);
 });
 
-test('a card still climbing, or held high, keeps its neighbours away', () => {
-  expect(rowJoins(60, -120, 0.1, false)).toBe(false); // the hand has not stopped: no row
-  expect(rowJoins(60, -120, ROW_MAX_PROG, true)).toBe(true); // the last of the low half
-  expect(rowJoins(60, -120, ROW_MAX_PROG + 0.01, true)).toBe(false); // above it: one card, alone
-});
-
-test('the ceiling is latched, so a wobbling prog cannot flicker the row', () => {
-  expect(rowLowNext(0.1, -1)).toBe(1); // undecided: asked at the ceiling
-  expect(rowLowNext(ROW_MAX_PROG, 1)).toBe(1);
-  expect(rowLowNext(ROW_MAX_PROG + 0.01, 1)).toBe(0); // over the ceiling: they leave
-  // …and a wobble back under it does not bring them straight back.
-  expect(rowLowNext(ROW_MAX_PROG - 0.01, 0)).toBe(0);
-  expect(rowLowNext(ROW_BACK_PROG, 0)).toBe(1); // a deliberate move back down does
+test('a card that has left the bar goes to the grid alone', () => {
+  // No neighbours at any height once the card is climbing — the held row and its ceiling were
+  // removed 2026-08-17, so `prog` past `ROW_AIR_PROG` is simply the end of the hop's territory.
+  expect(rowJoins(60, -120, 0.1)).toBe(false);
+  expect(rowJoins(60, -120, 0.5)).toBe(false);
+  expect(rowJoins(200, -400, 0.9)).toBe(false);
 });
 
 test('nothing about the vertical is judged mid-gesture any more', () => {

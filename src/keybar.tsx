@@ -39,8 +39,6 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
-  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 
@@ -69,9 +67,6 @@ import {
   barGrabbed,
   KEYS_DROP_DY,
   rowJoins,
-  rowLowNext,
-  ROW_OUT_MS,
-  ROW_STILL_FRAMES,
   controlByte,
   CARET_SETTLE_MS,
   CARET_STEP_MAX,
@@ -132,9 +127,7 @@ export type KeyBarProps = {
   /** T10: the zoom drag's TRANSITIONS, one JS call each — the per-frame follow runs in this
    *  file's pan worklet against `panSV`, because the JS thread stalls 40–300ms under load and a
    *  runOnJS pan hitched with it (perf harness, 2026-08-13). `onZoomGrab` pays the open's
-   *  one-off costs; `onZoomEnd` decides commit-or-spring-back from the release's velocity. The
-   *  held-in-the-air fact does NOT come through here — it is `panSV.heldAir`, written on the
-   *  worklet's own thread, because React learns it a commit too late to hide anything. */
+   *  one-off costs; `onZoomEnd` decides commit-or-spring-back from the release's velocity. */
   onZoomGrab?: (dx: number, dy: number) => void;
   onZoomEnd?: (dx: number, dy: number, vx: number, vy: number) => void;
   /** The card has actually begun to lift — arm the switcher's own state now, not at the grab. */
@@ -142,18 +135,13 @@ export type KeyBarProps = {
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
    *  the worklet. The screen owns the model: rubber band, thresholds, commit
-   *  (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux).
-   *
-   *  'start' also reports whether the card is HELD — the same `heldAir` latch the page row draws
-   *  itself from, so what the row shows and how far it reaches cannot disagree. A held card's row
-   *  stops at the last window: no new-tab page, and nothing past it to commit onto. */
-  onBarSwipe?: (phase: 'start' | 'end', dx: number, air?: boolean) => void;
+   *  (`src/barswipe-model.ts`). Unset = the axis is silence (no tmux). */
+  onBarSwipe?: (phase: 'start' | 'end', dx: number) => void;
   /** The gesture's shared values, owned by the screen: the worklet writes the hot path here. */
   panSV?: {
     swipeX: SharedValue<number>;
     prog: SharedValue<number>;
     dragX: SharedValue<number>;
-    join: SharedValue<number>;
     zoomReady: SharedValue<number>;
     zoomBase: SharedValue<number>;
     zoomFromX: SharedValue<number>;
@@ -165,10 +153,6 @@ export type KeyBarProps = {
     rowVis: SharedValue<number>;
     rowPos: SharedValue<number>;
     rowCount: SharedValue<number>;
-    /** Is this gesture's card held in the air? Written here — 0 at the grab, 1 at the settle latch
-     *  — and read by the screen's page row on the same thread, so the blank new-tab page beside a
-     *  held card is dark on the frame the row appears rather than a React commit later. */
-    heldAir: SharedValue<number>;
     stage: SharedValue<{ w: number; h: number }>;
   };
   /** The tab-name pills that replace the bar keys during a page swipe (§4.4). `x` is the
@@ -526,14 +510,6 @@ function KeyBarInner(props: KeyBarProps) {
   const grabbed = useSharedValue(0);
   /** The keyboard has already been sent away by this pan. */
   const dismissed = useSharedValue(0);
-  /** The worklet's half of the settle latch (see `onAirSettled`). */
-  const settled = useSharedValue(0);
-  /** Which side of the neighbour ceiling the card was on last frame: 1 low, 0 high, -1 unasked.
-   *  A separate latch because `rowVis` is animated now — mid-slide it holds 0.4, and comparing the
-   *  wanted state against it would restart the slide every frame. */
-  const rowLow = useSharedValue(-1);
-  /** Consecutive frames the hand has been still — see `ROW_STILL_FRAMES`. */
-  const still = useSharedValue(0);
   /** The pan's translation at the instant the card was grabbed. The grab costs `BAR_AXIS_SLOP` of
    *  travel, and the pan reports it from TOUCH-DOWN — so handing the page `e.translationX` made
    *  it open 10pt along instead of at zero: the card detached from the edge with a jump in the
@@ -566,8 +542,7 @@ function KeyBarInner(props: KeyBarProps) {
   );
   const jsZoomArm = useCallback(() => cbRef.current.onZoomArm?.(), []);
   const jsBarSwipe = useCallback(
-    (phase: 'start' | 'end', dx: number, air?: boolean) =>
-      cbRef.current.onBarSwipe?.(phase, dx, air),
+    (phase: 'start' | 'end', dx: number) => cbRef.current.onBarSwipe?.(phase, dx),
     [],
   );
   const dismissKeys = useCallback(() => Keyboard.dismiss(), []);
@@ -585,9 +560,6 @@ function KeyBarInner(props: KeyBarProps) {
       held.value = 0;
       grabbed.value = 0;
       dismissed.value = 0;
-      settled.value = 0;
-      rowLow.value = -1;
-      still.value = 0;
     })
     .onUpdate((e) => {
       'worklet';
@@ -600,8 +572,6 @@ function KeyBarInner(props: KeyBarProps) {
       if (grabbed.value === 0) {
         if (!barGrabbed(tx, ty)) return;
         grabbed.value = 1;
-        // Every gesture starts flat; only its own settle can call it held.
-        if (sv !== undefined) sv.heldAir.value = 0;
         if (showTabsSV.value === 1) runOnJS(jsZoomGrab)(tx, ty);
       }
       if (sv !== undefined && showTabsSV.value === 1 && sv.dragging.value === 1 && sv.zoomReady.value === 1) {
@@ -610,8 +580,8 @@ function KeyBarInner(props: KeyBarProps) {
           sv.zoomFromX.value = tx;
           sv.zoomFromY.value = ty;
         }
-        // The zoom's horizontal drift freezes once the row is held — two things moving the card
-        // at once is a card travelling twice as far as the finger.
+        // The zoom's horizontal drift freezes once a page swipe is running — two things moving the
+        // card at once is a card travelling twice as far as the finger.
         if (held.value === 0) sv.dragX.value = tx - sv.zoomFromX.value;
         sv.prog.value = Math.min(
           1,
@@ -623,53 +593,12 @@ function KeyBarInner(props: KeyBarProps) {
           sv.armed.value = 1;
           runOnJS(jsZoomArm)();
         }
-        // Settled: airborne and the hand has STOPPED — 90pt/s for `ROW_STILL_FRAMES` frames
-        // running, not the one frame a slow pull dips below it by itself. 90pt/s is stillness to
-        // a finger, not to a slow flick.
-        if (settled.value === 0 && sv.prog.value > 0.02) {
-          if (Math.abs(e.velocityY) < 90 && Math.abs(e.velocityX) < 90) {
-            still.value += 1;
-            if (still.value >= ROW_STILL_FRAMES) {
-              settled.value = 1;
-              sv.heldAir.value = 1;
-            }
-          } else {
-            still.value = 0;
-          }
-        }
-        // The neighbours around a held card, and the only thing that draws them: the hand has
-        // stopped (`heldAir`) AND the card is low — inside `ROW_MAX_PROG` of the pull. Climb past
-        // that and they leave again; it is one card up there, on its way to the grid alone (user,
-        // 2026-08-14). Reversible on purpose, because the pull itself is: up, and back down.
-        //
-        // Visible AND seated, both from here. The row used to be mounted by an `airSettled`
-        // render, and when it became permanent-and-shown-by-opacity (a91809f) only the page
-        // swipe's half of that condition was carried over — `rowVis` is set at `onBarSwipe`
-        // 'start' and nowhere else. So a held card sprang this join against an invisible row,
-        // and the first sideways move revealed it already seated instead of bouncing in
-        // (user, 2026-08-13). The spring is what the eye reads; the opacity just has to be on
-        // before it runs. Revealed in the SAME frame as `heldAir` — the JS hop this used to make
-        // said the same thing a commit later, long enough to see the page it is meant to suppress.
-        //
-        // The ceiling applies to a row that has already joined, too — a page swipe running under
-        // the finger is no exception (user, 2026-08-14). So the row is EARNED once (held and
-        // stopped, or the swipe started) and DRAWN only while the card is low.
-        if (sv.heldAir.value === 1 || held.value === 1) {
-          const low = rowLowNext(sv.prog.value, rowLow.value);
-          if (low !== rowLow.value) {
-            rowLow.value = low;
-            if (low === 1) {
-              sv.rowVis.value = 1; // on before the spring runs, as above
-              sv.join.value = withSpring(1, { damping: 28, stiffness: 220, overshootClamping: true });
-            } else {
-              // Out the way they came in, not a blink (user, 2026-08-14): `join` unseats them —
-              // the same 44pt the entrance closes — and the fade rides the same clock, so what the
-              // eye sees is the row leaving sideways rather than a frame of neighbours missing.
-              sv.join.value = withTiming(0, { duration: ROW_OUT_MS });
-              sv.rowVis.value = withTiming(0, { duration: ROW_OUT_MS });
-            }
-          }
-        }
+        // A card lifted off the bar goes to the grid ALONE. It used to gather its neighbours once
+        // the hand settled, and push them away again past a ceiling — removed 2026-08-17 after
+        // three fixes for the same report ("they flicker, and sometimes they don't disappear")
+        // each fitted the evidence and each missed. The two gestures either side of it are the
+        // ones that work and the ones that were being asked for: up goes to the grid, sideways
+        // hops a tab. `git log -S heldAir` finds the latch, the ceiling and its constants.
       }
       // The keys get out of the way once the card is visibly off the bar — not at the slop, which
       // the opening arc of a flat hop passes through on its own (see `KEYS_DROP_DY`).
@@ -677,15 +606,13 @@ function KeyBarInner(props: KeyBarProps) {
         dismissed.value = 1;
         runOnJS(dismissKeys)();
       }
-      // The row joins when the finger actually goes sideways — from a standing start on the bar,
-      // or from a card held low in the air: the climb has to have STOPPED (`heldAir`, the settle
-      // latch a few lines up) and stopped inside the bottom 30% of the pull. Higher than that the
-      // card is on its way to the grid alone (user, 2026-08-14).
+      // The page row joins when the finger goes sideways from a standing start on the bar. A card
+      // already climbing is on its way to the grid alone — it has no row to join.
       if (held.value === 0) {
-        if (!rowJoins(tx, ty, sv?.prog.value ?? 0, sv?.heldAir.value === 1)) return;
+        if (!rowJoins(tx, ty, sv?.prog.value ?? 0)) return;
         held.value = 1;
         originX.value = tx;
-        runOnJS(jsBarSwipe)('start', 0, sv?.heldAir.value === 1);
+        runOnJS(jsBarSwipe)('start', 0);
         return;
       }
       if (sv !== undefined) {

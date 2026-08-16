@@ -172,67 +172,32 @@ export function barGrabbed(dx: number, dy: number): boolean {
   return Math.abs(dx) > BAR_AXIS_SLOP || Math.abs(dy) > BAR_AXIS_SLOP;
 }
 
-/** The sideways travel that earns the page row once the card is off the bar: a deliberate pull
- *  straight up drifts 10–20pt sideways all by itself, and joining on that put neighbour cards
- *  around a card nobody was swiping (movement 3, screenshot). */
-export const ROW_AIR_DX = 48;
-
-/** Zoom progress below which the card is still ON THE BAR, and the row behaves as it always has.
+/** Zoom progress below which the card is still ON THE BAR, and a sideways move is a tab hop.
  *  Not raw `dy`: a flat hop's own arc crosses 30pt of upward travel by itself (2026-08-12, ten
  *  hops at -24…-26) and a raw-dy boundary threw those hops into the air branch, where they wait
  *  for a settle a hop never makes — no neighbours at all (user, 2026-08-14). `prog` is the arc
  *  already discounted: its dead zone grows with |dx| precisely to read a sideways swipe as zero. */
 export const ROW_AIR_PROG = 0.05;
 
-/** How far up the card may be and still gather neighbours. Past it the card is a single tab on
- *  its way to the grid, and neighbours around it are just clutter in the flight path (user,
- *  2026-08-14). The ceiling asked for was 30% of the pull, but `prog` saturates at 280pt of
- *  travel: 0.3 of it is 84pt, which on the phone is the very bottom of the motion and left the
- *  row triggerable only at the start (user, same day). 0.65 is the same intent at the scale the
- *  thumb actually works in: two thirds of the way up still gathers neighbours, the top third is
- *  the card alone. Tried at 0.5 first, still tight (user, same day). This is the knob. */
-export const ROW_MAX_PROG = 0.65;
-
-/** Once the row has LEFT, how far back down the card must come to gather it again.
+/**
+ * Horizontal travel that earns the page row (see `barGrabbed`): the slop, on the bar, going
+ * sideways more than up.
  *
- *  `prog` is not monotonic in the finger: its dead zone grows 1.3pt per pt of sideways travel
- *  (`zoomProgress`), so a thumb that drifts as it climbs makes progress wobble by several points
- *  of travel a frame. Against a bare ceiling that is a threshold re-crossed several times a
- *  second, and every crossing restarts the spring in / fade out pair — the neighbours flickering
- *  while the card is pulled further up (user, 2026-08-16). A tenth of the pull of hysteresis is
- *  wider than the wobble and still well inside one deliberate move back down. */
-export const ROW_BACK_PROG = 0.55;
-
-/** The ceiling, latched: `was` is the last answer (-1 = undecided, so the first is asked at the
- *  ceiling itself). Leaving takes `ROW_MAX_PROG`, coming back takes `ROW_BACK_PROG`. */
-export function rowLowNext(prog: number, was: number): number {
+ * `prog` rather than raw `dy`, because a flat hop's own arc crosses 30pt of upward travel by
+ * itself (2026-08-12, ten hops at -24…-26) and a raw-dy test read those as a lift. `prog` is that
+ * arc already discounted: its dead zone grows with |dx| precisely to score a sideways swipe zero.
+ * And sideways has to LEAD, because the first 25pt of a pull up are below `ROW_AIR_PROG` too, so
+ * the 10–20pt of drift a rising thumb makes by itself would otherwise start a hop nobody asked for
+ * (user, 2026-08-14).
+ *
+ * A card that is already climbing gets no row: it is one tab on its way to the grid. That used to
+ * be a second branch here — a held, settled card could still gather neighbours on a deliberate
+ * 48pt sideways move — and it went with the rest of the held row on 2026-08-17.
+ */
+export function rowJoins(dx: number, dy: number, prog: number): boolean {
   'worklet';
-  return prog <= (was === 0 ? ROW_BACK_PROG : ROW_MAX_PROG) ? 1 : 0;
+  return prog <= ROW_AIR_PROG && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > BAR_AXIS_SLOP;
 }
-
-/** How long the neighbours take to leave when the card climbs past the ceiling: they unseat and
- *  fade on the same clock, because vanishing on the frame read as a dropped frame, not a decision
- *  (user, 2026-08-14). Coming back down is the entrance spring, unchanged. */
-export const ROW_OUT_MS = 180;
-
-/** Horizontal travel that earns the page row (see `barGrabbed`): the slop on the bar; in the air,
- *  deliberate travel AND a card that is being held — the hand stopped climbing (`held`, the
- *  settle latch) and stopped low (`prog` inside `ROW_MAX_PROG`). Still climbing, or already high,
- *  means one card and no row. */
-export function rowJoins(dx: number, dy: number, prog: number, held: boolean): boolean {
-  'worklet';
-  // On the bar: low AND going sideways more than up. `prog` alone was not enough — the first
-  // 25pt of a pull up are below the ceiling too, so 10pt of the drift a rising thumb makes by
-  // itself took this branch and joined the row without any stop at all (user, 2026-08-14). A hop
-  // is the gesture whose sideways travel leads; a pull's drift never does.
-  if (prog <= ROW_AIR_PROG && Math.abs(dx) > Math.abs(dy)) return Math.abs(dx) > BAR_AXIS_SLOP;
-  return held && prog <= ROW_MAX_PROG && Math.abs(dx) > ROW_AIR_DX;
-}
-
-/** Consecutive still frames that count as an intentional stop. One frame under 90pt/s is not a
- *  decision — a slow pull dips below that on its own, and the row arrived at a hand that never
- *  stopped (user, 2026-08-14). Four frames is ~66ms; a real pause is several times that. */
-export const ROW_STILL_FRAMES = 4;
 
 /** Upward travel at which the keyboard gets out of the way. Not the slop: the opening of an
  *  ordinary flat swipe on a bottom bar IS upward — a thumb pivots, and the device log has ten
