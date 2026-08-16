@@ -51,3 +51,21 @@ export const SANS = 'Inter';
 export const SANS_MEDIUM = 'Inter-Medium';
 export const SANS_SEMIBOLD = 'Inter-SemiBold';
 export const SANS_BOLD = 'Inter-Bold';
+
+/**
+ * WHY EVERY TEXT STYLE IN THIS APP SETS `includeFontPadding: false`.
+ *
+ * Android wraps every text box in the font's own recommended extra leading; iOS adds nothing. Same
+ * font file, same `fontSize`, different line box — so any row that sizes to its text comes out
+ * taller on Android. With SF Pro vs Roboto that was invisible, because nobody expected the two to
+ * agree. Now that both platforms draw Inter it is the whole ballgame.
+ *
+ * Measured on the ⋯ menu, 2026-08-16, iOS device vs Android emulator at matched logical scale:
+ * every row was 3.8–7.0pt taller on Android (73.0/42.7/45.7/51.3 against 80.0/46.5/49.5/55.2).
+ * With the property set: 73.5/43.0/46.1/51.8 — inside half a point on all four.
+ *
+ * It is NOT a `Platform` branch and must not become one: iOS ignores the prop, so this is one code
+ * path that happens to be load-bearing on one side. There is no global switch in React Native —
+ * `Text.defaultProps` died with React 19 — so it is set per style, and a new text style without it
+ * is a new divergence.
+ */

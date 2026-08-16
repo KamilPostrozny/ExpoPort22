@@ -486,7 +486,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chevronText: { fontFamily: MONO, fontSize: 13 },
+  chevronText: { fontFamily: MONO, includeFontPadding: false, fontSize: 13 },
   divider: { width: 1, height: 28, marginHorizontal: 6, opacity: 0.6 },
 
   cap: {
@@ -499,10 +499,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   capKeyRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  capKey: { fontFamily: MONO, fontSize: TEXT.mono, lineHeight: 17 },
-  capKeyDanger: { fontFamily: MONO_BOLD },
-  capCaption: { fontFamily: SANS, fontSize: 10, lineHeight: 12 },
-  capWarn: { fontFamily: MONO_BOLD, fontSize: 10 },
+  capKey: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.mono, lineHeight: 17 },
+  capKeyDanger: { fontFamily: MONO_BOLD, includeFontPadding: false  },
+  capCaption: { fontFamily: SANS, includeFontPadding: false, fontSize: 10, lineHeight: 12 },
+  capWarn: { fontFamily: MONO_BOLD, includeFontPadding: false, fontSize: 10 },
 
   chip: {
     height: ROW_H,
@@ -514,8 +514,8 @@ const styles = StyleSheet.create({
     paddingLeft: 10,
     paddingRight: 12,
   },
-  mark: { fontFamily: MONO_BOLD, fontSize: 13 },
-  chipName: { fontFamily: MONO, fontSize: 12, maxWidth: 96 },
+  mark: { fontFamily: MONO_BOLD, includeFontPadding: false, fontSize: 13 },
+  chipName: { fontFamily: MONO, includeFontPadding: false, fontSize: 12, maxWidth: 96 },
   // Tabular figures, or the clock jitters every second as the digits change width.
-  chipMeta: { fontFamily: MONO, fontSize: 12, fontVariant: ['tabular-nums'] },
+  chipMeta: { fontFamily: MONO, includeFontPadding: false, fontSize: 12, fontVariant: ['tabular-nums'] },
 });

@@ -213,8 +213,8 @@ export default function Setup() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { padding: SPACE.xl, gap: SPACE.md },
-  title: { fontFamily: SANS_BOLD, fontSize: 34 },
-  caption: { fontFamily: SANS, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
+  title: { fontFamily: SANS_BOLD, includeFontPadding: false, fontSize: 34 },
+  caption: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
   /** The label over a card, drawn the way the settings sheet draws its own group headers. */
   header: { ...SECTION_HEADER, paddingHorizontal: SPACE.gutter, paddingBottom: 7 },
   card: { borderRadius: RADIUS.card, overflow: 'hidden' },
@@ -229,24 +229,25 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   modeRow: { paddingHorizontal: SPACE.gutter, paddingVertical: 9 },
   modeText: { flex: 1 },
-  modeLabel: { fontFamily: SANS, fontSize: TEXT.label },
-  modeNote: { fontFamily: SANS, fontSize: 12, lineHeight: 16 },
+  modeLabel: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.label },
+  modeNote: { fontFamily: SANS, includeFontPadding: false, fontSize: 12, lineHeight: 16 },
   /** The bundled Nerd Font check, not `✓` U+2713 — see the call sites. */
-  tick: { fontFamily: MONO, fontSize: TEXT.label },
-  label: { fontFamily: SANS, width: 88, paddingLeft: SPACE.gutter, fontSize: TEXT.label },
+  tick: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.label },
+  label: { fontFamily: SANS, includeFontPadding: false, width: 88, paddingLeft: SPACE.gutter, fontSize: TEXT.label },
   input: {
     fontFamily: SANS,
+    includeFontPadding: false,
     flex: 1,
     paddingVertical: 13,
     paddingRight: SPACE.gutter,
     fontSize: 16,
   },
-  problem: { fontFamily: SANS, fontSize: 14, lineHeight: 19 },
+  problem: { fontFamily: SANS, includeFontPadding: false, fontSize: 14, lineHeight: 19 },
   // The design pins its one filled button at 48 tall, so the height is set rather than left to
   // whatever the label plus a padding comes to.
   connect: { borderRadius: RADIUS.button, height: 48, ...CENTER },
-  connectLabel: { fontFamily: SANS_SEMIBOLD, fontSize: TEXT.button },
-  key: { fontFamily: MONO, fontSize: 11, lineHeight: 16, padding: SPACE.gutter },
+  connectLabel: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: TEXT.button },
+  key: { fontFamily: MONO, includeFontPadding: false, fontSize: 11, lineHeight: 16, padding: SPACE.gutter },
   copy: {
     alignSelf: 'flex-start',
     marginHorizontal: SPACE.gutter,
@@ -255,5 +256,5 @@ const styles = StyleSheet.create({
     paddingVertical: SPACE.sm,
     borderRadius: RADIUS.button,
   },
-  copyLabel: { fontFamily: SANS_SEMIBOLD, fontSize: 14 },
+  copyLabel: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: 14 },
 });

@@ -383,8 +383,8 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 10,
   },
-  headerSide: { fontFamily: SANS, fontSize: 15, maxWidth: 110 },
-  headerTitle: { fontFamily: SANS_SEMIBOLD, fontSize: 15 },
+  headerSide: { fontFamily: SANS, includeFontPadding: false, fontSize: 15, maxWidth: 110 },
+  headerTitle: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: 15 },
   crumbs: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -394,7 +394,7 @@ const styles = StyleSheet.create({
     flexWrap: 'nowrap',
     overflow: 'hidden',
   },
-  crumb: { fontFamily: MONO, fontSize: 11.5, flexShrink: 1 },
+  crumb: { fontFamily: MONO, includeFontPadding: false, fontSize: 11.5, flexShrink: 1 },
   listing: { flex: 1, borderTopWidth: StyleSheet.hairlineWidth },
   spinner: { marginTop: 40 },
   row: {
@@ -405,12 +405,12 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  rowIcon: { fontFamily: MONO, fontSize: 15, width: 20 },
-  rowName: { flex: 1, fontFamily: MONO, fontSize: 14.5 },
-  rowSize: { fontFamily: SANS, fontSize: 11 },
+  rowIcon: { fontFamily: MONO, includeFontPadding: false, fontSize: 15, width: 20 },
+  rowName: { flex: 1, fontFamily: MONO, includeFontPadding: false, fontSize: 14.5 },
+  rowSize: { fontFamily: SANS, includeFontPadding: false, fontSize: 11 },
   // The bundled mono has U+203A; without naming it the glyph falls through to whatever face each
   // platform picks for it, and the two builds draw a different chevron.
-  chevron: { fontFamily: MONO, fontSize: 16 },
+  chevron: { fontFamily: MONO, includeFontPadding: false, fontSize: 16 },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: SPACE.wide,
@@ -418,7 +418,7 @@ const styles = StyleSheet.create({
     paddingBottom: 26,
     gap: 10,
   },
-  saveAs: { fontFamily: SANS_SEMIBOLD, fontSize: 10, letterSpacing: 0.6 },
+  saveAs: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: 10, letterSpacing: 0.6 },
   nameField: {
     height: 42,
     borderRadius: RADIUS.control,
@@ -428,6 +428,7 @@ const styles = StyleSheet.create({
     // fight that, as it does in every other fixed-height field here. The prototype: padding:0 12px.
     paddingVertical: 0,
     fontFamily: MONO,
+    includeFontPadding: false,
     fontSize: 14.5,
   },
   save: {
@@ -439,6 +440,6 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
   },
-  saveLabel: { fontFamily: SANS_SEMIBOLD, fontSize: TEXT.button },
-  savePath: { fontFamily: MONO, fontSize: 12, opacity: 0.65, flexShrink: 1 },
+  saveLabel: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: TEXT.button },
+  savePath: { fontFamily: MONO, includeFontPadding: false, fontSize: 12, opacity: 0.65, flexShrink: 1 },
 });

@@ -502,7 +502,7 @@ function SwitcherInner(props: SwitcherProps) {
           {/* The bundled Nerd Font draws both bar glyphs, so the two circles hold the same mark
               from the same face on both platforms. 18/16pt is the size the icon set this replaced
               drew at, minus 2 — the conversion the tabs circle already established. */}
-          <Text style={{ fontFamily: MONO, fontSize: 18, color: theme.foreground }}>{''}</Text>
+          <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 18, color: theme.foreground }}>{''}</Text>
         </Pressable>
         <Text style={[styles.count, { color: theme.foreground }]}>
           {filtered
@@ -516,7 +516,7 @@ function SwitcherInner(props: SwitcherProps) {
             { backgroundColor: theme.accent },
             pressed && PRESSED_KEY,
           ]}>
-          <Text style={{ fontFamily: MONO, fontSize: 16, color: theme.onAccent }}>{''}</Text>
+          <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 16, color: theme.onAccent }}>{''}</Text>
         </Pressable>
       </View>
       {/* T14: the search field. Same string as the terminal view's bar; the ✕ disarms both.
@@ -537,7 +537,7 @@ function SwitcherInner(props: SwitcherProps) {
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
           {/*  is the Nerd Font magnifier, already bundled — the icon itself, on both platforms.
               13pt is the 14pt symbol it replaces minus 2, the conversion the bar circles use too. */}
-          <Text style={{ color: theme.muted, fontSize: 13, fontFamily: MONO }}>{''}</Text>
+          <Text style={{ color: theme.muted, fontSize: 13, fontFamily: MONO, includeFontPadding: false  }}>{''}</Text>
           <TextInput
             value={props.query}
             onChangeText={props.onQuery}
@@ -978,7 +978,7 @@ export const Snapshot = memo(function Snapshot({
           // the device pixel, so every row lands within a third of a point of where the pane has
           // it, with nothing accumulating. It also holds a blank line — an empty span list, and so
           // an empty <Text> — open at its proper height.
-          style={{ fontFamily: MONO, fontSize, lineHeight, height: lineHeight, color: theme.foreground }}>
+          style={{ fontFamily: MONO, includeFontPadding: false, fontSize, lineHeight, height: lineHeight, color: theme.foreground }}>
           {line.map((span, j) => (
             <Text key={j} style={spanStyle(span, theme)}>
               {span.text}
@@ -1087,7 +1087,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
   },
-  searchInput: { flex: 1, fontFamily: SANS, fontSize: 14, paddingVertical: 0 },
+  searchInput: { flex: 1, fontFamily: SANS, includeFontPadding: false, fontSize: 14, paddingVertical: 0 },
   searchClear: {
     width: 19,
     height: 19,
@@ -1098,7 +1098,7 @@ const styles = StyleSheet.create({
   // Symbols on one platform and Noto Sans Symbols on the other, which is two different marks. The
   // `fontWeight: '700'` that used to sit here synthesised on neither and is gone with it; the
   // wider mono advance re-centres itself inside the 19pt CENTER box.
-  searchClearGlyph: { fontFamily: MONO, fontSize: 9 },
+  searchClearGlyph: { fontFamily: MONO, includeFontPadding: false, fontSize: 9 },
   noHits: {
     position: 'absolute',
     top: 0,
@@ -1108,8 +1108,8 @@ const styles = StyleSheet.create({
     ...CENTER,
     gap: 8,
   },
-  noHitsLead: { fontFamily: SANS, fontSize: TEXT.label },
-  noHitsQuery: { fontFamily: MONO, fontSize: TEXT.mono },
+  noHitsLead: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.label },
+  noHitsQuery: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.mono },
   // No radius here: it scales with the stage, so it is passed at the call site (see there).
   placeholder: {
     position: 'absolute',
@@ -1131,7 +1131,7 @@ const styles = StyleSheet.create({
   },
   // Same ✕, same reason as `searchClearGlyph`: the bundled font draws it, so both platforms draw
   // the same mark. It sits in a 22pt CENTER box, which absorbs the mono advance.
-  closeGlyph: { fontFamily: MONO, fontSize: 10 },
+  closeGlyph: { fontFamily: MONO, includeFontPadding: false, fontSize: 10 },
   bar: {
     position: 'absolute',
     bottom: 0,
@@ -1149,7 +1149,7 @@ const styles = StyleSheet.create({
   },
   // §3's 49pt bar circle; its 25 was exactly half of that, which is `RADIUS.pill` said properly.
   circle: { width: BAR.circle, height: BAR.circle, borderRadius: RADIUS.pill, ...CENTER },
-  count: { fontFamily: MONO, fontSize: TEXT.mono },
-  name: { textAlign: 'center', fontFamily: MONO, fontSize: 12, marginTop: 7 },
-  sub: { textAlign: 'center', fontFamily: MONO, fontSize: 10, marginTop: 2 },
+  count: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.mono },
+  name: { textAlign: 'center', fontFamily: MONO, includeFontPadding: false, fontSize: 12, marginTop: 7 },
+  sub: { textAlign: 'center', fontFamily: MONO, includeFontPadding: false, fontSize: 10, marginTop: 2 },
 });

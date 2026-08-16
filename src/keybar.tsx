@@ -718,6 +718,7 @@ function KeyBarInner(props: KeyBarProps) {
   const keyLabel = {
     color: theme.foreground,
     fontFamily: MONO,
+    includeFontPadding: false,
     fontSize: TEXT.mono,
   };
 
@@ -1198,6 +1199,7 @@ export function ClipboardPopover({
         <Text
           style={{
             fontFamily: MONO,
+            includeFontPadding: false,
             fontSize: 13,
             color: slot.pinned ? theme.accentAlternate : theme.placeholder,
           }}>
@@ -1265,7 +1267,7 @@ const styles = StyleSheet.create({
   namePillSlot: { justifyContent: 'center' },
   namePillClip: { height: '100%' },
   namePill: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
-  namePillText: { fontFamily: MONO, fontSize: 14, flexShrink: 1 },
+  namePillText: { fontFamily: MONO, includeFontPadding: false, fontSize: 14, flexShrink: 1 },
   arrowsButton: {
     width: BAR.key,
     height: BAR.key,
@@ -1283,8 +1285,8 @@ const styles = StyleSheet.create({
     paddingTop: 5,
     paddingBottom: 4,
   },
-  capLetter: { fontFamily: MONO, fontSize: TEXT.button },
-  capCaption: { fontFamily: SANS, fontSize: CAP_CAPTION },
+  capLetter: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.button },
+  capCaption: { fontFamily: SANS, includeFontPadding: false, fontSize: CAP_CAPTION },
 
   /* popovers, hanging off the popBase anchor */
   arrowsPop: { position: 'absolute', right: BAR.sideMargin },
@@ -1296,14 +1298,14 @@ const styles = StyleSheet.create({
   /** The prototype draws these two clusters at two sizes — a 17pt arrow and a 12pt word — and one
    *  style for both had split the difference at 15, which is neither. Both boxes are fixed, so
    *  nothing reflows. */
-  arrowGlyph: { fontFamily: MONO, fontSize: 17 },
-  homeEndGlyph: { fontFamily: MONO, fontSize: TEXT.note },
+  arrowGlyph: { fontFamily: MONO, includeFontPadding: false, fontSize: 17 },
+  homeEndGlyph: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.note },
   popDivider: { width: 1, opacity: 0.5, marginVertical: 3 },
   homeEnd: { gap: SPACE.xs },
   homeEndKey: { width: 56, height: 34, borderRadius: 13, ...CENTER },
   hintPop: { position: 'absolute', right: BAR.sideMargin, maxWidth: 240 },
   hintPlate: { paddingHorizontal: 14, paddingVertical: 10 },
-  hintText: { fontFamily: SANS, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
+  hintText: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
   menuPop: { position: 'absolute', left: BAR.sideMargin, width: 256 },
   // The ⋯ menu's own header and rows keep the prototype's 11pt/0.5 and 18pt gutter — its numbers
   // are not the settings sheet's, and `SECTION_HEADER` deliberately does not reach here.
@@ -1312,6 +1314,7 @@ const styles = StyleSheet.create({
     paddingTop: 11,
     paddingBottom: 6,
     fontFamily: SANS_SEMIBOLD,
+    includeFontPadding: false,
     fontSize: TEXT.caption,
     letterSpacing: 0.5,
     opacity: 0.8,
@@ -1323,7 +1326,7 @@ const styles = StyleSheet.create({
   },
   /** The first row sits under the header, where the prototype draws no rule. */
   menuRowFirst: { borderTopWidth: 0 },
-  menuLabel: { fontFamily: SANS, fontSize: TEXT.label },
+  menuLabel: { fontFamily: SANS, fontSize: TEXT.label, includeFontPadding: false },
   menuBreak: { height: 6 },
 
   /* clipboard popover — centered, 300pt, 20pt corners per the prototype */
@@ -1334,6 +1337,7 @@ const styles = StyleSheet.create({
     paddingTop: 9,
     paddingBottom: 7,
     fontFamily: SANS_SEMIBOLD,
+    includeFontPadding: false,
     fontSize: TEXT.caption,
     letterSpacing: 0.4,
   },
@@ -1346,13 +1350,14 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   clipBody: { flex: 1, minWidth: 0 },
-  clipText: { fontFamily: MONO, fontSize: TEXT.note },
-  clipMeta: { fontFamily: SANS, fontSize: TEXT.micro, marginTop: 1 },
+  clipText: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.note },
+  clipMeta: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.micro, marginTop: 1 },
   clipPin: { padding: 2 },
   clipEmpty: {
     paddingHorizontal: 14,
     paddingVertical: SPACE.md,
     fontFamily: SANS,
+    includeFontPadding: false,
     fontSize: TEXT.note,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
@@ -1381,6 +1386,7 @@ const styles = StyleSheet.create({
     height: 24,
     opacity: 0,
     fontFamily: MONO,
+    includeFontPadding: false,
     fontSize: 13,
   },
 });

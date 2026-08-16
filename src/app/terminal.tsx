@@ -2223,7 +2223,7 @@ export default function SessionScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               spellCheck={false}
-              style={[styles.searchInput, { color: theme.foreground, fontFamily: MONO }]}
+              style={[styles.searchInput, { color: theme.foreground, fontFamily: MONO, includeFontPadding: false  }]}
             />
             <Text style={[styles.searchCount, { color: theme.muted }]}>
               {occ === null || search.q.trim() === ''
@@ -2253,7 +2253,7 @@ export default function SessionScreen() {
                   { backgroundColor: theme.surface, opacity: occ === null || occ.n === 0 ? 0.35 : 1 },
                   pressed && PRESSED,
                 ]}>
-                <Text style={{ color: theme.foreground, fontFamily: SANS_SEMIBOLD, fontSize: 13 }}>
+                <Text style={{ color: theme.foreground, fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: 13 }}>
                   {dir === 'prev' ? '∧' : '∨'}
                 </Text>
               </Pressable>
@@ -2803,8 +2803,8 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 11,
   },
-  searchInput: { flex: 1, fontFamily: SANS, fontSize: 13, paddingVertical: 0 },
-  searchCount: { fontFamily: MONO, fontSize: 11 },
+  searchInput: { flex: 1, fontFamily: SANS, includeFontPadding: false, fontSize: 13, paddingVertical: 0 },
+  searchCount: { fontFamily: MONO, includeFontPadding: false, fontSize: 11 },
   /** One stepper key. The pair sits in a 2pt-gap group of its own (see the row's JSX) so it reads
    *  as one segmented control, which is how the prototype draws them. */
   searchStep: {
@@ -2813,7 +2813,7 @@ const styles = StyleSheet.create({
     borderRadius: SEARCH_RADIUS.terminal,
     ...CENTER,
   },
-  searchDone: { fontFamily: SANS, fontSize: 15, paddingHorizontal: 2 },
+  searchDone: { fontFamily: SANS, includeFontPadding: false, fontSize: 15, paddingHorizontal: 2 },
   stageWrapper: { position: 'absolute', top: 0, left: 0, overflow: 'hidden' },
   /** The shared zoom container — deliberately NOT clipping: the cards beside the live one live a
    *  pitch outside it and each brings its own crop. */
@@ -2836,10 +2836,11 @@ const styles = StyleSheet.create({
     gap: SPACE.md,
     padding: SPACE.xxl,
   },
-  glyph: { fontFamily: MONO, fontSize: 44 },
-  headline: { fontFamily: SANS_BOLD, fontSize: 24 },
+  glyph: { fontFamily: MONO, includeFontPadding: false, fontSize: 44 },
+  headline: { fontFamily: SANS_BOLD, includeFontPadding: false, fontSize: 24 },
   sentence: {
     fontFamily: SANS,
+    includeFontPadding: false,
     fontSize: TEXT.label,
     lineHeight: leading(TEXT.label),
     textAlign: 'center',
@@ -2848,5 +2849,5 @@ const styles = StyleSheet.create({
   /** A filled button, wearing the app's button corner rather than the field's — these three had
    *  drifted to 12, which is what a field is. */
   action: { paddingHorizontal: SPACE.wide, paddingVertical: SPACE.md, borderRadius: RADIUS.button },
-  actionLabel: { fontFamily: SANS_SEMIBOLD, fontSize: TEXT.button },
+  actionLabel: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: TEXT.button },
 });

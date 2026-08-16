@@ -222,7 +222,7 @@ export default function SettingsSheet({
 
   //  is the Nerd Font tick, pinned to MONO so both platforms draw the same one — the switcher's
   // Done tick is the same glyph in the same family, and the two must not drift apart.
-  const check = <Text style={{ fontFamily: MONO, fontSize: 13, color: theme.accent }}>{''}</Text>;
+  const check = <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 13, color: theme.accent }}>{''}</Text>;
 
   /**
    * A disclosure row naming the theme in that slot, and its list underneath while it is open.
@@ -251,7 +251,7 @@ export default function SettingsSheet({
           </Text>
           {/*  / , the Nerd Font chevrons, in MONO: the U+2304 this used to fall back to is in
               neither Roboto nor Noto Sans, so it drew a tofu box on Android. */}
-          <Text style={{ fontFamily: MONO, fontSize: 12, color: theme.muted }}>
+          <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 12, color: theme.muted }}>
             {isOpen ? '' : ''}
           </Text>
         </Pressable>
@@ -445,8 +445,8 @@ const styles = StyleSheet.create({
   rowLine: { borderTopWidth: StyleSheet.hairlineWidth },
   /** A theme inside an expanded list, indented off the disclosure row that opened it. */
   subRow: { paddingLeft: SPACE.xxl },
-  label: { flex: 1, fontFamily: SANS, fontSize: TEXT.label },
-  value: { fontFamily: MONO, fontSize: TEXT.base, marginRight: SPACE.md },
+  label: { flex: 1, fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.label },
+  value: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.base, marginRight: SPACE.md },
   // The swatch strip and its chips are the prototype's own one-off geometry (gap:3, padding:3,
   // 9×13 chips at 2.5) — a single element's numbers, deliberately not in the shared vocabulary.
   swatch: {
@@ -464,10 +464,11 @@ const styles = StyleSheet.create({
   stepKey: { width: 38, height: 30, ...CENTER },
   // MONO not for the shape but for the picker: − (U+2212) and + are both in the bundled font,
   // and pinning the family is what stops each platform choosing its own fallback face.
-  stepGlyph: { fontFamily: MONO, fontSize: 20, lineHeight: 24 },
+  stepGlyph: { fontFamily: MONO, includeFontPadding: false, fontSize: 20, lineHeight: 24 },
   stepDivider: { width: 1 },
   note: {
     fontFamily: SANS,
+    includeFontPadding: false,
     fontSize: TEXT.caption,
     lineHeight: leading(TEXT.caption),
     paddingHorizontal: SPACE.gutter,
