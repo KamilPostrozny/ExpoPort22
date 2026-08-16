@@ -215,6 +215,9 @@ async function tick(): Promise<void> {
   timer = setTimeout(tick, pollDelay(state.attached, ticks));
 }
 
+/** What the last poll aimed at, so the choice is logged once rather than every 2s. */
+let aimedAt: string | null | undefined;
+
 async function poll(): Promise<void> {
   if (polling) return; // a slow link answers late; never stack channels on top of it
   polling = true;
@@ -223,6 +226,10 @@ async function poll(): Promise<void> {
     // turns out to be wrong — a session renamed or killed under us — the targeted form answers
     // nothing, and the untargeted one is better than going blind and dropping the tabs button.
     const session = pollSession(getSettings());
+    if (session !== aimedAt) {
+      aimedAt = session;
+      console.log(`[tmux] poll aimed at ${session === null ? 'nothing (untargeted)' : `session ${session}`}`);
+    }
     let answer = parsePoll(await run(pollCommand(session)));
     if (answer === null && session !== null) answer = parsePoll(await run(POLL));
     if (!up) return;

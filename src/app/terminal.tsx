@@ -1603,12 +1603,29 @@ export default function SessionScreen() {
   rbOpenRef.current = rbOpen;
   const fgCommand = tmux.foreground?.command ?? null;
   const fgPid = tmux.foreground?.pid ?? null;
+  /**
+   * The window a hop is waiting to hear about. `select-window` is asynchronous, so for a beat or
+   * two after a commit the poll still describes the window we LEFT — which revived the old
+   * window's process on the new tab (user, 2026-08-16: "the pill stayed"). An answer about any
+   * other window is stale until the one we hopped to shows up.
+   *
+   * It clears itself three ways: the expected window answers, three answers go by without it (the
+   * hop did not take, and reality wins), or the recipe is set by the hop itself. So unlike a
+   * standing filter this cannot strand the band on a window you are no longer looking at.
+   */
+  const awaiting = useRef<{ index: number; tries: number } | null>(null);
   useEffect(() => {
     // Not while anything is sliding: after a committed hop the very next display-message answer
     // carries the NEW window's foreground, and this flipped the handle ~100ms into every slide.
     // `ribbonForWindow` already set the right recipe at the commit; when the freeze lifts this
     // re-applies the latest poll, a no-op whenever the two agree.
     if (frozen) return;
+    const wait = awaiting.current;
+    if (wait !== null) {
+      if (tmux.windowIndex === wait.index) awaiting.current = null;
+      else if (++wait.tries <= 3) return;
+      else awaiting.current = null;
+    }
     setRibbonCore((c) =>
       ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
     );
@@ -1631,6 +1648,8 @@ export default function SessionScreen() {
    *  goes through here — a committed bar swipe, a card tap, a new window. */
   const ribbonForWindow = (win: TmuxWindow, why: string) => {
     console.log(`[ribbon] forWindow ${win.index} ${win.command} (${why})`);
+    awaiting.current = { index: win.index, tries: 0 }; // until tmux agrees we are there
+
     const idle = IDLE_SHELLS.has(win.command);
     setRibbonCore((c) =>
       idle ? ribbonSwitchedToIdle(c) : ribbonPoll(c, { command: win.command, pid: null }, Date.now()),
