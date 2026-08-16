@@ -35,6 +35,19 @@ const GRID_TOP = 0;
 /** The card's own corner radius (14pt at design width). */
 const CARD_R = 14 / DESIGN_W;
 /**
+ * The accent ring, ON SCREEN, and the same number at both ends of the flight.
+ *
+ * The flying surface draws it as an `absoluteFill` overlay divided by the zoom's scale, and the
+ * grid card it lands on draws a real border; they were 3pt and 2pt, so the ring visibly thinned at
+ * the handover — and because a border on an `absoluteFill` is drawn INWARD, that last point also
+ * uncovered a point of content along all four edges, which is the "micro adjustment of either its
+ * contents or the outline" in the same breath (user, 2026-08-17). One constant is the only thing
+ * that keeps two implementations of one ring honest.
+ */
+export const CARD_RING = 2;
+/** The same ring on a card that is not the active one: thinner, and in the border role. */
+export const CARD_RING_IDLE = 1;
+/**
  * The display's own corner radius — where the flying surface's rounding STARTS, so the terminal
  * reads as the phone's screen shrinking rather than as a rectangle that rounds off somewhere over
  * the grid (user, 2026-08-10). 62pt is the radius of the device the prototype is drawn at

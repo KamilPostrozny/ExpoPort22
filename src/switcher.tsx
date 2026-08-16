@@ -48,6 +48,8 @@ import {
   TEXT,
 } from '@/style';
 import {
+  CARD_RING,
+  CARD_RING_IDLE,
   DESIGN_W,
   gridHeight,
   gridTop,
@@ -829,11 +831,13 @@ function WindowCard({
     boxShadow: `0 18px 30px rgba(0,0,0,${0.55 * lift.value})`,
   }));
 
+  // `CARD_RING` and not a literal: the flying surface draws this same ring on its way here, and
+  // the two only agree at the landing if they read one number (user, 2026-08-17).
   const ring = dragged
-    ? { borderWidth: 2, borderColor: theme.accentAlternate } // mauve in every flavour's role map
+    ? { borderWidth: CARD_RING, borderColor: theme.accentAlternate } // mauve in every flavour's role map
     : card.win.active
-      ? { borderWidth: 2, borderColor: theme.accent }
-      : { borderWidth: 1, borderColor: theme.border };
+      ? { borderWidth: CARD_RING, borderColor: theme.accent }
+      : { borderWidth: CARD_RING_IDLE, borderColor: theme.border };
 
   // The border is part of the inset, not extra: RN lays a view's content out inside it, so a 2pt
   // ring plus the full padding put the snapshot 2pt further in than the terminal's own inset lands

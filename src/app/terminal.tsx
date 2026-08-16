@@ -84,6 +84,7 @@ import Switcher, {
   type Snap,
 } from '@/switcher';
 import {
+  CARD_RING,
   SEARCH_BAR_H,
   gridTop,
   revealOffset,
@@ -2089,13 +2090,15 @@ export default function SessionScreen() {
   }));
 
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
-  // with it; border width divided by scale so it reads ~3pt on screen throughout.
+  // with it; border width divided by scale so it reads `CARD_RING` on screen throughout, which is
+  // the same width the grid card it hands over to draws. It was 3 against that card's 2 and the
+  // ring stepped thinner on the landing frame (user, 2026-08-17).
   const ringStyle = useAnimatedStyle(() => {
     const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
-      borderWidth: prog.value > 0 ? 3 / f.scale : 0,
+      borderWidth: prog.value > 0 ? CARD_RING / f.scale : 0,
     };
   });
 
