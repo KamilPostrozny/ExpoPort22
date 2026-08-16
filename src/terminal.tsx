@@ -697,7 +697,18 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       if (since >= 150) flush();
       else settle = setTimeout(flush, 150 - since);
     });
-    observer.observe(host.current!);
+    // `border-box`, not the default `content-box`: the callback's own `fitRows` writes
+    // `paddingTop` onto this very element, and padding comes out of the content box — so a
+    // content-box observation sees its own inset as a resize, fires a second round, and Chromium
+    // reports the deferred first round as "ResizeObserver loop completed with undelivered
+    // notifications". That arrives as a window error whose `.error` is null, and null is all the
+    // dev-server log gets to print — a bare `DOM  ERROR  null` on every connect and every keyboard
+    // edge, which is a red line that says nothing and hides the ones that do.
+    // The border box is fixed by the layout above and does not move with the padding, so the real
+    // edges — keyboard, rotation, zoom — still fire and the feedback does not. Verified on the
+    // emulator 2026-08-16: same connect, `ResizeObserver loop` gone from the webview console and
+    // no new `DOM ERROR`. The `rowRemainder` warning is NOT this and still fires — separate bug.
+    observer.observe(host.current!, { box: 'border-box' });
     resize();
     latest.current.onBoot();
     reportModes(); // the baseline: a webview that just booted owes T11 the current state
