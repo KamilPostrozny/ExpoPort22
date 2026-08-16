@@ -1631,6 +1631,9 @@ export default function SessionScreen() {
    *  land on the far side of the gate, never a millisecond short of it. */
   const [, setGateBeat] = useState(0);
   useEffect(() => {
+    console.log(
+      `[ribbon] run #${ribbonCore.instance} ${ribbonCore.command ?? 'idle'} pid=${ribbonCore.pid ?? '-'} startedAt=${ribbonCore.startedAt}`,
+    );
     const timer = setTimeout(() => setGateBeat((n) => n + 1), RIBBON_MIN_RUN_MS + 50);
     return () => clearTimeout(timer);
   }, [ribbonCore.instance]);

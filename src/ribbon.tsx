@@ -103,11 +103,15 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
   const bandW = Math.max(160, props.width - props.padH);
   const reduceMotion = useReducedMotion();
 
-  // The chip's clock: re-render once a second while a live process is being timed.
-  const [, setBeat] = useState(0);
+  // The chip's clock. The tick is STATE holding the current time, not a counter that re-renders a
+  // `Date.now()` read in the body: this project builds with the React Compiler, which memoises
+  // that read against props that do not change on a tick, so the elapsed time was computed once
+  // at mount — when it was genuinely zero — and reused forever. On device the chip sat at 0:00
+  // through a 35-minute session (2026-08-16). Keyed on state, any memoisation invalidates.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!data.pulse) return;
-    const timer = setInterval(() => setBeat((n) => n + 1), 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [data.pulse]);
 
@@ -241,7 +245,7 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
   );
 
   const meta = data.pulse
-    ? ` · ${formatElapsed(Date.now() - props.startedAt)}`
+    ? ` · ${formatElapsed(now - props.startedAt)}`
     : recipe.id === 'suspended'
       ? ' · stopped'
       : null;
