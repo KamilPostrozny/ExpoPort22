@@ -40,7 +40,7 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 | Terminal emulation & render | **xterm.js inside an Expo DOM component** (webview). Gives xterm-256color, DECCKM, alt-screen detection, mouse-protocol negotiation, OSC 8 via link addon, OSC 52 hook, scrollback, selection. Bundled Nerd Font via CSS `@font-face`. Custom touch layer in the DOM component implements the notch-scroll rules (§4.3) where the negotiated protocol is actually known. |
 | Keys | ed25519 via `@noble/curves` (same author as `@noble/ed25519`, but self-contained — the standalone package needs a SHA-512 hook wired by hand); 32-byte seed in `expo-secure-store` (device-only, no backup). Public key re-derived on load. |
 | Persistence | Settings in AsyncStorage (forward-tolerant decode); seed + pinned host keys in SecureStore keyed `host:port`. |
-| UI/gestures | react-native-reanimated + gesture-handler for bar swipes, card grid, zoom transition; `expo-blur` for iOS glass (Android uses flush Material surfaces per design); expo-haptics, expo-clipboard, expo-image-picker, expo-document-picker, expo-camera. |
+| UI/gestures | react-native-reanimated + gesture-handler for bar swipes, card grid, zoom transition; `expo-linear-gradient` for the switcher's scroll-under ramp; expo-haptics, expo-clipboard, expo-image-picker, expo-document-picker, expo-camera. **No `expo-blur`** — removed 2026-08-16 (b427712): a backdrop blur cannot be one design across both platforms, so every surface is an opaque plate. Likewise no `expo-symbols` (SF Symbols are an Apple API; both platforms draw bundled Nerd Font glyphs). |
 | Theming | Catppuccin 4 flavours as 26-colour static data; ANSI 16 + all chrome derived via semantic roles (accent, danger, surface, panel, scrim, sub, muted…). `auto` follows system appearance live. |
 
 ---
@@ -50,14 +50,24 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 - Font: JetBrains Mono Nerd Font regular+bold, bundled (assets exist in the design project — copy the two `.ttf`s).
 - Flavours (bg/mantle/crust/surface0/text/sub/overlay0/accent/red/green/…): exact hexes in
   `Port22 Prototype.dc.html` `FLAV` table — Mocha `#1e1e2e/#181825/#11111b/#313244/#cdd6f4/#a6adc8/#6c7086/#89b4fa/#f38ba8/#a6e3a1`, plus Latte/Frappé/Macchiato sets. Terminal screens Mocha by default, setup reads well in Latte.
-- iOS glass recipe: `blur(14px) saturate(160%)`, tint `rgba(205,214,244,0.08)` dark /
+- ~~iOS glass recipe: `blur(14px) saturate(160%)`, tint `rgba(205,214,244,0.08)` dark /
   `rgba(255,255,255,0.55)` light, inset specular `1.5px 1.5px 1px rgba(255,255,255,0.12)`,
-  border `0.5px rgba(255,255,255,0.12)`.
+  border `0.5px rgba(255,255,255,0.12)`.~~ **Void 2026-08-16 (b427712).** The surface recipe is
+  now one plate for both platforms: opaque `theme.surface`, a 0.5pt hairline at `foreground` 12%
+  (`plateEdge`), the caller's radius, no shadow. Blur left the app entirely — iOS samples the
+  window for free but Android's Dimezis backend re-draws a nominated subtree offscreen every
+  frame, needs `blurTarget`/`blurMethod` this app never passed, forks three ways at API 31, and
+  paints a near-black film with no target. Two mechanisms is not one design. `src/ribbon.tsx`
+  reached the same answer first, for contrast reasons; `Plate` in `src/keybar.tsx` carries it.
 - Bar geometry: 49pt circles, 49pt pill, 35pt keys (18pt radius), 24pt side margins,
   hairline divider before the arrows button; popovers 26pt corners; ribbon/chord caps ~50pt wide with 8.5pt captions.
 - Android: **identical to iOS** — same Catppuccin roles, same geometry, same surfaces, same
-  glass. The Android design frames this bullet used to cite are deleted (2026-08-16). What follows
-  in strikethrough is the old divergence, kept only so it is recognisable when found in code:
+  plates, same bundled Inter for chrome text and same Nerd Font glyphs for icons. The Android
+  design frames this bullet used to cite are deleted (2026-08-16), and as of b427712 the code
+  matches: `src/style.ts` imports no `Platform`, and the seven surviving branches app-wide are all
+  behaviour (pageSheet, `keyboardWill*`, `ascii-capable`, the back button and ladder, the IME
+  double-up guard). What follows in strikethrough is the old divergence, kept only so it is
+  recognisable when found in code:
   ~~elevated `surface0` containers instead of glass (no blur, small shadow), 16pt bar corners,
   12pt keys, 20pt popovers, 8pt side margins, bar docked flush to
   Gboard; FAB for new tab, Roboto for chrome text.~~ The gesture pill and Gboard docking are
@@ -129,8 +139,14 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 ### 4.9 Lifecycle
 - Background kills socket (expected). Foreground: dead → auto reconnect, re-auth, new PTY, and the §4.1 start line again — which on the tmux modes is an *attach*, so the resumed session is the one that was there. Two consecutive failures → stop, show manual Reconnect. Distinct Disconnected vs Cannot-connect states (icon, headline, sentence, Setup/Reconnect buttons) + Connecting spinner.
 
-### 4.10 Android specifics (design file §2f/2g)
-- Same functionality, Material skin: flush mantle surfaces, no blur; bar rides Gboard (WindowInsets); switcher per design §5c — the same shared-progress transform (the prototypes share the zoom verbatim; "container-transform" is its Material name), grid bottom bar of **Done text button (left) · Roboto count · 56dp FAB (right, births the new tab)** — this file's older "top-left back" was the §2g draft, superseded — and system back walks §5d's ladder — settings sheet dismisses, the destination browser goes up one directory then dismisses from `/`, popovers/⋯ menu close, the grid closes into the pane, and at the bare terminal back is **home** (backgrounds the app; never a pop to Setup, which would skip the disconnect); gesture pill instead of home indicator. Everything else identical.
+### 4.10 Android specifics — **look section VOID as of 2026-08-16 (b427712)**
+- **There is no Material skin and no Android-only chrome.** Everything below about how things
+  *look* is dead: the flush mantle surfaces, the Material switcher bar, the FAB and the Roboto
+  count were all deleted, and both platforms now draw iOS's `+ circle | N Tabs | Done ✓`. What
+  survives from this section is only what the *system* owns: Gboard docking (WindowInsets), the
+  gesture pill, runtime permission prompts, and §5d's back ladder. Read the strikethrough as
+  history, not spec.
+- ~~Same functionality, Material skin: flush mantle surfaces, no blur; bar rides Gboard (WindowInsets); switcher per design §5c — the same shared-progress transform (the prototypes share the zoom verbatim; "container-transform" is its Material name), grid bottom bar of **Done text button (left) · Roboto count · 56dp FAB (right, births the new tab)** — this file's older "top-left back" was the §2g draft, superseded~~ — and system back walks §5d's ladder — settings sheet dismisses, the destination browser goes up one directory then dismisses from `/`, popovers/⋯ menu close, the grid closes into the pane, and at the bare terminal back is **home** (backgrounds the app; never a pop to Setup, which would skip the disconnect); gesture pill instead of home indicator. Everything else identical.
 
 ---
 

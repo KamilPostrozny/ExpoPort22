@@ -12,6 +12,15 @@ wrote full specs, and one adversarially verified every claim against the actual 
 **Full specs:** [Accessory](ribbon/spec-accessory.md) · [Compact](ribbon/spec-compact.md) ·
 [Reader](ribbon/spec-reader.md)
 
+> **Postscript, 2026-08-16 (b427712).** This study's central finding — that an opaque plate beats
+> glass over unpredictable content, and that `expo-blur` cannot cross the WebView's window boundary
+> on Android — was generalised from the ribbon to the whole app. Blur is gone everywhere,
+> `expo-blur` is uninstalled, and `Glass` in `src/keybar.tsx` is now `Plate`: opaque
+> `theme.surface`, a 0.5pt hairline, no shadow, one code path for both platforms. The dependency
+> survey below is therefore out of date in one direction only — `@expo/ui`, `expo-glass-effect`
+> and `expo-symbols` were all *uninstalled* rather than adopted. The reasoning is still worth
+> reading; the package inventory is not.
+
 ---
 
 ## 1. The complaint is one bug, and it is measurable
@@ -125,10 +134,12 @@ Everything below was fetched and read, not recalled.
 
 **Platform escape hatches, checked**
 
-- `@expo/ui` (~57.0.9, installed, referenced nowhere in `src/`) gives a real SwiftUI `Menu` /
-  Compose `DropdownMenu`. But: **a UIMenu cannot present itself** — programmatic open is
-  Android-only. It can be the *open half*, never the whole design.
-- `expo-glass-effect` (~57.0.1, installed, unused) is **iOS 26+ only**, falls back to a plain View.
+- `@expo/ui` (~57.0.9, was installed and referenced nowhere in `src/`; **uninstalled 2026-08-16**)
+  gives a real SwiftUI `Menu` / Compose `DropdownMenu`. But: **a UIMenu cannot present itself** —
+  programmatic open is Android-only. It can be the *open half*, never the whole design.
+- `expo-glass-effect` (~57.0.1, was installed and unused; **uninstalled 2026-08-16**) is
+  **iOS 26+ only**, falls back to a plain View — and an iOS-only surface is by definition not a
+  design both platforms can draw.
 - RNGH **will not** arbitrate against system edge gestures
   ([#833](https://github.com/software-mansion/react-native-gesture-handler/issues/833), closed as
   not planned) — and Android's back gesture owns **both** edges, with exclusion capped at 200dp and

@@ -27,9 +27,12 @@ indistinguishable from the same screen on iOS.
 
 Every Android case checks all of it, not just the behaviour the case names:
 
-- **icons** — the right glyph, the right size, the right weight, the right optical centre. Every
-  `<SymbolView>` renders its `fallback` on Android (expo-symbols is iOS-only), so *every* icon on
-  Android is a second implementation of the iOS one and none of them is verified by the iOS tick.
+- **icons** — the right glyph, the right size, the right weight, the right optical centre. There
+  is no longer a second implementation to catch out: `expo-symbols` is uninstalled and all eleven
+  former `<SymbolView>` sites draw the same bundled Nerd Font codepoint on both platforms
+  (2026-08-16). SF Symbols were an Apple API, so parity cost the iOS build its symbols — that was
+  the deliberate trade. What still needs checking is that the codepoint is actually IN the face:
+  `python3 scripts/patch-font.py` fails loudly if a chrome glyph is missing.
 - **fonts** — family, size, weight, letter-spacing, and that the glyph is actually in the bundled
   face. A codepoint the face lacks does not fail loudly; it falls through to Noto at a different
   weight (`scripts/patch-font.py` holds the check).
@@ -503,25 +506,35 @@ not repeated here.
 
 **This section was written as "the Android skin" and that premise is dead (2026-08-16 — AGENTS.md,
 "One app, two platforms").** There is no Material surface and no separate Android metric set: the
-bar has to look like the iOS bar. The `Glass` Platform branch and the `ANDROID ?` radii in
-`src/style.ts` are the divergence, not the specification — they are debt to remove, and any case
-below that reads as "Android does X instead" is inverted until it is rewritten against an iOS
-screenshot. What genuinely stays here is Gboard docking, which is a real system difference.
+bar has to look like the iOS bar.
+
+**The debt is now paid (b427712).** `src/style.ts` has no `Platform` import and no `ANDROID ?`
+arms; `Glass` is gone entirely, renamed `Plate`, with no platform branch inside it. So the cases
+below are no longer "inverted, pending a fix" — they state what the code already does, and they
+are verification, not a to-do list. What genuinely stays here is Gboard docking, which is a real
+system difference.
 
 Haptics may be inert on the emulator — feel them on hardware, only observe no crash here.
 
-### T7A.1 — INVERTED (2026-08-16): the bar stack matches iOS, blur included
+### T7A.1 — The bar stack matches iOS: opaque plates, no blur on EITHER platform
 - **Setup**: connected, keyboard up, dark flavour (Mocha). An iOS screenshot of the same screen,
   same flavour, keyboard up — **ask the user for it**; do not judge this case without it.
 - **Steps**: look at the ⋯ circle, the pill, the tabs circle; tap Ctrl (chord strip), the
   arrows button (popover), long-press Paste (clipboard popover), ⋯ (menu). Crop each control at
   native resolution and compare it to the same control in the iOS shot.
-- **Expect**: each surface is the *same* surface iOS draws — same translucency, same specular
-  border, same corner radius, same shadow. This case previously demanded the opposite ("opaque
-  `surface0`, no blur, no translucency") on the strength of a design file that no longer exists;
-  the `if (ANDROID)` early return in `Glass` (`src/keybar.tsx`) is what makes it fail today and is
-  the thing to remove. If Android cannot reach parity here, that is a finding to raise, not a
-  divergence to tick.
+- **Expect**: each surface is the *same* surface iOS draws: an opaque `theme.surface` plate, a
+  0.5pt hairline at `foreground` 12%, the caller's corner radius, and no shadow.
+- **This case has been wrong twice, in opposite directions — read the history before judging it.**
+  It first demanded Material ("opaque `surface0`, no blur") off a deleted Android design file. On
+  2026-08-16 it was inverted to demand iOS's blur ("same translucency, same specular border").
+  **That is also void.** A backdrop blur is not one design: iOS samples the window for free, while
+  Android's Dimezis backend re-draws a nominated subtree into an offscreen canvas every frame,
+  needs a `blurTarget` + `blurMethod` this app never passed, forks three ways at API 31
+  (`ExpoBlurView.kt:70,103,133`), and silently paints a near-black film with no target
+  (`BlurView.js:54`) — which is what Android was really drawing all along. So blur was removed
+  from BOTH platforms and `expo-blur` uninstalled; `src/ribbon.tsx` had already reached the same
+  answer for its own contrast reasons. **The iOS build changed here too** — if the iOS shot still
+  shows blur, it is the stale build, not the reference.
 - Android: [ ]
 
 ### T7A.2 — INVERTED (2026-08-16): metrics are the iOS metrics
@@ -563,10 +576,15 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
 - **Setup**: shell prompt; some text copied on the emulator for the pasteboard row.
 - **Steps**: tap Ctrl then the `C` cap; open the arrows popover, tap ↑; long-press Paste,
   tap a clipboard row.
-- **Expect**: each renders as an opaque elevated surface (T7A.1's skin) and works: `^C` on
-  the wire, history walks on ↑, the row's text is typed unexecuted. Captions and headers
-  (chord captions, CLIPBOARD, UPLOAD FILE) render in Roboto — the system default, no
-  fontFamily set — while key glyphs stay JetBrains Mono.
+- **Expect**: each renders as an opaque plate (T7A.1) and works: `^C` on the wire, history
+  walks on ↑, the row's text is typed unexecuted. Captions and headers (chord captions,
+  CLIPBOARD, UPLOAD FILE) render in **Inter**, bundled — NOT Roboto, and not the system default.
+  Chrome text used to set no `fontFamily` at all, which drew SF Pro on iOS and Roboto on Android:
+  divergence by omission, and the one case that could not be closed by taking the iOS value, since
+  SF Pro cannot be shipped to Android. Both platforms moved to Inter (b427712). Weight comes from
+  the family name (`Inter-Medium`/`-SemiBold`/`-Bold`), never `fontWeight` — a numeric weight
+  beside a one-face custom family fake-bolds on Android and no-ops on iOS. Key glyphs stay
+  JetBrains Mono.
 - Android: [ ]
 
 ### T7A.7 — Haptics on press do not crash
@@ -860,13 +878,13 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Setup**: a large file (tens of MB — the send needs to take a visible moment) via ⋯ → Files.
 - **Steps**: Save here; immediately look at the ⋯ circle and try tapping it.
 - **Expect**: the circle is accent-filled with the glyph in background colour for the duration
-  of the SFTP write, and tapping it does nothing; it returns to glass when the send settles —
+  of the SFTP write, and tapping it does nothing; it returns to the plate when the send settles —
   that is the entire progress UI (§4.4/§4.6).
 - iOS: [x] — **three bugs on the way through.** (1) Picking a video threw
   `PHPhotosErrorDomain error 3164` **uncaught in a promise** — a red box instead of a message;
   `pick()` now catches it and shows one "Could not read the file" alert. (2) The busy tint sat
   *under* Glass's blur and light-mode white overlay, so in Latte the accent washed out and the
-  glyph (painted in `theme.background`) nearly vanished; it is drawn over the glass now, with its
+  glyph (painted in `theme.background`) nearly vanished; it is drawn over the surface now, with its
   own radius, because an absolutely-filled child squared off the circle's edge when left to the
   parent's clip. (3) The ssh logging proxy printed the whole base64 upload, which put tens of MB
   through Metro's socket — `RangeError: Max payload size exceeded`, HMR dead, log gone; long
@@ -1052,10 +1070,13 @@ same session.
 All cases on the Android **emulator** (gated on T3.0's build), connected to the host machine's
 sshd at `10.0.2.2`, tmux configured and attached, three windows made beforehand — same harness
 as §T10. The transform, grid, cards and gestures are the SAME code as iOS (both design
-prototypes share the zoom verbatim, opacity stagger included); what is Android-only is the
-grid's bottom bar (Done text button · Roboto count · 56dp FAB), the FAB as the birth origin,
-and the system-back subscription. §T10's gesture cases are not repeated — walk T10A.5 and spot-
-check the rest only if the bar chrome or back handling misbehaves.
+prototypes share the zoom verbatim, opacity stagger included). **The Android-only bottom bar is
+gone** (b427712): the "Done text button · Roboto count · 56dp FAB" arrangement, its five
+Android-only styles and its `Platform.select` padding were deleted, and both platforms now draw
+iOS's `+ circle | N Tabs | Done ✓`. The FAB is no longer the birth origin — the + circle is, on
+both. What is still genuinely Android-only is the system-back subscription. §T10's gesture cases
+are not repeated — walk T10A.5 and spot-check the rest only if the bar chrome or back handling
+misbehaves.
 
 ### T10A.1 — Container-transform enter/exit (tabs tap and bar-swipe-up)
 - **Setup**: attached, three windows, window 2 active.
@@ -1067,17 +1088,18 @@ check the rest only if the bar chrome or back handling misbehaves.
   rides the finger, drifts with it horizontally, and a short release springs back to rest.
 - Android: [ ]
 
-### T10A.2 — INVERTED (2026-08-16): the bottom bar is the iOS bottom bar
+### T10A.2 — The bottom bar is the iOS bottom bar
 - **Setup**: switcher open. An iOS screenshot of the same switcher — **ask the user**.
 - **Steps**: open the switcher; crop the bottom bar at native resolution; compare control by
   control to the iOS shot.
-- **Expect**: the same controls iOS draws, in the same places, with the same glyphs — not the
-  Material substitutes this case used to demand ("Done" text button, Roboto count, 56dp FAB).
-  `Platform.OS === 'android'` at `src/switcher.tsx:499` renders that alternate bar and is the
-  thing to remove.
+- **Expect**: the same controls iOS draws, in the same places, with the same glyphs — `+ circle |
+  N Tabs | Done ✓`, the count in JetBrains Mono at `TEXT.mono`, not the Material substitutes this
+  case used to demand ("Done" text button, Roboto count, 56dp FAB). The
+  `Platform.OS === 'android'` branch that rendered the alternate bar is deleted (b427712), so
+  there is one code path and a difference here means a rendering bug, not a branch.
 - Android: [ ]
 
-### T10A.3 — FAB births a window out of itself
+### T10A.3 — The + circle births a window out of itself (was: the FAB)
 - **Steps**: with 3 windows open the switcher, tap the FAB; on the laptop run
   `tmux list-windows`.
 - **Expect**: a new terminal grows out of the FAB's bottom-right frame to full screen (the
@@ -1452,7 +1474,7 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
 ### T12.3 — A flavour tap restyles the live session, no reconnect
 - **Setup**: `vim` open with syntax colouring, sheet up.
 - **Steps**: tap Latte, then Frappé, then Mocha, watching terminal and chrome.
-- **Expect**: on every tap the terminal grid, the key bar glass, the sheet itself and the
+- **Expect**: on every tap the terminal grid, the key bar plates, the sheet itself and the
   check mark all restyle immediately; the SSH connection never blips (vim stays exactly
   where it was, `[session]` log shows no reconnect). Sub-second, no remount flash.
 - iOS: [ ]
@@ -1640,8 +1662,9 @@ After all T12 changes, re-run the headline case of each earlier section — one 
   at all. The browse sheet is inset 20 on every block (it was 18 throughout) and its name field
   sits centred rather than clipped high. Status actions no longer wear a field's corner and do
   respond to a touch.
-- **Also**: on a **light** scheme, the glass border is not a white line on a near-white surface —
-  it was hardcoded to its dark value while the tint beside it was already branched.
+- **Also**: on a **light** scheme, the plate's hairline is not a white line on a near-white
+  surface — it was hardcoded to its dark value while the tint beside it was already branched.
+  `plateEdge` (was `glassEdge`) takes it off `theme.foreground`, which fixes it for all 26.
 - **Not to be measured against a grid**: 7 *and* 8 on gaps, 11.5 and 12.5 on captions are the
   prototype's own hand-tuning and are correct as they are. The single-element numbers (9×13
   swatch, 38×30 stepper key, the two sheets' deliberately different shadows) stayed at their call
@@ -1688,14 +1711,21 @@ platforms"). Where a case below says "28dp Material corners" or "hand-drawn bott
 read it as inverted: the sheet has to have the *iOS* corner and the *iOS* look, reached through
 whatever Modal mode Android needs to get there. Those numbers came from a deleted design file.
 
+`SHEET_RADIUS` no longer branches — it is 24 on both (b427712). The upload sheet's Modal branch
+stays, because `presentationStyle="pageSheet"` is an iOS-only Modal mode and Android has to
+hand-build the equivalent; that is a permitted category-(1) branch, and the *result* is what these
+cases judge. Three numbers on it are still unmeasured and want settling here: the `insets.top + 46`
+top gap, the footer inset above the home indicator, and whether iOS's system pageSheet corner is
+really 24. One side-by-side screenshot settles all three.
+
 ### T12A.1 — Settings sheet: matches iOS, swipe-dismiss, back dismisses
 - **Setup**: connected, keyboard up.
 - **Steps**: ⋯ → Settings; look at the sheet; drag it down past a third and release; reopen;
   press system back.
-- **Expect**: the sheet is the iOS sheet — same top corner radius, same ground, same cards,
-  same blur or absence of it (**ask the user for an iOS screenshot**; the old "28dp Material
-  corners, no blur anywhere" came from the deleted design file, and `SHEET_RADIUS` in
-  `src/style.ts` still branches). The swipe-dismiss rides the finger and releases exactly as on
+- **Expect**: the sheet is the iOS sheet — same top corner radius (`SHEET_RADIUS` 24, one value
+  for both), same ground, same cards, and **no blur on either platform** (**ask the user for an
+  iOS screenshot**; both the old "28dp Material corners" and the later "same blur as iOS" are
+  void — see T7A.1 for why blur left both builds). The swipe-dismiss rides the finger and releases exactly as on
   iOS (same tested rule). System back dismisses the sheet with the slide-out — it never pops the route
   or reaches the terminal. Log: `[settings] sheet closed`.
 - Android: [ ]
@@ -1791,6 +1821,8 @@ whatever Modal mode Android needs to get there. Those numbers came from a delete
 
 Both platforms walk every case; T14.7 is Android-only. Android is **the same layout and the same
 chrome as iOS**, not a Material restyle of it (2026-08-16 — AGENTS.md, "One app, two platforms").
+`SEARCH_RADIUS` no longer branches: the switcher's field is 13 and the terminal's 38pt field is 12,
+on both platforms (b427712).
 
 ### T14.1 — The grid narrows on all four match surfaces
 - **Setup**: connected, tmux with ≥3 windows: one named `logs`, one whose pane cwd is
@@ -1867,9 +1899,10 @@ chrome as iOS**, not a Material restyle of it (2026-08-16 — AGENTS.md, "One ap
 ### T14.7 — Android: back ladder (Android only; chrome assertions INVERTED 2026-08-16)
 - **Steps**: walk T14.1 and T14.4 on the Android build; with search armed and the switcher
   open, press system back; in the terminal view with the search bar up, press back.
-- **Expect**: the search field and bar look exactly as they do on iOS — same corner, same
-  surface, same glass, same type (**ask the user for the iOS shot**). The old Material
-  assertions here are void; `SEARCH_RADIUS` in `src/style.ts` still branches. Back from the open switcher closes the grid into the active pane with the search
+- **Expect**: the search field and bar look exactly as they do on iOS — same corner
+  (`SEARCH_RADIUS.switcher` 13 / `.terminal` 12, unbranched), same opaque surface, same Inter
+  type (**ask the user for the iOS shot**). The old Material assertions here are void and the
+  `SEARCH_RADIUS` branch is deleted. Back from the open switcher closes the grid into the active pane with the search
   STILL armed (grid state preserved for the next open); back at the terminal goes home as
   before — the search bar does not eat the press.
 - Android: [ ]
