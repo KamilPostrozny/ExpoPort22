@@ -606,14 +606,33 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
   the factor RN reports is exactly the factor the WebView applies, so the division cancels it
   rather than approximating it. `getFontScale()` reflects the user's text-size preference on BOTH
   platforms (`PixelRatio.js:95-100`).
-- **BLOCKED on one measurement, and it is the whole design of the fix**: does iOS's WKWebView
-  scale CSS px with Dynamic Type at all? iOS was only ever measured at the DEFAULT text size. If
-  it does not scale, dividing unconditionally would wrongly SHRINK the iOS terminal and the
-  correction has to be Android-only — a legitimate category (3) branch, "an OS behaviour that
-  would otherwise double up", the same shape as the keyboard guard in `src/app/terminal.tsx`. If
-  it does scale, the division is unconditional and there is no branch. **Do not write this fix
-  before setting iOS Settings > Display & Brightness > Text Size to a large value and reading the
-  `[terminal] ... cell` line.**
+- **iOS ANSWERED 2026-08-16: WKWebView does NOT scale CSS px with Dynamic Type.** Text Size turned
+  up on the device, reconnected, and the terminal reported `dpr=3 cell=7.8000` /
+  `cell 7.7999 x 18.00` — identical to the default-size run. RN `Text` around it DID scale (the
+  Setup caption went from one line to two), so the CHROME scaling is shared behaviour on both
+  platforms and is not a divergence; only the terminal is. The correction is therefore Android-only,
+  category (3).
+- **The one-line division was written, measured, and REVERTED. It does not work.** Setting the
+  xterm font size to `fontSize / fontScale` on Android gave, at font_scale 1.5:
+
+  ```
+  font line:  size=8.6667  cell=5.1938        <- canvas measureText, NOT scaled
+  size line:  cell 7.7964 x 12.19             <- DOM render, IS scaled
+  cols:       76   (should be ~50)            <- laid out on the unscaled advance
+  ```
+
+  The glyph WIDTH comes out right (7.7964, was 11.6964) and everything else breaks. Android's
+  WebView scales RENDERED TEXT but not CANVAS METRICS and not LAYOUT, so dividing the font size
+  desynchronises three things that must agree: the canvas measurement `monoArrived()` uses to
+  prove the face loaded, the row height xterm derives from the size we set (17.14 -> 12.19, rows
+  would collide), and the column count xterm computes from its own advance (50 -> 76).
+- **Do not "fix" this with a compensating `lineHeight`.** It patches the row height to 12.19 x 1.5
+  = 18.29 against the correct 17.14 — 6.7% out, and the error moves with the scale. The column
+  count and the canvas path stay wrong regardless.
+- **Where it actually stands**: the only clean lever remains `WebSettings.setTextZoom(100)`, which
+  `@expo/dom-webview` does not expose. Closing this properly means getting that prop upstream (or
+  a config-plugin patch of the Android view), not more arithmetic on our side. Everything else has
+  now been tried and measured.
 - Android: [ ]
 
 ### T7A.3 — Icons render via text fallback (no blank keys)
