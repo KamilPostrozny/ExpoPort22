@@ -742,7 +742,17 @@ verified without it: `.github/workflows/ipa.yml` builds an unsigned Debug dev cl
 `macos-26`/Xcode 26.6 (older toolchains cannot compile `expo-modules-jsi`) and publishes it as the
 rolling `dev` prerelease; `docs/ship.md` is the laptop half — download, netmuxd, `xtool install`,
 which signs with the free Apple ID. Free provisioning expires weekly, so a re-sign is a re-run of
-that, not a rebuild. Android APK install is still unwritten.
+that, not a rebuild. The Android half is now the second half of the same doc (2026-08-17) and it is
+deliberately the opposite shape: no CI, because this box builds Android in ~6 minutes where it
+cannot build iOS at all, and no signing dance, because `./gradlew assembleDebug` signs with the
+SDK's own debug keystore and `adb install -r` takes the APK as-is — nothing expires. Documented end
+to end: `. ~/Android/env.sh`, `expo prebuild -p android` (plus the `git checkout package.json` it
+forces), the build, the APK at `android/app/build/outputs/apk/debug/app-debug.apk`, install to the
+emulator or to a phone over USB or `adb pair`/`connect`, and the `adb reverse` + deep-link launch
+that feeds it Metro. Verified 2026-08-17: the APK was deleted and rebuilt by that exact command,
+and `apksigner` reports `CN=Android Debug`. Still missing on this side: a Release APK, which needs
+a keystore of its own — so there is no Android twin of the `prod` IPA and every Android frame-rate
+number carries the debug constant.
 
 **T14 — Search across every window** ✅ implemented 2026-08-10 (device walk pending, TESTS.md T14.*) · deps: T10, T9, T4
 A search field in the tab switcher that matches **the output of every tmux window**, not just its
@@ -840,6 +850,293 @@ takes the same layout with Material chrome per its §5d divergence list):
   disarm (✕ or Done) clears both; a card tapped with the search armed lands with the keyboard
   down (you came to read); birthing a new window disarms.
 - Drag-reorder is disabled while the grid is filtered — a narrowed grid isn't the real order.
+
+**T15 — Biometric gate on connect, PIN when there is no biometric** deps: T5, T12
+
+One global setting, `requireAuth`, off by default, drawn as a `Switch` row in the settings sheet's
+SESSION section next to Disconnect (and on Setup, which is the only screen a first-time user sees).
+When it is on, `connect()` in `src/session.ts` awaits
+`LocalAuthentication.authenticateAsync({ promptMessage, cancelLabel: 'Cancel', disableDeviceFallback: false })`
+before it touches `ExpoSSH.connect`; a `success: false` of any kind aborts the connect and shows the
+§4.9 Disconnected screen with the plain sentence rather than a failure state of its own. `expo install
+expo-local-authentication` (~57.0.2 per `node_modules/expo/bundledNativeModules.json`,
+https://docs.expo.dev/versions/v57.0.0/sdk/local-authentication/), and its config plugin goes into
+`app.json` with a `faceIDPermission` string — that is not optional decoration, see the decisions.
+The toggle is disabled-with-a-reason rather than hidden when the device has nothing to authenticate
+with (`getEnrolledLevelAsync() === SecurityLevel.NONE`, i.e. no biometric *and* no passcode): the row
+greys and says "Set a passcode on this phone first", per the disabled-over-hidden rule.
+
+*Accept*: on both devices with the switch on — a cold launch and Connect raises Face ID / the
+fingerprint prompt and the session comes up after it; Cancel on the prompt returns to Setup with the
+session never opened and nothing in the log past `[session] gate refused`; with every biometric
+removed from the device but a passcode set, the same Connect raises the passcode/PIN sheet instead
+and still connects; with the switch off, Connect goes straight through as it does today; and
+backgrounding a live session and returning inside the grace window reconnects (§4.9) *without* a
+second prompt, while returning after it prompts once.
+
+Decisions (research, 2026-08-17):
+
+**The PIN-when-absent case is free on iOS and reactive on Android, and both reach it — verified in
+the module source, not the docs.** `disableDeviceFallback: false` (the default) is the whole answer,
+but the two platforms get there differently and it is worth knowing which is which before reading a
+log. iOS (`packages/expo-local-authentication/ios/LocalAuthenticationModule.swift`, sdk-57):
+`let policyForAuth = disableDeviceFallback ? .deviceOwnerAuthenticationWithBiometrics :
+.deviceOwnerAuthentication` — `deviceOwnerAuthentication` on a phone with no enrolled biometric goes
+*straight* to the passcode sheet, one call, no error in between. Android
+(`.../android/.../LocalAuthenticationModule.kt`) cannot do that: it hard-checks
+`keyguardManager.isDeviceSecure` and resolves `not_enrolled` if the device has no lock at all, then
+raises a `BiometricPrompt` with `allowedAuthenticators = <biometric class> or DEVICE_CREDENTIAL`.
+On a device with a PIN but no fingerprint that prompt *fails first* — `onAuthenticationError` with
+`ERROR_NO_BIOMETRICS`/`ERROR_HW_NOT_PRESENT` — and the module then re-enters through
+`promptDeviceCredentialsFallback`, which is a second `BiometricPrompt` on API 30+ and a
+`createConfirmDeviceCredentialIntent` `startActivityForResult` below it. So the Android user sees one
+prompt and one dismissal-then-PIN flicker where the iOS user sees one sheet. **Finding (parity, not
+fixable by us):** that flicker is the platform's, inside Expo's module; there is no branch of ours
+that removes it. Not worth a bug.
+
+**Do not set `biometricsSecurityLevel: 'strong'` — it crashes this app on API 28–29.** `app.json`
+pins `minSdkVersion: 28`. AndroidX's own javadoc on `PromptInfo.Builder.setAllowedAuthenticators`
+(androidx-main `BiometricPrompt.java`): "`DEVICE_CREDENTIAL` alone is unsupported prior to API 30,
+and `BIOMETRIC_STRONG | DEVICE_CREDENTIAL` is unsupported on API 28-29. Setting an unsupported value
+on an affected Android version will result in an error when calling `build()`." With
+`disableDeviceFallback: false` Expo ORs `DEVICE_CREDENTIAL` onto whatever
+`biometricsSecurityLevel` maps to, and its `authenticate()` catches only `NullPointerException` — so
+`'strong'` throws out of `build()` unhandled. Leave the option unset: the default `'weak'` is
+`BIOMETRIC_WEAK | DEVICE_CREDENTIAL`, which is supported on every level we ship to. Class-2 face
+unlock is a real weakening, and it is the right trade here because the thing being gated is a UI
+gate, not a key (below).
+
+**`promptSubtitle`, `promptDescription` and `requireConfirmation` are Android-only, so they stay
+unset.** iOS's `LAContext` sheet is one line; setting the Android-only strings would put two more
+lines of chrome on the Android sheet and nowhere else, which is exactly the look divergence AGENTS.md
+forbids. `fallbackLabel` is iOS-only and is left at the system default ("Enter Passcode"), for the
+same reason. The one string both platforms take is `promptMessage` and it is the same string.
+
+**`NSFaceIDUsageDescription` is load-bearing, not boilerplate.** `app.json` has no
+`expo-local-authentication` plugin entry today and no `NSFaceIDUsageDescription` in `infoPlist`.
+Without it the iOS module logs the "FaceID is available but has not been configured" warning and —
+because `disableDeviceFallback` is false, so it does not take the early bail-out — evaluates the
+policy anyway; the versioned doc states the outcome plainly: "the module will authenticate using
+device passcode". A Face ID user would get a passcode sheet and never know why. Add
+`["expo-local-authentication", { "faceIDPermission": "…" }]` to `app.json` and rebuild; it is a
+native change, so a Metro reload will not show it.
+
+**The gate is on `connect()`, with a non-persisted grace, and that is a decision not an
+optimisation.** §4.9 auto-reconnects on every foreground, and `connect()` is the one door all three
+callers (both screens, the AppState listener) go through — so gating anywhere else means gating
+several places. Gating `connect()` unmodified, though, means Face ID on every single foreground,
+which makes the toggle unusable within a day. So one module-level `lastAuthAt` timestamp in
+`session.ts`, five minutes, deliberately *not* persisted: a cold launch always asks. It is held in
+module state and read inside an async function, not in a render body — the React Compiler freezes
+render-time clocks (see memory), and a `Date.now()` in a component would be memoised into a lie.
+
+**Recommendation: do not put the SSH seed behind SecureStore's `requireAuthentication`, even though
+that is the cryptographically stronger-sounding option.** The question is fair — an app-drawn gate is
+theatre if the seed is readable anyway — and the answer came out of the two implementations rather
+than the docs:
+
+- iOS (`packages/expo-secure-store/ios/SecureStoreModule.swift`): `requireAuthentication: true` sets
+  `kSecAttrAccessControl` built with `SecAccessControlCreateWithFlags(…, .biometryCurrentSet, …)`.
+  `.biometryCurrentSet` means (a) **there is no passcode fallback at all** — the exact case T15 exists
+  to serve is the case this cannot serve — and (b) the item is destroyed by the system the moment the
+  enrolled set changes.
+- Android (`.../securestore/AuthenticationHelper.kt`): `assertBiometricsSupport()` throws unless
+  `canAuthenticate(BIOMETRIC_STRONG)` returns success, so a **PIN-only Android phone cannot store or
+  read the item at all**, and `SecureStoreModule.kt` catches `KeyPermanentlyInvalidatedException` on
+  both read and write for the same enrolment-change reason.
+- The shipped `.d.ts` says it without ambiguity: "Keys are invalidated by the system when biometrics
+  change, such as adding a new fingerprint… After a key has been invalidated, it becomes impossible
+  to read its value."
+
+Adding one fingerprint would therefore silently destroy the user's SSH identity and lock them out of
+their own host, on a phone with a passcode the feature refuses to use. That is a worse failure than
+the one it prevents. What actually protects the seed at rest is already in `src/keys.ts`:
+`WHEN_UNLOCKED_THIS_DEVICE_ONLY`, which keeps it unreadable while the phone is locked and off any
+restore or iCloud backup. **State the ceiling in the code**: T15's gate is a UI gate — it stops
+someone holding an unlocked phone, it does not stop someone with the filesystem. If that threat ever
+matters, the upgrade is `requireAuthentication` on a *derived, re-derivable* secret rather than the
+seed, and a written recovery path; not this. `ponytail:` comment on the toggle naming that ceiling.
+
+**T16 — Key management: generate, paste, upload** deps: T5, T15, T17
+
+Setup's key card becomes a key *screen*: the ed25519 identity `src/keys.ts` already owns, with its
+`SHA256:` fingerprint, plus three verbs. **Generate** replaces the seed under `port22.seed.v1` with a
+fresh `Crypto.getRandomBytes(32)` behind a confirm that says in as many words that the old key stops
+working the moment it is replaced and the new line has to reach the host — it is the same destructive
+shape as Forget host key and gets the same red-plus-confirm treatment. **Paste** takes an OpenSSH
+private key out of the pasteboard or a `TextInput`, hands the text to a new native
+`ExpoSSH.importPrivateKey(text, passphrase)` which returns `{ seedBase64, publicKeyLine }`, and
+stores the seed in the same SecureStore slot; a wrong or missing passphrase comes back as a plain
+sentence and changes nothing. **Upload** appends the public line to the host's `authorized_keys` over
+the exec channel that already exists, on the connection that is already up. Copy stays exactly where
+it is — it is still the only thing that works before there is any connection at all.
+
+*Accept*: on both devices — Generate produces a different fingerprint, the old key stops
+authenticating and the new line pasted into `authorized_keys` by hand authenticates; a key made with
+`ssh-keygen -t ed25519 -N ''` pastes and connects, and the same key made with `-N 'hunter2'` pastes,
+asks for the passphrase, refuses `wrong` with a sentence and connects with the right one; an
+RSA key pastes and is *refused* by name ("Port22 uses ed25519 keys…"), not by a stack trace; and with
+a session up, Upload appends exactly one line to a host whose `authorized_keys` already has three,
+leaves the other three byte-identical, leaves `~/.ssh` at 0700 and the file at 0600, and appending
+the same key twice appends nothing the second time.
+
+Decisions (research, 2026-08-17):
+
+**Parsing happens natively, in the two libraries we already ship, because no JS package fits.**
+Walking the ladder (AGENTS.md — name what you read):
+
+- `sshpk` (TritonDataCenter) does parse every format we care about in "pure node.js", and that is the
+  problem: it is pure *node*, requiring `crypto`, `Buffer`, `jsbn` and `bcrypt-pbkdf`. On RN that
+  needs a crypto polyfill chain to serve one paste box. Ruled out on the dependency, not the API.
+- `micro-key-producer` (paulmillr, successor to `ed25519-keygen`, same author as the `@noble/curves`
+  we already depend on) is pure JS and RN-clean, but its `ssh.js` is `ssh(seed, comment) → {
+  fingerprint, privateKey, publicKey }` — **generate only**. It does not read a key back.
+- Hand-rolling it in JS is ~40 lines for the unencrypted OpenSSH v1 container (the same
+  length-prefixed reader `publicKeyBlob` already writes, run backwards) — and then bcrypt-pbkdf and
+  AES-CTR for the encrypted case, which is where a hand-rolled parser stops being lazy.
+- Both native sides already contain a complete, maintained parser with passphrase support and neither
+  needs a new dependency: **sshj** has `KeyProviderUtil.detectKeyFileFormat` +
+  `FileKeyProvider.init(String privateKey, String publicKey, PasswordFinder)`, and `DefaultConfig`
+  registers `OpenSSHKeyV1KeyFile`, `PKCS8KeyFile`, `OpenSSHKeyFile` and `PuTTYKeyFile` (verified at
+  tag v0.40.0 — note `SSHClient.loadKeys`'s javadoc claims "only PKCS8 format… is supported" and the
+  code directly beneath it disproves that, so do not trust the javadoc). **Citadel** has
+  `OpenSSH.PrivateKey<Curve25519.Signing.PrivateKey>(string:decryptionKey:)` in `OpenSSHKey.swift`,
+  with its own `BCrypt.swift` and aes128/256-ctr.
+
+So: one new `AsyncFunction("importPrivateKey")` on both halves of `modules/expo-ssh`, no change to
+`connect`, which keeps taking `seedBase64`. On iOS the parsed `Curve25519.Signing.PrivateKey` hands
+back its 32-byte seed as `.rawRepresentation`. On Android sshj's `getPrivate()` gives a JCA
+`PrivateKey` whose `getEncoded()` is PKCS#8; `BouncyCastle`'s `PrivateKeyFactory.createKey` (bcprov
+is already an explicit dependency for exactly this family of reasons) yields
+`Ed25519PrivateKeyParameters.getEncoded()` — the seed. The public line is then re-derived by the
+existing `keys.ts` path, so there is still one source of truth for it.
+
+**ed25519 only, and that is a stated restriction rather than an oversight.** Realistically a user
+pastes one of four things: `-----BEGIN OPENSSH PRIVATE KEY-----` (what `ssh-keygen` has written by
+default since 7.8, ed25519 or RSA), `-----BEGIN RSA PRIVATE KEY-----` (classic PEM),
+`-----BEGIN PRIVATE KEY-----` (PKCS#8), or a PuTTY `.ppk`. sshj reads all four. Citadel's
+`OpenSSHKey.swift` reads **only the OpenSSH v1 container**, and only into `Curve25519.Signing.PrivateKey`
+or `Insecure.RSA.PrivateKey` — no PEM, no PKCS#8, no ECDSA. **Finding (parity):** Android could
+accept strictly more formats than iOS. iOS is the spec, so both accept the OpenSSH v1 container only,
+and the refusal sentence names `ssh-keygen -p -f <key>` as the one-command conversion. Narrowing
+further to ed25519 (dropping RSA, which Citadel *can* do via `.rsa(username:privateKey:)`) is ours,
+not the platform's: an RSA private key has no 32-byte seed, so supporting it means a second at-rest
+shape, a second `connect` path and a second auth method on both natives — for a key type OpenSSH has
+been nudging people off for a decade, in an app that generates ed25519 anyway. Say it in the refusal,
+not in a silent failure.
+
+**Where a pasted key lands, honestly.** In the same SecureStore slot as the generated one,
+`WHEN_UNLOCKED_THIS_DEVICE_ONLY`, as a raw 32-byte seed — which means **the passphrase protection is
+gone the moment the key is imported**. That is not a bug we can engineer away (the seed has to be
+usable without a prompt on every §4.9 auto-reconnect) but it *is* something the paste screen must say
+out loud, in the sentence next to the field, because a user who typed a passphrase reasonably
+believes it still applies. The passphrase itself is never stored — it exists for one native call and
+is dropped. Reducing to a seed also sidesteps the keychain's ~2048-byte historical value ceiling that
+storing a 3.2 KB RSA PEM would have walked into.
+
+**Generation is `Crypto.getRandomBytes(32)`, which is already there — the package on the ladder buys
+a fingerprint, not a keygen.** `micro-key-producer/ssh.js` would let `keys.ts` delete its hand-rolled
+`publicKeyBlob` wire encoding and gives the `SHA256:` fingerprint this screen needs in JS (today it
+exists only in `ExpoSSHModule.fingerprint`, native, and only for *host* keys). Worth taking, with one
+gate: assert the produced `publicKeyLine` is byte-identical to the current one for an existing seed
+before swapping, so that nobody's `authorized_keys` line changes under them. If that check is
+awkward, keeping `publicKeyBlob` and computing the fingerprint with `expo-crypto`'s SHA-256 is the
+smaller diff — this is the one place in T16 where either answer is defensible.
+
+**Upload is exec, not SFTP, and it is two calls with the decision in JS.** SFTP is wrong twice over:
+`ExpoSSH.upload` writes a whole file (an `authorized_keys` with three other keys in it would be
+replaced by one), and neither native side exposes an append mode or a create-mode, so `.ssh` 0700 and
+the file 0600 would have to be chmod'd over exec anyway. The shape that works, matching how
+`listHostSessions` and the tmux side-channel already read the host:
+
+1. `exec("cat ~/.ssh/authorized_keys 2>/dev/null", limit)` — parse in JS. Already present → say so and
+   append nothing. Also tells us whether the file ends in a newline; if it does not, the append has to
+   lead with one or the new key is glued onto someone else's line, which is the failure mode of every
+   hand-written `>>` on the internet.
+2. `exec("mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '%s\n' <quoted line> >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo PORT22_OK")`
+   — one chain, `&&` throughout so a failed `mkdir` cannot reach the append, and the sentinel is what
+   we check rather than the exit status. Every token here parses identically in fish, bash and zsh
+   (no `{ …; }`, which fish does not have); the line goes through `shellQuote` from `src/tmux-model.ts`,
+   which already exists for exactly this.
+
+**The chicken-and-egg has to be on the screen.** Upload needs an authenticated session, and this app
+has no password auth, so it cannot bootstrap the very first key — that is still Copy plus a paste on
+the host, and Setup's existing caption stays true. What Upload is genuinely for is the two flows
+after that: rotating a key (connect with the old, upload the new, remove the old by hand), and
+retiring a pasted key (paste the laptop key that already works, connect, upload Port22's own
+generated key, then stop using the pasted one). Wire the button so it is disabled with that reason
+when there is no live session, rather than absent.
+
+**T17 — Many hosts, each with its own settings** deps: T5, T12
+
+`Settings` splits into the fields that belong to a machine and the fields that belong to the app.
+Per host: `id`, `host`, `port`, `username`, `startMode`, `attachSession`, `knownSessions`,
+`startupCommand`, `lastUploadDir` — all nine are answers about one box, and `lastUploadDir`
+especially is a path that only exists on it. Global: `fontSize`, `followSystem`, `theme`,
+`themeDark`, `themeLight`, `tmuxExtras`, and T15's `requireAuth`. So `Settings` keeps its singleton
+and its `useSyncExternalStore` unchanged and gains `hosts: HostSettings[]` and `activeHostId: string`,
+with `getHost()` / `useHost()` / `updateHost(patch)` beside the existing three accessors. `endpoint()`,
+`validate()`, `startupLine()`, `pollSession()` and `usesTmux()` take a `HostSettings` instead of a
+`Settings` — they never read a global field, so this is a type change and not a logic one, and
+`src/core.test.ts` follows mechanically. Setup grows a host list above the Host/Port/User fields, in
+the same `styles.fields` card with the same Nerd Font `\uF00C` tick the start-mode rows use (name the codepoint, or copy it from
+`START_ROWS`' renderer — the PUA glyph does not survive being retyped), plus an "Add host"
+row and swipe-or-long-press to delete; the settings sheet gets nothing new, because §4.8 hides the
+connection fields while connected and switching host mid-session is a disconnect, not a setting.
+
+*Accept*: on both devices — an install that already has a host set up (upgraded in place, not a fresh
+one) launches straight onto Setup with that host present, selected, its start mode and username
+intact, and Connect works without retyping anything; adding a second host and connecting to it
+prompts TOFU for the *new* endpoint and leaves the first host's pin alone; switching back connects to
+the first without a prompt; each host remembers its own start mode and upload directory across an app
+restart; and deleting a host removes it from the list, offers to forget its pinned key, and never
+leaves the app with an empty `activeHostId`.
+
+Decisions (research, 2026-08-17):
+
+**Migration is the tolerant decode doing its job — do not bump `STORAGE_KEY`.** `port22.settings.v1`
+stays. `decode()` already exists to absorb shape changes (it is how `startMode` was introduced out of
+a bare `startupCommand`, and how `followSystem` was introduced out of `theme: 'auto'` — both are in
+the file, with comments, and are the precedent to follow). The branch is one `if`: when `o.hosts` is
+not an array, run the *existing* per-field tolerant readers over the top-level blob to build a single
+`HostSettings`, give it a fresh id, and set `activeHostId` to it. An install with nothing stored gets
+the same thing from `DEFAULTS`, so there is exactly one code path and no "first run" special case. A
+new storage key would be the version of this that loses the user's host, which is precisely the thing
+the accept line tests.
+
+**Ids come from `Crypto.randomUUID()` (`expo-crypto`, already a dependency), not from the endpoint.**
+`endpoint()` is `host:port` and the user edits both while typing — an id derived from it would change
+identity mid-keystroke and orphan the row. The id is also what `activeHostId` holds, so an index would
+break on delete.
+
+**`src/host-keys.ts` needs no change at all, and that is worth checking before touching it.** It is
+already keyed by `endpoint` base64url'd into the SecureStore key, one pin per `host:port`, with the
+comment explaining why the encoding is not a character substitution. Multi-host pinning therefore
+already works; T17 only has to pass the right `HostSettings` into `endpoint()`. The one new
+behaviour is on *delete*: an orphaned pin is harmless (nothing reads it) but confusing on the day the
+user re-adds the same box and is not asked to trust it, so the delete confirm offers `forgetHostKey`
+on the same sheet.
+
+**Rejected: keeping the flat fields as "the current host" and mirroring them into a saved list.**
+It is tempting because zero call sites change — every `settings.host` keeps working and switching is
+a copy in and a copy out. It is also two sources of truth for the same nine fields, kept in sync by
+hand on every `updateSettings` from the form, and the first missed mirror is a host that silently
+reverts. The accessor version touches roughly a dozen read sites (`src/session.ts` ×6,
+`src/app/terminal.tsx` ×3, `src/app/index.tsx`, `src/tmux.ts` ×3) in one mechanical pass and then
+cannot drift. Take the mechanical pass.
+
+**`knownSessions` stays cached per host and stays one connect behind.** Its existing comment explains
+why (Setup has no connection to ask over); with several hosts the only change is that the cache is no
+longer global, which is strictly more correct — today, switching the host field would show the
+previous machine's tmux sessions in the attach picker. Note that as a bug this slice fixes rather
+than a feature it adds.
+
+**No host-picker in the settings sheet, and no reconnect-on-switch.** §4.8 already hides host, port,
+user and the startup command while connected, on the grounds that they are Setup's. A host picker is
+the same class of control and belongs to the same screen; putting one in the sheet would mean deciding
+what a mid-session switch does to the PTY, the tmux side-channel and the replay history, for a gesture
+nobody asked for. Switching host is: Disconnect, pick, Connect. If that turns out to be a real
+irritation on device, it is a later slice with an explicit answer, not a silent teardown.
 
 ---
 

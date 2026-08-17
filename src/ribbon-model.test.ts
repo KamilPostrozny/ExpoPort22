@@ -12,6 +12,7 @@ import {
   formatElapsed,
   killCommand,
   matchRecipe,
+  ribbonAppearDelay,
   ribbonPoll,
   ribbonResumed,
   ribbonSwitchedToIdle,
@@ -20,6 +21,7 @@ import {
   type RibbonCore,
 } from '@/ribbon-model';
 import { RECIPES } from '@/ribbon-recipes';
+import { SEP, foregroundFrom, parsePoll } from '@/tmux-model';
 
 const fg = (command: string, pid = 4242) => ({ command, pid });
 
@@ -28,10 +30,10 @@ function running(command: string): RibbonCore {
   return ribbonPoll(RIBBON_IDLE, fg(command), 1000);
 }
 
-/** `selectRecipe` with the clock already past `RIBBON_MIN_RUN_MS` — every test but the gate's
- *  own is about WHICH recipe, not when. */
-const pick = (core: RibbonCore, altScreen: boolean, now = 1_000_000) =>
-  selectRecipe(core, altScreen, now);
+/** `selectRecipe` no longer takes a clock — the appear delay is `ribbonAppearDelay`, served by a
+ *  timer inside the band. These tests are about WHICH recipe. The flag is the PANE's
+ *  `#{alternate_on}`, not the outer terminal's buffer type. */
+const pick = (core: RibbonCore, paneAlt: boolean) => selectRecipe(core, { paneAlt });
 
 /* --- the selection table (§4.4) --- */
 
@@ -62,17 +64,62 @@ test('recipe selection: names, running, and the silences', () => {
   expect(pick(RIBBON_IDLE, false)).toBeNull();
 });
 
-test('a short-lived command never earns the band; a slow one does', () => {
-  const core = running('git'); // startedAt = 1000
-  expect(selectRecipe(core, false, 1000)).toBeNull();
-  expect(selectRecipe(core, false, 1000 + RIBBON_MIN_RUN_MS - 1)).toBeNull();
-  expect(selectRecipe(core, false, 1000 + RIBBON_MIN_RUN_MS)?.id).toBe('running');
-  // The gate is `running`'s alone: something the user opened on purpose shows at once.
-  expect(selectRecipe(running('vim'), true, 1000)?.id).toBe('vim');
-  expect(selectRecipe(running('claude'), false, 1000)?.id).toBe('agent');
-  // So does a job we watched stop — it has been alive by definition.
+test('a run that never changes still earns the band: the gate is a delay, not a render-time clock', () => {
+  // The device symptom (emulator, 2026-08-17): `sleep 30` and `sleep 15`, twice each, all four
+  // detected — `[ribbon] run #2 sleep pid=… startedAt=…` — and the chip region empty at every one
+  // of 40 samples across a full 30s run. The gate used to be `now - startedAt < RIBBON_MIN_RUN_MS`
+  // inside `selectRecipe`, which the screen called as `selectRecipe(core, altScreen, Date.now())`
+  // from a component body the React Compiler caches on `[connected, core, modes]`. A clock is not
+  // a dependency, and a running job changes nothing else:
+  const core = running('sleep'); // startedAt = 1000
+  expect(ribbonPoll(core, fg('sleep'), 3000)).toBe(core); // by design: a quiet beat re-renders nothing
+  expect(ribbonPoll(core, fg('sleep'), 1000 + RIBBON_MIN_RUN_MS + 60_000)).toBe(core);
+  // …and `set` in src/tmux.ts drops an identical answer before it even gets here. So nothing can
+  // re-open a gate that lives on the clock, and the model must not hide a live run behind one.
+  // The signature no longer has a clock to be cached against, so the memoised call is correct
+  // whenever it is served — which is the point.
+  expect(selectRecipe(core, { paneAlt: false })).toEqual({ id: 'running', proc: 'sleep' });
+
+  // The three seconds survive as a delay the band serves itself, off one timer per run.
+  expect(ribbonAppearDelay('running')).toBe(RIBBON_MIN_RUN_MS);
+  // The gate is `running`'s alone: something the user opened on purpose shows at once…
+  for (const id of ['vim', 'pager', 'htop', 'agent', 'suspended'] as const) {
+    expect(ribbonAppearDelay(id)).toBe(0);
+  }
+  expect(selectRecipe(running('vim'), { paneAlt: true })?.id).toBe('vim');
+  expect(selectRecipe(running('claude'), { paneAlt: false })?.id).toBe('agent');
+  // …as does a job we watched stop — it has been alive by definition.
   const stopped = { ...running('sleep'), suspended: 'sleep', command: null };
-  expect(selectRecipe(stopped, false, 1000)?.id).toBe('suspended');
+  expect(selectRecipe(stopped, { paneAlt: false })?.id).toBe('suspended');
+});
+
+test('the TUI gate reads the PANE, not the outer terminal — `running` inside tmux', () => {
+  // The second, independent blocker (emulator, 2026-08-17): `sleep 30` detected, chip region empty
+  // at all 15 samples across two runs, with the fixed appear-delay already in. The gate was fed
+  // T6's `modes.altScreen`, the OUTER xterm's buffer type — and a tmux client is itself a
+  // full-screen app, so that flag is permanently true for the whole session (every connect's mode
+  // log ends `{"altScreen":true,…}` and never flips back). `running` was therefore unreachable in
+  // every tmux session, i.e. in the app's own default start mode.
+  //
+  // This is the exact combination, end to end from a real tmux answer: pane flag 0 while the outer
+  // one is 1.
+  const answer = parsePoll(['1', '3', '4242', '0', 'sleep'].join(SEP));
+  expect(answer?.paneAlt).toBe(false);
+  const core = ribbonPoll(RIBBON_IDLE, foregroundFrom(answer)!, 1000);
+  expect(selectRecipe(core, answer!)).toEqual({ id: 'running', proc: 'sleep' });
+  // …and the outer flag, which is what used to be passed here, still swallows it. That is the bug.
+  expect(selectRecipe(core, { paneAlt: true })).toBeNull();
+
+  // §4.4 intact: a real full-screen TUI in the pane still gets no chip, because no caps beat wrong
+  // caps. Only the SOURCE of the fact changed.
+  const tui = parsePoll(['1', '3', '4242', '1', 'nethack'].join(SEP));
+  expect(tui?.paneAlt).toBe(true);
+  const inTui = ribbonPoll(RIBBON_IDLE, foregroundFrom(tui)!, 1000);
+  expect(selectRecipe(inTui, tui!)).toBeNull();
+  // A named recipe wins before the gate either way — which is why `vim` had its chip all along.
+  const vim = parsePoll(['1', '3', '4242', '1', 'vim'].join(SEP));
+  const inVim = ribbonPoll(RIBBON_IDLE, foregroundFrom(vim)!, 1000);
+  expect(selectRecipe(inVim, vim!)?.id).toBe('vim');
 });
 
 /* --- instance identity + the timer --- */
@@ -114,9 +161,12 @@ test('a blinking poll is the same run: same instance, same clock, no re-render',
   expect(pick(back, false)?.id).toBe('agent');
   // And a second quiet beat is the same object again, so React re-renders nothing.
   expect(ribbonPoll(back, fg('claude'), 5000)).toBe(back);
-  // The gate can therefore actually elapse — this is why `sleep` never appeared.
+  // And a blink no longer restarts `startedAt`, which is what the band's own gate timer counts
+  // from — the blink was one of the two things keeping `sleep` off the screen (the other is the
+  // memoised gate, in the test above).
   const slow = ribbonPoll(ribbonPoll(running('sleep'), null, 2000), fg('sleep'), 3000);
-  expect(selectRecipe(slow, false, 1000 + RIBBON_MIN_RUN_MS)?.id).toBe('running');
+  expect(slow.startedAt).toBe(1000);
+  expect(selectRecipe(slow, { paneAlt: false })?.id).toBe('running');
 });
 
 test('hopping away and back keeps the clock: same pid is the same run', () => {
@@ -139,6 +189,23 @@ test('a window hop to an idle window drops the band now, without waiting out the
   const left = ribbonSwitchedToIdle(core);
   expect(pick(left, false)).toBeNull();
   expect(ribbonSwitchedToIdle(left)).toBe(left); // already idle: the same object
+});
+
+test('a birth clears the band now; the poll-shaped null the swipe used to send would not', () => {
+  // Committing a bar swipe past the last tab births a window, and a window being created cannot be
+  // running anything — so the birth is a hop to an idle window, not an observation of one.
+  const core = running('claude');
+  // What it used to send: a poll's null, which `RIBBON_HOLD_MS` exists to disbelieve. The chip
+  // keeps the previous window's run and its clock…
+  const held = ribbonPoll(core, null, 2000);
+  expect(pick(held, false)?.id).toBe('agent');
+  // …and needs a SECOND null to clear, which is what the screen's hold timer keys on. Nothing in
+  // the poll guarantees one: tmux's store drops an answer identical to the last, so a foreground
+  // that has settled at null stops waking the reducer at all.
+  expect(held.goneAt).toBe(2000);
+  expect(ribbonPoll(held, null, 2000 + RIBBON_HOLD_MS).command).toBeNull();
+  // The birth needs none of that: it knows.
+  expect(pick(ribbonSwitchedToIdle(core), false)).toBeNull();
 });
 
 test('formatElapsed', () => {

@@ -36,7 +36,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { highlightLine, parseAnsi, spanColor, type SpanLine } from '@/ansi-spans';
-import { SEARCH_DEBOUNCE_MS, normalizeQuery, type SearchHit } from '@/search-model';
+import { SEARCH_DEBOUNCE_MS, normalizeQuery, type SearchAnswer } from '@/search-model';
 import {
   BAR,
   CARD_RADIUS,
@@ -66,7 +66,7 @@ import {
   targetSlot,
   type Frame,
 } from '@/switcher-model';
-import { capturePane, listWindows, searchPane } from '@/tmux';
+import { capturePane, execPool, listWindows, searchPane, shotPool } from '@/tmux';
 import { POLL_MS, type TmuxWindow } from '@/tmux-model';
 import { MONO, MONO_BOLD, rgba, SANS, type Theme } from '@/theme';
 
@@ -80,10 +80,6 @@ export type Card = { win: TmuxWindow; snap: Snap | null };
 /** More than a card can show at any legal font size — parse output is truncated here so a
  *  50k-line scrollback capture never becomes 50k <Text> nodes. */
 const MAX_LINES = 44;
-
-/** Captures in flight at once — see the burst comment in `refresh`. Four leaves headroom under a
- *  default MaxSessions of 10 for the PTY, the poll and whatever else the session is doing. */
-const CAPTURE_POOL = 4;
 
 
 /**
@@ -102,6 +98,9 @@ const CAPTURE_POOL = 4;
  */
 export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolean) {
   const [cards, setCards] = useState<Card[]>([]);
+  /** Did the LAST list fetch fail? The grid says so rather than standing empty — see `unreachable`
+   *  in SwitcherProps for why an empty grid that explains nothing is the one unacceptable answer. */
+  const [listFailed, setListFailed] = useState(false);
   const seq = useRef(0);
   /** What the cards show, and what landed while frozen and is waiting its turn — both keyed by
    *  window id, so a list-only refresh, a reorder, or a window that died mid-capture all keep
@@ -125,41 +124,46 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
     try {
       const wins = await listWindows();
       if (seq.current !== mine) return;
+      setListFailed(false);
       if (withSnapshots) {
         // A few at a time, not one channel per window all at once: every capture is its own exec
         // channel, sshd's MaxSessions is 10 per connection by default, and this session already
         // holds the shell's PTY and the poll. A 20-tab grid firing 20 at once came back with only
         // the active card's content — the one `refreshCard` fills with a single capture — and
         // stayed that way, because every poll repeated the same burst (device, 2026-08-13).
-        // ponytail: fixed pool, no queue; widen it if a big session ever feels slow to fill.
-        const caps: (Snap | null)[] = [];
+        // The pool is SHARED with T14's greps below (tmux.ts `execPool`): a pool each is two
+        // pools' worth of channels, which is exactly what a searched 24-tab grid saturated with
+        // (emulator, 2026-08-17 — 16 of 24 greps and 5 of 24 captures back as `open failed`).
         let failure: unknown = null;
-        for (let i = 0; i < wins.length; i += CAPTURE_POOL) {
-          const batch = await Promise.all(
-            wins.slice(i, i + CAPTURE_POOL).map((win) =>
-              capturePane(win.index)
-                .then((text) => ({ lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width }))
-                // window died between list and capture: it keeps its last snapshot
-                .catch((error) => {
-                  failure ??= error;
-                  return null;
-                }),
-            ),
-          );
-          if (seq.current !== mine) return;
-          caps.push(...batch);
-        }
+        const caps = await Promise.all(
+          wins.map((win) =>
+            execPool(() => capturePane(win.id))
+              .then((text) => ({ lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width }))
+              // window died between list and capture: it keeps its last snapshot
+              .catch((error) => {
+                failure ??= error;
+                return null;
+              }),
+          ),
+        );
+        if (seq.current !== mine) return;
         // Silent per window, once per refresh here: a burst that fails wholesale is exactly what
-        // this poll cannot show, and a blank card says nothing about why.
-        if (failure !== null)
+        // this poll cannot show, and a blank card says nothing about why. WHICH windows, not just
+        // how many: the count alone kept a year-long "always exactly one" unexplained (BUGS,
+        // 2026-08-17), and now that the target is a `@N` id, a failure names a window that is
+        // genuinely gone — nothing else can produce one.
+        if (failure !== null) {
+          const lost = wins.filter((_, i) => caps[i] === null);
           console.log(
             '[switcher]',
-            caps.filter((snap) => snap === null).length,
+            lost.length,
             'of',
             wins.length,
             'captures failed:',
+            lost.map((win) => `${win.id}(:${win.index})`).join(' '),
             failure,
           );
+        }
         caps.forEach((snap, i) => {
           if (snap === null) return;
           // The active window's card is the one the zoom flies into, and the terminal surface
@@ -184,6 +188,13 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
       return wins;
     } catch (error) {
       console.log('[switcher] refresh failed:', error);
+      // The cards are deliberately NOT cleared — a list we could not fetch says nothing about the
+      // windows we already have, and the last known grid is the best answer available. What the
+      // failure does change is that the grid must SAY so, because the one state this cannot leave
+      // the user in is the one the second Android walk found: a grid whose very first list failed
+      // stood blank and silent, with nothing to tap, until the system back button rescued it
+      // (emulator, 2026-08-17). Disabled over hidden — see `unreachable` in SwitcherProps.
+      if (seq.current === mine) setListFailed(true);
     }
   }, []);
 
@@ -195,7 +206,12 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
    *  parse, not the N-capture burst that stuttered the flight (device, 2026-08-11). */
   const refreshCard = useCallback(async (win: TmuxWindow) => {
     try {
-      const text = await capturePane(win.index);
+      // `shotPool`, not `execPool`: this must never queue behind a grid's worth of captures (that
+      // is the stale landing card), but it is not free of the budget either — the bar swipe warms
+      // two neighbours at once and a zoom arm can land on top of them, which is three unbounded
+      // channels and one of the three `open failed`s the walk caught. Two slots keeps the aimed
+      // capture behind at most one warm.
+      const text = await shotPool(() => capturePane(win.id));
       const snap = { lines: parseAnsi(text).slice(0, MAX_LINES), cols: win.width };
       shown.current.set(win.id, snap);
       setCards((prev) => prev.map((c) => (c.win.id === win.id ? { ...c, snap } : c)));
@@ -240,7 +256,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
     return () => clearInterval(timer);
   }, [live, refresh]);
 
-  return { cards, setCards, refresh, refreshCard };
+  return { cards, setCards, refresh, refreshCard, listFailed };
 }
 
 /* --- T14: the scrollback half of the search --- */
@@ -252,7 +268,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
  * keystroke would blink the whole grid empty for a debounce beat.
  */
 export function useScrollbackSearch(query: string, cards: Card[], active: boolean) {
-  const [byId, setById] = useState<Record<string, SearchHit | null>>({});
+  const [byId, setById] = useState<Record<string, SearchAnswer>>({});
   const seq = useRef(0);
   const latest = useRef(cards);
   latest.current = cards;
@@ -269,9 +285,35 @@ export function useScrollbackSearch(query: string, cards: Card[], active: boolea
     const mine = ++seq.current;
     const timer = setTimeout(() => {
       const wins = latest.current.map((c) => c.win);
-      void Promise.all(wins.map((w) => searchPane(w.index, q).catch(() => null))).then((hits) => {
+      // One window failing to grep must not take the search down with it — but it must not be
+      // silent either: "no hit" and "never asked" look identical in the grid, which is how the
+      // `-t :index` bug hid here (a grep that matched nothing because its target had slid).
+      // Same shape as the capture log above: which windows, then the first error. A failure is
+      // 'failed', NOT null: null is grep's own answer and drops the card from a filtered grid, so
+      // reporting a channel we never got back as null is the search silently under-reporting.
+      // Through the shared pool for the same reason the captures are (see `execPool`).
+      const lost: string[] = [];
+      let failure: unknown = null;
+      void Promise.all(
+        wins.map((w) =>
+          execPool(() => searchPane(w.id, q)).catch((error): SearchAnswer => {
+            lost.push(`${w.id}(:${w.index})`);
+            failure ??= error;
+            return 'failed';
+          }),
+        ),
+      ).then((hits) => {
         if (seq.current !== mine) return;
-        console.log('[search] grep settled:', q, hits.filter(Boolean).length, 'of', wins.length);
+        if (failure !== null) {
+          console.log('[search]', lost.length, 'of', wins.length, 'greps failed:', lost.join(' '), failure);
+        }
+        console.log(
+          '[search] grep settled:',
+          q,
+          hits.filter((h) => h !== null && h !== 'failed').length,
+          'of',
+          wins.length,
+        );
         setById(Object.fromEntries(wins.map((w, i) => [w.id, hits[i]])));
       });
     }, SEARCH_DEBOUNCE_MS);
@@ -303,10 +345,15 @@ export type SwitcherProps = {
   cards: Card[];
   /** The unfiltered count — the "N of M Tabs" label's M. */
   total: number;
+  /** The last `listWindows` did not come back. With cards in hand it changes nothing on screen —
+   *  they are still the truth as of the last answer, and the ~2s beat asks again. With NO cards it
+   *  is the whole screen: the grid says it cannot reach the host and offers the way back, because
+   *  a blank grid with nothing to tap is what stranded the user on 2026-08-17 (BUGS.md). */
+  unreachable: boolean;
   /** T14's shared search state: the raw string as typed, and the scrollback answers per window.
    *  Empty query = disarmed; this grid and the terminal's search bar edit the same string. */
   query: string;
-  hits: Record<string, SearchHit | null>;
+  hits: Record<string, SearchAnswer>;
   onQuery: (q: string) => void;
   onClearSearch: () => void;
   /** Gestures live only while the grid is fully open — not during the zoom transitions. */
@@ -490,6 +537,30 @@ function SwitcherInner(props: SwitcherProps) {
         </View>
       </ScrollView>
 
+      {/* Nothing to show and no way to find out: the grid says which of the two it is. A Pressable
+          and not a label because the taps that went nowhere on 2026-08-17 went into exactly this
+          space — the middle of an empty grid — so the way back is where the finger already is, not
+          only on the ✓ in the corner. `warning`, like the card's "not searched", for the same
+          reason: the next beat asks again and usually gets an answer.
+
+          AFTER the ScrollView, like the search field is (see the note there): paint order is what
+          puts it on top, and under the scroll view it would be visible and untouchable — which is
+          the bug, not the fix. Before the bar and the field, so those keep their own taps. */}
+      {!filtered && cards.length === 0 && props.unreachable && (
+        <Pressable
+          style={styles.noHits}
+          // Gated like the bar's own buttons: `interactive` is `sw === 'open'`, which is exactly
+          // the state the system back button recovered from, so this reaches the same door.
+          onPress={interactive ? props.onDone : undefined}
+          accessibilityRole="button"
+          accessibilityLabel="Could not reach the host — back to the terminal">
+          <Text style={[styles.noHitsLead, { color: theme.warning }]}>Could not reach the host</Text>
+          <Text style={[styles.noHitsSub, { color: theme.muted }]}>
+            The window list did not come back. Trying again — tap to go back.
+          </Text>
+        </Pressable>
+      )}
+
       {/* The bottom bar: + circle | "N Tabs" | Done ✓. */}
       <View
         style={[styles.bar, { marginBottom: props.insetBottom }]}
@@ -633,8 +704,9 @@ function WindowCard({
   /** The terminal's top inset in stage points; through the zoom it is this card's. */
   padTop: number;
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
-   *  armed, so the card shows the first occurrence instead of the pane's bottom. */
-  hit: SearchHit | null | undefined;
+   *  armed, so the card shows the first occurrence instead of the pane's bottom. `'failed'` = the
+   *  grep never answered; the card stays put and says so under its name. */
+  hit: SearchAnswer | undefined;
   /** Normalized query; '' = search disarmed. */
   query: string;
   slot: Frame;
@@ -877,7 +949,10 @@ function WindowCard({
   // highlight surgery; `highlightLine` returns miss lines untouched, so unmatched cards (a
   // name-only match) re-use every node.
   const shownLines = useMemo(() => {
-    const lines = hit ? parseAnsi(hit.lines.join('\n')) : (card.snap?.lines ?? null);
+    // 'failed' has no context to show — the card keeps its live snapshot and the label below says
+    // why it is still here.
+    const lines =
+      hit && hit !== 'failed' ? parseAnsi(hit.lines.join('\n')) : (card.snap?.lines ?? null);
     if (lines === null || query === '') return lines;
     return lines.map((line) => highlightLine(line, query));
   }, [hit, card.snap, query]);
@@ -939,12 +1014,23 @@ function WindowCard({
           theme={theme}
           style={[styles.name, { color: card.win.active ? theme.accent : theme.foreground }]}
         />
-        <HlText
-          text={directory}
-          query={query}
-          theme={theme}
-          style={[styles.sub, { color: theme.muted }]}
-        />
+        {/* T14: a window whose grep never came back keeps its card and wears the reason in place
+            of its directory — the one line the card has to spare. Dropping it instead would read
+            as "nothing here", which is the one thing we do not know (disabled over hidden: say it
+            rather than hide it). `warning`, not `danger`: the next settled keystroke asks again
+            and usually gets an answer. */}
+        {hit === 'failed' ? (
+          <Text style={[styles.sub, { color: theme.warning }]} numberOfLines={1}>
+            not searched
+          </Text>
+        ) : (
+          <HlText
+            text={directory}
+            query={query}
+            theme={theme}
+            style={[styles.sub, { color: theme.muted }]}
+          />
+        )}
       </Animated.View>
       </Animated.View>
     </GestureDetector>
@@ -1121,6 +1207,15 @@ const styles = StyleSheet.create({
   },
   noHitsLead: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.label },
   noHitsQuery: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.mono },
+  // The unreachable notice's second line: the same centred block, one step down and wrapped to a
+  // readable measure rather than running edge to edge.
+  noHitsSub: {
+    fontFamily: SANS,
+    includeFontPadding: false,
+    fontSize: TEXT.mono,
+    textAlign: 'center',
+    paddingHorizontal: SPACE.wide,
+  },
   // No radius here: it scales with the stage, so it is passed at the call site (see there).
   placeholder: {
     position: 'absolute',

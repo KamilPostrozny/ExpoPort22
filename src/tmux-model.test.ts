@@ -66,8 +66,15 @@ test('the required half is in the conf whether or not the comforts are', () => {
       ['WheelDownPane', 'Down'],
     ]) {
       expect(conf).toMatch(new RegExp(`bind -n ${wheel}\\s+if -F .#\\{\\|\\|:`));
-      // The mouse-aware app keeps its untouched report, the alt screen gets one key per notch.
+      // The mouse-aware app keeps its untouched report, a pager gets one key per notch.
       expect(conf).toMatch(new RegExp(`${wheel}[^\\n]*send -M[^\\n]*alternate_on[^\\n]*send -N1 ${key}`));
+      // ...and "a pager" is not just the alternate screen. git runs less with `LESS=FRX`, and `-X`
+      // keeps it on the main buffer: measured in a `git log` pane on this host, `alternate_on` is 0
+      // and `pane_current_command` is `git`, not `less` — so the name arm has to carry both, and
+      // anchored, or `gitk` and `lesspipe` would take the wheel too.
+      expect(conf).toContain(
+        `#{||:#{alternate_on},#{m/r:^(git|less)$,#{pane_current_command}}}' 'send -N1 ${key}' 'copy-mode -e'`,
+      );
       // ...and everything else still falls through to tmux's own default.
       expect(conf).toMatch(new RegExp(`${wheel}[^\\n]*copy-mode -e`));
     }
@@ -182,6 +189,26 @@ test('list-windows output parses, name last so separators in names shift nothing
   ]);
 });
 
+test('the list has exactly as many windows as tmux printed — no phantom row', () => {
+  // The refuted half of BUGS' "one exec per grid open fails": a single extra entry — an off-by-one,
+  // or the trailing newline every `list-windows` ends with becoming a card — would manufacture
+  // exactly one uncapturable target every time, which is what "always exactly 1, at 8 windows and
+  // at 25" looked like. It does not. Verbatim `tmux list-windows` output, trailing newline and all.
+  const rows: [string, number][] = [
+    ['@29', 0],
+    ['@26', 1],
+    ['@28', 2],
+    ['@30', 4],
+    ['@31', 5],
+  ];
+  const output =
+    rows.map(([id, i]) => line([id, String(i), '0', '/home/kamil', '80', 'fish', 'w'])).join('\n') + '\n';
+  expect(parseWindows(output)).toHaveLength(rows.length);
+  expect(parseWindows(output.trimEnd())).toHaveLength(rows.length);
+  // Non-contiguous indices survive as themselves — the gap is tmux's, not a missing window.
+  expect(parseWindows(output).map((w) => w.index)).toEqual([0, 1, 2, 4, 5]);
+});
+
 test('lines that are not windows (tmux diagnostics, junk) never become cards', () => {
   expect(parseWindows('')).toEqual([]);
   expect(parseWindows('no server running on /tmp/tmux-501/default\n')).toEqual([]);
@@ -191,18 +218,25 @@ test('lines that are not windows (tmux diagnostics, junk) never become cards', (
   expect(parseWindows(line(['@1', '1', '0', '/', '80', 'x']))).toEqual([]);
 });
 
-test('window commands target by validated integer index only', () => {
-  expect(selectWindowCommand(3)).toBe('tmux select-window -t :3');
-  expect(killWindowCommand(0)).toBe('tmux kill-window -t :0');
+test('window commands target by tmux window id, never by index', () => {
+  // `:index` is a position, and a position moves: with renumber-windows on, `kill-window -t :2`
+  // aimed at the card that WAS index 2 exits 0 and kills whatever slid into slot 2 (measured,
+  // tmux 3.7b). `@N` is server-global and never reused, so it names one window or none.
+  expect(selectWindowCommand('@3')).toBe('tmux select-window -t @3');
+  expect(killWindowCommand('@0')).toBe('tmux kill-window -t @0');
   // -e: colours stay escapes. -N: trailing spaces stay too, because they carry the background of
   // a highlighted run that reaches past its last letter.
-  expect(capturePaneCommand(2)).toBe('tmux capture-pane -p -e -N -t :2');
+  expect(capturePaneCommand('@12')).toBe('tmux capture-pane -p -e -N -t @12');
   // Always the end of the list, never tmux's lowest free index; quoted so fish leaves `{end}` be.
   expect(NEW_WINDOW).toBe("tmux new-window -a -t ':{end}'");
-  // The injection guard: an index is an integer or it is nothing.
-  expect(() => selectWindowCommand(1.5)).toThrow();
-  expect(() => killWindowCommand(NaN)).toThrow();
-  expect(() => capturePaneCommand(-1)).toThrow();
+  // The injection guard: an id is `@` and digits or it is nothing. An INDEX is now rejected too —
+  // `-t :7` also falls back to matching a window NAMED `7`, which is how a capture reached the
+  // wrong pane and exited 0.
+  expect(() => selectWindowCommand('7')).toThrow();
+  expect(() => killWindowCommand('@1; rm -rf ~')).toThrow();
+  expect(() => capturePaneCommand('@')).toThrow();
+  expect(() => capturePaneCommand('')).toThrow();
+  expect(() => capturePaneCommand('%2')).toThrow(); // a PANE id is not a window id
 });
 
 test('move-window inserts before when moving down, after when moving up', () => {
@@ -212,10 +246,20 @@ test('move-window inserts before when moving down, after when moving up', () => 
 
 /* --- the poll --- */
 
-test('poll parse: attached flag, badge index, pid, command-last rejoin', () => {
-  const poll = parsePoll(line(['1', '3', '4242', 'vim']) + '\n');
-  expect(poll).toEqual({ attached: true, windowIndex: 3, pid: 4242, command: 'vim' });
-  expect(parsePoll(line(['0', '1', '99', 'fish']))?.attached).toBe(false);
+test('poll parse: attached flag, badge index, pid, the PANE alt flag, command-last rejoin', () => {
+  const poll = parsePoll(line(['1', '3', '4242', '1', 'vim']) + '\n');
+  expect(poll).toEqual({ attached: true, windowIndex: 3, pid: 4242, paneAlt: true, command: 'vim' });
+  expect(parsePoll(line(['0', '1', '99', '0', 'fish']))?.attached).toBe(false);
+  // The whole 2026-08-17 bug in one line: a pane running `sleep` inside tmux. The OUTER terminal
+  // is on the alternate screen (it is showing a tmux client), the PANE is not.
+  expect(parsePoll(line(['1', '3', '4242', '0', 'sleep']))?.paneAlt).toBe(false);
+  // A command name full of separators still rejoins from field 5, not 4.
+  expect(parsePoll(line(['1', '3', '4242', '0', 'we', 'ird']))?.command).toBe(`we${SEP}ird`);
+  // A tmux too old for `#{alternate_on}` renders it empty — false, not a rejected line: the badge
+  // and the tabs button must not go down with a field only the ribbon reads.
+  const old = parsePoll(line(['1', '3', '4242', '', 'sleep']));
+  expect(old?.paneAlt).toBe(false);
+  expect(old?.command).toBe('sleep');
   expect(parsePoll('')).toBeNull(); // no server = nothing to say (§7: silence, not a message)
   expect(parsePoll('no current client\n')).toBeNull();
 });
@@ -232,7 +276,7 @@ test('the poll hurries for the attach, settles on it, and gives up hurrying eith
 });
 
 test('foreground: shells are idle, everything else is a process for the ribbon', () => {
-  const at = (command: string) => ({ attached: true, windowIndex: 1, pid: 7, command });
+  const at = (command: string) => ({ attached: true, windowIndex: 1, pid: 7, paneAlt: false, command });
   for (const shell of ['fish', 'bash', 'zsh', 'sh']) {
     expect(foregroundFrom(at(shell))).toBeNull(); // §4.4: shell name = idle
   }
@@ -241,7 +285,9 @@ test('foreground: shells are idle, everything else is a process for the ribbon',
   expect(foregroundFrom(at('sleep'))).toEqual({ command: 'sleep', pid: 7 });
   expect(foregroundFrom(null)).toBeNull();
   // Detached: whatever runs there is not under the user's finger, so the ribbon shows nothing.
-  expect(foregroundFrom({ attached: false, windowIndex: 1, pid: 7, command: 'vim' })).toBeNull();
+  expect(
+    foregroundFrom({ attached: false, windowIndex: 1, pid: 7, paneAlt: false, command: 'vim' }),
+  ).toBeNull();
 });
 
 test('poll and list commands go quiet instead of erroring without a server', () => {
@@ -280,6 +326,10 @@ test('the poll names its session, or asks untargeted when it cannot', () => {
   const aimed = model.pollCommand('port22');
   expect(aimed).toContain(`-t '=port22:'`); // exact name, that session's current window, active pane
   expect(aimed).toContain('#{pane_current_command}');
+  // The ribbon's TUI gate: per-pane, because the outer terminal's own buffer says only "tmux".
+  expect(aimed).toContain('#{alternate_on}');
+  // Command stays last — nothing after it to shift when a name contains the separator.
+  expect(aimed.indexOf('#{alternate_on}')).toBeLessThan(aimed.indexOf('#{pane_current_command}'));
   // A session name is user-typed on the attach picker, so it goes through the same quoting.
   expect(model.pollCommand('$(reboot)')).toContain(`'=$(reboot):'`);
 });

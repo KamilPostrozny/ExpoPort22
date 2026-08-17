@@ -15,6 +15,7 @@ import { useSyncExternalStore } from 'react';
 
 import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
 import { toBase64 } from '@/base64';
+import { makePool, retryRefused } from '@/exec-pool';
 import { parseSearchOutput, searchPaneCommand, type SearchHit } from '@/search-model';
 import { getSettings, pollSession, updateSettings, usesTmux } from '@/settings';
 import {
@@ -68,6 +69,11 @@ export type TmuxState = {
   /** The active pane's non-shell foreground process — what T11's ribbon keys on. `null` = idle
    *  shell, not attached, or no tmux. */
   foreground: { command: string; pid: number } | null;
+  /** The active PANE is on the alternate screen: a full-screen app in front of the user. This is
+   *  the ribbon's §4.4 "unknown TUI" gate, and it is NOT `modes.altScreen` from the outer xterm —
+   *  that one is permanently true inside tmux (see `pollCommand`). `false` without tmux, which is
+   *  moot: no tmux means no `foreground` either, so the ribbon has nothing to gate. */
+  paneAlt: boolean;
 };
 
 const DOWN: TmuxState = {
@@ -76,6 +82,7 @@ const DOWN: TmuxState = {
   attached: false,
   windowIndex: null,
   foreground: null,
+  paneAlt: false,
 };
 
 let state: TmuxState = DOWN;
@@ -101,6 +108,7 @@ function set(patch: Partial<TmuxState>) {
     next.config === state.config &&
     next.attached === state.attached &&
     next.windowIndex === state.windowIndex &&
+    next.paneAlt === state.paneAlt &&
     next.foreground?.command === state.foreground?.command &&
     next.foreground?.pid === state.foreground?.pid;
   if (same) return;
@@ -125,18 +133,81 @@ export function configStatus(): ConfigStatus {
 
 /* --- the exec seam --- */
 
-/** One short-lived exec channel per command, on the session's own connection. The commands are
- *  built to answer on stdout and exit 0 (see tmux-model), so a rejection here is transport-level
- *  — the caller decides whether that is silence or a throw. */
+/** One short-lived exec channel per command, on the session's own connection, spending from NO
+ *  budget — every caller in this file either goes through `run1` or is fanned out by a caller that
+ *  pools it (see the arithmetic below). The commands are built to answer on stdout and exit 0 (see
+ *  tmux-model), so a rejection here is transport-level — the caller decides whether that is silence
+ *  or a throw. */
 function run(command: string): Promise<string> {
   return ExpoSSH.exec(command, EXEC_LIMIT);
 }
 
-/** T11's kill-force cap: one non-tmux command on the same short-lived-exec seam the session's
- *  connection already provides. */
-export function exec(command: string): Promise<string> {
-  return run(command);
+/** A command that answers in a line or two, through the singleton budget, retried once if sshd
+ *  refuses the channel outright (see `retryRefused` — a refusal is strictly before execution, so
+ *  even `new-window` is safe to re-ask). Everything in this file that is not fanned out per window
+ *  goes through here; that is what makes the class countable. */
+function run1(command: string): Promise<string> {
+  return singlePool(() => retryRefused(() => run(command)));
 }
+
+/** T11's kill-force cap: one non-tmux command on the same short-lived-exec seam the session's
+ *  connection already provides. A singleton like every other user action. */
+export function exec(command: string): Promise<string> {
+  return run1(command);
+}
+
+/*
+ * --- the channel budget ---
+ *
+ * Every exec is a channel, and sshd counts them all against `MaxSessions` (default 10) for the one
+ * connection this app opens. THREE classes spend from it, and the whole point of splitting them is
+ * that they cannot sum past the limit no matter how they overlap:
+ *
+ *   1  the shell's PTY, held for the whole session
+ *   3  `execPool`  — the grid's per-window fan-outs (T10's captures, T14's greps), shared
+ *   2  `singlePool` — every command that is not fanned out, via `run1`: the ~2s poll, `listWindows`,
+ *                     select/kill/new/move, the probe, `cacheSessions`, `configure`'s two reads
+ *   2  `shotPool`  — the un-fanned single captures (the zoom's `refreshCard`, the bar swipe's two
+ *                     neighbour warms — which is three in flight if the two overlap)
+ *   = 8, and the two spare cover `configure`'s SFTP upload plus whatever sshd counts that we do not.
+ *
+ * The FIRST version of this budget got the arithmetic wrong and the second Android walk proved it
+ * (emulator, 2026-08-17): it bounded the two fan-outs at 4 and then assumed at most one singleton
+ * on top. The pool held — a `ps` on the host caught exactly four concurrent `capture-pane` children
+ * and never five, and no grep failed — but `open failed` still came back three times, at three
+ * un-pooled sites: a fan-out capture for a window that was demonstrably alive, `listWindows`, and
+ * `refreshCard`'s capture. Several singletons overlap in practice; unbounded classes summed past 10
+ * beside a pool that was itself behaving. Hence: no class outside a pool.
+ *
+ * The measurement before any of it existed, kept because it is what made this a correctness fix and
+ * not a tidy-up: 24 windows with the search armed fired 24 greps beside the captures and answered
+ * `open failed` for 16 of them — and a window whose grep failed is a window the grid CANNOT tell
+ * from "no hit". Note this is a different fault from BUGS.md's "one exec per grid open fails",
+ * which stays refuted: that one was always a window the user had just killed.
+ *
+ * ponytail: three fixed numbers against the DEFAULT MaxSessions. A host set lower (`MaxSessions 4`)
+ * still saturates — and now says so, in the grid's own words, instead of lying; a host set higher
+ * just fills the grid slower than it could. The upgrade is to read the host's own limit, which sshd
+ * does not advertise, so it would mean widening until `open failed` comes back and settling one
+ * below. Not worth it until someone's host is actually the odd one.
+ */
+
+/** The per-window fan-outs — captures and greps go through THIS instance, never one each: two
+ *  pools of three is six channels, which was the original bug. */
+export const execPool = makePool(3);
+
+/**
+ * The single captures, kept OFF `execPool` on purpose: `refreshCard`'s capture is the one the
+ * zoom-out crossfades into, and queueing it behind a grid's worth of captures would land stale
+ * content on the card the flight arrives at. Two slots, so the aimed capture waits behind at most
+ * one neighbour warm (~250ms) rather than behind twenty-four.
+ */
+export const shotPool = makePool(2);
+
+/** Everything that is not fanned out per window (see `run1`). Two, because the walk showed several
+ *  of them genuinely overlap — a poll, a `listWindows` and the user's select can all be in flight
+ *  at once — and one reserved slot is what the old budget assumed and did not enforce. */
+const singlePool = makePool(2);
 
 /* --- lifecycle (driven by src/session.ts state transitions) --- */
 
@@ -147,7 +218,7 @@ export async function startTmux(): Promise<void> {
   up = true;
   let present = false;
   try {
-    present = parseProbe(await run(PROBE));
+    present = parseProbe(await run1(PROBE));
   } catch {
     // A throwing exec layer on `command -v`'s exit 1 means the same thing as empty output.
   }
@@ -187,14 +258,14 @@ export function stopTmux(): void {
 async function configure(): Promise<void> {
   try {
     const { tmuxExtras } = getSettings();
-    const remote = await run(readFileCommand(`~/${CONF_PATH}`));
+    const remote = await run1(readFileCommand(`~/${CONF_PATH}`));
     if (needsPush(remote, tmuxExtras)) {
       const bytes = new TextEncoder().encode(generateConf(tmuxExtras));
       await ExpoSSH.upload(toBase64(bytes), CONF_PATH, CONF_DIRECTORIES);
     }
     // The whole apply: source our own file onto the running server, read the option back. Nothing
     // of the user's is touched on the way — see tmux-model's "why nothing of the user's is edited".
-    const verified = parseVerify(await run(APPLY_AND_VERIFY));
+    const verified = parseVerify(await run1(APPLY_AND_VERIFY));
     set({ config: verified ? 'applied' : 'not-applied' });
     console.log('[tmux] configure:', verified ? 'applied' : 'not-applied (read-back said no)');
   } catch (error) {
@@ -230,13 +301,14 @@ async function poll(): Promise<void> {
       aimedAt = session;
       console.log(`[tmux] poll aimed at ${session === null ? 'nothing (untargeted)' : `session ${session}`}`);
     }
-    let answer = parsePoll(await run(pollCommand(session)));
-    if (answer === null && session !== null) answer = parsePoll(await run(POLL));
+    let answer = parsePoll(await run1(pollCommand(session)));
+    if (answer === null && session !== null) answer = parsePoll(await run1(POLL));
     if (!up) return;
     set({
       attached: answer?.attached ?? false,
       windowIndex: answer?.attached ? answer.windowIndex : null,
       foreground: foregroundFrom(answer),
+      paneAlt: answer?.attached === true && answer.paneAlt,
     });
   } catch {
     // One missed beat; the next tick asks again.
@@ -249,7 +321,7 @@ async function poll(): Promise<void> {
  *  connection to ask over. Silent on failure: the picker just offers what it offered last time. */
 async function cacheSessions(): Promise<void> {
   try {
-    const names = parseSessions(await run(LIST_SESSIONS));
+    const names = parseSessions(await run1(LIST_SESSIONS));
     const known = getSettings().knownSessions;
     if (names.length !== known.length || names.some((name, i) => name !== known[i])) {
       updateSettings({ knownSessions: names });
@@ -262,19 +334,26 @@ async function cacheSessions(): Promise<void> {
 /* --- window helpers (T10's switcher, T11's swipe) --- */
 
 export async function listWindows(): Promise<TmuxWindow[]> {
-  return parseWindows(await run(LIST_WINDOWS));
+  return parseWindows(await run1(LIST_WINDOWS));
 }
 
 /** The window's active pane with its colours as escapes (`-e`) — feed it to a terminal, not a
- *  <Text>. Rejects when the window is gone; the switcher decides what a missing card looks like. */
-export function capturePane(windowIndex: number): Promise<string> {
-  return run(capturePaneCommand(windowIndex));
+ *  <Text>. Rejects when the window is gone; the switcher decides what a missing card looks like.
+ *
+ *  One channel per call and NOT pooled here, because the two ways of calling it belong to
+ *  different budgets: fanned out once per window it goes through `execPool`, and on its own — the
+ *  capture the zoom-out crossfades into — through `shotPool`, so it never queues behind a grid's
+ *  worth of them. Pooling it in here would put one inside the other and collapse both. Every
+ *  caller picks its pool; none may call this bare. */
+export function capturePane(windowId: string): Promise<string> {
+  return run(capturePaneCommand(windowId));
 }
 
 /** T14: first occurrence of `query` in the window's whole scrollback, with the card's context —
- *  the search stays on the host (one grep per window per settled keystroke). `null` = no hit. */
-export async function searchPane(windowIndex: number, query: string): Promise<SearchHit | null> {
-  return parseSearchOutput(await run(searchPaneCommand(windowIndex, query)));
+ *  the search stays on the host (one grep per window per settled keystroke). `null` = no hit.
+ *  Fanned out per window, so callers go through `execPool`. */
+export async function searchPane(windowId: string, query: string): Promise<SearchHit | null> {
+  return parseSearchOutput(await run(searchPaneCommand(windowId, query)));
 }
 
 /**
@@ -290,27 +369,27 @@ export async function searchPane(windowIndex: number, query: string): Promise<Se
  */
 const NUDGE_AFTER_SLIDE_MS = 400;
 
-export async function selectWindow(windowIndex: number): Promise<void> {
-  await run(selectWindowCommand(windowIndex));
+export async function selectWindow(windowId: string): Promise<void> {
+  await run1(selectWindowCommand(windowId));
   setTimeout(() => void poll(), NUDGE_AFTER_SLIDE_MS);
 }
 
 // Not deferred: a kill is not on the swipe path, and its grid wants the fresh list at once.
-export async function killWindow(windowIndex: number): Promise<void> {
-  await run(killWindowCommand(windowIndex));
+export async function killWindow(windowId: string): Promise<void> {
+  await run1(killWindowCommand(windowId));
   void poll();
 }
 
 // Deferred like `selectWindow`: committing a swipe past the last tab births a window, and that
 // commit is followed by the same slide.
 export async function newWindow(): Promise<void> {
-  await run(NEW_WINDOW);
+  await run1(NEW_WINDOW);
   setTimeout(() => void poll(), NUDGE_AFTER_SLIDE_MS);
 }
 
 /** Reorder for T10's drag-drop. Landing indices depend on the user's base-index/renumber
  *  options, so re-list after — the answer is what tmux did, not what we asked. */
 export async function moveWindow(from: number, to: number): Promise<void> {
-  await run(moveWindowCommand(from, to));
+  await run1(moveWindowCommand(from, to));
   void poll();
 }

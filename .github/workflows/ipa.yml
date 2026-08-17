@@ -1,7 +1,8 @@
 name: IPA
 
-# The whole iOS loop for a Linux desktop: this repo cannot build an Expo app locally (no Xcode, no
-# CocoaPods), so every push to `main` produces an unsigned Debug IPA and replaces the rolling `dev`
+# The whole iOS loop for a Linux desktop: this repo cannot build the *iOS* half locally (no Xcode,
+# no CocoaPods — Android builds fine on the box, which is why it has no workflow of its own; see
+# docs/ship.md), so every push to `main` produces an unsigned Debug IPA and replaces the rolling `dev`
 # prerelease. `xtool install` on the laptop signs it with the free Apple ID and pushes it to the
 # phone — see docs/ship.md. Signing does not happen here: it would need a paid account's
 # certificate in a secret, and free provisioning holds exactly one certificate that xtool owns.

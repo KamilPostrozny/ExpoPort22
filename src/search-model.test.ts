@@ -39,13 +39,23 @@ test('metadata match: name, path, process, case-insensitive substring', () => {
 /* --- the host-side grep --- */
 
 test('search command: whole scrollback, first hit only, quoted query', () => {
-  expect(searchPaneCommand(3, 'deploy')).toBe(
-    `tmux capture-pane -p -e -S - -t :3 | grep -i -F -n -m1 -B${HIT_BEFORE} -A${HIT_AFTER} 'deploy' 2>/dev/null; true`,
+  expect(searchPaneCommand('@3', 'deploy')).toBe(
+    `tmux capture-pane -p -e -S - -t @3 | grep -i -F -n -m1 -B${HIT_BEFORE} -A${HIT_AFTER} 'deploy' 2>/dev/null; true`,
   );
   // shellQuote's contract: a quote in the query cannot escape the quoting.
-  expect(searchPaneCommand(0, "it's")).toContain(`'it'\\''s'`);
-  expect(() => searchPaneCommand(1.5, 'x')).toThrow();
-  expect(() => searchPaneCommand(-1, 'x')).toThrow();
+  expect(searchPaneCommand('@0', "it's")).toContain(`'it'\\''s'`);
+});
+
+// The grep is targeted by tmux's `@N` id, through the one `target` guard the other window commands
+// share — never `-t :index`. Here the bug wears a different face than a mis-aimed kill: an index
+// that slid under a renumber, or one that falls through to a window NAMED like it, greps the wrong
+// scrollback (or none), and the switcher's per-window catch renders that as "no hit".
+test('search command targets the window id, and rejects anything that is not one', () => {
+  expect(searchPaneCommand('@31', 'x')).toContain('-t @31 |');
+  expect(searchPaneCommand('@31', 'x')).not.toContain('-t :');
+  for (const bad of ['5', ':5', '@', '@5x', '', '@5;rm -rf /', 'fish']) {
+    expect(() => searchPaneCommand(bad, 'x')).toThrow();
+  }
 });
 
 test('grep output parses into context lines with the hit line marked', () => {
@@ -69,6 +79,16 @@ test('a window survives on either half of the match', () => {
   // Held until the grep answers: a card leaves on a `null`, never on a pending `undefined`, so the
   // grid narrows one answer at a time instead of emptying and refilling on the first keystroke.
   expect(windowSurvives(win(), 'deploy', undefined)).toBe(true);
+});
+
+// The correctness half of the channel-saturation fix (emulator, 2026-08-17): a grep that never
+// answered must not read as "nothing here". Only grep's own `null` may take a card out of a
+// filtered grid.
+test('a window whose grep failed stays in the grid', () => {
+  expect(windowSurvives(win(), 'deploy', 'failed')).toBe(true);
+  expect(windowSurvives(win({ name: 'x', path: '/x', command: 'x' }), 'deploy', 'failed')).toBe(
+    true,
+  );
 });
 
 /* --- the highlight surgery (ansi-spans) --- */

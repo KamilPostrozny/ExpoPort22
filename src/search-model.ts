@@ -9,7 +9,7 @@
  * search state the two views reflect (§ T14: one piece of state, armed or disarmed as a whole).
  */
 
-import { shellQuote, type TmuxWindow } from '@/tmux-model';
+import { shellQuote, target, type TmuxWindow } from '@/tmux-model';
 
 /** Case-insensitive substring — the baseline the whole task is specified against. */
 export function normalizeQuery(q: string): string {
@@ -34,17 +34,18 @@ export const HIT_AFTER = 20;
  * `-i` to match the metadata half; `-m1` because the grid shows the first occurrence and nothing
  * more (multiple hits are the terminal view's prev/next job). `-n` marks which context line is
  * the hit. Quoting is `shellQuote`'s — the one contract for user-typed text on a remote command
- * line. Empty output = no hit (`; true` eats grep's exit 1).
+ * line. Empty output = no hit (`; true` eats grep's exit 1). The window is addressed by tmux's
+ * `@N` id through `target` — the same guard every other window command goes through, and for the
+ * same reasons (see its note).
  *
  * ponytail: grep runs over the escaped capture, so a hit split mid-word by a colour change is
  * missed. The upgrade is a plain capture for line numbers plus a coloured re-capture of that
  * range — two round trips per window (PLAN.md T14 leaves it open; this is the walkthrough's
  * baseline).
  */
-export function searchPaneCommand(index: number, query: string): string {
-  if (!Number.isInteger(index) || index < 0) throw new Error(`not a window index: ${index}`);
+export function searchPaneCommand(id: string, query: string): string {
   return (
-    `tmux capture-pane -p -e -S - -t :${index} | ` +
+    `tmux capture-pane -p -e -S - ${target(id)} | ` +
     `grep -i -F -n -m1 -B${HIT_BEFORE} -A${HIT_AFTER} ${shellQuote(query)} 2>/dev/null; true`
   );
 }
@@ -79,18 +80,29 @@ export function parseSearchOutput(stdout: string): SearchHit | null {
   return { lines, hitLine };
 }
 
+/**
+ * What one window's grep has told us, and the ONLY three things it can tell us:
+ *   `undefined`  not asked yet, or still in flight
+ *   `SearchHit`  a hit, with its context
+ *   `null`       grep answered: this scrollback does not contain the query
+ *   `'failed'`   we never got an answer — the channel died (sshd's MaxSessions, a dropped link)
+ *
+ * The fourth exists because it is not the third. A failed grep reported as `null` drops the card
+ * out of a filtered grid, and the user reads that as "no match here" — a search that quietly
+ * under-reports (emulator, 2026-08-17: 16 of 24 windows at once, all `open failed`).
+ */
+export type SearchAnswer = SearchHit | null | 'failed';
+
 /** The grid's filter: a window survives on either half of the match.
  *
- *  The three states of `hit` are the whole of it — a card is removed only once its grep has
- *  ANSWERED (`null`), never while the answer is still in flight (`undefined`). Treating "not known
- *  yet" as "no match" emptied the grid on the first keystroke and refilled it a beat later, so a
- *  quick query read as the tabs vanishing and coming back rather than as a list narrowing (user,
- *  device). Held instead, the grid only ever loses cards, one grep at a time. */
-export function windowSurvives(
-  win: TmuxWindow,
-  q: string,
-  hit: SearchHit | null | undefined,
-): boolean {
+ *  The four states of `hit` are the whole of it — a card is removed only once its grep has
+ *  ANSWERED that there is nothing (`null`), never while the answer is still in flight
+ *  (`undefined`) and never when the answer never came (`'failed'`). Treating "not known yet" as
+ *  "no match" emptied the grid on the first keystroke and refilled it a beat later, so a quick
+ *  query read as the tabs vanishing and coming back rather than as a list narrowing (user,
+ *  device). Held instead, the grid only ever loses cards, one grep at a time — and an unanswered
+ *  window stays, saying so on its card (§ disabled-over-hidden: never silently drop it). */
+export function windowSurvives(win: TmuxWindow, q: string, hit: SearchAnswer | undefined): boolean {
   return metaMatches(win, q) || hit !== null;
 }
 

@@ -1,5 +1,14 @@
 # Open bugs
 
+> **Session of 2026-08-17 — Android only; NOTHING here has been walked on the iPhone.** Four
+> emulator walks. Fixed and Android-verified: bugs 1+2 (search mark, 30/30 taps after two failed
+> attempts), 3, 4, 6, the key bar's landing frame, exec/kill by stale `@id`, the `MaxSessions`
+> fan-out, `selectWindow`'s unhandled rejection, the ribbon on birth, the ribbon's `running` chip,
+> and the grid's dead bottom bar. Closed as not reproducible (user): bug 5 and the grid tap — the
+> speculative fixes for both were written and withdrawn unshipped. Still open below: the addon's
+> grey matches decaying under tmux, and the two residuals at the end. Per AGENTS.md the iOS half is
+> a finding, not a footnote: every fix in this session is unverified there.
+
 Found on device during the T-perf accept walk (2026-08-15). Everything here is reproducible on a
 real phone against a live tmux session; where a cause was in doubt it was settled by checking out
 `fa4cb78` (the commit before the perf work), reloading, and reproducing the fault with the changes
@@ -85,6 +94,65 @@ index through `onDidChangeResults`, and `SearchEngine` returns a `{col, row, siz
 marking the current hit ourselves (our own decoration, or a rendered overlay) removes both this bug
 and, probably, bug 1. The alternative is vendoring `SearchAddon`.
 
+**In the tree, walked once on Android and FAILED, then re-fixed; the re-fix is NOT yet walked
+(2026-08-17).** `markHit` in `src/terminal.tsx` marks the hit itself and scrolls to it. Three
+causes, all in xterm and none of them the colours — read out of the renderer rather than guessed.
+The first two are why the addon's own active decoration is invisible:
+
+- `DomRendererRowFactory` lets the LAST decoration at a cell win, and `SortedList._flushInserted`
+  puts a newly inserted value AHEAD of the ones already at that line — so the grey match,
+  registered first, is applied last and paints over the addon's yellow. Then the *selection*
+  overwrites the survivor anyway (`_selectResult` goes to a hit via `term.select()`), and the
+  selection colour here is `theme.selection` — the same grey. `layer: 'top'` beats both, whatever
+  the insertion order; the addon exposes no way to ask for it.
+- The decoration ELEMENT, where `activeMatchBorder`'s outline and the `xterm-find-*` classes live,
+  is `display:none` while the alt buffer is active (`BufferDecorationRenderer._refreshStyle`) —
+  under tmux, always. That, not the `isActiveResult` hardcode above, is why the border experiment
+  changed nothing: only a decoration's *background* reaches the screen there, because the row
+  factory paints it into the cells.
+- **And a `layer: 'top'` decoration of our own is not enough either — that is what the failed walk
+  found.** 22 taps of `∨` with the keyboard up put yellow on screen 9 times; 8 taps with the
+  keyboard down, none. Not a capture race and not a flicker: 8 back-to-back screencaps after one
+  failing tap, and again at +3s and +6s, all with zero yellow fill pixels. Binary per tap and
+  permanent. The log was right every time (`marked 1`, never `marked 0`), so the decoration was
+  always built. The tell is the second symptom: on the failing frames **most of the addon's GREY
+  matches were gone too** — 20 results, 2 rows still carrying any decoration at all.
+
+  **A decoration cannot outlive its marker, and tmux's redraw kills markers.**
+  `DecorationService.registerDecoration` hangs `marker.onDispose → decoration.dispose()` on every
+  decoration it makes, and `Buffer` disposes markers on two things tmux does constantly:
+  `clearMarkers(ybase + y)` from `InputHandler._resetBufferLine` — every `CSI K` / `CSI J`, which
+  is how a pane repaints a row — and `lines.onDelete`, any scroll of a DECSTBM region. So the mark
+  dies the moment the host repaints the row under it, which is a coin flip inside the fraction of a
+  second between the tap and the screenshot.
+
+  The greys prove it on their own: the addon builds them once (`_highlightAllMatches` runs only
+  when the term or the options change) and this file has stubbed out `_updateMatches`, the one
+  thing that ever rebuilt them — so nothing *but* marker death can take them off the screen, and
+  they demonstrably came off it. Markers on a tmux-driven buffer are structurally unreliable, and
+  re-registering the mark would be a race against a stream that erases rows continuously.
+
+  **So the mark stopped being a decoration.** It is now our own absolutely-positioned element
+  inside `.xterm-rows` carrying the hit's own text: it inherits the row container's font, size and
+  (this file's, zeroed) letter-spacing so its glyphs land on the same pitch as the ones underneath,
+  it is placed from the cell `report()` already measures, and `z-index: 5` clears the selection
+  layer's 1 while staying under the decoration container's 6/7. Nothing xterm does to the buffer
+  can reach it. `term.onScroll` re-places it, which only matters on the `shell` start mode.
+
+  Still open, same root cause, out of scope here: **the addon's grey matches decay** as tmux
+  repaints, and with `_updateMatches` stubbed nothing rebuilds them, so a long-lived search ends up
+  with most matches unhighlighted. Un-stubbing it brings back the drift T14 removed; drawing all
+  matches ourselves is blocked on the addon exposing no public result list (`onDidChangeResults`
+  gives an index and a count, nothing more).
+
+And bug 1's scroll: on the alt screen there is nothing to scroll. That buffer has no scrollback
+(`baseY` 0, `viewportY` 0), so every hit xterm can find is already on screen and `_selectResult`'s
+scroll branch is unreachable by construction — the history the user means is tmux's, which only
+its copy-mode can reach. So under tmux bug 1 IS bug 2: "it did not go to the match" is "I cannot
+see which match it went to". In the normal buffer the scroll does run (`markHit` does it too now,
+so the hit no longer depends on the addon reaching its own branch). Raising tmux's history to the
+search is a separate piece of work and would have to drive copy-mode from `src/app/terminal.tsx`.
+
 ---
 
 ## 3. The outgoing card shows the incoming tab's contents for a frame
@@ -142,7 +210,29 @@ own.
 
 ---
 
-## 5. Neighbour cards do not reliably leave during the swipe up
+## 5. Neighbour cards do not reliably leave during the swipe up — CLOSED 2026-08-17, not reproducible
+
+**Closed by the user, who has walked it since: the symptom is gone and the entry is stale.** The
+visible half went with `e576202` ("the held card goes to the grid alone — the neighbour row is
+gone"), which deleted `heldAir`, the ceiling and the air branch of `rowJoins`, so a pure lift can no
+longer join the row at all — that commit landed *after* this entry was written, which is why the
+entry still describes it as open.
+
+**The React Compiler is exonerated, and that is worth keeping** so nobody re-runs the experiment
+below. Running babel-plugin-react-compiler with its logger reproduces the audit's claim exactly (8
+`CompileError`, then `CompileSuccess` for `PageContent`, `NeighborPage`, `Status`) — but the memo it
+gains is a no-op. `NeighborPage` reads no ref, holds no state and does not gate its own visibility:
+visibility is `opacity: rowVisSV.value` on the *parent* `Animated.View` (`usePageCardStyle`),
+outside the compiled component. Its one cached value, the style array, is keyed on `radii`, a stable
+`useAnimatedStyle` object; and its `<PageContent>` cache is keyed on `insets` (`paneInsets`), a
+fresh object literal every render, so it misses every time and is rebuilt anyway. `"use no memo"`
+would have changed nothing — the surgical test this entry prescribes was never going to move.
+
+A fix for a residual on the sideways-then-up path (adding `toGrid` to `onZoomEnd`'s fade condition)
+was written on 2026-08-17 and **withdrawn unshipped** once the entry was known to be closed: no live
+symptom, no fix. Recorded here so it is not rediscovered as an omission.
+
+<details><summary>Original entry, kept for the record</summary>
 
 **Repro.** Swipe a tab upward (the zoom toward the grid), slowly. Screenshot: 2026-08-15, 21:51.
 
@@ -172,6 +262,8 @@ render, a value whose identity is load-bearing for visibility).
 If the flashing persists with the directive in place, it is pre-existing and the compiler is
 exonerated — then check the zoom's own visibility gating, since bug 3 shows the same transition
 already releases things a frame early.
+
+</details>
 
 ---
 
@@ -208,14 +300,76 @@ with the hits mapped back to positions. That is a different feature from what T1
 a design question, not a patch. A cheaper honest half-measure: say so in the UI — the count is
 "20" when the truth is "20 on screen", and nothing tells the user which they are looking at.
 
-Note that `scrollback: 10_000` is therefore also close to dead weight while a session is under
-tmux; it only earns its memory on a bare shell without tmux.
+**Half-measure DONE, 2026-08-17. The design question is still open and unbuilt.** The count now
+carries its own scope: `3/20 on screen`, `20 on screen`, `none on screen` while the buffer cannot
+reach past the viewport, and the plain `3/20` / `20` / `none` when it genuinely can. Same `Text`,
+same MONO 11 in `muted` — the scope is part of the number, no new chrome.
+
+The signal is read, not guessed: `term.buffer.active.baseY === 0` (`screenOnly` in
+`src/terminal.tsx`) says the buffer holds no history at all, so the addon had only the visible rows
+to search. Under tmux that is permanent — the alternate buffer's `baseY` never leaves 0 — and on a
+bare shell it is true only until the first screenful scrolls off, after which the suffix disappears
+by itself. No `Platform.OS`, no "is this tmux" flag. It crosses the bridge on the existing
+`onDidChangeResults` path, as a third argument to `onSearchResults(index, count, screenOnly)`, into
+the same `occ` state that already holds "i/N".
+
+What is NOT done, and is the actual fix: host-side `capture-pane` for the terminal search, so the
+two searches in this app finally have the same reach. Still a design question.
+
+**`scrollback: 10_000` — verdict: keep it (2026-08-17).** It is dead weight under tmux, as this
+section says, but it is the *only* scrollback on the `shell` start mode (`startupLine`,
+`src/settings.ts`), where there is no host-side history to fall back on. And unfilled it is nearly
+free: xterm hands the number to `CircularList`, which does `new Array(maxLength)` and allocates a
+line object only on push (`common/CircularList.ts`) — so an unused 10 000 is one empty 10k-slot
+array, not 10 000 line buffers. Nothing to reclaim; a comment at the option now says so.
+
+---
+
+## 7. The grid's bottom bar is unreachable on Android — FIXED 2026-08-17, unverified on device
+
+**Repro (Android only).** Open the tabs grid. Tap `+`. Tap `✓`.
+
+**Symptom.** `+` opens the terminal's **UPLOAD FILE** sheet instead of birthing a window; `✓` does
+nothing at all. The grid can only be left with the system back button. Measured on the emulator
+2026-08-17: the grid's `+` at `[89,2182][218,2311]` and `✓` at `[862,2182][991,2311]` are the same
+rectangles as the key bar's `…` and tabs circles, the bar wins the hit test, and neither
+`[switcher] new window` nor a window-count change is ever logged. `✓` reaches `openSwitcher`, which
+returns early on `sw !== 'closed'` — a tap that does nothing and logs nothing. This is almost
+certainly the true "the app is stuck, 13 taps did nothing, only the system back button recovered
+it" report that was blamed on a blank grid.
+
+**Cause.** The key bar and the ribbon band are SCREEN-STATIC chrome: they are deliberately rendered
+*outside* the zoom box (see the comment above them in `src/app/terminal.tsx`) so a page swipe does
+not slide them, which puts them AFTER the grid in paint order — in front of it. Through the flight
+they are hidden by `barFadeStyle`, an opacity that reaches 0 a quarter of the way in.
+
+Invisible is not untouchable. Android's `TouchTargetHelper` walks the view tree checking bounds and
+`pointerEvents` and never looks at a view's alpha, so an opacity-0 key bar in front of the open
+grid keeps every hit that lands on it. **iOS never showed the fault** because UIKit's `hitTest:`
+skips any view with alpha ≤ 0.01 — the same JSX, two behaviours, and the phone's was the correct
+one by accident. The zoom box itself has always carried
+`pointerEvents={sw === 'closed' || 'closing' || 'drag' ? 'auto' : 'none'}`; when the bar moved out
+of that box it silently left the gate behind, and its stale comment ("the bar rides inside this")
+is what recorded the assumption.
+
+The grid's own `Could not reach the host` Pressable was suspect for the same reason — it is an
+absoluteFill and its lower band sits under the bar — and is fixed by the same change. Its centre,
+where the taps went, was always clear; only the strip behind the bar was dead.
+
+**Fix.** One `chromeLive` const in `src/app/terminal.tsx` (`sw === 'closed' || 'closing' ||
+'drag'`), read by all three chrome layers: the zoom box, the key bar's wrapper, and the ribbon
+band's layer (`box-none` → `none`). Says out loud what iOS was getting for free, so both platforms
+do it for the same reason and no `Platform.OS` branch appears. `closing` and `drag` stay live
+because the bar owns the drag gesture and the phase outlives the motion.
+
+Nothing in `src/switcher.tsx` changed — the grid was always drawing and gating its controls
+correctly (`interactive` is `sw === 'open'`), it just never got the touch.
 
 ---
 
 ## Also open, found the same session, lower priority
 
-### The key bar is up before the keyboard is
+### The key bar is up before the keyboard is — fixed, awaiting its second Android walk
 
 **Repro.** With the keyboard up, open the tabs grid, then come back to the terminal.
 
@@ -223,27 +377,78 @@ tmux; it only earns its memory on a bare shell without tmux.
 over an empty band, and the keyboard then slides up to meet it. It should start at the bottom and
 travel up with the keyboard (user, 2026-08-15).
 
-**Where to look.** `finishClose`'s `keysWereUp` branch raises the keys (`kbSettle` + `focusSignal`)
-but never touches `keyboardPad`, which the grid froze at whatever it was before the open — a full
-keyboard's worth. So the bar renders raised on the landing frame, hundreds of ms before the keyboard
-it is making room for exists.
+**Cause, in two layers.** The first was the value: `finishClose`'s `keysWereUp` branch raised the
+keys (`kbSettle` + `focusSignal`) but never touched `keyboardPad`, which the grid had frozen at
+whatever it was before the open — a full keyboard's worth. `syncPad()` could not be what zeroed it,
+because it read `Keyboard.metrics()`, which mid-hide still reports the departing keyboard (the same
+trap the fixed chrome bug hit, and why a `keyboardDidHide` backstop had to be added). So the
+listeners now record the pad every keyboard event ANNOUNCES — the freeze skips the render, not the
+record — `syncPad` reads that record, and `finishClose` calls it on both branches. That also removed
+the backstop's own 286 → 0 flicker.
 
-Zeroing the pad on that branch would put the bar back at the bottom, but `syncPad()` cannot be what
-does it: it reads `Keyboard.metrics()`, which mid-hide still reports the departing keyboard (the
-same trap the fixed chrome bug hit, and why a `keyboardDidHide` backstop had to be added). The
-honest version is to record the pad the last `keyboardWillChangeFrame` ANNOUNCED — the listener
-already computes it, and the freeze only needs to skip the render, not the record — and have
-`syncPad` read that. It removes the backstop's own 286 → 0 flicker at the same time (device probe,
-2026-08-15: the bar sits raised for the rest of every such hide). Written and then withdrawn
-unverified in that session; it wants its own device walk.
+The second layer was the TIMING, and it is what the 2026-08-16 Android walk caught: with the value
+right, the bar still spent frames 66–69 at 1373–1501px (its keyboard-up geometry, over a ~900px
+empty band with no keyboard on screen) after landing at frame 66, then DROPPED to 2193–2321px at
+frame 70 and rose again as Gboard arrived at 76. Motion in the wrong direction — worse than the
+symptom it replaced.
 
-That write is a plain `setState`, though, and iOS fires the event *before* the animation — so the
-bar would still lead the keyboard by an animation, rather than travelling with it. Genuinely
-together is an animated pad on the keyboard's own curve, which is the KeyboardAvoidingView
-behaviour `keyboardPad`'s note at the top of the file deliberately does not use; read that note
-before choosing which of the two this wants.
+That is an ordering bug, not emulator noise, and it is late by construction rather than by
+measurement: `finishClose` is `runOnJS`'d from the ZOOM_IN completion callback, so the UI thread has
+already painted the frame at prog 0 — the frame the landing is pinned by — before the JS thread has
+been handed the call at all, let alone rendered and committed. It can never be 0 frames late on any
+build, and the commit it rides in is a heavy one (`setSw('closed')` unmounts the grid and releases
+`holdSize`), which is why 4 frames at 30fps is plausible on a dev client with SwiftShader. A Release
+build shortens that tail; it cannot delete it.
 
-### Grid tap intermittently does nothing
+**Fix (2026-08-17, unwalked).** The thaw moved off the landing and onto the frame the close is
+COMMITTED — `syncPad()` next to `setSw('closing')` in `closeTo` (the two-frame gap that already pays
+the phase flip's costs) and in `springBack` (the drag release; a no-op on the `closeTo` path).
+That is ~380ms before the landing, and `barFadeStyle` holds the bar at opacity 0 until prog < 0.25,
+~140ms into the flight — so the bar fades in already at the bottom and is never seen anywhere else.
+`holdSize` has been true and marshaled for the whole grid session, so the box change rides a
+ResizeObserver that drops it: nothing refits, the host hears nothing, and the relayout moves off the
+landing frame into the flight where it is invisible. `finishClose` keeps its `syncPad()` as the
+reconcile for the no-flight `springBack` path and for any keyboard event that landed frozen mid-flight.
+
+No animated pad was needed and none was added — read `keyboardPad`'s note at the top of
+`src/app/terminal.tsx` for why an animated one would be wrong here anyway (the webview shrink has to
+land BEFORE the keyboard animation starts, and Android's only event is `keyboardDidShow`, which
+fires when the keyboard is already up).
+
+**What the next Android walk must measure.** Same pin — the landing frame is where the zoomed card's
+left edge reaches x=0.
+
+- **Keys-were-UP (primary).** From the FIRST frame the bar is visible at all (it fades in over the
+  last ~140ms of the flight, before the landing) it must be at the bottom, 2193–2321px. Zero frames
+  at 1373–1501px, and no downward step anywhere. Gboard then rises and the bar rises with it.
+- **Keys-were-DOWN (regression).** Unchanged: 2193–2321px from the landing frame on, never moves, no
+  empty band.
+- **Shell geometry (regression).** Unchanged: `pane_height` 26 rows with Gboard up, 44 down, and one
+  report per settle — nothing drawn under Gboard.
+- **New risk to watch:** the pad now changes on the flight's first frame instead of the landing.
+  Watch the close flight for a hitch or a jump in the flying card's content that was not there
+  before.
+
+### Grid tap intermittently does nothing — CLOSED 2026-08-17, not reproducible
+
+**Closed by the user, who has walked it since.** The entry below is kept because its analysis of the
+race is sound and worth having if the symptom ever returns.
+
+One thing was established while it was still thought open, and it inverts the fix this entry
+implies: **moving the tap's `maxDuration` below the drag's `activateAfterLongPress` would make it
+worse, not better.** The two 300ms deadlines are timers armed from the same touch-down
+(`performSelector:@selector(cancel) afterDelay:` in `RNTapHandler.m` against
+`@selector(activateAfterLongPress)` in `RNPanHandler.m`; two `postDelayed` runnables on Android), so
+equal delays on one runloop have no defined order — a coin flip. Lowering the tap's deadline
+converts that coin flip into a deterministic dead band `[maxDuration, 300)` in which the tap has
+already failed and the drag has not yet lifted, so *every* release inside it is silently lost. If
+this is ever reopened, the direction is to remove the tap's deadline, not to lower it.
+
+That removal was written on 2026-08-17 and **withdrawn unshipped** once the entry was known to be
+closed — it is a behaviour change (RNGH's 500ms default applies once reordering is off) with no live
+bug behind it. `.maxDuration(300)` therefore still stands in `src/switcher.tsx`.
+
+<details><summary>Original entry, kept for the record</summary>
 
 Tapping a card in the tabs grid sometimes does nothing at all, then recovers by itself on the next
 touch. `[switcher] select` never logs when it fails, so the tap is not reaching the handler — this
@@ -257,7 +462,44 @@ by itself on the next touch"), which matches the symptom exactly, including the 
 
 Reproduced on `fa4cb78` as well as on the perf branch.
 
-### One exec per grid open fails, and kills fail the same way
+</details>
+
+### One exec per grid open fails, and kills fail the same way — ANSWERED 2026-08-17 (Android)
+
+**"Always exactly one" was always the window you had just killed.** Settled on the emulator against
+a live host, once the failure log was made to name its target. The single failure fires when a kill
+races a capture that was already in flight for that same window:
+
+```
+'[switcher] kill', '@66'
+'[switcher]', 1, 'of', 26, 'captures failed:', '@66(:4)', { … Command exited 1 }
+```
+
+`@66(:4)` is the card the finger had just closed, and the count is back to 0 of 25 within one beat.
+Four grid opens at 7 windows and a sustained poll at **26** windows produced **zero** capture
+failures otherwise — the same scale as the original "1 of 25".
+
+**The dangerous half was real, and it was the opposite of what this entry feared.** A failed command
+exits 1 and touches nothing, so "a kill that reports failure" was always the safe case. The unsafe
+case was a stale index that *does* resolve: with `renumber-windows on`, killing a window slides every
+higher index down, and `-t :N` also falls through to matching a window by *name*. Replayed on real
+tmux 3.7b — list `a b c d`, kill index 1, then kill card `c` by its listed index 2 → **exit 0, and
+`d` died instead**, silently, while `killCard`'s optimistic removal showed the user the right card
+leaving. Verified on device too: a window *named* `5` at index `:3` survived a kill aimed at a
+now-dead `@65` that had sat at index `:5`.
+
+**Fixed** by addressing windows with tmux `@N` ids, which are unique server-wide and never reused —
+`target()` in `src/tmux-model.ts` is the one guard every command routes through, including
+`search-model`'s. `moveWindowCommand` keeps `:index` deliberately (a drop slot *is* a position; see
+its `ponytail:` note). The failure log now names the window: `[switcher] 1 of 25 captures failed:
+@31(:5) <error>`, and `killCard` re-lists and reports whether the window actually survived instead
+of assuming.
+
+**The saturation refutation below still stands for THIS mystery, but saturation is a separate real
+fault found the same day** — see "The grid's fan-out exceeds MaxSessions" further down. Do not merge
+the two: concurrency never explained "exactly one", and ids never fixed the channel count.
+
+<details><summary>Original entry, kept for the record</summary>
 
 Opening the tabs grid logs `[switcher] N of M captures failed` with **N always exactly 1** — 1 of
 25, 1 of 18, 1 of 8 — and `[switcher] kill failed` throws the identical error:
@@ -283,15 +525,326 @@ one is an action that does not happen. A kill that reports failure is survivable
 appears to succeed while the window lives would not be, and nothing has established which of those
 is occurring.
 
-**Where to look.** `killWindowCommand`/`capturePaneCommand` in `src/tmux-model.ts` take an index;
-`src/switcher.tsx` schedules the captures. Logging the index alongside the failure would settle it
-in one grid open — if the failing index is always one that is not in the current list, it is
-confirmed.
+</details>
 
-### `DOM ERROR null` on every refit
+### The grid's fan-out exceeds the host's `MaxSessions` — REFIXED 2026-08-17, unverified on device
 
-Every keyboard open/close, rotation, font-size change and theme change logs a bare `DOM ERROR null`
-from inside the webview, and surfaces the dev-client error overlay:
+*(The first fix was verified on the emulator and found half-right — the pool held, the arithmetic
+around it did not. The second is unverified: it needs a 24-window walk on Android and on the phone.)*
+
+The grid opens one exec channel per window for the card capture, and the scrollback search opens
+another per window, **concurrently** — roughly 2N channels against sshd's `MaxSessions`, which
+defaults to **10**. Measured on the emulator against a live host:
+
+| windows | result |
+|---|---|
+| 24 | `16 of 24 greps failed`, `5 of 24 captures failed` |
+| 7 | `3 of 7 greps failed` |
+
+all with `Opening 'session' channel failed: open failed`.
+
+**Why it matters more than it looks:** a window whose grep failed is currently indistinguishable
+from a window that simply had no match, so the filtered grid silently under-reports — the search
+looks like it answered when it never asked.
+
+This is **not** the "always exactly one" bug above, and the refutation in that entry is not
+overturned: concurrency was never what produced a single reliable failure at 8 windows. This one only
+appears at scale and only when search and capture overlap.
+
+**First fix (2026-08-17, partial)** — one shared pool, `execPool = makePool(4)` in `src/tmux.ts`
+(`src/exec-pool.ts`, tested; nothing installed offered this and it is not worth a dependency). Both
+fan-outs call through the *same* instance: two pools of four is precisely the bug, so the instance
+lives at the exec seam rather than in a component. The captures were already batched at 4; the greps
+were an unbounded `Promise.all`, so the peak was 4 + N, not 4.
+
+**The second Android walk proved the pool works and the arithmetic did not.** The cap is real: a
+`ps` on the host during a 24-window fan-out caught exactly four concurrent `tmux capture-pane`
+children of the one sshd session and never five, greps came back `22 of 24`, `21 of 24` with **no**
+`N of N greps failed`, and every card had content. But `open failed` still fired three times, at
+three sites that were outside the pool:
+
+| site | why it was outside |
+|---|---|
+| a fan-out capture for `@90(:19)` | the window was alive and untouched — not the understood just-killed case |
+| `listWindows()` | `tmux.ts` never pooled it |
+| `refreshCard`'s capture | deliberately un-pooled, so the zoom's landing card is never stale |
+
+The old budget assumed **at most one** singleton in flight beside the pool's 4. Several overlap in
+practice — the poll, a `listWindows`, the user's select, and the bar swipe's *two* neighbour warms —
+so the unbounded classes summed past 10 while the pool itself was behaving.
+
+**Fixed properly:** no exec class is outside a pool. Three of them, and the sum is the budget:
+
+| slots | class | what spends it |
+|---|---|---|
+| 1 | the shell's PTY | held for the whole session |
+| 3 | `execPool` | the grid's per-window fan-outs (captures + greps), shared |
+| 2 | `singlePool` (private, via `run1`) | every non-fanned command: the ~2s poll, `listWindows`, select/kill/new/move, the probe, `cacheSessions`, `configure`'s two reads |
+| 2 | `shotPool` | the un-fanned single captures — the zoom's `refreshCard` and the bar swipe's two neighbour warms |
+
+**= 8 against a default `MaxSessions 10`**, and the two spare cover `configure`'s SFTP upload plus
+whatever sshd counts that we do not. `capturePane` is still not pooled *inside* `tmux.ts`, and now
+for a sharper reason than before: its two callers belong to different budgets, and pooling it in the
+callee would nest one pool inside the other and collapse both.
+
+**One retry, and only on `open failed`** (`retryRefused`, `src/exec-pool.ts`, tested). A channel
+refusal happens strictly *before* the command reaches the remote shell, so re-asking cannot birth a
+second window or kill a second pane — unlike `Command exited 1`, which means it ran, and which is
+never retried. It waits 150ms first (an immediate re-ask meets the same full session table), it
+spends the pool slot it already holds rather than a new channel, and a second refusal is the
+caller's error: twice in a row is a host that is genuinely full, not a hiccup. Singletons only —
+retrying 24 refused greps is how you re-saturate the host you just backed off from.
+
+`ponytail:` ceiling recorded on the budget — three fixed numbers against the *default*; a host set
+lower still saturates (but now says so instead of lying), a host set higher just fills slower. The
+upgrade is probing upward until `open failed` returns, since sshd does not advertise the limit.
+
+**And "not searched" no longer reads as "no hit".** `SearchAnswer` gained a third state, `'failed'`:
+the card stays in the filtered grid and swaps its directory line for `not searched` in
+`theme.warning` — same row, same style, no layout shift; `warning` rather than `danger` because the
+next settled keystroke asks again.
+
+**The worst thing the walk found was not a missing card — it was a blank screen.** In the run where
+`listWindows()` was refused, the app was left on a bare `#11111b` (`theme.scrim`, the screen's own
+root, seen because the stage fades to alpha 0 at `sw === 'open'`) with no cards, no bar and no
+terminal, ignoring 13 further taps; only Android's system back button — which calls `doneToActive()`
+when `sw === 'open'` — got out. Reproduced once in four attempts, so it is timing-dependent, but a
+transient host hiccup must never be able to strand the user.
+
+The cause is that `refresh()` logged and returned `undefined`, and the grid opened onto the `[]` it
+had never left: the very first refresh fires at connect, inside the busiest moment of the channel
+budget, and if it fails nothing else fills `cards` until the grid is live. Fixed on both halves:
+
+- **It keeps what it had.** `setCards` is not called on failure — a list we could not fetch says
+  nothing about the windows already in hand, and the last known grid is the best answer available.
+- **It says so when it has nothing.** `useSwitcherCards` exposes `listFailed`; with zero cards the
+  grid draws `Could not reach the host` over `The window list did not come back. Trying again — tap
+  to go back.` (disabled over hidden, and the ~2s beat really is asking again). The block is a
+  `Pressable` wired to `onDone`, deliberately filling the middle of the grid — the empty space where
+  those 13 taps landed — so the way back is under the finger, not only on the ✓ in the corner.
+
+### `selectWindow` rejects unhandled and the LogBox eats the tabs button — FIXED 2026-08-17, unverified on device
+
+`void selectWindow(win.id)` is called bare in both `selectCard` and `settleBarSwipe`
+(`src/app/terminal.tsx`), unlike `killWindow`/`capturePane`/`searchPane`, which all carry a `.catch`.
+When the channel exhaustion above makes it reject, the unhandled rejection raises the dev-client
+LogBox toast, which **sits on top of the key bar and swallows taps on the tabs button** until it is
+dismissed:
+
+```
+ERROR  [Error: Uncaught (in promise, id: 0) Error: Call to function 'ExpoSSH.exec' has been rejected.
+→ Caused by: Opening `session` channel failed: open failed
+```
+
+Note this is a genuine unhandled rejection with a real reason, and therefore **not** the same thing
+as the `DOM ERROR null` entry above — that one was a window `ErrorEvent` with a null `.error` and is
+confirmed fixed (zero occurrences across ~40 minutes of heavy keyboard, zoom and resize work on
+2026-08-17).
+
+**Fixed**: both routes to a tab now go through one `switchTo(win)` in `src/app/terminal.tsx`, which
+carries the catch. Deliberately NOT pushed into `src/tmux.ts` — `killWindow`, `moveWindow` and
+`capturePane` all reject and let the caller decide, and the decision here is one only the screen can
+make: **the optimistic `active` flip is rolled back**. Both routes paint the tapped window active
+before the host answers, so a select that never landed leaves the halo, the pills and the anchor
+pointing at a tab we are not on. The rollback ASKS rather than remembers — `refresh(false)` is
+list-only (no capture burst) and comes back with tmux's own `active` flag, the same move `killCard`
+already makes when a kill fails. The failure names its window in the switcher's style:
+`[terminal] select failed: @68(:28) — the tab did not change`.
+
+**Next Android walk:** with a 20+ window session and the search armed (the channel exhaustion
+above), tap a card and confirm (a) no LogBox toast, (b) the tabs button still takes a tap, (c) if a
+select does fail, the halo ends up on the tab you are actually on, not the one you tapped.
+
+### The ribbon chip never appears for `sleep` — FIXED 2026-08-17, unverified on device
+
+Second Android walk of the day: `sleep 30` and `sleep 15`, twice each, touching nothing. All four
+runs were **detected** — `[ribbon] run #2 sleep pid=… startedAt=…`, `[ribbon] run #3 sleep …` — and
+the chip region was **empty at every sample**: 2/4/6/8/10s, 40 samples across a full 30s run
+(`chipband_nonbg=0`), and a full-frame screenshot at t≈17s showing nothing.
+
+**This was never fixed, and the comment on `RIBBON_HOLD_MS` claiming it was is now corrected.**
+`c6cfde4` ("A plain `sleep` could never raise the band") removed one of two blockers — the flapping
+untargeted poll, which made every beat a new instance with a fresh `startedAt` — and shipped on a
+green test run without ever putting a `sleep` on a screen. The second blocker went in with the gate
+itself (`b02c949`) and had never worked a day:
+
+**`RIBBON_MIN_RUN_MS` was a clock read inside a memoised expression.** The screen has
+
+```js
+const recipe = connected ? selectRecipe(ribbonCore, modes.altScreen, Date.now()) : null;
+```
+
+in its component body, and this app builds with `reactCompiler: true`. Running the actual compiler
+over that line:
+
+```js
+if ($[0] !== connected || $[1] !== modes || $[2] !== ribbonCore) {
+  t1 = connected ? selectRecipe(ribbonCore, modes.altScreen, Date.now()) : null;
+} else { t1 = $[3]; }
+```
+
+`Date.now()` is not a dependency. A job that is simply running changes none of the three: an
+identical poll answer returns the *same* core object by design (`ribbonPoll`'s "quiet beat"), and
+`set` in `src/tmux.ts` drops it before that. So the screen's gate-beat timer — which does exist, and
+does fire at `RIBBON_MIN_RUN_MS + 50` — re-rendered against an unchanged cache and read the stale
+`null` straight back. The band could never appear for **any** unnamed command, at any duration.
+
+Third of the same family in two days, and the diagnosis is always the same sentence: *a quantity
+that moves with the wall clock cannot be recomputed by a re-render nobody's dependencies noticed.*
+The chip clock frozen at 0:00 was this (`Date.now()` in `RibbonAccessory`'s body); `RIBBON_HOLD_MS`
+never expiring was this (nothing woke the reducer); this is this.
+
+**Fixed** — the same shape as the hold's fix, a timer rather than a hoped-for beat, and this one in
+`src/ribbon.tsx` where the state lives:
+
+- `selectRecipe` no longer gates on the clock. A non-shell, non-TUI, non-REPL foreground is
+  `running` from its first beat, so the screen's memoised call is *correct* whenever it is cached.
+- `ribbonAppearDelay(id)` (`src/ribbon-model.ts`) is the three seconds as data: `RIBBON_MIN_RUN_MS`
+  for `running`, `0` for everything the user opened on purpose.
+- `RibbonAccessory` holds that delay itself — `setTimeout` → `setRipe(true)`, keyed on
+  `startedAt + delay`, returning `null` until it fires. State cannot be memoised away.
+- The VoiceOver announcement moved behind the same gate: the band is mounted for every `ls` now,
+  and announcing one would put back exactly the intrusion the gate exists to prevent.
+
+`selectRecipe`'s third parameter is dead and marked `_now`; it stays only because the screen's call
+site keeps its arity, and `src/app/terminal.tsx` was another agent's file this session.
+
+Covered in `src/ribbon-model.test.ts` ("a run that never changes still earns the band: the gate is a
+delay, not a render-time clock") — it drives the reducer with a run that starts and never changes,
+asserts the poll really does return the identical object 60s later, and asserts the band is selected
+anyway. The timer itself is in the component and is device-verified only.
+
+**Next Android walk:** run `sleep 30`, touch nothing. `[ribbon] run #N sleep pid=… startedAt=T` at
+t≈0. Chip region still empty at t = 2s. Chip present from **t ≈ 3.0–3.1s** (the 3000ms delay, armed
+from `startedAt`, so a poll that noticed the run ~1s late still shows it 3s after it *began*),
+reading `▶ sleep · 0:03` and ticking — 0:10 at t≈10s, 0:25 at t≈25s. `[ribbon] open sleep` if the
+chip is tapped, with kill / ^Z bg / ^C. On exit at t≈30s the chip fades within
+`RIBBON_HOLD_MS + 50` + one poll beat (≤4.6s) and does not tick on. Also run `ls` and confirm
+**nothing** appears — the gate still has to swallow short commands.
+
+**That walk happened and `sleep` still showed nothing.** This half really was fixed; there was a
+second, independent blocker, written up immediately below.
+
+### `running` is unreachable inside tmux: the TUI gate read the wrong terminal — FIXED 2026-08-17, unverified on device
+
+The walk the entry above asked for: `sleep 30`, twice, touching nothing. Detected both times
+(`[ribbon] run #1 sleep pid=… startedAt=…`) and the chip region **empty at every sample** — t = 0.5,
+1.5, 2.0, 2.5, 2.9, 3.2, 3.6, 5, 10, 15, 25, 29, 31, 33, 36s. Never `▶ sleep · 0:03`, never a tick.
+So the appear-delay fix landed and something else was swallowing the same chip.
+
+**The §4.4 "unknown TUI" gate was fed the OUTER terminal's buffer type.**
+
+```js
+if (altScreen) return null; // an unknown TUI: no caps beat wrong caps (§4.4)
+return { id: 'running', proc: core.command };
+```
+
+`altScreen` is `term.buffer.active.type === 'alternate'` (`src/terminal.tsx:698`) — the xterm the app
+draws the session in. **A tmux client is itself a full-screen app**, so inside tmux that flag is
+permanently `1`: every tmux connect ends its mode log at `{"altScreen":true,…}` and it never flips
+back. The gate therefore returned `null` for every unnamed command in every tmux session — which is
+this app's own default start mode. `running` was not "rare", it was **unreachable in every
+configuration**:
+
+- `vim` had its chip only because `matchRecipe` hits *before* the gate. It proved nothing.
+- Plain-`shell` start mode has `altScreen:false`, and no ribbon at all (`attached:false`,
+  `foreground:null`) — the poll is what feeds the ribbon, so no tmux means nothing to gate.
+
+The signal was measuring the wrong thing. The gate asks "is the pane's foreground app a full-screen
+TUI"; the outer buffer answers "is tmux running". tmux can answer the real question itself —
+`#{alternate_on}` is per pane, and the conf's own wheel binding already switches on it.
+
+**Fixed** — the fact changed source, not meaning:
+
+- `pollCommand` carries `#{alternate_on}` beside the pid it already reports, inserted *before*
+  `pane_current_command` so the command stays the last field and a name full of separators still
+  shifts nothing. `parsePoll` reads it as `paneAlt`, and deliberately does **not** reject a line for
+  it: a tmux too old to know the format renders it empty, and the badge and tabs button must not go
+  down with a field only the ribbon reads.
+- `src/tmux.ts` carries `paneAlt` on `TmuxState` (in the dedupe compare, so a change actually
+  propagates), false unless attached.
+- `selectRecipe`'s gate takes that instead. §4.4 is untouched: a real full-screen TUI in the pane
+  still gets no chip.
+
+**`modes.altScreen` stays exactly where it is.** `scrollRoute` consumes the same-named flag and for
+*it* the outer reading is correct — inside tmux a wheel notch should be arrows. Two facts, one
+name; both call sites now say so in a comment.
+
+**And the compiler could not see any of this**, which is why `selectRecipe` now takes
+`{ paneAlt }` rather than a bare boolean: the wrong signal was passed for two months and `tsc` was
+happy, because both are `boolean`. Named, only the tmux poll's answer fits (`useTmux()` satisfies it
+structurally).
+
+Covered in `src/tmux-model.test.ts` (the field parses, empty degrades to false, command still
+rejoins from field 5) and `src/ribbon-model.test.ts` ("the TUI gate reads the PANE, not the outer
+terminal"), which drives a real poll line with the pane flag `0` — the exact combination the bug
+needs — and asserts `running`, plus that the old outer-flag value still swallows it.
+
+`src/app/terminal.tsx` was another agent's file this session: its one call site,
+`selectRecipe(ribbonCore, modes.altScreen)` at line 1825, becomes `selectRecipe(ribbonCore, tmux)`.
+Until that is applied it is the single expected `tsc` error.
+
+**Next Android walk:** in the default tmux mode, `sleep 30`, touch nothing. Chip **appears at
+t ≈ 3.0–3.1s** reading `▶ sleep · 0:03` and ticks (0:10 at 10s, 0:25 at 25s); gone within ≤4.6s of
+the exit. `ls` — **nothing**, ever (short-lived, the 3s delay swallows it). `vim` — the named chip,
+at once, exactly as before. Worth one extra: open `htop` (named, chip) then something with no
+recipe that takes the alt screen, e.g. `nethack` or `watch -n1 date | less`, and confirm **no**
+chip — that is the §4.4 intent still holding on the new signal.
+
+### The ribbon does not clear on a bar-swipe birth — FIXED 2026-08-17, unverified on device
+
+Swiping past the last tab to birth a new window lands correctly (`@68:28:fish` created and active,
+fresh prompt drawn), but the ribbon chip keeps the *previous* window's run: it still read
+`claude · 0:43`, then `1:10`, timer running, on an empty `fish` window, while `[tmux]` reported
+`windowIndex 28, foreground: null`. No `[ribbon] forWindow 28` was ever emitted. Hopping away and
+back fixes it instantly (`[ribbon] forWindow 28 fish`).
+
+The report was right that the birth path never told the ribbon, but that was only half of it. **Two
+faults, and the second is not about births at all.**
+
+1. **The birth sent a poll-shaped null.** The hop path calls `ribbonForWindow`, which for an idle
+   shell uses `ribbonSwitchedToIdle` — authoritative, clears at once. The birth commit called
+   `ribbonPoll(core, null)` instead, which is exactly the signal `RIBBON_HOLD_MS` exists to
+   disbelieve: it only armed `goneAt` and waited for a second null to confirm it. It also never
+   armed `awaiting`, so the first poll answer still describing the window we *left* could put that
+   window's run back on the new tab.
+
+2. **`RIBBON_HOLD_MS` has no beat to expire on.** `set` in `src/tmux.ts` drops an answer identical
+   to the last one, and the ribbon's poll effect is keyed on `[fgCommand, fgPid, frozen,
+   windowIndex]`. Once the foreground has settled at null, *nothing wakes the reducer again* — so
+   the second null the hold is waiting for never arrives and the hold never runs out. That is why
+   the chip sat at `1:10` and climbing instead of clearing 2.5s in, and why hopping away and back
+   (a `windowIndex` change) fixed it instantly. This was never specific to births: **any** command
+   that simply exits while the user watches leaves its name and clock on the chip until something
+   unrelated changes. The flapping untargeted poll used to supply that beat by accident; targeting
+   the poll (entry below) took it away.
+
+**Fixed** (`src/app/terminal.tsx`):
+
+- `ribbonForBirth()` at the commit — `ribbonSwitchedToIdle`, so the band leaves with the slide, plus
+  an `awaiting` placeholder (`index: -1`, an index no answer can match) that ignores the next few
+  answers about the window being left. Its three-answer give-up is still the backstop.
+- `settleBarSwipe`'s `newWindow().then(refresh(false))` now calls `ribbonForWindow(born, 'bar swipe
+  birth')` with the fresh list's active window — the same thing `birthCard` does for the grid's ✚.
+  That replaces the placeholder with the real index within a roundtrip and emits the
+  `[ribbon] forWindow 28 fish` the report found missing.
+- One timer arms whenever `goneAt` is set and re-applies the null at `RIBBON_HOLD_MS + 50`, so the
+  hold expires on its own beat. Cancelled the moment the process comes back into view, so a
+  blinking poll still costs nothing — which is the whole point of the hold.
+
+Covered in `src/ribbon-model.test.ts` ("a birth clears the band now; the poll-shaped null the swipe
+used to send would not") for the pure half; the timer and the `awaiting` placeholder live in the
+component and are device-verified only.
+
+**Next Android walk:** swipe past the last tab and watch for `[ribbon] forBirth` at the commit and
+`[ribbon] forWindow <new index> fish` a beat later — the chip must be gone before the slide settles
+and must not come back. Then, separately: run `sleep 30` on a window, touch nothing, and confirm the
+chip clears ~2.5s after it exits rather than ticking on (fault 2, which no birth is needed to see).
+
+### `DOM ERROR null` on every refit — FIXED 2026-08-16 in `10c949e`
+
+Every keyboard open/close, rotation, font-size change and theme change logged a bare
+`DOM ERROR null` from inside the webview, and surfaced the dev-client error overlay:
 
 ```
 [terminal] tap
@@ -299,18 +852,28 @@ from inside the webview, and surfaces the dev-client error overlay:
 DOM ERROR null
 ```
 
-`[terminal] size …` is logged inside `report()` immediately before `latest.current.onResize(…)`.
-That call — like all ~15 `latest.current.*` bridge calls in `src/terminal.tsx` — is a floating
-promise: never awaited, never `.catch()`ed. A rejection therefore lands as an unhandled rejection,
-which is what `ERROR null` is.
+**It was not a promise rejection.** The diagnosis this entry used to carry — that the ~15
+floating `latest.current.*` bridge calls in `src/terminal.tsx` are never `.catch()`ed, so a
+rejection lands as an unhandled one — is why catching `onResize` did not silence it. Expo's
+webview dev hooks (`expo/src/async-require/setupHMR.ts`) log the two cases separately:
+`unhandledrejection` logs `event.reason`, and a bridge rejection's reason is an `Error` built by
+`marshal.tsx`'s `errorFromJson`, so it would have printed a message and a stack. `window.error`
+logs `event.error`, and that is the only one of the two that can be `null`.
 
-Reproduced on `fa4cb78`, so it predates the perf branch. The fix is to catch them where
-`latest.current` is assembled (`src/terminal.tsx:315`) rather than at each call site — but note
-that wrapping every handler adds a promise per call on paths as hot as `onData`, so the wrapper
-should not allocate on the keystroke path.
+It was ours: the `ResizeObserver` callback called `fitRows`, which writes `paddingTop` onto the
+element being observed. Padding comes out of the *content* box, so the default content-box
+observation saw its own inset as a resize, fired a second round, and Chromium reported the
+deferred first one as "ResizeObserver loop completed with undelivered notifications" — a window
+error with a null `.error`. Observing `{ box: 'border-box' }` breaks the feedback without
+changing a measurement (`src/terminal.tsx`, the comment above `observer.observe`).
 
-A first attempt at catching only `onResize` did **not** silence it, so confirm which call is
-actually rejecting before fixing — and log the rejection reason, because `null` says nothing.
+Evidence it is closed, from `/tmp/metro.log`: the last `DOM ERROR null` is at line 164, in the
+pre-fix session whose `padTop 8.81, error, error, padTop 0.81` interleave the commit message
+quotes. After it, **618 `[terminal] size …` reports and zero** — which also rules the rejection
+theory out for good, since `onResize` fired 618 times without one.
+
+Still open and NOT this: the `[terminal] box off by …pt` / `rowRemainder` warning, which survived
+the change.
 
 ### The foreground poll answers about a window you are not looking at — FIXED 2026-08-16
 
@@ -372,3 +935,35 @@ shown to help and has not been shown to hurt.
 
 Either measure it — the perf overlay's UI figure, same session, same load, flag on and off — or
 take it out. Do not leave it sitting here as something everyone assumes was justified.
+
+---
+
+## Residuals from the 2026-08-17 Android walks
+
+Both found while verifying other fixes, both minor, neither caused by this session's changes.
+
+### A bar swipe cannot start during the zoom-out's `closing` tail
+
+The chrome hit-test fix keeps the key bar live through `closed`/`closing`/`drag`, on the stated
+grounds that "the bar owns the drag gesture and the phase outlives the motion". Measured on the
+emulator: a swipe issued 0.25–0.5s after `✓` does nothing — no hop, no log — while the same swipe
+at ~0.75s commits, and from rest it always commits.
+
+The pointer-events change is not the cause; the touch reaches the handler and the handler refuses
+it. `onBarSwipe`'s start guards on `swRef.current !== 'closed' && !== 'drag'`, so `closing` is
+rejected, and `ZOOM_IN` is 380ms. So `chromeLive` includes a phase the gesture itself will not
+accept — harmless, but the comment justifying it is describing something that does not happen.
+Either widen the handler to take `closing` or narrow `chromeLive` and correct the comment; do not
+leave the two disagreeing.
+
+### The ribbon's clock ticks on through `RIBBON_HOLD_MS` after the process exits
+
+`sleep 8` ended at t=8.0 (the poll saw null at 8.42). The chip read `0:09` at t=10.0 and `0:10` at
+t=11.0, then vanished by 12.0 — so it counts up for the ~2.5s the hold is disbelieving the null,
+and disappears 3–4s after the exit.
+
+The disappearance is inside the documented bound and the hold is doing exactly its job — a null has
+to survive a beat before it is believed (see `RIBBON_HOLD_MS`). What is wrong is only that the
+elapsed clock keeps *advancing* during the hold, so a job that ran 8s can be read as having run 10.
+Freezing the displayed time at `goneAt` while the hold is open would fix it without touching the
+hold; the number is then the run's true length whichever way the hold resolves.

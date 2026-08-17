@@ -52,8 +52,8 @@ import KeyBar, {
 } from '@/keybar';
 import { RibbonAccessory } from '@/ribbon';
 import {
+  RIBBON_HOLD_MS,
   RIBBON_IDLE,
-  RIBBON_MIN_RUN_MS,
   killCommand,
   ribbonPoll,
   ribbonResumed,
@@ -160,6 +160,12 @@ export default function SessionScreen() {
    * event to ResizeObserver is ~25-35ms, plus a frame to paint).
    */
   const [keyboardPad, setKeyboardPad] = useState(0);
+  /** The pad the last keyboard event ANNOUNCED, whether or not it was rendered. The listeners below
+   *  freeze while a zoom owns the stage's box, but the freeze only needs to skip the render — the
+   *  record costs nothing and is the one honest answer to "where is the keyboard now" for the doors
+   *  that thaw the pad afterwards. `Keyboard.metrics()` cannot answer it: it is the last frame the
+   *  keyboard was SHOWN at, so mid-hide it still reports the departing one (see `syncPad`). */
+  const announcedPad = useRef(0);
   /**
    * Were the keys up when the last overlay took the terminal? The way back puts them back the way
    * they were rather than raising them unconditionally — the reference app's `keyboardHidden` is
@@ -195,17 +201,14 @@ export default function SessionScreen() {
     const timer = setTimeout(() => setKbSettle(false), 500);
     return () => clearTimeout(timer);
   }, [kbSettle]);
-  /** The listener's math, off the keyboard's current frame instead of an event — for the doors
-   *  that unfreeze the pad with no keyboard move left to re-report it. Mid-hide it reads the
-   *  departing keyboard (see the `keyboardDidHide` listener below, which is what corrects that). */
-  const syncPad = () => {
-    // Same categories as the listener below — (3) Android's window resizes itself for the IME,
-    // (1) there is no Android `keyboardWillChangeFrame` for this to reconcile against.
-    if (Platform.OS !== 'ios') return;
-    const frame = Keyboard.metrics();
-    const overlap = frame ? Dimensions.get('window').height - frame.screenY : 0;
-    setKeyboardPad(overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0);
-  };
+  /** Thaw: render the pad the last event announced — for the doors that unfreeze with no keyboard
+   *  move left to re-report it. It used to ask `Keyboard.metrics()` where the keyboard is, which is
+   *  a question that API does not answer mid-hide (it is the last SHOWN frame; RN clears
+   *  `_currentlyShowing` only on `keyboardDidHide`, at the END of the hide). Every door here thaws
+   *  during exactly that window — the grid's open dismissed the keyboard — so `metrics()` wrote the
+   *  departing keyboard's overlap back and the bar sat raised over dead space until the backstop
+   *  below corrected it (286 → 0, device probe 2026-08-15). Platform-free: both listeners record. */
+  const syncPad = () => setKeyboardPad(announcedPad.current);
   // Category (1), an API that exists on one platform only: Android has no
   // `keyboardWillChangeFrame`, so the pad is driven off `keyboardDidShow`/`Hide` instead — the same
   // pad, the same subtraction, the same freeze while a zoom owns the box. What is NOT true any more
@@ -218,6 +221,7 @@ export default function SessionScreen() {
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const pad = (height: number) => {
+      announcedPad.current = height; // recorded even while frozen — `syncPad` thaws off this
       if (swRef.current !== 'closed') return;
       // No `- insets.bottom` here, and that is not a slip: the bar is placed at
       // `keyboardPad + insets.bottom`, and Android's reported height already stops at the top of
@@ -248,37 +252,31 @@ export default function SessionScreen() {
         // with no position — the sheets' Modals raise one on the way in and out. Taking it at face
         // value padded the entire stage away for a frame or two (seen on device).
         if (e.endCoordinates.screenY <= 0) return;
+        const overlap = Dimensions.get('window').height - e.endCoordinates.screenY;
+        // Both edges off this one event: a keyboard parked at or below the window's bottom edge
+        // overlaps nothing, which is the hide. `keyboardWillHide` says the same thing later.
+        const next = overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0;
+        announcedPad.current = next; // recorded even while frozen — `syncPad` thaws off this
         // The zoom owns the stage's box while it runs. The tabs-tap dismisses the keyboard in
         // the same tick the flight starts, and this event lands (often more than once) before
         // `holdSize` has marshaled into the webview — each pad change resized the webview and
         // the observer refit xterm mid-flight, which is the hitching (device, 2026-08-11).
         // Frozen here, the box never moves; `finishClose` reconciles the pad on the way out.
         if (swRef.current !== 'closed') return;
-        const overlap = Dimensions.get('window').height - e.endCoordinates.screenY;
-        // Both edges off this one event: a keyboard parked at or below the window's bottom edge
-        // overlaps nothing, which is the hide. `keyboardWillHide` says the same thing later.
-        setKeyboardPad(overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0);
+        setKeyboardPad(next);
         setKbSettle(false); // the keyboard we were waiting for: this is the final geometry
       }),
-      // The backstop for a pad reconciled MID-HIDE. `Keyboard.metrics()` is not "where the
-      // keyboard is", it is the last frame it was SHOWN at: RN keeps `_currentlyShowing` from
-      // `keyboardDidShow` and clears it on `keyboardDidHide`, at the END of the hide animation
-      // (react-native/Libraries/Components/Keyboard/Keyboard.js). So a `syncPad` landing while the
-      // keyboard is on its way out reads the departing frame and writes its overlap back — and on
-      // the way out of the grid nothing is left to correct it, because the hide's own
-      // `keyboardWillChangeFrame` was frozen out above. That is a key bar parked at its
-      // keyboard-up position over dead space, for good (BUGS.md, "search view keeps the zoom's
-      // chrome"); `springBack` dodges the same trap by not calling `syncPad` at all. The end of the
-      // hide is the one unambiguous moment: no keyboard, no pad.
-      //
-      // It corrects rather than prevents: the probe walk (device, 2026-08-15) shows the pad going
-      // 286 → 0 on every such exit, which is the bar sitting raised for the rest of the hide.
-      // Reading the last ANNOUNCED frame instead of `metrics()` would never write the 286 at all —
-      // see the "key bar is up before the keyboard is" entry in BUGS.md, which wants the same
-      // change and its own device walk.
+      // This used to be the backstop that CORRECTED a pad `syncPad` had misread mid-hide (the
+      // probe walk saw 286 → 0 on every exit from the grid — the bar sitting raised for the rest
+      // of the hide). `syncPad` reads the announced record now and never writes the 286, so what
+      // is left here is the one hole that record has: `keyboardWillChangeFrame` above drops any
+      // frame reported with `screenY <= 0`, which the sheets' Modals raise on the way in and out.
+      // The end of a hide is unambiguous — no keyboard, no pad — so it closes that hole for both
+      // the render and the record.
       Keyboard.addListener('keyboardDidHide', () => {
+        announcedPad.current = 0;
         // Same freeze as above — the zoom owns the stage's box while it runs, and `finishClose`
-        // reconciles on the way out (by which time `metrics()` is null and syncPad reads 0).
+        // thaws on the way out.
         if (swRef.current !== 'closed') return;
         setKeyboardPad(0);
       }),
@@ -419,7 +417,7 @@ export default function SessionScreen() {
   const [pageSwipe, setPageSwipe] = useState<PageSwipe | null>(null);
   /** Mid-zoom, mid-slide: the moving views must not have their content swapped underneath them. */
   const frozen = (sw !== 'closed' && sw !== 'open') || pageSwipe !== null;
-  const { cards, setCards, refresh, refreshCard } = useSwitcherCards(
+  const { cards, setCards, refresh, refreshCard, listFailed } = useSwitcherCards(
     showTabs && connected,
     sw !== 'closed',
     frozen,
@@ -517,7 +515,7 @@ export default function SessionScreen() {
           if (keyboardPad > 0) Keyboard.dismiss();
           else setFocusSignal((n) => n + 1);
         },
-    onSearchResults: async (i, n) => setOcc({ i, n }),
+    onSearchResults: async (i, n, screenOnly) => setOcc({ i, n, screenOnly }),
   };
   const tv_onData = useCallback(async (...a: any[]) => termH.current.onData?.(...a), []);
   const tv_onResize = useCallback(async (...a: any[]) => termH.current.onResize?.(...a), []);
@@ -564,12 +562,14 @@ export default function SessionScreen() {
    * `q`/`on` are the whole armed-or-disarmed state: the switcher's field and the terminal's bar
    * edit the same string, and disarming from either side clears both. The scrollback half runs
    * host-side greps only while the grid is up; the terminal view searches its own xterm buffer
-   * through the search addon instead — the emulator already holds those 10k lines. */
+   * through the search addon instead — which under tmux is only the visible screen (BUGS.md §6),
+   * hence `screenOnly` and the "on screen" the count wears when it is set. */
   const [search, setSearch] = useState({ q: '', on: false });
   const searchRef = useRef(search);
   searchRef.current = search;
-  /** The addon's live "i/N" for the terminal bar; `null` until it first speaks. */
-  const [occ, setOcc] = useState<{ i: number; n: number } | null>(null);
+  /** The addon's live "i/N" for the terminal bar, plus how far it reached; `null` until it first
+   *  speaks. */
+  const [occ, setOcc] = useState<{ i: number; n: number; screenOnly: boolean } | null>(null);
   const hits = useScrollbackSearch(search.on ? search.q : '', cards, sw !== 'closed' && search.on);
   const nq = search.on ? normalizeQuery(search.q) : '';
   const visibleCards =
@@ -704,14 +704,17 @@ export default function SessionScreen() {
     // a stage with no keyboard in it, reports that, and is corrected ~250ms later — two reflows of
     // every pane on the host, landing just as the terminal comes back into view (device). Nothing
     // is raised, nothing to wait for.
+    //
+    // The pad froze at the open (see the keyboardWillChangeFrame guard) and no keyboard event is
+    // coming to re-report it, so thaw it to the last one that WAS announced. The thaw that MATTERS
+    // for the bar's position already happened at the commit (`closeTo`/`springBack`) — this one is
+    // the reconcile, for the two things that can still be owed at the landing: the no-flight
+    // `springBack` path above, which never reaches a commit thaw, and any keyboard event that
+    // landed frozen during the flight's 380ms. Same value on the ordinary path, so React bails.
+    syncPad();
     if (keysWereUp.current) {
       setKbSettle(true);
       setFocusSignal((n) => n + 1);
-    } else {
-      // The pad froze at the open (see the keyboardWillChangeFrame guard) and no keyboard event
-      // is coming to re-report it — ask the OS where the keyboard actually is. Usually that is
-      // "down" (pad 0), but a search-hit select can land with the grid's keyboard still up.
-      syncPad();
     }
   };
 
@@ -824,6 +827,7 @@ export default function SessionScreen() {
     probe('fly');
     closeArmed.current = false;
     setSw('closing'); // already `closing` when `closeTo` armed it two frames ago; a drag release sets it here
+    syncPad(); // the drag path's thaw — see `closeTo`. A no-op on the `closeTo` path, which did it there.
     // Solid on the first frame, not dissolved in over 120ms. The card and the surface are the
     // same geometry at t=1 — that is what all the crossfade arithmetic buys — so the swap has
     // nothing to hide, and a dissolve between two pictures that differ AT ALL is ghosting in plain
@@ -1027,6 +1031,23 @@ export default function SessionScreen() {
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
     setSw('closing');
+    // Thaw the pad HERE, on the frame the close is committed, not in `finishClose`. It used to be
+    // the landing's alone, and a landing thaw is late by construction: `finishClose` is
+    // `runOnJS`'d from the ZOOM_IN completion callback, so the UI thread has already painted the
+    // frame at prog 0 — the frame the card's left edge reaches x=0 — before the JS thread has even
+    // been handed the call, let alone rendered and committed the new pad. Whatever the commit
+    // costs, the bar paints at least one frame at the keyboard-up position it was frozen at, over
+    // an empty band, and then DROPS to the bottom. Measured on the emulator 2026-08-17 at 30fps:
+    // bar at 1373–1501px for frames 66–69 after a landing at 66, at the bottom from 70. Motion in
+    // the wrong direction, which is worse than the symptom it replaced.
+    // Committed here it lands ~380ms before the landing, while the bar is still faded out
+    // (`barFadeStyle` is 0 until prog < 0.25, ~140ms into the flight), so the bar fades in already
+    // at the bottom and the keyboard's own event raises it from there. `holdSize` has been true
+    // and marshaled for the whole grid session, so the box change this causes is one the
+    // ResizeObserver drops — nothing refits and the host hears nothing (the freeze's reason was
+    // the OPEN, where the hold has not marshaled yet). It also moves that relayout off the
+    // landing frame, where it was in plain sight, into the flight, where it is not.
+    syncPad();
     // Armed on a ref, NOT on `swRef`: that one is written during render, and two frames is not a
     // promise that React has rendered. When it had not, the guard read the old phase, the motion
     // never started and `closing` stood — with the grid untouchable and the surface invisible,
@@ -1058,13 +1079,36 @@ export default function SessionScreen() {
     }, REVEAL_MS);
   };
 
+  /**
+   * The only place a `select-window` is asked for — one catch for both routes to a tab (a card tap
+   * and a committed bar swipe), rather than one per call site that the next route would forget.
+   *
+   * Bare `void selectWindow(...)` was an unhandled rejection whenever the host ran out of exec
+   * channels (`open failed`, BUGS.md), and in the dev client an unhandled rejection raises the
+   * LogBox toast — which covers the key bar and swallows taps on the tabs button, so a transient
+   * host hiccup locked the user out of the grid entirely.
+   *
+   * NOT pushed down into `src/tmux.ts`: `killWindow`, `moveWindow` and `capturePane` all reject and
+   * let the caller decide, and the decision here is one only this screen can make — the optimistic
+   * `active` flip. Both routes paint the tapped window active before the host answers, so a select
+   * that never landed leaves the halo, the pills and the anchor all pointing at a tab we are not
+   * on. Rolled back by ASKING rather than by remembering: `refresh(false)` is list-only (no capture
+   * burst on the JS thread) and comes back with tmux's own `active` flag, which is the truth the
+   * flip was guessing at — the same move `killCard` makes when a kill fails.
+   */
+  const switchTo = (win: TmuxWindow) =>
+    selectWindow(win.id).catch(async (error) => {
+      console.log(`[terminal] select failed: ${win.id}(:${win.index}) — the tab did not change`, error);
+      await refresh(false); // undo the optimistic `active` flip: whatever tmux says is where we are
+    });
+
   const selectCard = (pos: number, win: TmuxWindow) => {
     if (sw !== 'open') return;
     console.log('[switcher] select', win.id);
     probeT0.current = Date.now();
     probe(`tap ${win.id} (${win.index === tmux.windowIndex ? 'same' : 'switch'})`);
     ribbonForWindow(win, 'card tap'); // as with the bar swipe: under the zoom, not a beat after it
-    void selectWindow(win.index); // §7: no haptic on tab select
+    void switchTo(win); // §7: no haptic on tab select
     // The accent outline is `win.active`, which only the ~2s list beat refreshes — flipped
     // optimistically here (as a kill removes its card), or the old tab stays haloed through
     // the flight and a beat past it (user, 2026-08-11).
@@ -1142,13 +1186,22 @@ export default function SessionScreen() {
     // session and drops the PTY back into a bare shell — not a state the switcher can stand
     // over. The grid hides the lone card's ✕ and rubber-bands its swipe for the same reason.
     if (cards.length <= 1) return;
-    if (!cards.some((c: Card) => c.win.id === win.id)) return; // already killed: indices renumber
+    if (!cards.some((c: Card) => c.win.id === win.id)) return; // already killed
     console.log('[switcher] kill', win.id);
     setCards(cards.filter((c: Card) => c.win.id !== win.id)); // optimistic: leaves before tmux answers
-    // A renumber race can leave the index stale — log, re-list, move on.
-    killWindow(win.index).catch((error) => {
-      console.log('[switcher] kill failed:', error);
-      void refresh(false);
+    // The card is already gone from the grid, so a failure here has to answer the only question
+    // that matters — is the window still THERE? — and the answer is a re-list, not an assumption.
+    // (Since the target is a `@N` id, exit 1 means tmux could not find that window at all, and
+    // nothing else was killed in its place; the re-list is what proves it rather than claims it.)
+    killWindow(win.id).catch(async (error) => {
+      const wins = await refresh(false);
+      const alive = wins === undefined ? null : wins.some((w) => w.id === win.id);
+      console.log(
+        '[switcher] kill failed:',
+        win.id,
+        alive === null ? 'still there? the re-list failed too' : alive ? 'WINDOW IS STILL ALIVE' : 'window is gone anyway',
+        error,
+      );
     });
   };
 
@@ -1363,8 +1416,9 @@ export default function SessionScreen() {
    *  differ exactly when the answer matters (see `afterHostRedraw`). */
   const dataSeq = useRef(0);
   /** `dataSeq` at the moment `select-window` went out, the baseline the settle's redraw-wait
-   *  measures from. Read at the commit, not at the settle: on a LAN the redraw beats the slide
-   *  home (user, 2026-08-10: "small delay still there"). */
+   *  measures from. It used to be read a slide EARLIER than the request, at the commit, so that on
+   *  a LAN the redraw beat the slide home — which is what painted the incoming window into the
+   *  outgoing card (see `settleBarSwipe`). Now the two are one line apart. */
   const bytesAtCommit = useRef(0);
   /** Constant velocity for whatever distance is left (see slideMs) — a fixed 320ms ease-out
    *  sprinted the rest of the way on an early release (user, 2026-08-11). */
@@ -1416,33 +1470,63 @@ export default function SessionScreen() {
     roundSV.value = 0; // x is already 0 here, so the travel factor has faded the edge out too
   };
 
-  const settleBarSwipe = () => {
-    // Nothing to cover. The overlay hides a redraw that has not landed yet, and on a LAN it is
-    // rarely outstanding by the time the slide is home (the trace: redraw complete at +35ms
-    // against a ~300ms slide). Mounting it anyway costs a React commit and the wait's own frames
-    // AFTER the motion has already stopped, which is the beat between the card settling and the
-    // tab being live (user, 2026-08-11).
-    if (dataSeq.current > bytesAtCommit.current) {
-      clearBarSwipe();
-      return;
-    }
-    // The overlay covers the terminal until the host has finished redrawing the pane it lands
-    // on. Its insets FREEZE at this commit's values, so a chrome change under it (the keyboard)
-    // cannot reflow it in plain view.
-    setPageSwipe((s) =>
-      s === null
-        ? s
-        : {
-            ...s,
-            phase: 'settle',
-            pos: s.target,
-            settled: cards[s.target]?.snap ?? null,
-            settleInsets: paneInsets,
-          },
-    );
+  /**
+   * The slide is home, the arriving card is exactly over the screen — and only NOW is tmux told to
+   * switch. That ordering is the whole fix for BUGS.md §3.
+   *
+   * The live terminal is the OUTGOING page of a hop: it is the card the finger pushes off the
+   * screen, and it is a live webview, not a picture. Telling the host at the commit (which is what
+   * this used to do, "so the redraw beats the slide home") meant tmux repainted that card with the
+   * window being switched TO while it was still most of the way on screen — the previous tab's
+   * card showing the next tab's contents, every hop, for the ~50ms-to-slide-end remainder. The
+   * card-tap path never had it and that is the tell: there the switch is issued while the surface
+   * is invisible behind the grid (`selectCard`), and nothing live is on screen to catch the paint.
+   *
+   * So the hop is given the same guarantee. The landed neighbour is the cover (bf8efbb: the row
+   * survives the settle and the arriving card IS the overlay), the redraw lands underneath it, and
+   * `afterHostRedraw` drops it once the burst is quiet. What it costs is the roundtrip — the tab is
+   * live one redraw after the motion stops instead of during it — and that time is spent behind a
+   * still of the tab being arrived at, which is what the settle is for.
+   *
+   * The old fast path ("nothing to cover, the redraw already landed") went with it: nothing can
+   * have landed when the baseline is taken on the line above the request.
+   */
+  const settleBarSwipe = (win: TmuxWindow | undefined) => {
+    bytesAtCommit.current = dataSeq.current;
+    // Either way tmux redraws the PTY, which replaces the snapshot: `new-window` makes the
+    // window it creates the active one, exactly as `select-window` does.
+    if (win) void switchTo(win);
+    // …and re-list, exactly as the grid's ✚ does (`birthCard`). Committing onto the slot past
+    // the last tab BIRTHS a window, and nothing here ever told the card list about it: with
+    // the grid closed there is no poll running at all (`useSwitcherCards`'s interval is armed
+    // on `live`), so the new tab stayed missing until the grid was next opened AND its 2s beat
+    // came round — "tens of seconds" (user, 2026-08-13). Worse than a missing card: `tmux`
+    // has already switched to a window `cards` does not contain, so `activePosIn` finds
+    // neither the index nor the active flag and falls back to 0 — the anchor, the pills and
+    // the halo all point at the wrong tab until something re-lists.
+    // `refresh(false)` is list-only: no capture burst on the JS thread, and the fresh shell
+    // has nothing to snapshot yet. Rare by nature — this is a window being created, not a hop.
+    // The ribbon is told about the born window here, the way `birthCard` tells it about the ✚'s:
+    // the commit above could only clear the band (it has no index to await on yet), and a clear is
+    // not the same as knowing where we are. Without this the birth never armed `awaiting`, so the
+    // first poll answer that still described the window we LEFT put its run back on the new tab —
+    // and, the foreground having settled at null, no further answer ever came to take it off again
+    // (`claude · 1:10` on an empty `fish`, BUGS.md).
+    else
+      newWindow()
+        .then(() => refresh(false))
+        .then((wins) => {
+          const born = wins?.find((w) => w.active);
+          if (born) ribbonForWindow(born, 'bar swipe birth');
+        })
+        .catch((error) => console.log('[barswipe] new window failed:', error));
+    // `pos` deliberately stays where the swipe started: it is what `anchor` renders the row
+    // around, and moving it to the target here re-pointed the very card that is covering the
+    // screen at the tab one PAST the target — a content swap in plain sight, in the phase that now
+    // holds for a whole roundtrip. The pills, which are what wanted `pos` moved (their strip
+    // otherwise snapped back to the tab just left), read `target` during the settle instead.
+    setPageSwipe((s) => (s === null ? s : { ...s, phase: 'settle' }));
     roundSV.value = withTiming(0, { duration: 200 });
-    // The same wait the zoom's flight uses — usually already satisfied by the time the slide has
-    // landed, which is the whole point of taking the baseline back at the commit.
     afterHostRedraw(bytesAtCommit.current, clearBarSwipe);
   };
 
@@ -1549,8 +1633,6 @@ export default function SessionScreen() {
         pos,
         target: pos,
         phase: 'drag',
-        settled: null,
-        settleInsets: null,
       });
       roundSV.value = 1; // the edge itself rides the travel — see pageEdgeStyle
       swipeX.value = rubber(dx, pos, slots);
@@ -1581,34 +1663,14 @@ export default function SessionScreen() {
         // The handle changes with the slide, not a poll beat after it — and it costs no height,
         // so nothing refits. A window we are about to create runs an idle shell: no handle.
         if (win) ribbonForWindow(win, 'bar swipe commit');
-        else setRibbonCore((c) => ribbonPoll(c, null, Date.now()));
-        // The settle's redraw-wait counts from here, not from the settle: on a LAN tmux's redraw
-        // beats the slide home.
-        bytesAtCommit.current = dataSeq.current;
-        // Either way tmux redraws the PTY, which replaces the snapshot: `new-window` makes the
-        // window it creates the active one, exactly as `select-window` does.
-        if (win) {
-          void selectWindow(win.index);
-          // Same optimistic `active` flip as a card select — the next grid open must not show
-          // the halo a list beat behind.
+        else ribbonForBirth();
+        // Optimistic `active` flip, here and not with the switch below: the pills, the anchor and
+        // the next grid open all read it, and none of them may wait for a roundtrip.
+        if (win)
           setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
-        }
-        // …and re-list, exactly as the grid's ✚ does (`birthCard`). Committing onto the slot past
-        // the last tab BIRTHS a window, and nothing here ever told the card list about it: with
-        // the grid closed there is no poll running at all (`useSwitcherCards`'s interval is armed
-        // on `live`), so the new tab stayed missing until the grid was next opened AND its 2s beat
-        // came round — "tens of seconds" (user, 2026-08-13). Worse than a missing card: `tmux`
-        // has already switched to a window `cards` does not contain, so `activePosIn` finds
-        // neither the index nor the active flag and falls back to 0 — the anchor, the pills and
-        // the halo all point at the wrong tab until something re-lists.
-        // `refresh(false)` is list-only: no capture burst on the JS thread, and the fresh shell
-        // has nothing to snapshot yet. Rare by nature — this is a window being created, not a hop.
-        else
-          newWindow()
-            .then(() => refresh(false))
-            .catch((error) => console.log('[barswipe] new window failed:', error));
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
-        slideTo((info.pos - target) * pagePitch(stage.w), settleBarSwipe);
+        // The HOST is told at the landing, not here — see `settleBarSwipe`.
+        slideTo((info.pos - target) * pagePitch(stage.w), () => settleBarSwipe(win));
       }
     }
   };
@@ -1693,17 +1755,36 @@ export default function SessionScreen() {
       ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
     );
   }, [fgCommand, fgPid, frozen, tmux.windowIndex]);
-  /** One re-render as `RIBBON_MIN_RUN_MS` elapses. `selectRecipe` reads the clock, and a quiet
-   *  poll deliberately returns the same core object (no re-render), so without this the band for
-   *  a slow job would wait for whatever happened to render next. 50ms of slack: the timeout must
-   *  land on the far side of the gate, never a millisecond short of it. */
-  const [, setGateBeat] = useState(0);
+  /**
+   * The beat `RIBBON_HOLD_MS` expires on. The hold needs a SECOND null to be believed, and nothing
+   * guarantees one arrives: `set` in src/tmux.ts drops an answer identical to the last, so once the
+   * foreground has settled at null the effect above never re-runs and the hold never runs out. The
+   * chip then keeps the finished run's name and its ticking clock until something unrelated changes
+   * — which is what left `claude · 1:10` on a freshly born `fish` window (BUGS.md), and is equally
+   * true of any command that simply exits while the user watches.
+   *
+   * One timer per hold, cancelled the moment the process comes back into view (`goneAt` returns to
+   * null on any answer that names a command) — so a blinking poll still costs nothing, which is the
+   * whole point of the hold.
+   */
+  useEffect(() => {
+    if (ribbonCore.goneAt === null) return;
+    const timer = setTimeout(
+      () => setRibbonCore((c) => ribbonPoll(c, null, Date.now())),
+      RIBBON_HOLD_MS + 50, // never a millisecond short of the gate, as with the MIN_RUN beat below
+    );
+    return () => clearTimeout(timer);
+  }, [ribbonCore.goneAt]);
+  /** There is deliberately NO re-render armed here for `RIBBON_MIN_RUN_MS`. One used to be, and it
+   *  could not work: this call site is `selectRecipe(…, Date.now())` in a component body, and the
+   *  React Compiler caches it on `[connected, modes, ribbonCore]` — none of which a running job
+   *  changes — so the timer re-rendered straight back into the stale cache and `running` was
+   *  unreachable for every command at every duration (2026-08-17). The delay is the band's own now
+   *  (`ribbonAppearDelay` + a timer inside `RibbonAccessory`), where nothing memoises it. */
   useEffect(() => {
     console.log(
       `[ribbon] run #${ribbonCore.instance} ${ribbonCore.command ?? 'idle'} pid=${ribbonCore.pid ?? '-'} startedAt=${ribbonCore.startedAt}`,
     );
-    const timer = setTimeout(() => setGateBeat((n) => n + 1), RIBBON_MIN_RUN_MS + 50);
-    return () => clearTimeout(timer);
   }, [ribbonCore.instance]);
 
   /** The recipe for a window we are switching to, named from the list rather than waited for,
@@ -1719,7 +1800,32 @@ export default function SessionScreen() {
     );
   };
 
-  const recipe = connected ? selectRecipe(ribbonCore, modes.altScreen, Date.now()) : null;
+  /**
+   * The same thing for a window that does not exist yet — the bar swipe committed onto the slot
+   * past the last tab. A birth is a hop to a window that CANNOT be running anything, so the clear
+   * is authoritative and goes through `ribbonSwitchedToIdle`: the band leaves with the slide.
+   *
+   * This used to be `ribbonPoll(c, null)`, a poll-shaped null, which is exactly what
+   * `RIBBON_HOLD_MS` exists to disbelieve — it only armed `goneAt`, and the second beat that would
+   * have expired the hold never came (tmux's store dedupes identical answers, so once the
+   * foreground settles at null the poll effect stops firing). The previous window's run therefore
+   * stayed on the chip with its clock running, forever.
+   *
+   * `awaiting` gets a placeholder rather than an index because tmux picks the new window's number
+   * and has not told us yet: no answer can match, so the next few — which describe the window we
+   * left — are ignored, and `settleBarSwipe`'s re-list replaces this with the real index within a
+   * roundtrip. The three-answer give-up is still the backstop if that re-list never lands.
+   */
+  const ribbonForBirth = () => {
+    console.log('[ribbon] forBirth (bar swipe): a new window runs nothing');
+    awaiting.current = { index: -1, tries: 0 };
+    setRibbonCore(ribbonSwitchedToIdle);
+  };
+
+  // `tmux`, not `modes` — the gate wants the PANE's `#{alternate_on}`, and `modes.altScreen` is the
+  // outer xterm's buffer type, which a tmux client pins true for the whole session. Both are
+  // booleans, which is how the wrong one went unnoticed; `selectRecipe` now takes the shape.
+  const recipe = connected ? selectRecipe(ribbonCore, tmux) : null;
   // A DIFFERENT recipe means the caps under the finger changed, so the band collapses. A new
   // instance of the same one (a second `npm run build`) leaves it open and just restarts the
   // clock — closing chrome the user did not close is worse than a stale timer.
@@ -1794,13 +1900,21 @@ export default function SessionScreen() {
 
   /* --- the name pills' inputs --- */
 
-  /** Where the strip sits, and whether the offset counts. The settle moves `pos` to the target in
-   *  the same commit, but `swipeX` keeps the slide's final offset until the post-paint reset
-   *  effect — read together they put the continuous position a full window off, snapping the new
-   *  pill to a capsule and back (user, 2026-08-11). The settle IS the landing, so the offset is
-   *  gated to zero there rather than `x` being pointed at a different value: swapping the shared
-   *  value was what made the pills' mappers restart (see `pillPosSV`). */
-  const pillPos = pageSwipe?.pos ?? activePosIn(cards);
+  /** Where the strip sits, and whether the offset counts. The strip lands on the TARGET at the
+   *  settle — leaving it on `pos` snapped it back to the tab just left for the length of the
+   *  settle, a second flicker of the wrong name (user, 2026-08-11). It used to get there by
+   *  `settleBarSwipe` moving `pos` itself, which the card row also reads (see there). Meanwhile
+   *  `swipeX` keeps the slide's final offset until the post-paint reset effect — read together
+   *  they put the continuous position a full window off, snapping the new pill to a capsule and
+   *  back (same report). The settle IS the landing, so the offset is gated to zero there rather
+   *  than `x` being pointed at a different value: swapping the shared value was what made the
+   *  pills' mappers restart (see `pillPosSV`). */
+  const pillPos =
+    pageSwipe === null
+      ? activePosIn(cards)
+      : pageSwipe.phase === 'settle'
+        ? pageSwipe.target
+        : pageSwipe.pos;
   const pillHold = pageSwipe === null || pageSwipe.phase === 'settle';
   useEffect(() => {
     pillPosSV.value = pillPos;
@@ -2008,6 +2122,27 @@ export default function SessionScreen() {
   /** Is anything scaling? Only then do the layout-and-raster styles above go live. */
   const zoomActive = sw !== 'closed';
 
+  /**
+   * Can the terminal's own chrome be TOUCHED this phase? Every layer of it — the zoom box, the
+   * floating key bar, the ribbon band — answers with this one expression, because they all sit in
+   * front of the grid in paint order and they all go invisible together (`barFadeStyle`).
+   *
+   * Invisible is not untouchable. Android's touch dispatch walks the view tree without ever
+   * looking at a view's alpha, so an opacity-0 key bar in front of the open grid keeps every hit
+   * that lands on it — and the bar's `…` and tabs circles sit at exactly the coordinates of the
+   * grid's `+` and `✓` (emulator, 2026-08-17: `+` opened the UPLOAD FILE sheet, `✓` reached
+   * `openSwitcher`, which returns early on `sw !== 'closed'`, so the grid could not be closed by
+   * anything but the system back button). iOS hides the fault because UIKit's `hitTest:` skips
+   * any view with alpha ≤ 0.01 — the same JSX, two behaviours, and the phone's is the correct
+   * one. This says out loud what iOS was getting for free, so both platforms do it for the same
+   * reason.
+   *
+   * `closing` and `drag` stay live on purpose: the bar owns the drag gesture, and the phase
+   * outlives the motion by the tail of its ease-out — a dead bar there is a terminal that looks
+   * landed and will not swipe (user, 2026-08-11).
+   */
+  const chromeLive = sw === 'closed' || sw === 'closing' || sw === 'drag';
+
   /** The grid's arrival, the same travel that carries the card (§7's no-clocks principle): the
    *  backdrop stays dark until the card is halfway to the tabs view, then the grid comes in
    *  quickly over the next fifth — on a drag it rides the finger, on a tap-open or a release it
@@ -2148,6 +2283,7 @@ export default function SessionScreen() {
           padTop={padTop}
           cards={gridCards.current}
           total={cards.length}
+          unreachable={listFailed}
           query={search.on ? search.q : ''}
           hits={hits}
           onQuery={sw_onQuery}
@@ -2189,11 +2325,9 @@ export default function SessionScreen() {
           actually running — the pages either side of it. It keeps the stage's full height and does
           NOT clip, so a card a pitch away is not cut off; each card inside crops itself. */}
       <Animated.View
-        // `closing` is touchable too: the bar rides inside this, so a dead subtree is a bar that
-        // ignores the finger — and the phase outlives the motion by the tail of its ease-out,
-        // which is a terminal that looks landed and will not swipe (user, 2026-08-11).
-        // The gesture picks the flight up from where it is (see `onSwitcherDrag`).
-        pointerEvents={sw === 'closed' || sw === 'closing' || sw === 'drag' ? 'auto' : 'none'}
+        // See `chromeLive`: the same phases the key bar and the ribbon band answer to. The gesture
+        // picks the flight up from where it is (see `onSwitcherDrag`).
+        pointerEvents={chromeLive ? 'auto' : 'none'}
         style={[
           stage === null ? styles.screen : [styles.zoomBox, { width: stage.w, height: stage.h }],
           stage !== null && boxStyle,
@@ -2247,14 +2381,15 @@ export default function SessionScreen() {
               spellCheck={false}
               style={[styles.searchInput, { color: theme.foreground, fontFamily: MONO, includeFontPadding: false  }]}
             />
-            <Text style={[styles.searchCount, { color: theme.muted }]}>
+            {/* BUGS.md §6: the addon walks xterm's buffer, which under tmux holds only the
+                visible screen — so a count that could not reach past the viewport says so, and
+                "20" and "20 on screen" stop being the same claim. Same Text, same MONO 11 in
+                `muted`: the scope is part of the number, not new chrome beside it. */}
+            <Text numberOfLines={1} style={[styles.searchCount, { color: theme.muted }]}>
               {occ === null || search.q.trim() === ''
                 ? ''
-                : occ.n === 0
-                  ? 'none'
-                  : occ.i >= 0
-                    ? `${occ.i + 1}/${occ.n}`
-                    : `${occ.n}`}
+                : (occ.n === 0 ? 'none' : occ.i >= 0 ? `${occ.i + 1}/${occ.n}` : `${occ.n}`) +
+                  (occ.screenOnly ? ' on screen' : '')}
             </Text>
           </View>
           {/* The pair, in a group of its own: they are one segmented control, so they sit closer
@@ -2362,16 +2497,18 @@ export default function SessionScreen() {
           front costs nothing: they are a pitch away and never overlap it. The bar moved out with
           them, so it still draws over every card in the row rather than under the arriving one.
 
-          Gone once the release commits to the GRID (`opening`), or they would fly in one pitch
-          behind the card: tabs arriving in pairs (user, 2026-08-13, screenshot). `closing` keeps
-          them: that is the spring back from a lift, the slide can still be live under it, and
-          sitting the phase out unmounted them mid-slide — the flash (trace, movement 1).
+          Mounted unconditionally, and shown by `rowVis` alone (a91809f) — the phase test that used
+          to stand here (`sw === 'closed' || 'drag' || 'closing'`, so gone for `opening`) is not a
+          condition on this JSX any more, and every reason it existed is now a reason `rowVis` has
+          to be written: a release that commits to the GRID must take the row out, or the
+          neighbours fly in one pitch behind the card — tabs arriving in pairs (user, 2026-08-13,
+          screenshot). `onZoomEnd` is where that write lives.
 
-          The exits are conditional on purpose: releasing a HELD card (no page swipe live) sends
-          the neighbours back out to their sides so the main card flies to the grid alone (user,
-          2026-08-13) — but a hop's landing must stay an instant cut, because the landed card sits
-          exactly over the settle overlay's identical picture, and sliding it away would show the
-          same tab twice, one peeling off the other. */}
+          The exits are conditional on purpose: releasing a card to the grid — held, or mid-hop —
+          sends the neighbours back out to their sides so it flies alone (user, 2026-08-13) — but a
+          hop's LANDING must stay an instant cut, because the landed card sits exactly over the
+          live pane's identical picture, and sliding it away would show the same tab twice, one
+          peeling off the other. */}
       {stage !== null && showTabs && connected && (
         <>
           {anchor > 0 && (
@@ -2434,6 +2571,9 @@ export default function SessionScreen() {
           full window height under it. Its own glass pills carry no full-width ground, so the
           card's background (or the crust gap, mid-swipe) shows through around them. */}
       <Animated.View
+        // It used to ride inside the zoom box, which gated it; out here it is the grid's own
+        // bottom bar that it covers, and the fade alone does not stop a hit (see `chromeLive`).
+        pointerEvents={chromeLive ? 'auto' : 'none'}
         style={[
           { position: 'absolute', left: 0, right: 0, bottom: keyboardPad + insets.bottom },
           barFadeStyle,
@@ -2477,7 +2617,9 @@ export default function SessionScreen() {
           parent that outlives it, or a finished process takes the band off screen in one frame
           instead of the 180ms glide down. */}
       <Animated.View
-          pointerEvents="box-none"
+          // `box-none` while the terminal is up, dead while the grid is: the band rests at
+          // `popBase`, over the grid's bar, and fades with the key bar (see `chromeLive`).
+          pointerEvents={chromeLive ? 'box-none' : 'none'}
           style={[StyleSheet.absoluteFill, barFadeStyle]}>
         {recipe !== null && (
           <RibbonAccessory
@@ -2617,19 +2759,13 @@ type PageSwipe = {
   pos: number;
   /** Where a commit is headed (= `pos` until the release decides). */
   target: number;
-  /** drag = finger down; anim = commit/cancel slide running; settle = snapshot holding the
-   *  screen while tmux redraws the PTY under it. */
+  /** drag = finger down; anim = commit/cancel slide running; settle = the landed neighbour card
+   *  holding the screen while tmux redraws the PTY under it (`settleBarSwipe`). */
   phase: 'drag' | 'anim' | 'settle';
-  /** The page the commit landed on, kept for the settle overlay — `pos` has moved to `target` by
-   *  then, so which side it came from is no longer derivable. Moving `pos` is the point: the name
-   *  pills read their position from it, and leaving it behind snapped the strip back to the tab
-   *  just left for the length of the settle, which is a second flicker of the wrong name before
-   *  the keys return (user, 2026-08-10). */
-  settled: PageSnap;
-  /** The pane insets AS OF the settle's mount — the deferred ribbon swap changes the live ones
-   *  a layout later, and the overlay must not move with them (see settleBarSwipe). */
-  settleInsets: { top: number; side: number; bottom: number } | null;
 };
+/* `settled`/`settleInsets` used to ride here — a duplicate snapshot of the committed page, mounted
+ * as an overlay at the landing. bf8efbb made the landed neighbour its own cover and stopped
+ * rendering the overlay; the two fields were still being filled in for nobody. */
 
 /** The captured pane at page size — T10's Snapshot renderer, fitted to the pane's true columns
  *  inside the box they are drawn in. A page card rides beside the live terminal at 1:1, so every

@@ -110,8 +110,9 @@ export type TerminalProps = {
    *  tap: only this layer knows the touch was neither a scroll nor a long-press selection. */
   onTap: () => Promise<void>;
   /** T14: the search addon's live occurrence count — `index` is 0-based, −1 past the highlight
-   *  limit; `count` 0 = no hits. Feeds the "i/N" label beside the terminal's search field. */
-  onSearchResults: (index: number, count: number) => Promise<void>;
+   *  limit; `count` 0 = no hits. Feeds the "i/N" label beside the terminal's search field.
+   *  `screenOnly` says how far that count reached: see `screenOnly()` below. */
+  onSearchResults: (index: number, count: number, screenOnly: boolean) => Promise<void>;
   ref?: Ref<TerminalHandle>;
   dom?: DOMProps;
 };
@@ -297,6 +298,21 @@ function fontReport(fontSize: number): string {
   );
 }
 
+/**
+ * Whether a search over this buffer reached nothing but the visible screen (BUGS.md §6).
+ *
+ * `baseY` is how many rows have scrolled off above the viewport, so `baseY === 0` says the buffer
+ * holds no history at all and the addon — which walks *xterm's* buffer — had only the visible rows
+ * to search. Under tmux that is the permanent state: each pane draws inside a scroll region
+ * (DECSTBM) on the ALTERNATE buffer, where content scrolling never leaves the screen, so the
+ * session's real scrollback is tmux's and the count is "N on screen" however deep the history goes.
+ * On a bare shell (`startMode: 'shell'`) it is true only until the first screenful scrolls off, and
+ * from then on the count is the whole truth and says nothing extra.
+ *
+ * Measured, not assumed: no "is this tmux" flag anywhere, just what the buffer can actually reach.
+ */
+const screenOnly = (term: Terminal) => term.buffer.active.baseY === 0;
+
 /*
  * Once nudged, the size was: a cell of 23.4 device pixels starts on a different fraction of a pixel
  * in every column, the two renderers do not round that fraction the same way — one seats a glyph on
@@ -335,22 +351,157 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
 
   // The one decoration set both directions share. Backgrounds must be #RRGGBB (addon contract):
   // every role here is a palette hex. The ruler colours are required by the type; no ruler is on.
+  // `activeMatch*` is passed because the type wants it and it costs nothing — but it is NOT what
+  // marks the current hit. `markHit` below is, and says why.
   const searchOptions = () => {
     const t = latest.current.theme;
     return {
       decorations: {
         matchBackground: t.selection,
         activeMatchBackground: t.warning,
-        // NOTE: the active match does not actually draw differently — see BUGS.md §3. The addon
-        // builds the decoration (it reports one) and these colours are far apart, but nothing of
-        // it reaches the screen. `activeMatchBorder` was tried here and made no difference, which
-        // is the useful part: an outline paints outside the box, so the element cannot merely be
-        // covered — it is not rendering. Fixing it means marking the hit ourselves, not passing
-        // this addon better colours.
         matchOverviewRuler: t.warning,
         activeMatchColorOverviewRuler: t.warning,
       },
     };
+  };
+
+  /** The cell the rows are actually drawn on, as `report` last measured it — the mark is placed
+   *  with it. Cached rather than re-measured per keystroke because `advance()` lays out a
+   *  1000-glyph probe inside the live rows container; `report` runs on exactly the events that
+   *  can change the number (fit, keyboard edge, rotation, hold release). */
+  const cellSize = useRef({ w: 0, h: 0 });
+
+  /** The current hit's mark: our own elements over the rows, one per row the hit spans. */
+  const hitMark = useRef<{ el: HTMLElement; row: number; x: number }[]>([]);
+  /** Removes the mark and says how many of its elements were still in the document — the whole
+   *  point of the walk's `kept` field: 0/1 is a mark that was created and then taken away. */
+  const clearHitMark = () => {
+    const kept = hitMark.current.filter((m) => m.el.isConnected).length;
+    const had = hitMark.current.length;
+    for (const m of hitMark.current) m.el.remove();
+    hitMark.current = [];
+    return `${kept}/${had}`;
+  };
+
+  /** Puts each of the mark's elements over its row. Separate from `markHit` because the viewport
+   *  can move under a mark that is already up (a finger scroll on the normal buffer). */
+  const placeHitMark = () => {
+    const term = terminal.current;
+    if (term === null) return;
+    const { w, h } = cellSize.current;
+    const top = term.buffer.active.viewportY;
+    for (const m of hitMark.current) {
+      m.el.style.left = `${m.x * w}px`;
+      m.el.style.top = `${(m.row - top) * h}px`;
+    }
+  };
+
+  /**
+   * Mark the hit the addon just landed on — and scroll to it if it is off-screen (BUGS.md §1, §2).
+   *
+   * The addon's own active decoration is built (it reports one) and is invisible, and neither
+   * reason is the colours it was handed. Both were read out of the renderer:
+   *
+   * - It is a `layer: 'bottom'` decoration, and so is the grey match already sitting on those
+   *   cells. `DomRendererRowFactory` walks every decoration at a cell and lets the LAST one win,
+   *   and `SortedList._flushInserted` puts a newly inserted value AHEAD of the ones already at
+   *   that line — so the grey match, registered first, is applied last and paints over the
+   *   yellow. Whatever survived that would then be overwritten again by the selection, because
+   *   `_selectResult` "goes to" a hit by calling `term.select()` and the selection colour here is
+   *   `theme.selection` — the very grey the matches are drawn in.
+   * - The decoration ELEMENT — where `activeMatchBorder`'s outline and the `xterm-find-*` classes
+   *   live — is set to `display:none` for as long as the alt buffer is active
+   *   (`BufferDecorationRenderer._refreshStyle`), which under tmux is always. That is why trying
+   *   `activeMatchBorder` changed nothing: nothing about that element reaches the screen. Only
+   *   the background does, and only because the row factory paints it into the cells.
+   *   (The upstream `isActiveResult` hardcode at `DecorationManager.ts:147` is real too, but it
+   *   is downstream of this: it only kills the class on an element that is already hidden.)
+   *
+   * `layer: 'top'` is the lever the addon does not expose and it beats both — and a `layer:'top'`
+   * decoration of our own was the first fix. It reached the screen only about half the time
+   * (Android walk 2026-08-17: 22 taps, yellow on 9; 8 with the keyboard down, yellow on none),
+   * and the frames that lost it had lost MOST OF THE GREY MATCHES TOO — 2 of 20 rows still
+   * carrying anything. That is the tell, and it is not about colours or layers at all:
+   *
+   * **A decoration cannot outlive its marker, and markers under tmux are killed by the redraw.**
+   * `DecorationService.registerDecoration` hangs `marker.onDispose → decoration.dispose()` on
+   * every decoration, and `Buffer` disposes markers on two things tmux does constantly:
+   * `clearMarkers(ybase + y)` from `InputHandler._resetBufferLine` — i.e. every `CSI K` / `CSI J`,
+   * which is how tmux repaints a row — and `lines.onDelete`, i.e. any scroll of a DECSTBM region.
+   * So the mark dies the moment the host repaints the row it sits on, which is a coin-flip inside
+   * the fraction of a second between the tap and the screenshot.
+   *
+   * The greys prove it independently: the addon builds them once (`_highlightAllMatches` runs only
+   * when the term or the options change) and this file has stubbed out `_updateMatches`, the only
+   * thing that ever rebuilt them — so nothing but marker death can take them off the screen, and
+   * they demonstrably came off it.
+   *
+   * Hence: no marker, no decoration. The mark is our own absolutely-positioned element inside
+   * `.xterm-rows`, holding the hit's own text — it inherits the row container's font, size and
+   * (this file's, zeroed) letter-spacing, so its glyphs land on the same pitch as the ones
+   * underneath, and `z-index: 5` clears the selection layer's 1 while staying under the decoration
+   * container's 6/7. Nothing xterm does to the buffer can take it away.
+   *
+   * The scroll is the same arithmetic the addon does, kept here so the hit does not depend on the
+   * addon's internals. On the alt screen it is a no-op both times and correctly so: that buffer
+   * has no scrollback (`baseY` 0, `viewportY` 0), every hit xterm can find is already on screen,
+   * and the history the user is thinking of is tmux's, reachable only through its copy-mode.
+   */
+  const markHit = (dir: string) => {
+    const term = terminal.current;
+    if (term === null) return;
+    const kept = clearHitMark();
+    // Where the addon went, read publicly: `_selectResult` selects the hit and clears the
+    // selection when there is none, so the selection IS the hit — 0-based col, absolute row
+    // (scrollback included), end exclusive.
+    const sel = term.getSelectionPosition();
+    const b = term.buffer.active;
+    if (sel === undefined) {
+      console.log(`[search] ${dir} no hit — buffer ${b.type} viewportY ${b.viewportY} kept ${kept}`);
+      return;
+    }
+    const was = b.viewportY;
+    if (sel.start.y < b.viewportY || sel.start.y >= b.viewportY + term.rows)
+      term.scrollLines(sel.start.y - b.viewportY - Math.floor(term.rows / 2));
+    const rows = host.current?.querySelector('.xterm-rows') as HTMLElement | null;
+    const { w, h } = cellSize.current;
+    const t = latest.current.theme;
+    if (rows !== null && w > 0 && h > 0) {
+      for (let row = sel.start.y; row <= sel.end.y; row++) {
+        const x = row === sel.start.y ? sel.start.x : 0;
+        const width = (row === sel.end.y ? sel.end.x : term.cols) - x;
+        if (width <= 0) continue; // a hit ending exactly on a wrap gives an empty last row
+        const el = document.createElement('div');
+        // Not trimmed: a query may legitimately end in a space, and the mark has to be as wide as
+        // what was matched. The box is sized from the cell rather than left to the text's own
+        // advance — the two agree in a monospace font, and the cell is still right if the row was
+        // erased under us between the search and this line, where the text would come back empty.
+        el.textContent = b.getLine(row)?.translateToString(false, x, x + width) ?? '';
+        el.style.cssText =
+          `position:absolute;z-index:5;width:${width * w}px;height:${h}px;` +
+          `line-height:${h}px;overflow:hidden;` +
+          // The label-on-a-fill role: glyphs inside the mark stay legible on both schemes, where
+          // `foreground` on yellow does not.
+          `background:${t.warning};color:${t.onAccent};` +
+          // The rows are deliberately selectable (§4.2's long press) and this text is a copy of
+          // theirs — a selection dragged over the mark must not pick it up twice.
+          '-webkit-user-select:none;user-select:none;';
+        rows.appendChild(el);
+        hitMark.current.push({ el, row, x });
+      }
+      placeHitMark();
+    }
+    console.log(
+      `[search] ${dir} hit ${sel.start.y}:${sel.start.x}→${sel.end.y}:${sel.end.x}`,
+      // `marked` is what this tap put up, `kept` what the tap before it still had when this one
+      // cleared: `marked 1 kept 0/1` is a mark that was created and then lost, `marked 0` one that
+      // was never created. `markers`/`decos` are the addon's greys — they ride xterm markers, and
+      // watching that count fall is watching the redraw kill decorations.
+      `marked ${hitMark.current.length} kept ${kept}`,
+      `markers ${term.markers.length} decos ${host.current?.querySelectorAll('.xterm-decoration').length ?? -1}`,
+      `cell ${w.toFixed(4)}×${h.toFixed(2)}`,
+      `buffer ${b.type} rows ${term.rows} baseY ${b.baseY} viewportY ${was}→${b.viewportY}`,
+    );
   };
 
   const handle: TerminalHandle = {
@@ -360,12 +511,26 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       for (const chunk of chunks) term.write(fromBase64(chunk));
     },
     search: (query) => {
-      if (query === '') search.current?.clearDecorations();
-      else search.current?.findNext(query, { ...searchOptions(), incremental: true });
+      if (query === '') {
+        clearHitMark();
+        search.current?.clearDecorations();
+      } else {
+        search.current?.findNext(query, { ...searchOptions(), incremental: true });
+        markHit('type');
+      }
     },
-    searchNext: (query) => search.current?.findNext(query, searchOptions()),
-    searchPrev: (query) => search.current?.findPrevious(query, searchOptions()),
-    searchOff: () => search.current?.clearDecorations(),
+    searchNext: (query) => {
+      search.current?.findNext(query, searchOptions());
+      markHit('next');
+    },
+    searchPrev: (query) => {
+      search.current?.findPrevious(query, searchOptions());
+      markHit('prev');
+    },
+    searchOff: () => {
+      clearHitMark();
+      search.current?.clearDecorations();
+    },
   };
   useDOMImperativeHandle(
     (ref ?? null) as Ref<DOMImperativeFactory>,
@@ -427,6 +592,9 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       fontFamily: MONO,
       fontSize,
       theme: xtermTheme(theme),
+      // Unused under tmux (BUGS.md §6: nothing ever leaves a pane's scroll region into it), but
+      // kept: it is the ONLY scrollback on the `shell` start mode, and an unfilled one costs a
+      // 10k-slot empty array — `CircularList` allocates lines on push, not up front.
       scrollback: 10_000,
       cursorBlink: true,
       // T14: the search addon's highlight decorations ride `registerDecoration`, which xterm 6
@@ -464,8 +632,12 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // a frozen scrollback snapshot, if the highlight ever needs to track live output.
     (searchAddon as unknown as { _updateMatches: () => void })._updateMatches = () => {};
     const searchResults = searchAddon.onDidChangeResults(({ resultIndex, resultCount }) => {
-      latest.current.onSearchResults(resultIndex, resultCount);
+      latest.current.onSearchResults(resultIndex, resultCount, screenOnly(term));
     });
+    // The mark is placed in viewport coordinates, so it has to follow the viewport. A no-op under
+    // tmux (the alt buffer never scrolls), but on the `shell` start mode a finger scroll would
+    // otherwise leave the mark parked on whatever row moved into its place.
+    const hitScroll = term.onScroll(() => placeHitMark());
     term.open(host.current!);
     terminal.current = term;
     fit.current = fitAddon;
@@ -640,6 +812,9 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       forced = false;
       reported = { cols: term.cols, rows: term.rows, padTop };
       const { w, h } = cell();
+      // The mark is placed on this, and this is the only place it is measured — every event that
+      // can move the cell (fit, keyboard edge, rotation, hold release) comes through here.
+      cellSize.current = { w, h };
       console.log(
         '[terminal] size', term.cols, '×', term.rows,
         // Four places on the advance, not two: the thing that goes wrong with it is thousandths of
@@ -726,6 +901,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       observer.disconnect();
       teardownTouch();
       searchResults.dispose();
+      hitScroll.dispose();
+      hitMark.current = []; // the elements go with the terminal; the refs must not outlive it
       term.dispose();
     };
   }

@@ -19,9 +19,11 @@
  * content is a two-colour C40 perimeter — no single role colour can work, because the terminal
  * draws in the same theme and can always land on itself at 1.00:1.
  *
- * The screen owns the state (`src/ribbon-model.ts` decides, `RIBBON_MIN_RUN_MS` gates) and
- * executes the caps; this file draws, ticks the clock, arms the two-tap quit, and reads the
- * open gesture.
+ * The screen owns the state (`src/ribbon-model.ts` decides) and executes the caps; this file
+ * draws, holds `RIBBON_MIN_RUN_MS` on its own timer, ticks the clock, arms the two-tap quit, and
+ * reads the open gesture. The two timers are not decoration: both quantities move with the wall
+ * clock, and a wall clock read in a component body is memoised by the React Compiler against props
+ * that a running job never changes.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -42,7 +44,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Key } from '@/keybar';
-import { formatElapsed } from '@/ribbon-model';
+import { formatElapsed, ribbonAppearDelay } from '@/ribbon-model';
 import { RECIPES, type Cap, type RecipeId } from '@/ribbon-recipes';
 import { TEXT } from '@/style';
 import { MONO, MONO_BOLD, rgba, SANS, type Theme } from '@/theme';
@@ -110,6 +112,32 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [data.pulse]);
+
+  /**
+   * `RIBBON_MIN_RUN_MS`, served here. The screen mounts this component the moment the foreground
+   * is a recipe at all and we hold the three seconds ourselves, off one timer per run — because
+   * the same React Compiler memoisation that froze the clock above froze the gate when it lived in
+   * `selectRecipe(core, altScreen, Date.now())`: that call is cached on the screen's core, which a
+   * running job never changes, so the gate-beat re-render read the cached `null` back and `sleep`
+   * never raised the band at all (emulator, 2026-08-17 — see `RIBBON_MIN_RUN_MS`). A timeout into
+   * state is the same shape as the hold timer, and for the same reason: nothing else is going to
+   * wake this.
+   */
+  const ripeAt = props.startedAt + ribbonAppearDelay(recipe.id);
+  const [ripe, setRipe] = useState(() => Date.now() >= ripeAt);
+  useEffect(() => {
+    const left = ripeAt - Date.now();
+    if (left <= 0) {
+      setRipe(true);
+      return;
+    }
+    setRipe(false);
+    const timer = setTimeout(() => {
+      setNow(Date.now()); // or the chip can arrive reading 0:02, a beat behind its own gate
+      setRipe(true);
+    }, left);
+    return () => clearTimeout(timer);
+  }, [ripeAt]);
 
   /** The resting silhouette is the chip's own width — measured, because the process name is not
    *  ours to predict. The default is the running recipe's typical width, so the first frame is
@@ -195,9 +223,13 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
 
   // Self-appearing chrome is invisible to VoiceOver unless it says so, and must not steal focus
   // from whatever is being read.
+  // Not before the gate: the band is mounted for every `ls` now, and announcing one would put back
+  // exactly the intrusion `RIBBON_MIN_RUN_MS` exists to prevent, for the users least able to
+  // ignore it.
   useEffect(() => {
+    if (!ripe) return;
     AccessibilityInfo.announceForAccessibility(`${recipe.proc} actions available`);
-  }, [recipe.id, recipe.proc]);
+  }, [recipe.id, recipe.proc, ripe]);
 
   // Category (2), hardware/OS affordance: Android's back gesture owns both screen edges,
   // exclusion is capped at 200dp and refused at the bottom, and RNGH will not arbitrate against
@@ -281,6 +313,10 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
       </Key>
     );
   };
+
+  // After every hook, so the gate cannot reorder them: a short command mounts this and draws
+  // nothing, and the entrance below plays when the three seconds are up rather than at mount.
+  if (!ripe) return null;
 
   return (
     <>

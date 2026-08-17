@@ -13,9 +13,9 @@
  * `printf`, `>>`. All of it was run through `fish -c` verbatim before landing here.
  */
 
-/** v3: the root-table wheel bindings, so a pager on the alternate screen scrolls instead of
- *  opening copy mode over a buffer that does not move. */
-export const CONF_VERSION = 3;
+/** v4: the root-table wheel bindings' pager case is matched by name as well as by alternate screen,
+ *  so `git log` scrolls too — v3 caught only the pagers that switch buffers. */
+export const CONF_VERSION = 4;
 export const CONF_MARKER = `# port22-conf-v${CONF_VERSION}`;
 
 /** Relative on purpose: SFTP resolves paths against `$HOME`, absolute would leave it. */
@@ -66,16 +66,28 @@ bind -T copy-mode-vi WheelDownPane send -N1 -X scroll-down
 set -g mouse on
 
 # What a wheel notch means in a pane that is NOT already in copy mode. tmux's default answer is
-# \`copy-mode -e\` for any app that has not asked for the mouse — and on the alternate screen that
-# opens copy mode over the alt buffer, where scrolling moves nothing. That is a pager that will not
-# scroll: \`less\` and \`man\` take the wheel and sit still (user, device). The alternate-screen case
-# has to become the keys the pager actually reads.
+# \`copy-mode -e\` for any app that has not asked for the mouse — and over a pager that opens copy
+# mode on a buffer that does not move. That is a pager that will not scroll: \`less\`, \`man\` and
+# \`git log\` take the wheel and sit still (user, device). The pager case has to become the keys the
+# pager actually reads.
 #
 # Three cases, in the order tmux tests them: the app asked for the mouse (vim, htop, and this
-# app's own host) — hand it the report untouched; the alternate screen without mouse — one arrow
-# per notch, matching the copy-mode bindings above; anything else — copy mode, tmux's own default.
-bind -n WheelUpPane   if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{alternate_on}' 'send -N1 Up' 'copy-mode -e'"
-bind -n WheelDownPane if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{alternate_on}' 'send -N1 Down' 'copy-mode -e'"
+# app's own host) — hand it the report untouched; a pager — one arrow per notch, matching the
+# copy-mode bindings above; anything else — copy mode, tmux's own default.
+#
+# "A pager" is two tests because the alternate screen alone misses git's. git runs less with
+# \`LESS=FRX\` and \`-X\` suppresses the termcap init, so that less never switches buffers. Measured
+# on this host (tmux 3.7b, git 2.55.0): in a pane sitting in \`git log\`, \`alternate_on\` is 0 and
+# \`pane_current_command\` is \`git\` — NOT \`less\`, since git keeps the process group. So the name
+# arm matches both spellings, anchored so \`gitk\` and \`lesspipe\` are not pagers. \`less\` and \`man\`
+# still come in on \`alternate_on\`; the name arm is what \`git log\`, \`git diff\` and \`git show\` need.
+#
+# The cost of the name arm: a long \`git clone\` or \`git push\` also reports \`git\`, so a notch there
+# sends an arrow into a process not reading stdin instead of opening copy mode. Nothing is typed
+# into the shell and nothing scrolls away — the same "sit still" the wheel already did, and it ends
+# when the command does.
+bind -n WheelUpPane   if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{||:#{alternate_on},#{m/r:^(git|less)$,#{pane_current_command}}}' 'send -N1 Up' 'copy-mode -e'"
+bind -n WheelDownPane if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{||:#{alternate_on},#{m/r:^(git|less)$,#{pane_current_command}}}' 'send -N1 Down' 'copy-mode -e'"
 
 # A copy-mode yank lands on the phone's pasteboard over OSC 52 (§4.7). set-clipboard alone is not
 # enough: tmux only emits OSC 52 when the outer terminal advertises the Ms capability, and
@@ -243,11 +255,37 @@ export function parseWindows(stdout: string): TmuxWindow[] {
   return windows;
 }
 
-/** Everything interpolated into a window command is an integer, enforced — there is no quoting
- *  problem an index can smuggle past this. */
-function target(index: number): string {
-  if (!Number.isInteger(index) || index < 0) throw new Error(`not a window index: ${index}`);
-  return `-t :${index}`;
+/**
+ * Windows are addressed by tmux's own `@N` id, never by `:index` (BUGS "One exec per grid open
+ * fails", 2026-08-17). An index is a POSITION, and three separate things move it under us —
+ * measured on tmux 3.7b on this box, not assumed:
+ *
+ * - **Renumbering.** With the user's `renumber-windows on` — a setting this app deliberately does
+ *   not own (see EXTRAS) — killing one window slides every higher index down by one. A card list
+ *   taken before that kill then addresses the wrong windows: `kill-window -t :2` aimed at the card
+ *   that WAS index 2 exited 0 and killed the window that had slid into slot 2 instead. A silent,
+ *   successful kill of a bystander, which is the outcome BUGS feared and worse than the one it
+ *   named.
+ * - **Name fallback.** `-t :7` with no window at index 7 does not stop at "no such index": tmux
+ *   falls through to matching the window NAME, so a window called `7` sitting at index 5 answered
+ *   the capture — exit 0, wrong pane, no error anywhere.
+ * - **The session isn't pinned either.** `:N` means "index N in whatever session tmux calls
+ *   current", and `pollCommand`'s note above already measured that alternating between sessions on
+ *   the user's host. A `@N` id is unique across the whole SERVER — verified: a capture by id
+ *   answered for a window in a session that was not the current one.
+ *
+ * What survives of the old contract: nothing user-typed reaches a command line. `@\d+` is as tight
+ * a shape as the integer was.
+ *
+ * Exported so every command that addresses a window routes through this one guard — including
+ * `searchPaneCommand` over in `src/search-model.ts`, which built its own `-t :index` until
+ * 2026-08-17 and had the same bug wearing a different face: a grep whose target had slid, or that
+ * matched a window NAMED like the index, answers about the wrong scrollback (or none), and the
+ * switcher's per-window catch made that look like "no hit".
+ */
+export function target(id: string): string {
+  if (!/^@\d+$/.test(id)) throw new Error(`not a window id: ${id}`);
+  return `-t ${id}`;
 }
 
 /** `-e` keeps colours as escapes: the card is drawn by a terminal of its own (T10), so what comes
@@ -259,16 +297,20 @@ function target(index: number): string {
  *  strip — is spaces carrying a background. Trimmed away, the band stops at the last letter in the
  *  card and runs to its true width in the pane, which is a band that changes length at the swipe's
  *  hand-over (user, 2026-08-11). Needs tmux 3.1, where the flag arrived. */
-export function capturePaneCommand(index: number): string {
-  return `tmux capture-pane -p -e -N ${target(index)}`;
+export function capturePaneCommand(id: string): string {
+  return `tmux capture-pane -p -e -N ${target(id)}`;
 }
 
-export function selectWindowCommand(index: number): string {
-  return `tmux select-window ${target(index)}`;
+export function selectWindowCommand(id: string): string {
+  return `tmux select-window ${target(id)}`;
 }
 
-export function killWindowCommand(index: number): string {
-  return `tmux kill-window ${target(index)}`;
+/** Exit 1 here means one thing only, and it is not "maybe": a `@N` is never reused, so tmux
+ *  answering `can't find window: @N` is tmux saying that window is already gone — verified on
+ *  3.7b, a kill against a dead id exits 1 and touches nothing. Nothing else can be killed by
+ *  mistake, which is exactly what `:index` could not promise. */
+export function killWindowCommand(id: string): string {
+  return `tmux kill-window ${target(id)}`;
 }
 
 /**
@@ -286,9 +328,17 @@ export const NEW_WINDOW = "tmux new-window -a -t ':{end}'";
 /** `-b`/`-a` shuffle neighbours out of the way (tmux ≥ 3.2) — a bare move-window refuses an
  *  occupied index, and a drag-reorder's drop slot is always occupied. Landing indices depend on
  *  the user's own base-index/renumber-windows, so T10 re-lists after every move. */
+/* ponytail: the one window command still on `:index`. A drop slot IS a position — `-b`/`-a` is
+ * chosen by `to < from`, which ids cannot answer — and its two indices come from a list taken at
+ * the drag's start and are re-listed the moment the move lands, so the window it can address by
+ * mistake is a neighbour it was about to shuffle anyway. Nothing is destroyed either way. Give
+ * `reorderArgs` a direction and this can take ids too. */
 export function moveWindowCommand(from: number, to: number): string {
-  const source = target(from).replace('-t', '-s');
-  return `tmux move-window ${to < from ? '-b' : '-a'} ${source} ${target(to)}`;
+  const slot = (index: number) => {
+    if (!Number.isInteger(index) || index < 0) throw new Error(`not a window index: ${index}`);
+    return `:${index}`;
+  };
+  return `tmux move-window ${to < from ? '-b' : '-a'} -s ${slot(from)} -t ${slot(to)}`;
 }
 
 /* --- the poll (badge for T7, foreground process for T11's ribbon) --- */
@@ -337,11 +387,23 @@ export function pollDelay(attached: boolean, ticks: number): number {
  * our client is looking at. `=` means "exact name, no prefix match", so a session called `port22x`
  * cannot answer for `port22`.
  */
+/**
+ * `#{alternate_on}` rides along because the ribbon's §4.4 "unknown TUI" gate has no other honest
+ * source. It used to read the OUTER xterm's buffer type (`modes.altScreen`, src/scroll-model.ts),
+ * and under tmux that is permanently 1 — a tmux CLIENT is itself a full-screen app — so the gate
+ * swallowed `running` for every command in every tmux session, which is this app's default start
+ * mode (emulator, 2026-08-17: `sleep 30` detected, chip region empty at all 15 samples).
+ * `alternate_on` is per PANE, i.e. it answers the question the gate actually asks: is the thing in
+ * front of the user a full-screen app. The conf's wheel binding above already switches on it.
+ *
+ * NOT a replacement for `modes.altScreen`: the scroll router wants the outer reading (under tmux
+ * you do want arrows), so the two facts stay separate — see `selectRecipe` and `scrollRoute`.
+ */
 export function pollCommand(session: string | null): string {
   const target = session === null ? '' : ` -t ${shellQuote(`=${session}:`)}`;
   return (
     `tmux display-message${target} -p '` +
-    ['#{session_attached}', '#{window_index}', '#{pane_pid}', '#{pane_current_command}'].join(SEP) +
+    ['#{session_attached}', '#{window_index}', '#{pane_pid}', '#{alternate_on}', '#{pane_current_command}'].join(SEP) +
     `' 2>/dev/null; true`
   );
 }
@@ -354,21 +416,30 @@ export type TmuxPoll = {
   attached: boolean;
   windowIndex: number;
   pid: number;
+  /** The ACTIVE PANE's alternate screen — a full-screen app in front of the user. Nothing to do
+   *  with the outer terminal's own buffer, which under tmux is always the alternate one. */
+  paneAlt: boolean;
   command: string;
 };
 
-/** `null` = no server, or garbage — either way there is nothing to say. */
+/** `null` = no server, or garbage — either way there is nothing to say.
+ *
+ *  `paneAlt` is deliberately NOT part of the reject test: a tmux too old to know
+ *  `#{alternate_on}` renders it empty, and rejecting the line for that would take the badge, the
+ *  tabs button and the ribbon down with it. Anything but `1` reads as false, which is the same
+ *  answer the gate had before this field existed. */
 export function parsePoll(stdout: string): TmuxPoll | null {
   const line = stdout.trim().split('\n')[0] ?? '';
   const fields = line.split(SEP);
-  if (fields.length < 4) return null;
-  const [attached, windowIndex, pid] = fields;
+  if (fields.length < 5) return null;
+  const [attached, windowIndex, pid, paneAlt] = fields;
   if (!/^\d+$/.test(attached) || !/^\d+$/.test(windowIndex) || !/^\d+$/.test(pid)) return null;
   return {
     attached: Number(attached) > 0,
     windowIndex: Number(windowIndex),
     pid: Number(pid),
-    command: fields.slice(3).join(SEP),
+    paneAlt: paneAlt === '1',
+    command: fields.slice(4).join(SEP),
   };
 }
 
