@@ -923,7 +923,7 @@ Two things this did NOT fix, both handled in the ribbon:
 
 ---
 
-## Not a bug: the one perf change nobody has measured
+## RESOLVED: the one perf change nobody has measured — removed 2026-08-17
 
 `package.json` carries `reanimated.staticFeatureFlags.IOS_SYNCHRONOUSLY_UPDATE_UI_PROPS: true`
 (added in `e75141f`). It is compiled into the native build, so it only takes effect in a fresh IPA.
@@ -936,6 +936,18 @@ shown to help and has not been shown to hurt.
 
 Either measure it — the perf overlay's UI figure, same session, same load, flag on and off — or
 take it out. Do not leave it sitting here as something everyone assumes was justified.
+
+**Taken out.** Measuring it needs the iPhone and a Release IPA, and the iOS half was deferred this
+session, so the binary above resolves to removal rather than to an unmeasured flag surviving another
+month on the strength of nobody having removed it.
+
+Two facts that make removal the conservative direction rather than a coin flip: reanimated 4.5.1's
+own default is `false` (`src/featureFlags/staticFlags.json:5` and `staticFeatureFlags.ts:17`), so
+this is a return to upstream, not a new position; and the flag is compiled into the native build, so
+nothing changes until the next IPA and **nothing on Android is affected at all**.
+
+If an iOS measurement ever justifies it, restoring it is the same one block of `package.json` — but
+then the number goes here with it.
 
 ---
 

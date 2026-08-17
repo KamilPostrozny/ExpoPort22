@@ -82,7 +82,13 @@ import {
   useSettings,
   usesTmux,
 } from '@/settings';
-import { SEARCH_HIGHLIGHT_MS, normalizeQuery, windowSurvives } from '@/search-model';
+import {
+  SEARCH_DEBOUNCE_MS,
+  normalizeQuery,
+  searchLabel,
+  windowSurvives,
+  type WindowSearch,
+} from '@/search-model';
 import Switcher, {
   Snapshot,
   useScrollbackSearch,
@@ -108,7 +114,15 @@ import {
 import SettingsSheet from '@/settings-sheet';
 import { CENTER, PRESSED, RADIUS, SEARCH_RADIUS, SPACE, TEXT, leading } from '@/style';
 import TerminalView, { type TerminalHandle } from '@/terminal';
-import { exec, killWindow, moveWindow, newWindow, selectWindow, useTmux } from '@/tmux';
+import {
+  exec,
+  killWindow,
+  moveWindow,
+  newWindow,
+  searchWindow,
+  selectWindow,
+  useTmux,
+} from '@/tmux';
 import {
   IDLE_SHELLS,
   tabsAvailable,
@@ -447,6 +461,13 @@ export default function SessionScreen() {
           // the remainder) or the flushed bytes scrolling a line. The two are a row apart and look
           // alike; only the trace tells them apart (user, 2026-08-11).
           const was = lastFit.current;
+          // A resize re-rolls the search: the host reflows the pane for the new size, so every
+          // on-screen hit position the last capture reported is about to be wrong (a keyboard open
+          // takes eighteen rows off the bottom, and the marks would stay where they were). Only
+          // when a search is armed, and only on a size that actually moved — this callback also
+          // fires as a re-report that changes nothing.
+          if (searchRef.current.on && (was === null || was.cols !== cols || was.rows !== rows))
+            setSearchFit((n) => n + 1);
           if (was === null || was.cols !== cols || was.rows !== rows || was.top !== topInset)
             probe(
               `FIT ${was ? `${was.cols}×${was.rows} padTop ${was.top.toFixed(1)}` : 'first'} → ` +
@@ -526,7 +547,6 @@ export default function SessionScreen() {
           if (keyboardPad > 0) Keyboard.dismiss();
           else setFocusSignal((n) => n + 1);
         },
-    onSearchResults: async (i, n, screenOnly) => setOcc({ i, n, screenOnly }),
   };
   const tv_onData = useCallback(async (...a: any[]) => termH.current.onData?.(...a), []);
   const tv_onResize = useCallback(async (...a: any[]) => termH.current.onResize?.(...a), []);
@@ -537,7 +557,6 @@ export default function SessionScreen() {
   const tv_onModes = useCallback(async (...a: any[]) => termH.current.onModes?.(...a), []);
   const tv_onTwoFingerTap = useCallback(async (...a: any[]) => termH.current.onTwoFingerTap?.(...a), []);
   const tv_onTap = useCallback(async (...a: any[]) => termH.current.onTap?.(...a), []);
-  const tv_onSearchResults = useCallback(async (...a: any[]) => termH.current.onSearchResults?.(...a), []);
   const termHold = (sw !== 'closed' && sw !== 'open') || kbSettle;
   const terminalView = useMemo(
     () => (
@@ -555,7 +574,6 @@ export default function SessionScreen() {
         onModes={tv_onModes}
         onTwoFingerTap={tv_onTwoFingerTap}
         onTap={tv_onTap}
-        onSearchResults={tv_onSearchResults}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
     ),
@@ -571,16 +589,25 @@ export default function SessionScreen() {
   /* --- T14: one search, shared by the grid and the terminal view --- *
    *
    * `q`/`on` are the whole armed-or-disarmed state: the switcher's field and the terminal's bar
-   * edit the same string, and disarming from either side clears both. The scrollback half runs
-   * host-side greps only while the grid is up; the terminal view searches its own xterm buffer
-   * through the search addon instead — which under tmux is only the visible screen (BUGS.md §6),
-   * hence `screenOnly` and the "on screen" the count wears when it is set. */
+   * edit the same string, and disarming from either side clears both.
+   *
+   * BOTH halves are host-side now (BUGS.md §6): the grid greps every window for its first hit, the
+   * terminal asks the same host for every occurrence in the window in front of the user. The two
+   * searches finally have the same reach — tmux's whole history — where the terminal's used to walk
+   * xterm's buffer and see the visible screen and nothing else. */
   const [search, setSearch] = useState({ q: '', on: false });
   const searchRef = useRef(search);
   searchRef.current = search;
-  /** The addon's live "i/N" for the terminal bar, plus how far it reached; `null` until it first
-   *  speaks. */
-  const [occ, setOcc] = useState<{ i: number; n: number; screenOnly: boolean } | null>(null);
+  /** What the host last answered for the terminal's search: the true count for the window, and the
+   *  hits that are on the screen. `null` until it answers, `'failed'` when it could not be asked —
+   *  which is NOT "no hits" (§ the grid's `SearchAnswer`, same distinction). */
+  const [found, setFound] = useState<WindowSearch | 'failed' | null>(null);
+  /** Which of the ON-SCREEN hits the steppers are standing on. The off-screen ones are counted and
+   *  reported and cannot be stepped to — see `stepHit`. */
+  const [hitAt, setHitAt] = useState(0);
+  /** Bumped by a resize that moved the row count (see `onResize`): the pane reflows on the host,
+   *  so the hit positions have to be asked for again. */
+  const [searchFit, setSearchFit] = useState(0);
   const hits = useScrollbackSearch(search.on ? search.q : '', cards, sw !== 'closed' && search.on);
   const nq = search.on ? normalizeQuery(search.q) : '';
   const visibleCards =
@@ -608,30 +635,9 @@ export default function SessionScreen() {
   const disarmSearch = () => {
     console.log('[search] disarmed');
     setSearch({ q: '', on: false });
-    setOcc(null);
+    setFound(null);
+    setHitAt(0);
   };
-
-  // The armed query drives the addon's decorations (and lands on the next occurrence). It runs
-  // whichever view is in front, so a card tap arrives on an already-highlighted terminal.
-  // Every handle call is `?.()` on the METHOD, not just the ref: expo/dom's native proxy answers
-  // `undefined` for every imperative prop until the webview boots and posts its registration —
-  // a plain call in that window is a TypeError that unmounts the screen (found on device).
-  const searchEverArmed = useRef(false);
-  useEffect(() => {
-    if (!connected) return;
-    if (search.on && search.q.trim() !== '') {
-      searchEverArmed.current = true;
-      // Debounced, because this is not a cheap call: with decorations on, the addon walks the
-      // whole scrollback to rebuild the highlight set, inside the same webview that is parsing
-      // shell output — and undebounced it did that once per character typed.
-      const t = setTimeout(() => terminal.current?.search?.(search.q.trim()), SEARCH_HIGHLIGHT_MS);
-      return () => clearTimeout(t);
-    } else if (searchEverArmed.current) {
-      searchEverArmed.current = false;
-      terminal.current?.searchOff?.();
-      setOcc(null);
-    }
-  }, [search.on, search.q, connected]);
 
   /** The active window's position in `list` — tmux's fresher poll first, the list's flag second. */
   const activePosIn = (list: Card[]) => {
@@ -645,6 +651,98 @@ export default function SessionScreen() {
   const activePos = () => activePosIn(visibleCards);
   /** The window sitting in a visible slot — the aim and the card to hide are the same window. */
   const idAt = (pos: number) => visibleCards[pos]?.win.id ?? null;
+
+  /* --- the terminal's own search: one host grep per settled keystroke (BUGS.md §6) --- *
+   *
+   * The window the user is looking at, by tmux's `@N` — never `:index`, which slides under a
+   * renumber and greps somebody else's scrollback (`target`'s note). The full list, not the
+   * filtered one: what is searched is the window in front, whether or not the grid would keep it.
+   *
+   * Every handle call is `?.()` on the METHOD, not just the ref: expo/dom's native proxy answers
+   * `undefined` for every imperative prop until the webview boots and posts its registration — a
+   * plain call in that window is a TypeError that unmounts the screen (found on device).
+   */
+  const activeWinId = cards[activePosIn(cards)]?.win.id ?? null;
+  /** The hits over the bridge, which carries JSON: two parallel arrays, not one of objects (see
+   *  `showHits`). */
+  const pushHits = (hits: WindowSearch['onScreen'], len: number, active: number) =>
+    terminal.current?.showHits?.(
+      hits.map((h) => h.row),
+      hits.map((h) => h.col),
+      len,
+      active,
+    );
+  const searchEverArmed = useRef(false);
+  useEffect(() => {
+    if (!connected) return;
+    const q = search.on ? search.q.trim() : '';
+    if (q === '') {
+      if (searchEverArmed.current) {
+        searchEverArmed.current = false;
+        terminal.current?.searchOff?.();
+        setFound(null);
+        setHitAt(0);
+      }
+      return;
+    }
+    searchEverArmed.current = true;
+    // No tmux, no history to reach — and no way in either: the search is armed from the switcher's
+    // field, and the switcher only exists under tmux (`tabsAvailable`). Belt and braces.
+    if (!tmux.present || activeWinId === null) return;
+    // Not while the grid is up: the grid is running its own greps at that moment (one per window,
+    // three channels' worth) and the terminal's count is behind an opacity-0 stage. It re-fires on
+    // the way out, which is also how landing in ANOTHER window re-searches — `activeWinId` changes
+    // and this effect is keyed on it.
+    if (sw !== 'closed') return;
+    // The same settled keystroke the grid greps on — one exec per query, not one per character.
+    let live = true;
+    const timer = setTimeout(() => {
+      void searchWindow(activeWinId, q)
+        .then((answer) => {
+          if (!live) return;
+          console.log(
+            `[search] ${JSON.stringify(q)} in ${activeWinId}:`,
+            answer.total, 'in the window,', answer.onScreen.length, 'on screen',
+          );
+          setFound(answer);
+          setHitAt(0);
+          pushHits(answer.onScreen, q.length, 0);
+        })
+        .catch((error) => {
+          if (!live) return;
+          // Said, not swallowed: a search that never reached the host must not read as "no hits
+          // here" (§ disabled-over-hidden, and the grid's `'failed'` for the same reason).
+          console.log('[search] host search failed:', error);
+          setFound('failed');
+          terminal.current?.searchOff?.();
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `pushHits` is a render-fresh closure
+    // over a ref, called from the timer; keying the effect on it would re-fire on every render.
+  }, [search.on, search.q, connected, tmux.present, activeWinId, sw, searchFit]);
+
+  /** ∧/∨: the next on-screen hit, wrapping. The off-screen ones are NOT stepped to — nothing this
+   *  side can do would show them (the pane's history is tmux's, and the alternate buffer does not
+   *  scroll), and moving the label onto a hit the user cannot see is the one thing worse than not
+   *  moving at all. The count says how many there are and where this one sits among them; ∧ at the
+   *  first reachable hit is greyed by `stepsLive` below, which is the honest end of the walk.
+   *
+   *  ponytail: reaching them means driving tmux's copy-mode — `copy-mode -t @N` plus
+   *  `send-keys -X search-backward`, which tmux does natively and highlights in the pane. That
+   *  hands the pane's keyboard to copy-mode and needs its own exit, so it is a feature, not a
+   *  branch of this one. */
+  const stepHit = (dir: 1 | -1) => {
+    if (found === null || found === 'failed' || found.onScreen.length === 0) return;
+    const n = found.onScreen.length;
+    const next = (hitAt + dir + n) % n;
+    setHitAt(next);
+    pushHits(found.onScreen, search.q.trim().length, next);
+  };
+  const stepsLive = found !== null && found !== 'failed' && found.onScreen.length > 0;
 
   /** Grid position → the card's frame in stage coordinates (search field and headroom above the
    *  grid, minus the grid's own scroll) — where the zoom aims. */
@@ -2417,15 +2515,13 @@ export default function SessionScreen() {
               spellCheck={false}
               style={[styles.searchInput, { color: theme.foreground, fontFamily: MONO, includeFontPadding: false  }]}
             />
-            {/* BUGS.md §6: the addon walks xterm's buffer, which under tmux holds only the
-                visible screen — so a count that could not reach past the viewport says so, and
-                "20" and "20 on screen" stop being the same claim. Same Text, same MONO 11 in
-                `muted`: the scope is part of the number, not new chrome beside it. */}
+            {/* BUGS.md §6: the count is the host's now — every occurrence in the window, tmux's
+                whole history included. `searchLabel` owns the wording, because the honesty is in
+                the arithmetic: the index is the hit's place in the WHOLE window, so `1265/1284`
+                says both what this hit is and how much of the search is above the screen and out
+                of the steppers' reach. Same Text, same MONO 11 in `muted`. */}
             <Text numberOfLines={1} style={[styles.searchCount, { color: theme.muted }]}>
-              {occ === null || search.q.trim() === ''
-                ? ''
-                : (occ.n === 0 ? 'none' : occ.i >= 0 ? `${occ.i + 1}/${occ.n}` : `${occ.n}`) +
-                  (occ.screenOnly ? ' on screen' : '')}
+              {search.q.trim() === '' ? '' : searchLabel(found, hitAt)}
             </Text>
           </View>
           {/* The pair, in a group of its own: they are one segmented control, so they sit closer
@@ -2434,16 +2530,11 @@ export default function SessionScreen() {
             {(['prev', 'next'] as const).map((dir) => (
               <Pressable
                 key={dir}
-                disabled={occ === null || occ.n === 0}
-                onPress={() => {
-                  const q = search.q.trim();
-                  if (q === '') return;
-                  if (dir === 'prev') terminal.current?.searchPrev?.(q);
-                  else terminal.current?.searchNext?.(q);
-                }}
+                disabled={!stepsLive}
+                onPress={() => stepHit(dir === 'prev' ? -1 : 1)}
                 style={({ pressed }) => [
                   styles.searchStep,
-                  { backgroundColor: theme.surface, opacity: occ === null || occ.n === 0 ? 0.35 : 1 },
+                  { backgroundColor: theme.surface, opacity: stepsLive ? 1 : 0.35 },
                   pressed && PRESSED,
                 ]}>
                 <Text style={{ color: theme.foreground, fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: 13 }}>

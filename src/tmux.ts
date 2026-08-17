@@ -16,7 +16,14 @@ import { useSyncExternalStore } from 'react';
 import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
 import { toBase64 } from '@/base64';
 import { makePool, retryRefused } from '@/exec-pool';
-import { parseSearchOutput, searchPaneCommand, type SearchHit } from '@/search-model';
+import {
+  parseSearchOutput,
+  parseWindowSearch,
+  searchPaneCommand,
+  searchWindowCommand,
+  type SearchHit,
+  type WindowSearch,
+} from '@/search-model';
 import { getSettings, pollSession, SESSION_NAME, updateSettings, usesTmux } from '@/settings';
 import {
   APPLY_AND_VERIFY,
@@ -174,7 +181,8 @@ export function exec(command: string): Promise<string> {
  *   1  the shell's PTY, held for the whole session
  *   3  `execPool`  — the grid's per-window fan-outs (T10's captures, T14's greps), shared
  *   2  `singlePool` — every command that is not fanned out, via `run1`: the ~2s poll, `listWindows`,
- *                     select/kill/new/move, the probe, `cacheSessions`, `configure`'s two reads
+ *                     select/kill/new/move, the probe, `cacheSessions`, `configure`'s two reads,
+ *                     and the terminal view's own search (`searchWindow` — one window, not N)
  *   2  `shotPool`  — the un-fanned single captures (the zoom's `refreshCard`, the bar swipe's two
  *                     neighbour warms — which is three in flight if the two overlap)
  *   = 8, and the two spare cover `configure`'s SFTP upload plus whatever sshd counts that we do not.
@@ -390,6 +398,25 @@ export function capturePane(windowId: string): Promise<string> {
  *  Fanned out per window, so callers go through `execPool`. */
 export async function searchPane(windowId: string, query: string): Promise<SearchHit | null> {
   return parseSearchOutput(await run(searchPaneCommand(windowId, query)));
+}
+
+/**
+ * BUGS.md §6: the terminal view's search — every occurrence in ONE window, plus where the visible
+ * ones are, in one exec.
+ *
+ * Through `run1`, not `execPool`: this is a singleton, one per settled keystroke for the window in
+ * front of the user, so it belongs to the class the budget above already reserves two channels for.
+ * It is deliberately NOT on the fan-out pool — a search typed on the terminal is not competing with
+ * a grid full of captures (the caller holds it while the grid is up), and giving it a slot there
+ * would take one off the grid's greps for a query the grid is not showing.
+ *
+ * Rejects if the host cannot be reached OR if the answer is unparseable — see `parseWindowSearch`:
+ * a search that never reached the host must not read as "no hits in this window".
+ */
+export async function searchWindow(windowId: string, query: string): Promise<WindowSearch> {
+  const parsed = parseWindowSearch(await run1(searchWindowCommand(windowId, query)), query);
+  if (parsed === null) throw new Error(`search: no answer for ${windowId}`);
+  return parsed;
 }
 
 /**
