@@ -94,8 +94,9 @@ index through `onDidChangeResults`, and `SearchEngine` returns a `{col, row, siz
 marking the current hit ourselves (our own decoration, or a rendered overlay) removes both this bug
 and, probably, bug 1. The alternative is vendoring `SearchAddon`.
 
-**In the tree, walked once on Android and FAILED, then re-fixed; the re-fix is NOT yet walked
-(2026-08-17).** `markHit` in `src/terminal.tsx` marks the hit itself and scrolls to it. Three
+**FIXED, Android-verified 2026-08-17 (walks 3-4: yellow on 30 of 30 taps, keyboard up and down,
+stable at +3s and +6s).** It took two attempts; both are written up here because the first was
+sound reasoning that still failed on glass.** `markHit` in `src/terminal.tsx` marks the hit itself and scrolls to it. Three
 causes, all in xterm and none of them the colours — read out of the renderer rather than guessed.
 The first two are why the addon's own active decoration is invisible:
 
@@ -325,7 +326,7 @@ array, not 10 000 line buffers. Nothing to reclaim; a comment at the option now 
 
 ---
 
-## 7. The grid's bottom bar is unreachable on Android — FIXED 2026-08-17, unverified on device
+## 7. The grid's bottom bar is unreachable on Android — FIXED, Android-verified 2026-08-17 (walk 4)
 
 **Repro (Android only).** Open the tabs grid. Tap `+`. Tap `✓`.
 
@@ -369,7 +370,7 @@ correctly (`interactive` is `sw === 'open'`), it just never got the touch.
 
 ## Also open, found the same session, lower priority
 
-### The key bar is up before the keyboard is — fixed, awaiting its second Android walk
+### The key bar is up before the keyboard is — FIXED, Android-verified 2026-08-17 (walk 4: bar at y2193-2320 on the landing)
 
 **Repro.** With the keyboard up, open the tabs grid, then come back to the terminal.
 
@@ -527,7 +528,7 @@ is occurring.
 
 </details>
 
-### The grid's fan-out exceeds the host's `MaxSessions` — REFIXED 2026-08-17, unverified on device
+### The grid's fan-out exceeds the host's `MaxSessions` — FIXED, Android-verified 2026-08-17 (walks 3-4)
 
 *(The first fix was verified on the emulator and found half-right — the pool held, the arithmetic
 around it did not. The second is unverified: it needs a 24-window walk on Android and on the phone.)*
@@ -623,7 +624,7 @@ budget, and if it fails nothing else fills `cards` until the grid is live. Fixed
   `Pressable` wired to `onDone`, deliberately filling the middle of the grid — the empty space where
   those 13 taps landed — so the way back is under the finger, not only on the ✓ in the corner.
 
-### `selectWindow` rejects unhandled and the LogBox eats the tabs button — FIXED 2026-08-17, unverified on device
+### `selectWindow` rejects unhandled and the LogBox eats the tabs button — FIXED, Android-verified 2026-08-17
 
 `void selectWindow(win.id)` is called bare in both `selectCard` and `settleBarSwipe`
 (`src/app/terminal.tsx`), unlike `killWindow`/`capturePane`/`searchPane`, which all carry a `.catch`.
@@ -655,7 +656,7 @@ already makes when a kill fails. The failure names its window in the switcher's 
 above), tap a card and confirm (a) no LogBox toast, (b) the tabs button still takes a tap, (c) if a
 select does fail, the halo ends up on the tab you are actually on, not the one you tapped.
 
-### The ribbon chip never appears for `sleep` — FIXED 2026-08-17, unverified on device
+### The ribbon chip never appears for `sleep` — FIXED, Android-verified 2026-08-17 (walk 4)
 
 Second Android walk of the day: `sleep 30` and `sleep 15`, twice each, touching nothing. All four
 runs were **detected** — `[ribbon] run #2 sleep pid=… startedAt=…`, `[ribbon] run #3 sleep …` — and
@@ -725,7 +726,7 @@ chip is tapped, with kill / ^Z bg / ^C. On exit at t≈30s the chip fades within
 **That walk happened and `sleep` still showed nothing.** This half really was fixed; there was a
 second, independent blocker, written up immediately below.
 
-### `running` is unreachable inside tmux: the TUI gate read the wrong terminal — FIXED 2026-08-17, unverified on device
+### `running` is unreachable inside tmux: the TUI gate read the wrong terminal — FIXED, Android-verified 2026-08-17 (walk 4)
 
 The walk the entry above asked for: `sleep 30`, twice, touching nothing. Detected both times
 (`[ribbon] run #1 sleep pid=… startedAt=…`) and the chip region **empty at every sample** — t = 0.5,
@@ -791,7 +792,7 @@ at once, exactly as before. Worth one extra: open `htop` (named, chip) then some
 recipe that takes the alt screen, e.g. `nethack` or `watch -n1 date | less`, and confirm **no**
 chip — that is the §4.4 intent still holding on the new signal.
 
-### The ribbon does not clear on a bar-swipe birth — FIXED 2026-08-17, unverified on device
+### The ribbon does not clear on a bar-swipe birth — FIXED, Android-verified 2026-08-17 (walk 4)
 
 Swiping past the last tab to birth a new window lands correctly (`@68:28:fish` created and active,
 fresh prompt drawn), but the ribbon chip keeps the *previous* window's run: it still read
@@ -967,3 +968,203 @@ to survive a beat before it is believed (see `RIBBON_HOLD_MS`). What is wrong is
 elapsed clock keeps *advancing* during the hold, so a job that ran 8s can be read as having run 10.
 Freezing the displayed time at `goneAt` while the hold is open would fix it without touching the
 hold; the number is then the run's true length whichever way the hold resolves.
+
+---
+
+## Found by the T13 acceptance walk (2026-08-17)
+
+### Fast keystrokes are reordered in the terminal — FIXED 2026-08-17, awaiting its Android walk
+
+`adb shell input text "less"` lands in the pane as `lses`. `/etc/services` lands as
+`/ecst/ervcies`. Typed one character at a time ~350ms apart it is always correct, and the *same*
+fast `input text` into the Setup screen's RN `TextInput` is correct — so the reordering is in the
+terminal's own key path, not in adb and not in RN's text input.
+
+This is silent input corruption on the app's primary function, and it invalidates any test that
+types quickly. Note the shape: characters are transposed, not dropped, which is what a set of
+concurrent async deliveries completing out of order looks like rather than a lost-event bug.
+
+**The bridge was innocent; the order was lost in native dispatch.** Every hop above it is strictly
+FIFO, traced one by one: xterm's `onData` is synchronous; expo's DOM proxy awaits `Promise.all(args)`
+but with one argument per call the continuations resolve in enqueue order; `webview-wrapper` calls
+the action synchronously inside `onMessage`; `ExpoSSH.send` is a synchronous JSI call; and
+expo-modules-core launches each suspend function on `modulesQueue`, a single `HandlerThread`.
+
+Then `ExpoSSHModule.kt` does `withContext(Dispatchers.IO) { session.send(text) }` — and
+**`Dispatchers.IO` is a POOL**. Two launched sends land on two threads with no ordering relation,
+both writing to sshj's unsynchronized `ChannelOutputStream`, which can reorder *and* corrupt a shared
+buffer. That is the transposition signature exactly.
+
+**iOS has the same hole latent**, for a different reason: `SSHSession.swift`'s actor method awaits
+`writer.write(...)`, and Swift actors are **reentrant**, so a second `send` may enter while the first
+is suspended. It is ordered today only because Citadel submits to a serial NIO event loop — nothing
+in our code guarantees it.
+
+**Fixed in JS, no rebuild.** `send()` in `src/session.ts` is one serialised writer: keystrokes append
+to a string, one `ExpoSSH.send` is in flight at a time, and anything typed behind it coalesces into
+the next batch. With never two calls in flight no native dispatcher can reorder anything, on either
+platform. It also *shortens* the hot path — a burst costs one bridge crossing per round trip instead
+of one per key. The startup line now goes through `send()` too, so there is exactly one writer and it
+cannot interleave with a key typed into a freshly opened shell.
+
+A `Mutex` in the Kotlin was rejected deliberately: it gives mutual exclusion but **not submission
+order**, so it would have cost a rebuild without fixing the bug. The native `send` stays
+order-agnostic by design and the JS queue is now its sole caller. `src/session.test.ts` locks it —
+the mocked native `send` settles after a shuffled delay, longest first, and asserts no two writes
+overlap and the burst arrives in submission order.
+
+### Uploading a file is dead on Android — OPEN, and it is PICKER-SPECIFIC (refined 2026-08-17)
+
+⋯ → UPLOAD FILE → Files launches the system Files activity, which backgrounds the app, and
+backgrounding closes the shell (`[app] background` → `{"status":"disconnected"}`). On return the
+destination sheet calls `exec` to resolve its start dir on the same tick as `[app] active`, before
+the auto-reconnect lands:
+
+```
+[upload] sheet could not resolve a start dir: … IllegalStateException: Not connected
+```
+
+The reconnect succeeds ~1s later but the sheet never retries — it spins forever, shows no error, and
+`Save here` stays disabled. Reproduced twice; nothing reaches the host.
+
+**Refined by the T9/T8 walk: only two of the three pickers do this.** The SAF document picker
+(Files) and the camera background the app and kill the shell. The **Android photo picker does not
+background the app** — the session survives and the entire upload flow then works end to end:
+browse, breadcrumb, descend, collision tint plus overwrite, the rename sanitiser, the silent save,
+the remembered destination including its vanished-directory fallback to `$HOME`, and the
+unwritable-directory alert. So the sheet and the SFTP path are fine; only the picker choice is fatal.
+
+Two fix directions, and they are not exclusive: find whatever keeps the photo picker's activity
+resumed and do the same for the other two, and/or make the sheet retry its start-dir resolution when
+the session comes back instead of spinning. The retry is the smaller and more honest of the two —
+per the disabled-over-hidden rule it should also say why it is waiting. Not a `Platform.OS` branch
+either way.
+
+### Selecting text on Android offers no edit menu — OPEN
+
+A stationary long-press selects correctly (`[terminal] selection "PlasmaDesktop"`, both drag handles
+drawn, no `scroll` line — the pan layer stands off as designed), and a tap elsewhere clears it. But
+no floating toolbar ever appears: no Copy, nothing. So an Android user can select text and then do
+nothing with it, while T4 proved the iOS system edit menu (Copy · Look Up · Translate) works.
+
+Verified three ways — native-resolution crop, `uiautomator` finding no `Copy` node, and
+`dumpsys window windows` during a live selection showing only the two handle `PopupWindow`s — and
+from two injection paths.
+
+**Starting point:** the DOM component installs no ActionMode callback, and Chromium WebView will not
+raise its own toolbar for a selection on a non-editable body. Copy is core to a terminal, so this is
+a parity gap that has to close, not a divergence to accept.
+
+### The TOFU prompt cannot reach pixel parity while it is `Alert.alert`
+
+`src/app/terminal.tsx:309` uses `Alert.alert`, so Android draws a Material dialog where iOS draws a
+UIAlertController. Raised per AGENTS.md rather than fixed: parity here means building the prompt out
+of the app's own sheet chrome, which is a change to a security-relevant flow and wants its own slice.
+
+### The ribbon's caps can fire into a session the user is not in — OPEN, dangerous
+
+Found while walking T7 (2026-08-17). In **plain-shell** start mode — where `src/ribbon-model.ts`'s
+own comment claims "no ribbon at all" — a `✏ claude · 6:44` chip appeared. The untargeted tmux poll
+had answered for the user's *real* `port22` session, on a phone that was not attached to it.
+
+The chip is not the problem; its **caps** are. Tapping kill / `^Z` / `^C` there would have sent those
+control characters into the user's live `claude` session from a screen showing an unrelated plain
+shell. The walk agent did not tap them and moved to a private session — so this is reasoned from the
+chip's presence plus what the caps do, not from an observed kill.
+
+This is the same untargeted-poll family as the FIXED entry "The foreground poll answers about a
+window you are not looking at". That fix targeted `pollCommand(session)` in `session` and `attach`
+modes and explicitly left `custom` and `shell` unable to name a target — which is exactly the mode
+this was found in. The conclusion there was that the flap was cosmetic in those modes; it is not.
+
+**Where a fix goes.** Either the ribbon does not mount at all when the app has no session it can
+name (the comment already believes this is the case — make it true), or the caps refuse to send when
+the poll's answer cannot be attributed to the window on screen. The first is smaller and matches the
+stated intent.
+
+### A long-press selection kills the key bar's pan until relaunch — OPEN
+
+Reproduced twice on the emulator (2026-08-17). From a fresh launch, a downward swipe on the key bar
+hides Gboard as designed. Long-press any word in the terminal to select it, and the identical swipe
+then does nothing — no `[terminal] size`, `mInputShown` stays true — while *taps* on the bar keep
+working. Clearing the selection does not restore it. Only `am force-stop` and a relaunch does.
+
+So the pan handler alone loses the touch stream, permanently, and the app has to be restarted.
+
+**Where to look.** The WebKit selection path in `src/terminal.tsx` and its own note at `:1050` —
+something in it appears to leave the touch stream claimed. Note the practical consequence for
+testing: anyone walking a bar-gesture case must relaunch first, or a stale selection from an earlier
+case will read as a gesture failure. It masqueraded as exactly that during this walk.
+
+### The key bar's swipe up does not raise the keyboard — OPEN, and the iOS tick for it is stale
+
+T7.9 / T7A.5. Swipe DOWN on the bar works (`50×26` → `50×45`, bar stays docked). Swipe UP does
+nothing: `input swipe` at 250ms and 400ms, and a seven-step `input motionevent` drag, all leave
+`mInputShown=false`, the grid at `50×45`, no `[terminal] size` and no switcher.
+
+**This is not an Android divergence — the raise does not exist in the code at all.**
+`src/keybar.tsx:548` makes the pan's only keyboard action `Keyboard.dismiss()`; `barDismisses`
+(`src/keybar-model.ts:210`) is the sole vertical exit that touches the keyboard; and the upward
+branch (`ty <= -KEYS_DROP_DY`) also only dismisses, for T10's drag. Nothing in the pan raises
+`focusSignal`.
+
+So the iOS boxes ticked for these two cases are stale by the same argument. Either restore the raise
+or rewrite both cases to describe what the bar is actually meant to do — do not tick them again
+without deciding which.
+
+### `quickAttach` uses the picker that kills the session — OPEN
+
+T8.16. The 📎 cap logs `[ribbon] cap 📎` and builds the right path
+(`/tmp/port22/20260817T143236.txt`), then dies on `[session] disconnected` →
+`[upload] failed … 'ExpoSSH.upload' has been rejected`, with one alert.
+
+`quickAttach()` defaults to `'files'` (`src/upload.ts:128`) and is called bare at
+`src/app/terminal.tsx:1871` — the SAF picker, the one that backgrounds the app and closes the shell.
+TESTS.md's own case text says `quickAttach('photo')`, which is the picker that survives. So this is
+a one-word fix that has been failing the case it was written against.
+
+### A large file OOMs before anything is sent — OPEN
+
+T8.14. A 46 MB JPEG: `FileSystemFile.base64` throws
+`java.lang.OutOfMemoryError: Failed to allocate a 123507192 byte allocation … growth limit
+201326592`, surfaced as one "Could not read the file" alert.
+
+Whole-file base64 (`src/upload.ts:74-95`) needs roughly 2.7× the file size on the Java heap, so the
+"tens of MB" the case specifies is unreachable on Android where iOS handled it. At 7.8 MB the case's
+own Expect holds (⋯ goes solid accent `#89b4fa`, glyph in background colour, taps ignored, four
+consecutive frames), so the ceiling is between the two.
+
+The fix is to stop materialising the whole file as base64 — both natives already write bytes at
+offsets (`RemoteFile.write` on Android is even chunked at 32 KB by hand), so the chunking wants to
+start at the read rather than at the wire.
+
+### Pinned clipboard slots duplicate across a JS remount — OPEN
+
+Two identical `yank-two-bravo · pinned` rows appeared, with the log going `3 slots, 1 pinned` →
+`3 slots, 2 pinned` and nothing pinned in between. `hydratePins()` appends onto live module state
+(`src/clipboard.ts:62-68`) and `_layout.tsx:36-39`'s effect re-runs on **every JS root remount** —
+every dev-client relaunch here, and a JS reload in production. Hydration has to be idempotent, or
+replace rather than append.
+
+### The ⋯ menu does not dismiss the keyboard — OPEN
+
+T8.7. `mInputShown=true` before and after; Gboard stays full height with the menu squeezed above the
+bar. iOS drops it (`52 × 26` → `52 × 41`). `src/keybar.tsx:693` is a bare `toggle('menu')` with no
+`Keyboard.dismiss()` on that path, unlike `openSettings` (`src/app/terminal.tsx:355-363`) which does
+it correctly — so this is a missed call, not a platform difference.
+
+### Small parity gaps found the same walk
+
+- **Camera filenames are `.jpeg`, not `.jpg`** (T8.11). `stampName` keeps the asset's extension and
+  Android's camera hands back `.jpeg`. The stamp itself is correct UTC.
+- **Android's own clipboard chip** pops over the bottom-left of the key bar for ~10s on every OSC 52
+  yank and swallows taps there — it ate two Paste long-presses during the walk. No iOS counterpart,
+  and nothing we can suppress from JS; worth knowing before blaming the key bar for a lost tap.
+
+### TESTS.md carries three stale Expect clauses
+
+Annotated in place during the walk rather than failed, because in each case the app is right and the
+test is out of date: the conf marker is v4 not v1; the app no longer appends a `source-file` line to
+the user's tmux conf (`src/tmux-model.ts:145-157`); and the tabs circle is greyed-not-hidden and no
+longer keyed on the conf (`tabsAvailable = present && attached`). The numeric window badge no longer
+exists as UI at all — the switcher's active card is now the only reader of `windowIndex`.

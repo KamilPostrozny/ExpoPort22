@@ -165,7 +165,13 @@ layer is byte-identical on both platforms, so any behavioural difference is the 
 - Steps: launch the app; watch Metro and `adb logcat`.
 - Expect: build succeeds; app boots to Setup with no `Cannot find native module 'ExpoSSH'`;
   the `[ssh]` proxy logs appear on first call rather than a red screen.
-- Android: [ ]
+- Android: [x] — 2026-08-17, `4a0aaa4`. `./gradlew assembleDebug` BUILD SUCCESSFUL in 10s / 726
+  tasks; the installed dev client boots straight to Setup with the fields prefilled, no red screen
+  and no `Cannot find native module 'ExpoSSH'` in logcat (`ExpoModulesCore: ✅ AppContext was
+  initialized`, `ReactNativeJS: Running "main"`). The `[ssh]` proxy trace itself is silent by
+  design at this commit — `LOG = false` in `modules/expo-ssh/src/ExpoSSHModule.ts` — so the native
+  module's liveness is evidenced by the calls landing instead: `[session] host key …`,
+  `[tmux] {"present":true,…}` and a live shell.
 
 **T3.1 — first connect: TOFU fingerprint prompt**
 - Setup: host key for `10.0.2.2` not pinned (fresh install, or Forget host key). Emulator's
@@ -173,7 +179,14 @@ layer is byte-identical on both platforms, so any behavioural difference is the 
 - Steps: fill Setup with `10.0.2.2`, port 22, user; Connect.
 - Expect: modal shows `ed25519 SHA256:…` matching `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`
   on the host — same string iOS shows, no padding `=`. `connect` stays pending until answered.
-- Android: [ ]
+- Android: [x] — 2026-08-17. Pin cleared via Settings → Forget host key, then Connect: the modal
+  reads `ed25519 SHA256:jJLTGz6Twft7miBOgEw53ue4iMHQag+OVz7K1mjaqAM`, byte-identical to
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on this box, no trailing `=`. Log:
+  `[session] host key ask SHA256:jJLTGz…` and the state stays `{"status":"connecting"}` until the
+  button is pressed. **Finding (look, not behaviour):** the prompt is `Alert.alert`
+  (`src/app/terminal.tsx:309`), so Android draws a Material dialog — grey surface, 4dp corners,
+  uppercase teal CANCEL/TRUST in Roboto — where iOS draws a UIAlertController. The two cannot be
+  pixel-identical while the prompt is RN's native alert; raised per AGENTS.md rather than fixed.
 
 **T3.2 — trust + pin, second connect straight through**
 - Setup: T3.1's prompt on screen.
@@ -181,7 +194,12 @@ layer is byte-identical on both platforms, so any behavioural difference is the 
 - Expect: first connect lands in a live shell (banner streams in); second connect shows **no
   prompt** — the pinned key is answered before the handshake asks (held-answer path) and the
   terminal appears directly.
-- Android: [ ]
+- Android: [x] — 2026-08-17. TRUST → `{"status":"connected"}`, fastfetch banner streams into the
+  grid. Disconnect, Connect again: no prompt, log goes straight to `[session] host key trust
+  SHA256:jJLTGz…` then `{"status":"connected"}` — the held-answer path, `host key ask` never
+  fires. Note for the next walker: the handshake has a 30 s timeout, so a TOFU prompt left
+  unanswered longer dies with the generic "Could not connect" rather than anything naming the
+  timeout (`TransportException: Timeout expired: 30000 MILLISECONDS` in the log).
 
 **T3.3 — mismatch hard-refusal**
 - Setup: key pinned (T3.2); host key swapped (`ssh-keygen -f /tmp/newkey …` into sshd config +
@@ -190,7 +208,14 @@ layer is byte-identical on both platforms, so any behavioural difference is the 
 - Steps: Connect.
 - Expect: no prompt, no session — the Cannot-connect state with the mismatch sentence.
   `connect` rejected; nothing pinned anew. Only recovery is Forget host key in Settings.
-- Android: [ ]
+- Android: [x] — 2026-08-17, against a throwaway sshd stood up in the scratchpad on `10.0.2.2:2222`
+  with its own host key (`/etc/ssh/sshd_config` untouched). The endpoint already carried a pin from
+  an earlier session, so the new key was refused on sight: no prompt, no session,
+  `[session] host key mismatch SHA256:27WjhO4BQ6XOPaJXFCdMYwvw19/IFTbWTSrpNvif8LI` then
+  `{"status":"failed",…,"mismatch":true}` with the mismatch sentence on the Cannot-connect screen.
+  Reconnect repeated the identical mismatch — nothing was pinned anew. Forget host key → Connect
+  then produced a fresh TOFU prompt showing the new fingerprint. Observation for T12: the red
+  Forget host key button is still ON the mismatch screen as well as in Settings.
 
 **T3.4 — exec `ls`**
 - Setup: connected (T3.2).
@@ -198,7 +223,14 @@ layer is byte-identical on both platforms, so any behavioural difference is the 
   issues `command -v tmux` on connect; check the `[ssh] exec` log pair.
 - Expect: resolves with stdout; a failing command (`command -v tmux` on a host without tmux)
   rejects and the probe treats it as absent — same as iOS. Nothing echoes into the PTY grid.
-- Android: [ ]
+- Android: [x] — 2026-08-17, both halves. Resolve: connecting to this box logs
+  `[tmux] {"present":true,…}`, i.e. the connect-time `command -v tmux` exec resolved with stdout.
+  Reject: the scratchpad sshd was re-run with a `ForceCommand` that gives exec channels
+  `PATH=/nonexistent-bin` (the PTY still gets a normal shell), and the same connect logged
+  `[tmux] {"present":false,…}` — the exec rejected and the probe treated tmux as absent. In both
+  cases the grid showed only a clean prompt; nothing echoed. The `[ssh] exec` log pair the case
+  names is not available at this commit (`LOG = false` in `modules/expo-ssh/src/ExpoSSHModule.ts`),
+  so the exec's effect is the evidence.
 
 **T3.5 — shell I/O + resize**
 - Setup: connected, terminal on screen.
@@ -206,7 +238,13 @@ layer is byte-identical on both platforms, so any behavioural difference is the 
   `:q`.
 - Expect: echo and output render; UTF-8 survives chunk splits (paste `é漢字🙂` — no mojibake);
   vim redraws to the new size after rotation — `resize` reached the PTY.
-- Android: [ ]
+- Android: [x] — 2026-08-17. `echo hello` → `hello`. UTF-8: `cat` of a 48,400-byte file of
+  `é漢字🙂` rendered with zero mojibake end to end, so multi-byte characters survive the channel
+  reads they certainly split across. Resize: `vim /etc/services` in portrait at
+  `[terminal] size 50 × 45`; rotating to landscape logged `size 112 × 15` and vim repainted at the
+  new geometry with its ruler (`1,1  Top`) at the far right of the 112-column grid. The keyboard
+  is the other resize path and it works too — raising Gboard takes the grid to `50 × 26`, dropping
+  it returns `50 × 45`.
 
 **T3.6 — SFTP upload confirmed by listDirectory**
 - Setup: connected; a small file reachable via the Files picker.
@@ -215,6 +253,18 @@ layer is byte-identical on both platforms, so any behavioural difference is the 
   shows the file with its exact byte size; `ls -la /tmp/port22` on the host shows the dir mode
   0700. A multi-MB file arrives intact (chunked writes) — `sha256sum` matches.
 - Android: [ ]
+  - FAILED 2026-08-17: the upload never reaches SFTP. ⋯ → UPLOAD FILE → Files opens the system
+    Files activity, which **backgrounds the app**; backgrounding closes the SSH shell
+    (`[app] background` → `[session] {"status":"disconnected"}`). When the picker returns, the
+    destination sheet calls `exec` to resolve its start directory on the same tick the app goes
+    `active`, before the auto-reconnect has finished, and gets
+    `[upload] sheet could not resolve a start dir: Call to function 'ExpoSSH.exec' has been
+    rejected. → Caused by: java.lang.IllegalStateException: Not connected`. The reconnect succeeds
+    ~1 s later but the sheet never retries: it spins forever, shows no error, and `Save here` stays
+    disabled with no cwd. Reproduced twice, 3.15 MB and identical either way; nothing was written
+    to `/tmp/port22` on the host. This is Android-specific in origin — iOS presents its document
+    picker inside the app, so the session is never torn down — but the fix belongs in the sheet:
+    resolve the start dir *after* the session reports `connected`, and retry rather than spin.
 
 **T3.7 — disconnect/reconnect lifecycle (§4.9)**
 - Setup: connected.
@@ -224,7 +274,16 @@ layer is byte-identical on both platforms, so any behavioural difference is the 
   re-auths with **no TOFU prompt** and opens a fresh PTY; two consecutive failures stop with
   the manual Reconnect screen; Reconnect works once sshd is back. `onShellClose` fired each
   teardown — no zombie pump threads (logcat shows no repeated `expo-ssh-shell` churn).
-- Android: [ ]
+- Android: [x] — 2026-08-17, against the scratchpad sshd on `10.0.2.2:2222` so it could be killed
+  freely. Background 35 s → `[app] background`, `{"status":"disconnected"}`; foreground →
+  `{"status":"connecting"}`, `[app] active`, `host key trust SHA256:27Wjh…` (**no TOFU prompt**),
+  `{"status":"connected"}` and a fresh PTY (the tmux probe re-ran). Then sshd killed (listener
+  *and* its `sshd-session` children — killing only the listener leaves the connection alive and
+  fakes a pass): foreground once → auto attempt, `ECONNREFUSED`, plain-English failure; foreground
+  again → second auto attempt, same; foreground a third time → **no attempt**, the manual
+  Reconnect screen stands. sshd restored, Reconnect → connected. Zombie check: `ps -T` on the app
+  pid shows exactly one `expo-ssh-shell` thread while connected and **zero** while disconnected,
+  after six connect/disconnect rounds — every teardown ran.
 
 ## T6 — Scroll gesture system
 
@@ -239,7 +298,11 @@ per spend and `[terminal] modes {...}` per mode change.
   the finger's direction; log says route `local`; nothing is sent to the PTY (no stray input
   at the prompt).
 - iOS: [x]
-- Android: [ ]
+- Android: [x] — 2026-08-17. `seq 1 200`, then a slow one-finger pan of 400 device px in 50 px
+  steps: seven `[terminal] scroll local 1` lines and the viewport parked at lines 152–196 instead
+  of the prompt; the reverse pan gave seven `scroll local -1` and landed back on line 200 with a
+  clean, empty prompt — nothing was typed into the PTY. Content tracks the finger in both
+  directions (finger down reveals earlier lines).
 
 ### T6.2 — `less` scrolls by arrows, both directions
 - **Setup**: `less /etc/services` (alt screen, no mouse, no DECCKM).
@@ -251,7 +314,14 @@ per spend and `[terminal] modes {...}` per mode change.
   `{"altScreen":true,"mouseReporting":false,"decckm":true}` and the app correctly sent
   `ESC O A` / `ESC O B`. Byte form tracking the live DECCKM flag is the real assertion and it
   holds; "less = DECCKM off" is not true of every `less` build.
-- Android: [ ]
+- Android: [x] — 2026-08-17, with the same premise correction as iOS and on the same host: `less -N
+  /etc/services` reports `[terminal] modes {"altScreen":true,"mouseReporting":false,"decckm":true}`,
+  so the app correctly sends SS3 rather than CSI. Forward pan → seven `scroll arrows -1`, less
+  moved from top line 1 to top line 7; reverse pan → seven `scroll arrows 1`, back to line 1 and
+  clamped there. No escape garbage anywhere on screen in either direction. The byte form itself
+  cannot be read on Android at this commit (`LOG = false` in
+  `modules/expo-ssh/src/ExpoSSHModule.ts` silences `[ssh] send`); that `less` moves line-by-line
+  and prints nothing literal is the observable standing in for it.
 
 ### T6.3 — `htop` with mouse on: wheel at the finger's cell
 - **Setup**: `htop` (requests mouse + SGR).
@@ -261,7 +331,16 @@ per spend and `[terminal] modes {...}` per mode change.
   under the finger, which is the real assertion once tmux is configured).
 - iOS: [x] — SGR wheel-down events carry the finger's own cell (`ESC [<65;28;19M`, `…;29;18M`,
   `…;30;17M`, `…;32;16M` as the finger moved), so the column travels with the touch.
-- Android: [ ]
+- Android: [x] — 2026-08-17. `htop` (`modes {"altScreen":true,"mouseReporting":true,…}`), pan →
+  `[terminal] scroll wheel -1` ×N and the process list scrolls. The column half was taken the way
+  the case says is the real assertion, with tmux: attached to a session split into two side-by-side
+  panes running `less -N PLAN.md` (left, cols 0–24) and `less -N TESTS.md` (right, cols 26–49), a
+  pan at x=250 scrolled **only** the left pane and a pan at x=880 scrolled **only** the right one —
+  including while the other was tmux's active pane. The wheel lands at the finger's own cell.
+  Harness note: an injected touch that sits still for ~1 s before moving matures into a WebKit
+  long-press and the selection pre-empts the pan (`[terminal] selection …`, no `scroll` line), so
+  the drag must start moving immediately; that is the harness, not the app (T6.7 wants exactly
+  that long-press).
 
 ### T6.4 — DECCKM variant: vim vs less
 - **Setup**: `vim` on a long file, `:set mouse=` first so no mouse reporting; separately `less`.
@@ -272,7 +351,12 @@ per spend and `[terminal] modes {...}` per mode change.
   "decckm":true}`, no garbage). The less half is **not producible on this host**: its `less`
   sets DECCKM even under `-X`, so it too gets SS3. The DECCKM-off byte form is asserted by
   T7.7 instead (arrows at a shell prompt, `decckm:false` → `CSI A`).
-- Android: [ ]
+- Android: [x] — 2026-08-17, vim half verified exactly as iOS: `vim /etc/services` with
+  `:set mouse=` gives `modes {"altScreen":true,"mouseReporting":false,"decckm":true}`, the pan
+  routes `[terminal] scroll arrows -1` (so SS3 A/B), vim's cursor walked 1 → 43 line by line and no
+  literal escape text appeared. The less half is **not producible on this host** for the same
+  reason iOS recorded: this `less` sets DECCKM even so (see T6.2's `decckm:true`), so the
+  DECCKM-off byte form has to be asserted by T7.7.
 
 ### T6.5 — Momentum flick, and a touch stops the coast dead
 - **Setup**: plain shell with deep scrollback (`seq 1 2000`).
@@ -284,7 +368,12 @@ per spend and `[terminal] modes {...}` per mode change.
   T13 walk (last `DOM LOG` line 22:28), so `coast start` and `[terminal] scroll` were not
   available as evidence; the RN-side `[session] modes` and `[ssh] send` bytes were used for
   the rest of T6 instead.
-- Android: [ ]
+- Android: [x] — 2026-08-17, and here the DOM console *was* reaching Metro, so the coast is in the
+  log rather than eye-verified. `seq 1 2000`, hard flick → `[terminal] coast start 3.439 px/ms`
+  followed by 68 `scroll local` spends decaying 3 → 2 → 1 and thinning out. Repeat the same flick
+  and tap once mid-coast: `[terminal] coast caught 3.144 px/ms carried` and the run collapses from
+  68 spends to 4 — and the tap did nothing else, no `[terminal] tap` line (so no keyboard:
+  `mInputShown=false` after), no `[terminal] selection`, no cursor move.
 
 ### T6.6 — One finger and two fingers are the same pan
 - **Setup**: plain shell with scrollback.
@@ -296,6 +385,17 @@ per spend and `[terminal] modes {...}` per mode change.
   bytes went to the PTY across the whole run (the local route sends nothing, so the absence is
   the assertion).
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: this harness cannot put two fingers on the screen. `adb shell input
+    motionevent` is single-pointer (`input --help` lists no multi-pointer form), and raw injection
+    does not reach the app either: the emulator's eleven `virtio_input_multi_touch_N` devices
+    declare no `INPUT_PROP_DIRECT` and no `BTN_TOUCH`, and protocol-B `sendevent` sequences as root
+    (slot / tracking-id / x / y, with and without `BTN_TOUCH` and `ABS_MT_PRESSURE`) produced no
+    touch in the app — nor did the emulator console's own `event send`. What one finger can show is
+    covered by T6.1 and T6.8; the one-vs-two equivalence, the mid-pan finger add/drop and "no zoom"
+    need a real device. Side effect worth knowing before anyone retries this: those `sendevent`
+    attempts carry `BTN_STYLUS`, which flips Gboard into stylus-handwriting mode and silently kills
+    typing until `settings put secure stylus_handwriting_enabled 0` and a Gboard `pm clear` (both
+    were restored afterwards).
 
 ### T6.7 — Stationary long-press still selects (T4 regression)
 - **Setup**: plain shell, some text on screen, keyboard down (T4's WebKit focus finding).
@@ -308,6 +408,19 @@ per spend and `[terminal] modes {...}` per mode change.
   walk — a one-finger tap that never became a pan now calls `removeAllRanges()` in the touch
   layer's `touchEnd`.
 - Android: [ ]
+  - FAILED 2026-08-17: selection yes, **edit menu no**. With the keyboard down, a stationary
+    long-press over a word logs `[terminal] selection "PlasmaDesktop"` and draws the highlight with
+    both teal drag handles, and no `[terminal] scroll` line appears — the pan layer correctly never
+    claims the touch. But no floating edit menu is drawn: no Copy, no Select all, nothing. Checked
+    three ways — the native-resolution crop shows only handles; `uiautomator` finds no `Copy` node;
+    `dumpsys window windows` during a live selection lists two `PopupWindow:` entries (the two
+    handles) and no toolbar. Reproduced from two different injection paths (`input motionevent`
+    hold and `input swipe x y x y 1200`). So on Android the user can select text and then cannot do
+    anything with it, where iOS gets Copy · Look Up. The tap half is fine: a one-finger tap
+    elsewhere clears the selection, i.e. the `removeAllRanges()` fix from the iOS walk works here
+    too. Likely cause to start from: the DOM component never installs an ActionMode callback, and
+    Chromium WebView will not raise its own floating toolbar for a selection made on a `body` that
+    is not editable and whose host view has no action-mode support wired up.
 
 ### T6.8 — Notch granularity is one line per cell height
 - **Setup**: `less /etc/services` with line numbers (`less -N`) so movement is countable.
@@ -316,7 +429,12 @@ per spend and `[terminal] modes {...}` per mode change.
   following pan picks up the carried remainder (no dead zone at slow speeds).
 - iOS: [x] — `less -N` went from top line 1 to top line 6 across a run of six down-arrows: one notch,
   one line. Up-pans against the top of the file clamp in `less` and leave nothing on screen.
-- Android: [ ]
+- Android: [x] — 2026-08-17. One cell is 45 device px here (17.13 CSS px × the 2.63 webview scale)
+  and the slop is 8 CSS px ≈ 21 device px, so a 250 px pan is exactly slop + five cells: it
+  produced **five** `scroll arrows -1` and `less -N /etc/services` went from top line 1 to top line
+  5 — not 1, not 20. Sub-cell behaviour checked inside one gesture: three 10 px steps (30 px, under
+  a cell once the slop is paid) spent **zero** notches, and continuing the same slow 10 px steps to
+  100 px total fired the notch on schedule — the remainder carries, no dead zone at slow speeds.
 
 ### T6.9 — Mode signal fires on entering and leaving vim
 - **Setup**: Metro log visible; plain shell.
@@ -329,7 +447,12 @@ per spend and `[terminal] modes {...}` per mode change.
   `{"altScreen":false,"mouseReporting":false,"decckm":false}`; htop flips `mouseReporting`
   the same way. The `[terminal]` twin was only present while the DOM console still reached
   Metro (see T6.5).
-- Android: [ ]
+- Android: [x] — 2026-08-17, all four edges, each with both the `[terminal]` DOM line and its
+  `[session]` twin, one pair per change and none per keystroke. vim entry
+  `{"altScreen":true,"mouseReporting":true,"decckm":false,…}` then `…"decckm":true`; `:q!` →
+  `{"altScreen":false,"mouseReporting":false,"decckm":false,…}`; htop entry
+  `{"altScreen":true,"mouseReporting":false,…}` then `…"mouseReporting":true,"decckm":true`; `q` →
+  both flags back to false. The two-line settle per transition matches what iOS recorded.
 
 ### T6.10 — `git log`'s pager takes the wheel, not tmux's history
 - **Setup**: attached to tmux, in a repo with enough history to scroll. Run `git log`.
@@ -345,7 +468,17 @@ per spend and `[terminal] modes {...}` per mode change.
   the second case and already work; this case fails until the condition widens to match a pager
   by name.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17, and the premise above is stale: the condition **has** been widened
+  (`src/tmux-model.ts`, `generateConf`, the `#{m/r:^(git|less)$,#{pane_current_command}}` arm) and
+  it works. The measurement the case was waiting on, taken on a pane sitting in `git log` while the
+  phone was attached: **`alternate_on=0`, `pane_current_command=git`** (also `pane_in_mode=0`,
+  `mouse_any_flag=0`) — the alternate-screen test alone would indeed have missed it; the name arm
+  is what catches it. All three pagers then scrolled themselves, `pane_in_mode` staying `0`
+  throughout so nothing fell into tmux copy mode: `git log` moved forward over the commit body and
+  back to the `commit 4a0aaa4…` header (route `wheel`); `less TESTS.md` (`alternate_on=1`,
+  `cmd=less`) scrolled; `man ssh` (`alternate_on=1`, `cmd=man`) scrolled from the NAME header to
+  SYNOPSIS. Walked against a throwaway `t13walk` session, not the user's. Note: `less CLAUDE.md` as
+  literally written is a one-line file and cannot move — use a long file to see anything.
 
 ## T7 — Key bar core
 
@@ -363,7 +496,11 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   slides away) after the one chord.
 - iOS: [x] — one `^C` (0x03) on the wire, `sleep 100` died at 7s, prompt back; the screenshot has
   Ctrl untinted and the strip gone.
-- Android: [ ]
+- Android: [x] — 2026-08-17, Pixel 7 AVD, plain shell on 10.0.2.2. Ctrl tinted accent and the
+  chord strip rose (grid `50 × 45` → `50 × 40`); the `C · interrupt` cap echoed `^C`, `sleep 100`
+  died (fish printed its `1m 10s` duration badge) and the prompt came back; the crop after the tap
+  has Ctrl untinted and the strip gone (`50 × 40` → `50 × 45`). `LOG = false` at this commit, so
+  there is no `[ssh]` byte trace — the byte is judged on its effect.
 
 ### T7.2 — Ctrl double-tap locks and sends repeated chords
 - **Setup**: shell prompt with a longish command typed (do the typing *before* locking —
@@ -376,7 +513,14 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - iOS: [x] — locked, the typed `a` and `e` went out as `^A` and `^E`, and the strip stayed up across
   both (terminal held `52 × 22`, returning to `52 × 26` only on the unlock tap); two `^C` in a
   row earlier held the lock the same way.
-- Android: [ ]
+- Android: [x] — the double-tap locked: the pill turned accentA pink with a halo (armed is blue),
+  a typed `a` and then `e` chorded as `^A`/`^E` (caret jumped to the leading `e` of
+  `echo abcdefghij`, then back past the final `j`), the strip stayed up across two `C` caps, and one
+  more tap unlocked it — tint and strip gone, grid back to `50 × 26`, and `ae` then typed as letters.
+  - NOTE 2026-08-17: one double-tap in roughly ten produced *armed*, not *locked* — blue pill, and the
+    strip closed after the first chord. `onCtrlTap` (`src/keybar.tsx:469`) reads `ctrl` out of the
+    render closure, so two taps inside one React commit both compute from `off`. Not reproduced in the
+    run recorded above; worth a functional `setCtrl` if it is ever seen on hardware.
 
 ### T7.3 — All five strip caps are observable
 - **Setup**: shell prompt with some history; then `sleep 100` for Z.
@@ -390,7 +534,12 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   stopped`), `^R`, `^L` (screen cleared to one prompt line, cursor report `12;3` → `2;3`),
   `^D` (nested `bash` exited). Each disarmed after its chord — the terminal goes `52 × 22`
   while the strip is up and back to `52 × 26` after, which is the disarm visible in the log.
-- Android: [ ]
+- Android: [x] — all five observed, each disarming after its own chord (grid `50 × 40` → `50 × 45`
+  every time): `R` opened fish's `search:` pager and Esc left it; `L` cleared the screen to one prompt
+  line; `Z` printed `^Zfish: Job 1, 'sleep 100' has stopped`; `D` exited a nested `bash` instantly
+  (`exit` echoed, no confirmation). Captions read interrupt · suspend · history · clear · EOF. `C` is
+  T7.1's evidence — at an *empty* fish prompt ^C repaints the same prompt and shows nothing, so this
+  case's "^C + fresh prompt" is a bash-ism rather than an Android failure.
 
 ### T7.4 — Esc leaves vim insert mode
 - **Setup**: `vim`, press `i`, type a word.
@@ -399,14 +548,18 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   proof the byte was ESC (0x1b), not text.
 - iOS: [x] — `^[` on the wire while vim held the alt screen, and vim then exited on `:q!`, which
   only happens if the byte was a real 0x1b.
-- Android: [ ]
+- Android: [x] — `-- INSERT --` vanished on the Esc tap and vim's ruler went `1,6` → `1,5`, the
+  one-cell left shift Esc makes leaving insert mode; `:q!` + Return then quit vim back to the shell,
+  which only happens if the byte was a real 0x1b.
 
 ### T7.5 — Tab completes in the shell
 - **Setup**: shell prompt, type `ls /et`.
 - **Steps**: tap Tab.
 - **Expect**: completes to `/etc/` (0x09 went down the PTY).
 - iOS: [x] — `ls /et` + Tab left `ls /etc/` on the prompt, fish's ghost suggestion trailing it.
-- Android: [ ]
+- Android: [x] — `ls /et` plus one Tab tap left `ls /etc/` on the prompt, fish's ghost
+  `modprobe.d/` trailing it. (An earlier attempt needed a second tap; the clean repeat completed on
+  the first, so that was tap injection, not the key.)
 
 ### T7.6 — Paste types the pasteboard
 - **Setup**: copy a string on the phone (e.g. from Notes): `echo pasted-ok`.
@@ -415,7 +568,10 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   long-press does nothing yet — TODO(T8) clipboard popover.
 - iOS: [x] — `echo pasted-ok` landed on the prompt unexecuted, cursor after it. (The long-press half
   is no longer a no-op: T8 shipped the popover, so it is covered by T8.5.)
-- Android: [ ]
+- Android: [x] — the pasteboard was seeded from the Android Settings search field (typed
+  `echo pasted-ok`, select-all, `KEYCODE_COPY`); the Paste tap typed it at the prompt unexecuted with
+  the cursor after the `k`, no Return of ours. Long-press is T8's popover now — same as the iOS note,
+  covered by T8.5.
 
 ### T7.7 — Arrows navigate in vim (DECCKM) and walk history at a prompt
 - **Setup**: `vim` on a multi-line file; separately a shell with history.
@@ -428,14 +584,19 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   stays open across taps; outside tap or the button closes it.
 - iOS: [x] — see the byte evidence folded into **Expect** above; the popover stayed open across the
   whole run of taps.
-- Android: [ ]
+- Android: [x] — in `vim /etc/services` with `[session] modes … "decckm":true`, the four arrows each
+  moved one cell or row (cursor `46/udp` `p` → `46/tcp` `p` → back → `d` → `p`, ruler home at `43,25`),
+  and the popover stayed open across all four taps. It closed both ways: its own button, and a tap
+  outside it. At the prompt with `"decckm":false`, ↑ recalled `vim /etc/services` and ↓ cleared the
+  line again.
 
 ### T7.8 — Home/End at a prompt
 - **Setup**: shell prompt, type a long command, caret at the end.
 - **Steps**: arrows popover → Home, then End.
 - **Expect**: caret jumps to line start, then line end (CSI H / CSI F; shells map both).
 - iOS: [x] — `^[[H` then `^[[F` on the wire.
-- Android: [ ]
+- Android: [x] — with `echo this-is-a-long-command-line` typed and the caret at the end, Home put it
+  on the leading `e` and End put it back past the final `e`.
 
 ### T7.9 — Bar swipe ↓ hides the keyboard, ↑ shows it
 - **Setup**: keyboard up (it rises on connect).
@@ -448,6 +609,18 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   with no bytes on the wire between them. (The "second ↑ is a no-op" line is stale: T10
   shipped, so that gesture is the switcher drag now — T10.2.)
 - Android: [ ]
+  - FAILED 2026-08-17: the ↓ half passes and the ↑ half does nothing at all. Down: a swipe anywhere on
+    the bar puts Gboard away, the bar stays docked at the bottom and the grid grows `50 × 26` →
+    `50 × 45`. Up: three attempts — `input swipe` at 250ms and at 400ms, and a seven-step
+    `input motionevent` drag — all left `mInputShown=false`, the grid at `50 × 45`, no `[terminal]
+    size` and no switcher. This is **not** an Android divergence: it is shared TS with no `Platform`
+    branch. `src/keybar.tsx:548` makes the pan's only keyboard action `Keyboard.dismiss()`;
+    `barDismisses` (`src/keybar-model.ts:210`) is the sole vertical exit that touches the keyboard, and
+    the upward branch (`ty <= -KEYS_DROP_DY`) also only dismisses, for T10's switcher drag. Nothing in
+    the pan raises `focusSignal`, so the keyboard now returns only on a terminal tap, on the switcher
+    closing, or from a ribbon cap. The iOS tick above is stale by the same argument.
+  - Walk this one from a FRESH LAUNCH — a prior long-press selection silently kills the bar's pan; see
+    the finding recorded under T7.13.
 
 ### T7.10 — Keys never fire during a bar swipe
 - **Setup**: shell prompt, keyboard up.
@@ -458,7 +631,9 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - iOS: [x] — swipes started on Esc/Ctrl fired no key: nothing on the wire across six swipe pairs
   (each visible as the grid flipping `52 × 26` ↔ `52 × 41`), while deliberate presses of the
   same keys sent normally. The press-in dim does flash during the swipe, which the case allows.
-- Android: [ ]
+- Android: [x] — three ↓ swipes started with the finger on Esc, on Ctrl and on Tab: each hid Gboard
+  and fired no key. The prompt stayed empty in all three (a stray Tab at an empty fish prompt would
+  have opened the completion pager) and the bar crops show Ctrl untinted with no chord strip.
 
 ### T7.11 — Press feedback: dim/shrink + haptic on touch, not on echo
 - **Setup**: any key; airplane-mode-slow or `sleep`-blocked session is the interesting case.
@@ -466,7 +641,14 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - **Expect**: the key dims and shrinks while touched and the light haptic fires on the
   *touch*, immediately — even when the session is slow to echo (§4.4: on touch, not echo).
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — held Esc measured against its own rest state at native resolution: the label shrinks
+  (ink bbox 60 × 20 px → 57 × 19) and dims (peak luminance 205 → 140) while touched. The haptic is
+  real on this AVD and readable: `dumpsys vibrator_manager` appends a 52 ms `usage: TOUCH` effect for
+  `com.kamilpostrozny.port22` on every key tap, and with the session blocked by `sleep 60` an Esc tap
+  logged its effect 24 ms after the tap — so it is not gated on the host's echo. One nuance the Expect
+  predates: the haptic fires on the **completed tap**, not on touch-down (`src/keybar.tsx:269-273`,
+  deliberate, user 2026-08-11, so a bar swipe passing over a key does not buzz). "On touch, not echo"
+  still holds. The buzz itself is hardware-only.
 
 ### T7.12 — Two-finger tap opens Settings; two-finger pan still scrolls
 - **Setup**: shell with scrollback (`seq 1 200`).
@@ -476,6 +658,10 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
 - iOS: [x] — `[terminal] two-finger tap` then `[settings] sheet open` (the T12 sheet now, not the
   stub alert). The two-finger pan scrolling and opening nothing is T6.6's evidence.
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: two-finger input cannot be injected on this AVD — the
+    `virtio_input_multi_touch_N` devices declare no `INPUT_PROP_DIRECT`/`BTN_TOUCH`, and protocol-B
+    `sendevent` as root and the emulator console's `event send` both produce nothing. Both halves of
+    this case (the tap and the pan) need two fingers.
 
 ### T7.13 — Native input owns the keyboard; selection works with it up (the T4 fix)
 - **Setup**: fresh connect (keyboard rises on its own), text on screen.
@@ -497,6 +683,28 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
   a Copy control on the bar, so no WebKit gesture is involved. Re-run this case after that
   lands.
 - Android: [ ]
+  - FAILED 2026-08-17: three halves pass and one does not — and it is a *different* half from the iOS
+    failure. **Passing.** The keyboard is owned by the native input: `dumpsys input_method` reports
+    `mServedView=com.facebook.react.views.textinput.ReactEditText` and typing echoes through it
+    (`echo hello-native`), with no webview IME at any point. A tap on the terminal dismisses the
+    keyboard (`50 × 26` → `50 × 45`) and another raises it. And the keyboard-up long-press selects
+    **without the iOS side effect**: `[terminal] selection "native"` and later `selection "Disk"`, each
+    with `mInputShown=true` and no `size` line behind it — the keyboard does not drop and the grid does
+    not reflow under the selection. **Failing: no system edit menu ever appears.** The selection draws
+    its two handles (they are the only two `PopupWindow`s in `dumpsys window windows`) and they drag
+    correctly, but there is no floating Copy / Select-all toolbar — looked for immediately, 3 s later,
+    and again after nudging a handle, in both the `uiautomator` dump and the screenshots. Without it a
+    selection cannot be copied on Android. Also: the case's "swipe the bar ↑ to bring it back" step is
+    unusable (T7.9), so a terminal tap was used instead.
+  - FOUND WHILE WALKING, separate bug, 2026-08-17: **a long-press selection kills the key bar's pan
+    until the app is relaunched.** Fresh launch — a ↓ swipe on the bar hides Gboard (`mInputShown`
+    false, grid `50 × 26` → `50 × 45`). Long-press any word in the terminal, and the identical swipe
+    then does nothing: no `[terminal] size`, `mInputShown` stays true. Taps on the bar keep working
+    (Ctrl still arms and the strip still rises), so it is the pan alone. Clearing the selection does
+    not restore it — only `am force-stop` plus a relaunch does. Reproduced twice. The suspect is the
+    WebKit selection path in `src/terminal.tsx` (its own note at :1050, "once WebKit has begun a
+    selection, the moves are its drag handles, not a pan") leaving the touch stream claimed. This is
+    what made T7A.4/T7A.5 look broken mid-run until they were re-walked from a fresh launch.
 
 ## T7A — Key bar on Android (emulator)
 
@@ -634,6 +842,12 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
   a config-plugin patch of the Android view), not more arithmetic on our side. Everything else has
   now been tried and measured.
 - Android: [ ]
+  - FAILED 2026-08-17: the divergence is unchanged at this commit. `settings put system font_scale 1.5`,
+    relaunch, connect → `[terminal] size 50 × 44 cell 11.6964 × 17.14`, against `7.7964 × 17.13` at
+    1.0. The cell scales in WIDTH by exactly 1.5 while the row height and the column count do not, so
+    50 × 11.70 = 585dp of grid sits on a 411dp screen: the screenshot has the fastfetch banner and every
+    prompt line running off the right edge and rows clipping each other vertically, and in the key bar
+    "Paste" overlaps the arrows glyph. `settings put system font_scale 1.0` restored `cell 7.7964`.
 
 ### T7A.3 — Icons render via text fallback (no blank keys)
 - **Setup**: connected, tmux configured (so the tabs circle shows).
@@ -641,7 +855,14 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
   the clipboard popover.
 - **Expect**: `⋯`, `✛`, `▣`+badge, `●`/`○` all visible — SF Symbols don't exist here, so
   the `fallback` text glyphs must carry every icon. No empty circle, no invisible pin.
-- Android: [ ]
+- Android: [x] — 2026-08-17, every icon cropped at native resolution: ⋯ renders as three filled dots
+  (`\uF141`), the arrows button as the four-way glyph (`\uF047`), the tabs circle as the two offset
+  squares (`\uF24D`) — greyed in plain shell, full strength once attached to tmux — and the clipboard
+  row's pin mark as a solid pushpin. Nothing blank, nothing tofu, everything from the bundled face.
+  Two parts of the Expect are stale rather than failing: the literal `⋯` / `✛` / `▣` / `●` / `○`
+  fallbacks were replaced by Nerd Font codepoints on 2026-08-16, and there is **no badge on the tabs
+  circle at this commit** — `src/keybar.tsx:797-815` renders the glyph alone and `grep -rn badge
+  src/**/*.tsx` finds none. Checked attached to tmux with one window and with two; no badge either way.
 
 ### T7A.4 — Bar rides Gboard: docking up/down + terminal resize
 - **Setup**: connected (keyboard rises on connect).
@@ -651,7 +872,11 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
   double-height dead strip (the old `height` KAV would have subtracted the keyboard twice);
   keyboard down → the bar drops to the gesture-pill area. Each transition logs a new
   `[terminal] size` — the window resize is what fires §4.2's debounced resize.
-- Android: [ ]
+- Android: [x] — measured off native-resolution frames. Keyboard up: the bar plate spans y 1373–1500
+  (128px = 48.8dp) and Gboard's top edge is at y 1517, so the gap is 16px = 6.1dp — the bar's own
+  bottom padding, not a doubled keyboard inset. Keyboard down: the plate spans 2193–2320 with the
+  gesture pill at 2364–2373, i.e. it drops to the pill area. Every transition logged a fresh
+  `[terminal] size` (`50 × 26` ↔ `50 × 45`).
 
 ### T7A.5 — Bar swipe ↓/↑ hides and shows Gboard
 - **Setup**: keyboard up.
@@ -659,6 +884,12 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
 - **Expect**: Gboard slides away and the terminal grows (taller grid in the log); the ↑
   swipe raises it again — same behaviour as T7.9, now via the Android window resize.
 - Android: [ ]
+  - FAILED 2026-08-17: the same split as T7.9, and the same cause. ↓ on the bar puts Gboard away and
+    the grid grows `50 × 26` → `50 × 45`; ↑ does nothing — no keyboard, no `[terminal] size` — tried
+    with `input swipe` at 250/300/400ms and with a stepped `input motionevent` drag. The bar's pan only
+    ever calls `Keyboard.dismiss()` (`src/keybar.tsx:548`); nothing on the bar raises the keyboard.
+  - Walk this from a FRESH LAUNCH: a prior long-press selection kills the pan (see T7.13's finding),
+    which makes even the ↓ half look broken.
 
 ### T7A.6 — Chord strip + arrows + clipboard popovers: flush and functional
 - **Setup**: shell prompt; some text copied on the emulator for the pasteboard row.
@@ -673,7 +904,18 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
   the family name (`Inter-Medium`/`-SemiBold`/`-Bold`), never `fontWeight` — a numeric weight
   beside a one-face custom family fake-bolds on Android and no-ops on iOS. Key glyphs stay
   JetBrains Mono.
-- Android: [ ]
+- Android: [x] — all three popovers render as opaque plates with a hairline and no shadow, and all
+  three work: Ctrl then the `C` cap killed `sleep 60` with `^C` echoed; the arrows popover's ↑ recalled
+  `sleep 60` from history; a ~900ms press on Paste opened the clipboard popover
+  (`[clipboard] 0 slots, 0 pinned`, header CLIPBOARD, one row `echo pasted-ok` /
+  `phone pasteboard · just now` with its pin), and tapping the row typed the text unexecuted. Font: the
+  chrome text is Inter, not Roboto — `src/app/_layout.tsx:29-32` registers the four Inter faces under
+  the SANS names and `keybar.tsx` sets `SANS`/`SANS_SEMIBOLD` on the chord captions, the CLIPBOARD and
+  UPLOAD FILE headers and the menu labels; a shape correlation of the rendered `CLIPBOARD` header
+  against both candidates scored Inter 600 at 0.960 vs Roboto at 0.932, with the aspect ratio also
+  closer to Inter. Honest limit: at the 13px caption size the two faces are **not** separable from a
+  screenshot (per-letter correlation 0.9666 vs 0.9669), so the caption row is verified by construction
+  and by the larger header, not by its own pixels.
 
 ### T7A.7 — Haptics on press do not crash
 - **Setup**: any key.
@@ -681,7 +923,13 @@ Haptics may be inert on the emulator — feel them on hardware, only observe no 
 - **Expect**: presses dim/shrink and send; no red screen from `expo-haptics` (the emulator
   usually has no vibrator — the call must no-op, not throw). Feel the actual haptic on
   hardware, not here.
-- Android: [ ]
+- Android: [x] — keys, chord caps and popover arrows pressed in a sweep: every press dimmed, shrank
+  and sent, with no red screen and no `expo-haptics` exception. This AVD does have a vibrator, and
+  `dumpsys vibrator_manager` shows the app's 52 ms `usage: TOUCH` effects *finishing* rather than being
+  rejected, so the call is not even taking the no-op path here. The one `FATAL signal 11` in the logcat
+  ring is unrelated to presses: it is a startup crash on the `mqt_v_js` thread inside
+  `MountingCoordinator::pullTransaction` ("trying to execute non-executable memory") at process uptime
+  4s on one relaunch, and the app came straight back. The buzz itself stays hardware-only.
 
 ## T9 — tmux side-channel + config push
 
@@ -704,7 +952,17 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   stripped): probe reported `config:"not-applied"`, then `[tmux] configure: applied`. Host side
   gained `~/.config/port22/port22.conf` (`# port22-conf-v1`, `set -g @port22 1`) and exactly one
   `source-file -q …` line at `~/.tmux.conf:62`, rest of that file untouched.
-- Android: [ ]
+- Android: [x] — emulator 2026-08-17, attach mode onto a private session (`t13walk3`). `tmux
+  kill-server` was NOT run: it would kill the user's live `port22`/`prot22` sessions. Virgin state
+  reached instead with `rm -rf ~/.config/port22` + `tmux set -gu @port22`, so the read-back verify
+  was genuine. Log: `{"present":true,"config":"not-applied",…}` → `{"config":"applied"}` →
+  `[tmux] configure: applied`; host gained `~/.config/port22/port22.conf` (4145 B) and
+  `tmux show -gv @port22` answered `4`. Tabs circle went live (glyph sampled `#cdd6f4` vs the greyed
+  `#53566b` of a plain-shell connect).
+  **Two Expect clauses are stale, not failures.** (1) The marker is `# port22-conf-v4`
+  (`CONF_VERSION = 4`), not v1. (2) Nothing is appended to the user's tmux conf any more — the app
+  stopped writing outside its own directory on 2026-08-12 (`src/tmux-model.ts:145-157`); this host
+  has no `~/.tmux.conf` at all.
 
 ### T9.2 — Works on a fish login shell
 - **Setup**: host user's shell is fish (`chsh -s $(which fish)` or already so).
@@ -715,7 +973,10 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - iOS: [x] — the T9.1 round trip above *was* the fish run: this host's login shell is fish 4.8.1
   (`Shell: fish 4.8.1` in its own greeting). No `Unknown command` or `Missing end` anywhere in
   the log.
-- Android: [ ]
+- Android: [x] — the T9.1 run above IS the fish run: this host's login shell is `/bin/fish`
+  (fish 4.8.1 in its own greeting), and every exec channel is `fish -c`. Zero `Unknown command`,
+  `Missing end` or `Unexpected end` anywhere in the whole Metro log, and the verify still answered
+  `4`.
 
 ### T9.3 — Toggle off: tabs affordance gone, no push on next connect
 > Historical: the toggle became the §4.1 start mode. The same state is now reached by choosing
@@ -731,7 +992,15 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   `upload` lines, `~/.config/port22` still absent, state `"config":"not-applied"` (which is what
   hides the circle), and 7 poll beats in the same window — the feed is independent of the
   toggle, as designed.
-- Android: [ ]
+- Android: [x] — reached the same state the way the note above says to: start mode `Plain shell`,
+  then `rm -rf ~/.config/port22` and reconnect. Log carried the probe and nothing else — no
+  `configure:` line, no upload — `~/.config/port22` stayed absent and state stayed
+  `"config":"not-applied"`. The poll kept beating: sampling the host for the poll's own
+  `tmux display-message` child caught 5 hits in 10 s (≈ the 2 s beat), against 0 in 12 s in T9.4
+  where the poll is off.
+  **Stale Expect clause, not a failure:** the tabs circle does not disappear — it renders greyed
+  (glyph `#53566b`) and answers with a hint when tapped (`src/keybar.tsx`, user 2026-08-12,
+  "disabled over hidden"). Greyed is the derived state this case is really asserting.
 
 ### T9.4 — No tmux on the host: zero tmux UI, zero message
 - **Setup**: a host (or container) without tmux on PATH.
@@ -742,7 +1011,12 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   without a tabs circle, nothing said on screen. One `[ssh] exec failed` at the probe, then
   silence — the poll does not run when tmux is absent. Rough edge, log-only: when tmux vanishes
   *mid-session* the poll keeps retrying every 2s and logs a failure each beat.
-- Android: [ ]
+- Android: [x] — tmux was hidden from the app WITHOUT touching the user's running server: a
+  temporary `~/.config/fish/conf.d` guard stripped `/usr/bin` from the PATH of non-interactive
+  fish over SSH only (the app's exec channels), leaving every interactive shell — including the
+  app's own PTY — untouched; deleted again straight after. Result: `{"present":false,…}` and then
+  silence — no poll (0 `display-message` hits in 12 s of sampling), no error line, tabs circle
+  greyed, and nothing on screen mentions tmux (full-frame screenshot read).
 
 ### T9.5 — Badge tracks `select-window` from another client
 - **Setup**: connected, `tmux attach` typed into the phone session (window badge visible on the
@@ -753,7 +1027,11 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - iOS: [x] — the laptop *is* the host (10.42.0.71), so a shell here is a genuine second client.
   `select-window -t 3` from it moved the app's feed to `windowIndex: 3` untouched, having
   already tracked 1 → 2. One `[tmux]` line per change, not per poll beat.
-- Android: [ ]
+- Android: [x] — a host-side `tmux select-window -t t13walk3:1` then `:2` (a genuine second client)
+  moved the feed `windowIndex` 2 → 1 → 2, one `[tmux]` line per change and none on the quiet beats,
+  each within one poll. **Note the badge itself no longer exists:** nothing renders `windowIndex` on
+  the tabs circle any more; the switcher's active card is the only UI reader (confirmed in T9.6's
+  screenshot, where the ringed card was window 2). The log line is the assertion, as the case says.
 
 ### T9.6 — capture-pane snapshot carries ANSI colour
 - **Setup**: attached to tmux; something colourful on screen (`ls --color`, `git log`).
@@ -762,7 +1040,10 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
 - **Expect**: the captured string contains `\x1b[` colour sequences (`-e` did its job); fed to
   a terminal it reproduces the pane's colours.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — T10's grid is the on-screen assertion now. With `ls --color=always /usr` run in all
+  three windows, the switcher's cards reproduced the pane colours: cyan `fastfetch` keys, blue
+  directory names, pink `85%`, green symlink targets, read at native resolution. Colour cannot
+  survive a `capture-pane` without `-e`, so the escapes were in the string.
 
 ### T9.7 — new/kill/select/move helpers observable from a second client
 - **Setup**: attached to tmux; laptop attached to the same session, watching `tmux list-windows`.
@@ -772,7 +1053,12 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   (`select-window`), indices reorder (`move-window -b`/`-a`), a window dies (`kill-window`).
   Every command in the log is an exec channel — the phone's PTY never echoes any of it.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — all four driven from the switcher against the private `t13walk3` session, each
+  read back on the host with `tmux list-windows -F '#{window_index} #{window_id}'`:
+  `+` → `3 @156` appeared and went active (`[switcher] new window`); drag of that card to slot 0 →
+  `0 @156, 1 @153, 2 @154, 3 @155` (`[switcher] reorder {"from":3,"to":0}`); card ✕ → `@156` gone
+  (`[switcher] kill @156`); card tap → `@153` active (`[switcher] select @153`). The PTY's own pane
+  shows none of those commands — the screenshot after the round is a clean prompt.
 
 ### T9.8 — Poll: `sleep 100` is foreground, the prompt is idle
 - **Setup**: attached to tmux, at a fish prompt. **Dep: T11** for the on-screen ribbon; until
@@ -783,7 +1069,8 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   a bare prompt never does.
 - iOS: [x] — driven from the host side (`send-keys 'sleep 100' Enter`, then `C-c`): the feed went
   `null` → `{"command":"sleep","pid":348866}` → `null`, one beat each way.
-- Android: [ ]
+- Android: [x] — driven from the host into the private session (`send-keys 'sleep 100' Enter`, then
+  `C-c`): `foreground:null` → `{"command":"sleep","pid":3989936}` → `null`, one beat each way.
 
 ### T9.9 — Version bump replaces an old conf
 - **Setup**: on the host: `printf '# port22-conf-v0\nset -g mouse on\n' > ~/.config/port22/port22.conf`.
@@ -796,7 +1083,10 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   the file's mtime at the first push's `23:40:25`, so nothing was re-uploaded. Note for the
   reader: `configure: applied` logs on *every* connect — it reports the verify round-trip, not
   an upload. The mtime is what tells a push from a skip.
-- Android: [ ]
+- Android: [x] — planted `# port22-conf-v0` (33 B, md5 `4399f4…`); the reconnect replaced it with v4
+  (4145 B, md5 `50b7f6…`, mtime 16:00:25) and logged `configure: applied`. A second
+  Disconnect→Connect logged `configure: applied` again but left the mtime at 16:00:25 and the md5
+  unchanged — byte-identical content skipped the push, exactly as the iOS note explains.
 
 ### T9.10 — Failed push changes nothing visible
 - **Setup**: on the host: `chmod 500 ~/.config` (or `chattr +i` the port22 dir) so the SFTP
@@ -811,7 +1101,14 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   nothing visible changes: …`, state stayed `"config":"not-applied"`, and the screenshot shows
   the bar without a tabs circle (the pill stretches into its place). Session fully usable, no
   alert, no banner.
-- Android: [ ]
+- Android: [x] — the gentle setup (`rm -rf ~/.config/port22 && touch ~/.config/port22`). Log:
+  `[tmux] configure failed, nothing visible changes: [Error: Call to function 'ExpoSSH.upload' has
+  been rejected.` and the state stayed `"config":"not-applied"`. Session fully usable, no alert, no
+  banner, nothing said on screen.
+  **Stale Expect clause, not a failure:** the tabs circle stays live here, because `tabsAvailable`
+  is `present && attached` and no longer includes the conf — dropped deliberately on 2026-08-12
+  (`src/tmux-model.ts:489` and its comment: nothing behind the button reads the conf). Sampled
+  glyph `#cdd6f4` (live), against `#53566b` in T9.3/T9.4 where it really is greyed.
 
 ## T8 — Clipboard + ⋯ menu + uploads
 
@@ -830,7 +1127,14 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   the attached client: one `[clipboard] 1 slots, 0 pinned` per yank, and the popover's top row
   read the text with `tmux yank · just now`. The pasteboard half is the popover's own
   phone-pasteboard row, which reads the live iOS pasteboard and showed the same string.
-- Android: [ ]
+- Android: [x] — same driver as iOS (`tmux set-buffer -w 'yank-one-alpha'` on the private session,
+  which makes tmux emit the OSC 52 to the attached client): exactly one `[clipboard] 1 slots, 0
+  pinned`, and the long-pressed popover's top row read `yank-one-alpha` / `tmux yank · just now`.
+  The pasteboard half is the popover's phone-pasteboard row, which reads the live Android clipboard
+  through `expo-clipboard` and showed the same string — the same evidence the iOS tick rests on.
+  **Android-only finding (not a failure):** every yank pops Android 13's own clipboard-write chip
+  over the bottom-left of the key bar for ~10 s, covering the ⋯ circle and part of the pill, and it
+  swallows taps in that region while it is up. iOS has no such overlay.
 
 ### T8.2 — Three-yank rotation
 - **Setup**: as T8.1.
@@ -840,7 +1144,9 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - iOS: [x] — four yanks logged `1 → 2 → 3 → 3 slots`; the popover showed `yank-four-delta`,
   `yank-three-charlie`, `yank-two-bravo` newest-first with `yank-one-alpha` gone, and the
   phone-pasteboard row below them holding `yank-four-delta`.
-- Android: [ ]
+- Android: [x] — four yanks logged `1 → 2 → 3 → 3 slots`; the popover showed `yank-four-delta`,
+  `yank-three-charlie`, `yank-two-bravo` newest-first with `yank-one-alpha` gone, and the
+  phone-pasteboard row below them holding `yank-four-delta`. Read off a native-resolution crop.
 
 ### T8.3 — Pin survives rotation and an app restart
 - **Setup**: one yank in the slots.
@@ -852,7 +1158,11 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - iOS: [x] rotation half — pinning logged `3 slots, 1 pinned`, and three fresh yanks settled at
   `4 slots, 1 pinned`: `golf`/`foxtrot`/`echo` rotating above `yank-two-bravo`, which read
   `tmux yank · pinned` with a filled pin. Restart half below.
-- Android: [ ]
+- Android: [x] — both halves. Pinning `yank-two-bravo` logged `3 slots, 1 pinned`; three fresh yanks
+  settled at `4 slots, 1 pinned` with `golf-seven`/`foxtrot-six`/`echo-five` rotating above it and
+  the pinned row reading `tmux yank · pinned`. Force-stop → relaunch → reconnect → popover: only
+  `yank-two-bravo · pinned` survived, the three unpinned were gone, and the phone-pasteboard row
+  held the live clipboard.
 
 ### T8.4 — Paste tap types the top slot and never executes
 - **Setup**: yank `echo yanked` (with no newline selected); cursor at an empty prompt.
@@ -861,7 +1171,9 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   sits at the end of the typed text. Pressing Return manually runs it (proof the text is real).
 - iOS: [x] — one `[ssh] send echo yanked` with no `\r` behind it; the screenshot shows it at the
   prompt with the cursor after it, unexecuted.
-- Android: [ ]
+- Android: [x] — yanked `echo yanked`, one Paste tap: the host pane read `❯ echo yanked` with
+  `#{cursor_x}` 13, i.e. the cursor sitting at the end of the typed text and no second prompt line —
+  nothing ran. A manual Return afterwards printed `yanked`, proving the text was real.
 
 ### T8.5 — Long-press popover: previews, provenance, pasteboard slot, banner once
 - **Setup**: at least one yank in the slots; copy something in another iOS app first.
@@ -871,7 +1183,18 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   N min ago"); the phone-pasteboard row is last and shows the other app's text; iOS's paste
   banner fires **once per open** (on the read), not per row; outside tap closes.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — pasteboard seeded from another app (Settings' search field + `KEYCODE_COPY`,
+  `settings-app-clip-77`). The popover showed one-line ellipsized previews (`long-preview-line
+  ABCDEFGHIJKLMN…`) with provenance (`tmux yank · just now`, `tmux yank · 3 min ago`,
+  `tmux yank · pinned`), the phone-pasteboard row last holding the other app's text; an outside tap
+  closed it and a second long-press reopened it. iOS's paste banner has no Android counterpart —
+  Android notifies on clipboard *write* instead (see T8.1's finding), so that clause is N/A here.
+  **Bug found while reading this popover:** the pinned slot DUPLICATES — two identical
+  `yank-two-bravo · pinned` rows, and the log went `3 slots, 1 pinned` → `3 slots, 2 pinned` with
+  nothing pinned in between. `hydratePins()` appends unconditionally onto live module state
+  (`src/clipboard.ts:62-68`), and `_layout.tsx:36-39`'s `useEffect` runs again on every JS root
+  remount (each dev-client deep-link relaunch here; a JS reload in production), so one pin becomes
+  N. Not diagnosed further, not fixed.
 
 ### T8.6 — Multiline yank stays unexecuted
 - **Setup**: yank a multi-line block (two shell lines) in copy-mode.
@@ -884,7 +1207,9 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   on) read the embedded newlines as Return presses. Fix: track DECSET 2004 on the mode signal
   and wrap clipboard text in `ESC[200~ … ESC[201~`. Re-run: the same yank lands as one
   unexecuted continuation block, wire shows `ESC[200~echo alpha-1…`.
-- Android: [ ]
+- Android: [x] — `printf 'echo alpha-1\necho beta-2' | tmux load-buffer -w -`, then the popover's top
+  slot tapped: the host pane read `❯ echo alpha-1` / `  echo beta-2` as one fish continuation block,
+  cursor at its end, no output — nothing ran. Bracketed paste works on Android too.
 
 ### T8.7 — ⋯ menu: three pickers reachable
 - **Setup**: connected, keyboard up.
@@ -897,6 +1222,16 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   keyboard dropped as the menu opened (`52 × 26` → `52 × 41`). Pickers are system UI and a
   cancel leaves no log trace, so the three-picker half is eye-verified.
 - Android: [ ]
+  - FAILED 2026-08-17: the menu opens with the keyboard STILL UP. Raised Gboard (`mInputShown=true`),
+    tapped ⋯: the menu rendered squeezed above the bar and `mInputShown` was still `true`, keyboard
+    fully on screen (screenshot). iOS drops it (`52 × 26` → `52 × 41`). There is no
+    `Keyboard.dismiss()` on this path at all — `src/keybar.tsx:693` is a bare `toggle('menu')`,
+    unlike `openSettings` (`src/app/terminal.tsx:355-363`) which does dismiss.
+    The rest of the case passed: Files opened the SAF document picker, Photo or video the Android
+    photo picker with no permission prompt, Camera asked for camera permission once
+    ("While using the app") and then opened the camera; cancelling each returned to the terminal
+    with nothing typed and no sheet. Note Files and Camera also drop the SSH session on the way
+    (they background the app) while the photo picker does not — see T8.8.
 
 ### T8.8 — Destination sheet: browse, breadcrumb, descend
 - **Setup**: pick a file via ⋯ → Files.
@@ -911,7 +1246,20 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   `.config` still listed. Everything else was right first time: opens at `$HOME`, directories
   before files, descend re-lists (`listDirectory /home/kamil/Projects` in the log), breadcrumb
   `/ home › kamil › Projects`, host label, and `Save here /home/kamil/Projects`.
-- Android: [ ]
+- Android: [x] — but ONLY through the photo picker; the case's own "⋯ → Files" route cannot reach a
+  working sheet on Android (see the finding below). Via ⋯ → Photo or video the sheet opened at
+  `$HOME` on its first ever run, breadcrumb `/ home › kamil` with `/` accented and `kamil` bright,
+  one `..` row and no `.`, directories before files (dotfiles included, sizes on files), names mono.
+  Tapping `.config` descended and re-listed (`/ home › kamil › .config`, `Save here
+  /home/kamil/.config`); `..` walked back to `/ home › kamil`.
+  **Finding — which picker you use decides whether upload works at all.** The SAF document picker
+  (Files) and the camera background the app, which closes the shell; the sheet then resolves its
+  start dir against the dead connection and logs `[upload] sheet could not resolve a start dir:
+  [Error: Call to function 'ExpoSSH.exec' has been rejected.` — empty listing, no breadcrumb,
+  `Save here` disabled, and it never recovers even after the auto-reconnect lands (waited 20 s+,
+  re-checked). The Android photo picker does NOT background the app, the session survives, and
+  every upload case below passes through it. That is the shape of the "uploading is dead on
+  Android" bug from part 1: it is picker-specific, not universal.
 
 ### T8.9 — Collision is visible and overwrite works
 - **Setup**: on the host: `echo old > ~/collide.txt`; pick any file via ⋯ → Files.
@@ -925,7 +1273,11 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   (target went 1162 bytes / md5 `bbc1e2…` → 87916 bytes / md5 `9ae6ac…`).
   **Run it against the `~/collide.txt` this setup asks for.** During T13 it was pointed at a
   real `~/note.txt` instead and destroyed its contents — the case overwrites whatever it names.
-- Android: [ ]
+- Android: [x] — run against the `~/collide.txt` the setup asks for (`echo old >`, 4 B, md5
+  `814fa5…`). `collide.txt, 4 B` was visible in the `$HOME` listing; typing `collide.txt` into
+  SAVE AS turned the label into "SAVE AS — replaces the existing file" and the field's border
+  warning-yellow; Save here overwrote with no further prompt (target went 4 B / `814fa5…` →
+  2 163 464 B / `c9adc5…`). Cleaned up afterwards.
 
 ### T8.10 — Editable filename lands the file under the new name
 - **Setup**: pick a file with a known name via ⋯ → Files.
@@ -933,7 +1285,9 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Expect**: the file lands as `renamed-hello.txt` (the sanitiser turns the space into a dash
   on save); the original name is nowhere on the host.
 - iOS: [x] — landed as `~/Downloads/renamed-hello.txt`; the picked file's own name never appeared.
-- Android: [ ]
+- Android: [x] — browsed into `~/Downloads`, cleared SAVE AS, typed `renamed hello.txt`, Save here:
+  the file landed as `~/Downloads/renamed-hello.txt` (2 163 464 B) and `~/Downloads/renamed
+  hello.txt` never existed. The picked file's own name (`42.mp4`) is nowhere on the host.
 
 ### T8.11 — Camera default name is the timestamp
 - **Setup**: ⋯ → Camera, take a photo, accept it.
@@ -942,6 +1296,14 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - iOS: [x] — camera shot pre-filled with the UTC stamp, and the send itself went through
   (`[ssh] upload -> undefined`).
 - Android: [ ]
+  - FAILED 2026-08-17: the stamp is right, the extension is not — the sheet pre-filled
+    `20260817T142208.jpeg`, where the case (and iOS) say `YYYYMMDDTHHMMSS.jpg`. UTC and the right
+    minute were confirmed against `date -u` (`20260817T142153` typed one shot earlier), and it is
+    not the camera's IMG-style name, so only the suffix diverges: `stampName` keeps the picked
+    asset's extension and Android's camera returns `.jpeg`.
+    The other half of the iOS tick — the send going through — could not happen either: the camera
+    backgrounds the app, so the sheet came up with the dead-connection failure of T8.8 (empty
+    listing, `Save here` disabled, `[upload] sheet could not resolve a start dir`).
 
 ### T8.12 — "Save here" saves silently
 - **Setup**: any destination upload; the terminal at a prompt with a distinctive line.
@@ -951,7 +1313,9 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   session from this flow).
 - iOS: [x] — verified alongside T8.9: the file landed on the host (mtime and md5 both changed) while
   the terminal kept a clean prompt, nothing typed, no output.
-- Android: [ ]
+- Android: [x] — verified twice, alongside T8.9 and T8.10: the sheet dismissed on Save here, the
+  file landed on the host (size and md5 both changed), and the terminal behind it kept its prompt
+  exactly as it was — nothing typed, no output (screenshots before and after).
 
 ### T8.13 — Last destination is remembered
 - **Setup**: complete T8.8's browse ending in a subdirectory, Save here.
@@ -960,7 +1324,11 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   settings); if the directory has meanwhile vanished, the sheet falls back to `$HOME` without
   an error.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — after a save into `~/Downloads`, the second upload's sheet opened straight at
+  `/ home › kamil › Downloads`; a force-stop, relaunch, reconnect and a third upload opened there
+  too, so it is persisted, not in-memory. Fallback half checked as well: saved once into a
+  throwaway `~/.0t13tmp`, deleted the directory on the host, opened a fourth sheet — it came up at
+  `/ home › kamil` with no error and no alert.
 
 ### T8.14 — ⋯ circle tints accent and goes inert during the send
 - **Setup**: a large file (tens of MB — the send needs to take a visible moment) via ⋯ → Files.
@@ -979,6 +1347,18 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   strings now log as a head plus their length. After those: the circle is solid accent with a
   readable glyph for the duration of the send and ignores taps throughout.
 - Android: [ ]
+  - FAILED 2026-08-17: at the size this case asks for, Android cannot even read the file. A 46 MB
+    JPEG picked from the photo library threw before any send:
+    `[upload] picker failed: [Error: Call to function 'FileSystemFile.base64' has been rejected.
+    → Caused by: java.lang.OutOfMemoryError: Failed to allocate a 123507192 byte allocation …
+    growth limit 201326592]`. The app handled it correctly — one "Could not read the file" alert,
+    nothing else — but the whole-file-to-base64 read in `pickOrThrow` (`src/upload.ts:74-95`) puts
+    ~2.7× the file size on the Java heap, so "tens of MB" is out of reach on this AVD's 192 MB
+    growth limit. iOS did tens of MB fine.
+    The Expect's own behaviour DOES hold at a size that fits: with a 7.8 MB image the ⋯ circle went
+    solid accent (`#89b4fa`) with the ⋯ glyph in the background colour for four consecutive frames
+    of the send and returned to the plate when it settled, and a tap on it during the send did
+    nothing (no menu). Left unticked because the case as written — tens of MB — fails.
 
 ### T8.15 — Unwritable destination: one alert, nothing typed, nothing left
 - **Setup**: on the host: `mkdir -p ~/noentry && chmod 500 ~/noentry`; upload via ⋯ → Files.
@@ -989,7 +1369,13 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   the terminal untouched behind it, `~/noentry` still empty, and the log carrying both
   `[ssh] upload failed: …SFTPMessage.Status error 1` and
   `[upload] failed: /home/kamil/noentry/wllpr-iphone.png`.
-- Android: [ ]
+- Android: [x] — `mkdir -p ~/noentry && chmod 500 ~/noentry`, browsed into it (the listing worked:
+  breadcrumb `/ home › kamil › noentry`, empty), Save here: one "Could not send the file" alert with
+  a single OK, `[upload] failed: /home/kamil/noentry/46.jpg [Error: Call to function
+  'ExpoSSH.upload' has been rejected.`, `~/noentry` still empty, and the pane behind it unchanged
+  (captured before and after). Restored with `chmod 700` and removed. Note the raw SFTP status is
+  NOT in the log on Android — `LOG = false` in `modules/expo-ssh/src/ExpoSSHModule.ts` masks it
+  behind the generic "has been rejected", where iOS quoted `SFTPMessage.Status error 1`.
 
 ### T8.16 — Quick-attach: `/tmp/port22`, typed path, trailing space
 - **Setup**: connected, cursor at a prompt. **Dep: T11** — the agent ribbon 📎 cap is the only
@@ -1002,6 +1388,17 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   "upload path" clipboard slot.
 - iOS: [ ]
 - Android: [ ]
+  - FAILED 2026-08-17: the cap fires and builds the right path, the send never lands. Drove it from
+    the real T11 ribbon (a harmless `sleep` copied to `/tmp/t13bin/claude` made the foreground read
+    as an agent; the chip appeared, the band scrolled to the 📎 cap). Tapping it logged
+    `[ribbon] cap 📎` and opened a picker, then: `[session] {"status":"disconnected"}` followed by
+    `[upload] failed: /tmp/port22/20260817T143236.txt [Error: Call to function 'ExpoSSH.upload' has
+    been rejected.` and one "Could not send the file" alert. Nothing typed at the prompt, no
+    clipboard slot, `/tmp/port22` never created on the host.
+    Root cause is T8.8's: the shipped cap calls `quickAttach()` with its default kind, which is
+    `'files'` (`src/upload.ts:128`, `src/app/terminal.tsx:1871`) — the SAF picker, the one that
+    backgrounds the app and kills the connection. The case's own text says `quickAttach('photo')`,
+    and the photo picker is exactly the one that would have survived.
 
 ## T10 — Tab switcher
 

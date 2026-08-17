@@ -14,6 +14,15 @@ const resizes: [number, number][] = [];
 /** Captured from `addListener`, so the test can play the native side. */
 const handlers: Record<string, (payload: unknown) => void> = {};
 
+/** Every `send` the module made, and whether one was still running when the next arrived — the
+ *  native side settles these on a thread POOL, so two in flight is two racing writers. */
+const writes: string[] = [];
+let inFlight = 0;
+let overlapped = false;
+/** How long the n-th write takes to settle, shuffled so a serial path is the only thing that can
+ *  still come out in order. */
+let delays: number[] = [];
+
 mock.module('react-native', () => ({
   AppState: { addEventListener: () => ({ remove: () => {} }), currentState: 'active' },
 }));
@@ -36,7 +45,13 @@ mock.module('../modules/expo-ssh/src/ExpoSSHModule', () => ({
     connect: async () => {},
     disconnect: async () => {},
     startShell: async () => {},
-    send: async () => {},
+    send: async (text: string) => {
+      overlapped ||= inFlight > 0;
+      inFlight += 1;
+      writes.push(text);
+      await new Promise((resolve) => setTimeout(resolve, delays.shift() ?? 0));
+      inFlight -= 1;
+    },
     resize: async (cols: number, rows: number) => {
       resizes.push([cols, rows]);
     },
@@ -44,7 +59,7 @@ mock.module('../modules/expo-ssh/src/ExpoSSHModule', () => ({
   },
 }));
 
-const { attachTerminal, connect, disconnect, setSize } = await import('@/session');
+const { attachTerminal, connect, disconnect, send, setSize } = await import('@/session');
 
 // The session is a module singleton, so the replay buffer outlives a test. `disconnect` is the
 // real thing that empties it — the same path the Disconnect button takes.
@@ -55,6 +70,8 @@ beforeEach(async () => {
 const shell = (data: string) => handlers.onShellData?.({ data });
 /** One turn of the event loop — what the coalescing timer waits for. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** Long enough for the slowest write below to settle and the queue behind it to drain. */
+const settled = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 test('a burst of chunks crosses into the terminal as one batch, in order', async () => {
   const seen: string[][] = [];
@@ -111,4 +128,26 @@ test('a size the shell already has is not sent again', async () => {
     [100, 40],
     [100, 41],
   ]);
+});
+
+/** The one that matters: `less` typed fast arrived at the host as `lses` (2026-08-17), because the
+ *  native `send` finishes on a thread pool and two calls in flight are two writers racing for the
+ *  PTY stream. Nothing on the JS side can order what native has already parallelised — so the rule
+ *  this asserts is that there is never a second call in flight, whatever order the first settles
+ *  in. Drop the `await` in `pump` and both expectations below fail. */
+test('a burst of keystrokes reaches the shell in submission order, one write at a time', async () => {
+  await connect();
+  await settled();
+  writes.length = 0;
+  overlapped = false;
+  // Shuffled, longest first: anything issued alongside the opening write would settle ahead of it.
+  delays = [8, 0, 6, 2, 4];
+
+  const typed = [...'/etc/services'];
+  for (const key of typed) send(key);
+  await settled();
+
+  expect(overlapped).toBe(false); // never two writers on one stream
+  expect(writes.join('')).toBe('/etc/services'); // and the bytes in the order they were typed
+  expect(writes.length).toBeLessThan(typed.length); // the burst coalesced behind the first write
 });

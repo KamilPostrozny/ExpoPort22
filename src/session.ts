@@ -117,8 +117,10 @@ export async function connect(): Promise<void> {
     // The start mode's line (§4.1), replayed on every reconnect — which is what makes a reconnect
     // feel like a resume rather than a fresh login, and is why the tmux modes attach rather than
     // create: the second connect of the day finds the first one's session and walks back into it.
+    // Through `send`, not `ExpoSSH.send`: one writer, so the startup line cannot end up interleaved
+    // with a keystroke typed into the shell that just came up.
     const line = startupLine(settings);
-    if (line !== null) await ExpoSSH.send(`${line}\n`);
+    if (line !== null) send(`${line}\n`);
   } catch (error) {
     shellOpen = false;
     // A half-open connection after a failed shell open would make the next `connect` fail for a
@@ -194,9 +196,42 @@ export function forgetPinnedHostKey(): Promise<void> {
 /* --- the PTY --- */
 
 /** Keystrokes and the replies the terminal writes on the app's behalf. Dropped when no shell is
- *  open: every caller is a finger on a key that is still on screen while a session is coming back. */
+ *  open: every caller is a finger on a key that is still on screen while a session is coming back.
+ *
+ *  ONE write is in flight at a time, and whatever is typed behind it coalesces into the next one.
+ *  That is not an optimisation, it is the ordering: `ExpoSSH.send` runs its body off the module
+ *  queue — Android hands it to `Dispatchers.IO`, which is a POOL, and the body is an unsynchronized
+ *  `write` + `flush` on sshj's `ChannelOutputStream` — so two calls in flight are two threads
+ *  racing for the same stream and the bytes land in whichever order they win. That is how `less`
+ *  arrived at the host as `lses` (2026-08-17). Nothing above this line orders anything: xterm's
+ *  `onData`, the DOM bridge's postMessage and the webview's `onMessage` are all FIFO, and the
+ *  native module's own queue is a single HandlerThread — the order is lost at the hop into the
+ *  pool, and the only fix that holds for both platforms is to never have two calls in flight. */
+let queued = '';
+let writing = false;
+
 export function send(text: string): void {
-  if (shellOpen) ExpoSSH.send(text).catch(() => {});
+  if (!shellOpen || text === '') return;
+  queued += text;
+  if (!writing) void pump();
+}
+
+async function pump(): Promise<void> {
+  writing = true;
+  try {
+    while (queued !== '' && shellOpen) {
+      const batch = queued;
+      queued = '';
+      // Awaited: the promise settles after the native write has flushed, so the next batch cannot
+      // overtake it. A burst therefore costs ONE crossing per round trip rather than one per key.
+      await ExpoSSH.send(batch);
+    }
+  } catch {
+    // As before: a write that fails is a shell on its way out, and the reconnect owns what next.
+  } finally {
+    queued = ''; // a shell that closed under us takes its unwritten keystrokes with it
+    writing = false;
+  }
 }
 
 export function setSize(cols: number, rows: number): void {
