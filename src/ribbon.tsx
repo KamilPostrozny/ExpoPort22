@@ -38,8 +38,6 @@ import Animated, {
   useReducedMotion,
   useSharedValue,
   withDelay,
-  withRepeat,
-  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -142,30 +140,7 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
       : withTiming(0, { duration: 100 });
   }, [open, reduceMotion, caps]);
 
-  // The make-aware cue, played exactly once per recipe: three cycles of a 2.5pt lateral
-  // oscillation, then still forever. Slow linear oscillation is the best detection/irritation
-  // compromise in the literature; the axis is horizontal because the pane's own transients
-  // (scrolling text) are vertical, so this is orthogonal to the masking signal.
-  const nudge = useSharedValue(0);
-  useEffect(() => {
-    if (reduceMotion) {
-      nudge.value = 0;
-      return;
-    }
-    nudge.value = withRepeat(
-      withSequence(
-        withTiming(-2.5, { duration: 525, easing: Easing.inOut(Easing.sin) }),
-        withTiming(0, { duration: 525, easing: Easing.inOut(Easing.sin) }),
-      ),
-      3,
-      false,
-    );
-  }, [recipe.id, reduceMotion, nudge]);
-
-  const clipStyle = useAnimatedStyle(() => ({
-    width: w.value,
-    transform: [{ translateX: nudge.value }],
-  }));
+  const clipStyle = useAnimatedStyle(() => ({ width: w.value }));
   const capsStyle = useAnimatedStyle(() => ({ opacity: caps.value }));
 
   // The chevrons say "there is more" without a JS re-render per scroll frame — the JS thread
@@ -321,14 +296,10 @@ export function RibbonAccessory(props: RibbonAccessoryProps) {
       )}
       <GestureDetector gesture={swipeOpen}>
         {/* Two views, and for the same reason the switcher's card is two (see its JSX): the
-            entrance is a LAYOUT animation, and `FadeInDown`/`FadeOutDown` glide by writing
-            `translateY` — the very property `clipStyle` writes its nudge into. On one view they
-            take turns and the last writer wins, which is Reanimated's "Property transform … may be
-            overwritten by a layout animation" (16 of them in one device log, every one on the beat
-            the band mounted). It is not theoretical here: `nudge` starts on the same mount the
-            entrance does, so the arrival glide and the attention cue spent the first 180ms
-            fighting. The wrapper owns the position and the entrance; the clip owns its width and
-            its nudge. */}
+            entrance is a LAYOUT animation, and a layout animation on the same view as an
+            animated style is Reanimated's "Property transform … may be overwritten by a layout
+            animation". The wrapper owns the position and the entrance; the clip owns its
+            width. */}
         <Animated.View
           entering={(reduceMotion ? FadeIn : FadeInDown).duration(180)}
           // 180 out as well as in: a 140 exit against a 180 entry read as the ribbon blinking
@@ -456,7 +427,7 @@ const styles = StyleSheet.create({
     height: BAND_H,
     alignItems: 'flex-end',
   },
-  /** What the band looks like, and the only view that clips: `width` and the nudge both land here. */
+  /** What the band looks like, and the only view that clips: the animated `width` lands here. */
   clip: {
     height: BAND_H,
     overflow: 'hidden',
