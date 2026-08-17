@@ -1,11 +1,12 @@
 import * as Clipboard from 'expo-clipboard';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/use-theme';
 import { fingerprint, importKey, loadOrCreateKey, regenerateKey, uploadPublicKey } from '@/keys';
+import { NO_FINGERPRINT } from '@/keys-model';
 import { useSession } from '@/session';
 import { CENTER, PRESSED, RADIUS, SECTION_HEADER, SPACE, TEXT, TINT, leading } from '@/style';
 import { MONO, SANS, SANS_SEMIBOLD } from '@/theme';
@@ -20,10 +21,15 @@ import { MONO, SANS, SANS_SEMIBOLD } from '@/theme';
  * cannot bootstrap the first key — it is for rotating one (connect with the old, upload the new)
  * and for retiring a pasted one. That is why the button is disabled with the reason on it rather
  * than hidden.
+ *
+ * Two doors lead here and the difference matters: Setup's Manage button, and the terminal's ⋯ menu
+ * — which is the one that reaches Upload with a session up, because Setup's own back is the
+ * terminal's `leave()`, which disconnects on the way out. `from` is only the back link's label.
  */
 export default function Keys() {
   const theme = useTheme();
   const session = useSession();
+  const { from } = useLocalSearchParams<{ from?: string }>();
   const [line, setLine] = useState<string | null>(null);
   const [print, setPrint] = useState('');
   const [pasted, setPasted] = useState('');
@@ -33,14 +39,30 @@ export default function Keys() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void show(loadOrCreateKey());
+    loadOrCreateKey()
+      .then(show)
+      .catch((error) => {
+        console.log('[keys] could not read the key:', error);
+        setNote({ bad: true, text: `Could not read the key on this phone: ${error}` });
+      });
   }, []);
 
-  async function show(pending: Promise<{ publicKeyLine: string }>) {
-    const key = await pending;
+  /**
+   * The screen's half of a key that already exists: the line, then its fingerprint.
+   *
+   * It never throws, and it is never what decides whether an action worked. The line is the key;
+   * the `SHA256:` string is decoration derived from it, and it is derived LAST — a digest the
+   * platform will not take degrades this one card and nothing else. Awaiting it before the note
+   * was set is what let a cosmetic failure report itself as a failed write (see `regenerateKey`).
+   */
+  async function show(key: { publicKeyLine: string }) {
     setLine(key.publicKeyLine);
-    setPrint(await fingerprint(key.publicKeyLine));
-    return key;
+    try {
+      setPrint(await fingerprint(key.publicKeyLine));
+    } catch (error) {
+      console.log('[keys] fingerprint failed:', error);
+      setPrint(NO_FINGERPRINT);
+    }
   }
 
   /** Same red-plus-confirm shape as Forget host key, and for the same reason: there is no undo and
@@ -60,10 +82,14 @@ export default function Keys() {
           onPress: async () => {
             setBusy(true);
             try {
-              await show(regenerateKey());
+              // `regenerateKey` writes last, so a throw here means the old key is still the key
+              // and this sentence is true. Everything after the write is reporting, in this order:
+              // say it landed, THEN draw it — never the other way round.
+              const key = await regenerateKey();
               setNote({ bad: false, text: 'New key. Its line has to reach the host before the next connect.' });
+              await show(key);
             } catch (error) {
-              setNote({ bad: true, text: `Could not write the new key: ${error}` });
+              setNote({ bad: true, text: `Could not write the new key, so the old one is still in use: ${error}` });
             } finally {
               setBusy(false);
             }
@@ -85,10 +111,18 @@ export default function Keys() {
         setNote({ bad: true, text: result.problem });
         return;
       }
-      await show(Promise.resolve(result.key));
+      // The clear-down happens FIRST, before anything that can fail: the body, the passphrase and
+      // the previous attempt's refusal all belong to an import that is now over. Left until after
+      // the fingerprint, one throw in there kept the key body, the typed passphrase and a stale
+      // "That key could not be opened" on screen over a successful import (Android, 2026-08-17).
       setPasted('');
       setPassphrase(''); // never stored, and not left on screen either
       setNote({ bad: false, text: 'Imported. This is the key Port22 connects with from now on.' });
+      await show(result.key);
+    } catch (error) {
+      // `importKey` writes last too, so the only thing left that can throw is the keychain itself.
+      console.log('[keys] import failed to store:', error);
+      setNote({ bad: true, text: `Could not store that key, so nothing has changed: ${error}` });
     } finally {
       setBusy(false);
     }
@@ -111,12 +145,20 @@ export default function Keys() {
     <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Pressable onPress={() => router.back()} hitSlop={SPACE.gutter}>
-          <Text style={[styles.back, { color: theme.accent }]}>Setup</Text>
+          <Text style={[styles.back, { color: theme.accent }]}>{from ?? 'Setup'}</Text>
         </Pressable>
         <Text style={[styles.title, { color: theme.foreground }]}>Key</Text>
 
         <View style={[styles.card, { backgroundColor: theme.panel }]}>
-          <Text selectable style={[styles.mono, { color: theme.foreground }]}>
+          {/* Sans and muted when there is no digest to show: the degraded card is a sentence, and
+              a sentence set in the fingerprint's 12pt mono reads as a broken fingerprint. */}
+          <Text
+            selectable
+            style={[
+              styles.mono,
+              print === NO_FINGERPRINT && styles.degraded,
+              { color: print === NO_FINGERPRINT ? theme.muted : theme.foreground },
+            ]}>
             {print === '' ? 'reading…' : print}
           </Text>
         </View>
@@ -271,6 +313,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   mono: { fontFamily: MONO, includeFontPadding: false, fontSize: 12, lineHeight: 17, padding: SPACE.gutter },
+  degraded: { fontFamily: SANS, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
   caption: {
     fontFamily: SANS,
     includeFontPadding: false,

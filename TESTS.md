@@ -2966,3 +2966,219 @@ on both platforms (b427712).
   announced frame read instead of `Keyboard.metrics()`; record which one you saw.
 - 📸 the landing frame in both (a) and (b), plus one shot of the squared top corner.
 - iOS: [ ]
+
+## T15/T16/T17 — the lock, the keys, many hosts (walked on Android 2026-08-18)
+
+Preamble: same harness as every other Android section — `. ~/Android/env.sh`, the emulator, sshd
+on `10.0.2.2`. Three of these cases need a **second endpoint**; stand one up in the scratchpad
+(`/usr/sbin/sshd -f <own config> -E <own log>` on `:2222`, its own `HostKey`, its own
+`AuthorizedKeysFile`) rather than touching `/etc/ssh/sshd_config`. Giving that config
+`SetEnv TMUX_TMPDIR=/tmp/<dir>` is what makes the second endpoint a genuinely different *tmux*
+host, which T17.3 needs and nothing else provides on a one-box harness.
+
+Two harness facts learned the hard way, both worth knowing before the first tap:
+
+- **`while read … ; do adb shell … ; done < file` eats the file.** `adb shell` consumes stdin, so
+  only the first line is ever typed. Use `mapfile` (or `< /dev/null` on every `adb`) when typing a
+  multi-line key into the paste box.
+- **A LogBox toast swallows taps on the control underneath it.** T16's `[digest]` bug (below)
+  raises one on every visit to the key screen, and while it is up "Use this key" reports
+  `enabled=true` and does nothing at all. Dismiss the toast (its ✕) before every tap on that
+  screen, or you will file a working button as broken.
+- **`BiometricPrompt` and the PIN sheet are `FLAG_SECURE`** — `screencap` and `screenrecord` both
+  come back black. The accessibility tree (`uiautomator dump`) and `logcat` are the only evidence
+  available for T15.2–T15.5; do not ask for a screenshot of them.
+
+### T17.1 — An existing install keeps its host (migration, destructive-order-sensitive)
+- **Setup**: an install made by a **pre-T17 build**, with a host fully set up — hostname, port,
+  username, a non-default start mode, one connect done so the key is pinned and `knownSessions` is
+  cached, and an upload directory. Confirm the shape first:
+  `adb shell "sqlite3 /data/data/com.kamilpostrozny.port22/databases/RKStorage 'select value from
+  catalystLocalStorage where key=\"port22.settings.v1\"'"` must show the **flat** blob with no
+  `hosts` array. Back it up before doing anything else.
+- **Steps**: build the new APK and `adb install -r` it **over the top** — no uninstall, no
+  `pm clear`. A wipe tests nothing. Launch, then Connect without retyping anything.
+- **Expect**: Setup shows **one** host row, ticked, carrying the hostname and username; the three
+  fields below hold the same values; the same start mode is ticked with its command intact. Connect
+  goes straight through — the log says `[session] host key trust <fp>`, never `ask`. The stored blob
+  is now `hosts: [ … ]` + `activeHostId`, all nine per-host fields carried over, and the globals
+  (`fontSize`, themes, `tmuxExtras`) unchanged. **If the host is gone this is a P0 — stop.**
+- iOS: [ ]
+- Android: [x] 2026-08-18 — passed whole. Fingerprint on the trust line matched
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` exactly.
+
+### T17.2 — A second host pins its own key, and the first host's pin is untouched
+- **Setup**: T17.1's host, plus the scratch sshd on `:2222`. Check SecureStore for a **stale pin**
+  first — `adb shell "cat /data/data/…/shared_prefs/SecureStore.xml" | grep -o 'hostkey.v1.[A-Za-z0-9_-]*'`
+  — and remove it if the endpoint was used in an earlier run, or the missing TOFU will read as a
+  failure when it is really a leftover.
+- **Steps**: Add host → the new endpoint → Connect. Trust it. Disconnect, tap host 1, Connect.
+- **Expect**: the alert names the **new** `host:port` and the new host key's fingerprint; after
+  trusting, SecureStore holds **two** `hostkey.v1.*` entries. Switching back to host 1 connects with
+  `trust` and no prompt at all.
+- iOS: [ ]
+- Android: [x] 2026-08-18 — both halves passed; the two pins are independent.
+
+### T17.3 — Each host's attach picker lists its own sessions
+- **Setup**: two hosts whose tmux servers genuinely differ (the `TMUX_TMPDIR` trick above). Create a
+  session that exists only on the second.
+- **Steps**: put host 1 on `Existing tmux session` and read the picker; switch to host 2, same mode,
+  read it again. Then give the two hosts different start modes and upload directories, force-stop
+  the app, relaunch, and read both back.
+- **Expect**: each picker lists only its own host's sessions — this is the bug T17 fixes, where the
+  cache was global and showed the previous machine's list. After the restart each host still has its
+  own `startMode`, `attachSession`, `knownSessions` and `lastUploadDir`.
+- iOS: [ ]
+- Android: [x] 2026-08-18 — host 2's picker listed only its own session; the stored blob showed two
+  independent `knownSessions` arrays; all four per-host fields survived a force-stop.
+
+### T17.4 — Delete, forget, and the last host
+- **Steps**: long-press host 2 → **Delete and forget key**. Then re-add that same endpoint and
+  Connect. Then long-press the survivor and use plain **Delete**.
+- **Expect**: the row leaves, its pin leaves with it, `activeHostId` lands on the survivor and Setup
+  renders it ticked with its fields filled — never blank, never tickless. Re-adding the endpoint
+  prompts TOFU again. Deleting the **last** host leaves exactly one blank `New host` row, ticked,
+  with default fields — never an empty card. Plain Delete leaves the pin behind.
+- **Watch the button order**: the confirm's three buttons dump in the order
+  `DELETE AND FORGET KEY`, `DELETE`, `CANCEL`, so a `grep -F DELETE | head -1` tap hits the
+  *destructive-plus-forget* one. Tap by bounds.
+- iOS: [ ]
+- Android: [x] 2026-08-18 — all four parts passed.
+
+### T15.1 — Lock off is the default and changes nothing
+- **Expect**: `requireAuth` absent from a migrated blob defaults to `false`; Connect goes straight
+  through with no prompt.
+- iOS: [ ]
+- Android: [x] 2026-08-18.
+
+### T15.2 — Biometric gate on a cold launch
+- **Setup**: `adb shell locksettings set-pin 1234`, then enrol a fingerprint —
+  `adb shell am start -a android.settings.FINGERPRINT_ENROLL`, PIN, MORE, I AGREE, then
+  `adb -e emu finger touch 1` about eight times. Arm the switch under Security on Setup.
+  Force-stop (cold = no grace).
+- **Steps**: relaunch, Connect. Authenticate with `adb -e emu finger touch 1`.
+- **Expect**: the prompt carries `Unlock Port22 to open a session on <host:port>.` and appears
+  before **any** SSH traffic — the log may show `[session] {"status":"connecting"}` first (that is
+  the deliberate re-entrancy guard, `session.ts`), but there must be no `ExpoSSH` call, no
+  `host key` line and no connect until the prompt is answered. The session comes up after it.
+- iOS: [ ]
+- Android: [x] 2026-08-18.
+
+### T15.3 — Cancel refuses, and nothing reaches the wire
+- **Steps**: cold launch, Connect, dismiss the prompt with the **system back gesture**.
+- **Expect**: `[session] gate refused user_cancel`, `status: failed`, and §4.9's screen carrying
+  "Port22 is locked. It asks for Face ID, a fingerprint or your passcode…". The log holds **no**
+  `ExpoSSH` line, no `host key` line and no connect for the whole attempt.
+- **Note (parity)**: there is no "Cancel" button to tap. With `disableDeviceFallback: false`
+  AndroidX puts **"Use PIN"** in the negative-button slot, and the only cancel is back or the scrim;
+  iOS's sheet shows "Cancel". `cancelLabel` survives only as the scrim's content-desc.
+- iOS: [ ]
+- Android: [x] 2026-08-18.
+
+### T15.4 — The five-minute grace
+- **Steps**: with a live session, HOME, then resume with
+  `adb shell am start -n com.kamilpostrozny.port22/.MainActivity` — **not** the dev-client deep
+  link, which reloads the bundle and resets `lastAuthAt`, so a grace pass looks like a fail.
+- **Expect**: `[app] active` → `[session] connecting` → `host key trust` → `connected`, with no
+  `FingerprintAuthenticationClient` line anywhere. A cold launch instead prompts (T15.2).
+- iOS: [ ]
+- Android: [x] 2026-08-18 — 16s after the unlock, no second prompt.
+
+### T15.5 — PIN with no biometric enrolled
+- **Setup**: delete the fingerprint (Security & privacy → Device unlock → Pixel Imprint → Delete
+  Finger 1) and keep the PIN. Cold launch.
+- **Expect**: a credential sheet carrying the same `promptMessage`, and a successful connect after
+  the PIN.
+- **Note (PLAN.md's predicted flicker did not happen here)**: PLAN's T15 write-up expects a
+  `BiometricPrompt` failing `ERROR_NO_BIOMETRICS` and only then handing off to the PIN sheet. On
+  API 36 the framework resolves it *before* any dialog — `BiometricService/PreAuthInfo` marks the
+  fingerprint sensor `Ineligible … state: 4` and `AuthController` shows a single dialog with
+  `authenticators: 32768` (DEVICE_CREDENTIAL alone). One sheet, no flicker, which is what iOS does.
+  Re-check on API 28–30 before calling the divergence gone.
+- iOS: [ ]
+- Android: [x] 2026-08-18.
+
+### T15.6 — No lock on the phone at all
+- **Setup**: `adb shell locksettings clear --old 1234`.
+- **Expect**: with `requireAuth` **off** the row's label greys and the switch reports
+  `enabled="false"`, under the caption "Set a passcode on this phone first." With `requireAuth`
+  **on** the switch stays `enabled="true"` so it can be turned off — that is deliberate, never
+  strand the user behind a lock they cannot pass — and Connect refuses with
+  `[session] gate refused not_enrolled` and a message that names the way out.
+- iOS: [ ]
+- Android: [x] 2026-08-18 — both states walked.
+
+### T16.1 — Generate
+- **Steps**: note the public line on Setup. Manage → Generate a new key → **Cancel**, and check the
+  line. Then Generate → Replace. Connect. Then paste the new line into the host's
+  `authorized_keys` and connect again.
+- **Expect**: Cancel changes nothing. Replace produces a different line, Setup's card shows the new
+  one, and the connect fails with exactly "The host would not accept this key. Add the public key
+  from Setup to ~/.ssh/authorized_keys on the machine, then try again." Adding the line by hand
+  makes it connect.
+- iOS: [ ]
+- Android: [x] 2026-08-18 — all of the above passed, **but see T16.4**: the confirmation the screen
+  shows after a successful Replace is the *error* "Could not write the new key: …".
+
+### T16.2 — Paste
+- **Setup**: on the host, `ssh-keygen -t ed25519 -N ''`, the same with `-N 'hunter2'`, an RSA key,
+  and a PEM key (`ssh-keygen -m PEM`; note `-m PEM -t ed25519` is refused by ssh-keygen, so the PEM
+  case is necessarily RSA-in-PEM — it is the container that is under test, not the algorithm).
+- **Steps**: for the clipboard button, Copy on Setup then **From clipboard** on the key screen.
+  For typing, see the `mapfile` note in the preamble. Walk all six inputs.
+- **Expect**: the public line from Copy is refused with the OpenSSH-container sentence naming
+  `ssh-keygen -p -f <key>`. The plain ed25519 key imports and connects, and the line the app derives
+  is byte-identical to `ssh-keygen -y` on the host. The encrypted key with an empty passphrase says
+  "This key is protected by a passphrase…"; with `wrong` it says "That key could not be opened…" and
+  the stored key does not change; with `hunter2` it imports and connects. RSA is refused by name
+  ("Port22 uses ed25519 keys, and this one is ssh-rsa…"). PEM gets the `ssh-keygen -p -f` sentence.
+- **The note lives at the bottom of the ScrollView** — scroll to it, or every case reads as silent.
+- iOS: [ ]
+- Android: [x] 2026-08-18 — every refusal and both imports verified against `ssh-keygen -y`.
+  The one thing that never appears is the *success* message; see T16.4.
+
+### T16.3 — Upload
+- **Setup**: a host whose `authorized_keys` holds three keys **and none of them the app's** — which
+  on a one-box harness means authenticating through the scratch sshd's own `AuthorizedKeysFile`
+  while `~/.ssh/authorized_keys` holds the three. Set `~/.ssh` to 0755 and the file to 0644 first,
+  or the chmod half of the accept proves nothing.
+- **Reaching the screen with a session up**: Setup is the only route to `/keys`, and leaving the
+  terminal disconnects. The way in is to open `/keys` while disconnected and then HOME + resume —
+  §4.9's foreground listener reconnects under the screen. See T16.5.
+- **Steps**: with no session, read the row and tap it. Then with a session, tap; tap again;
+  `truncate` the file to end mid-line with no trailing newline and tap again; finally
+  `mv ~/.ssh ~/.ssh.bak` and tap once more.
+- **Expect**: with no session the Pressable is `enabled="false"`, the caption names Copy on Setup,
+  and the tap does nothing. With a session: "Added to ~/.ssh/authorized_keys on this host.",
+  `wc -l` 3→4, the first three lines byte-identical, `~/.ssh` 0700 and the file 0600. The second tap
+  says "This key is already in ~/.ssh/authorized_keys. Nothing was added." and the file is unchanged.
+  On the truncated file the key lands on its **own** line, leaving the half-line intact. With no
+  `~/.ssh` at all the directory is created 0700 with the file 0600 holding exactly the one key.
+- iOS: [ ]
+- Android: [x] 2026-08-18 — all five parts passed, byte-for-byte.
+
+### T16.4 — The key screen's fingerprint never renders on Android (open bug)
+- **Steps**: open Manage.
+- **Observed 2026-08-18**: the card reads `reading…` forever and the screen throws
+  `Error: [digest] Cannot convert '[object ArrayBuffer]' to a Kotlin type. no ArrayBuffer attached`,
+  which LogBox points at `keys.ts:70` (`fingerprint`). `src/keys.ts` calls
+  `Crypto.digest(SHA256, blob.buffer as ArrayBuffer)`; expo-crypto's Android
+  `CryptoModule.digest(algorithm, output: TypedArray, data: TypedArray)` only converts a
+  **TypedArray**, so the raw ArrayBuffer is rejected. iOS's Swift converter takes it, which is why
+  this is invisible there. The `.d.ts` says `BufferSource`, so TypeScript never complains.
+- **What it costs, beyond the missing fingerprint** — every path through `show()` throws after
+  `setLine`, so: Generate reports "Could not write the new key: …" on a replacement that
+  **succeeded** (an actively false message on an irreversible action); a successful Paste shows no
+  "Imported." at all and leaves the key body *and the typed passphrase* on screen; and in a dev
+  build the resulting LogBox toast sits over "Use this key" and eats taps on it.
+- iOS: [ ] — not reproducible there by construction.
+- Android: [ ] — open.
+
+### T16.5 — Upload cannot be reached the way a user would reach it (open)
+- **Observed 2026-08-18**: `/keys` is pushed from Setup only (`index.tsx`), and the terminal's back
+  runs `leave()` — `disconnect()` then `router.back()`. So arriving on the key screen from a live
+  session always kills the session first, and "Add to authorized_keys" is greyed with "Needs a
+  session that is already up". The only way to see it enabled is to sit on `/keys` and let §4.9's
+  foreground reconnect fire underneath. The feature works (T16.3); the route to it does not exist.
+- iOS: [ ] — same navigation on both platforms, so expect it there too.
+- Android: [ ] — open.

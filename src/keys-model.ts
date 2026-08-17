@@ -52,6 +52,15 @@ export const UNREADABLE =
   'That key could not be opened. If it has a passphrase, check it and try again. Nothing here has ' +
   'changed.';
 
+/**
+ * What the fingerprint card says when the digest cannot be taken (Android's `Crypto.digest` did
+ * exactly this until 2026-08-17). Disabled-over-hidden: the key itself is untouched and every verb
+ * on the screen still works, so the card says which of the two is missing rather than leaving
+ * `reading…` up forever or taking the action that produced it down with it.
+ */
+export const NO_FINGERPRINT =
+  'The fingerprint could not be computed on this phone. The key itself is fine — its full line, and Copy, are on Setup.';
+
 /* --- reading the container --- */
 
 export type KeyInspection =

@@ -8,7 +8,12 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export function fromBase64(base64: string): Uint8Array {
+// The buffer is spelled out because a bare `Uint8Array` is `Uint8Array<ArrayBufferLike>`, which
+// includes SharedArrayBuffer and so is NOT a `BufferSource` — and `BufferSource` is what
+// `expo-crypto`'s `digest` takes (see `fingerprint` in keys.ts, which must hand it the typed array
+// itself: Android's converter refuses a bare ArrayBuffer). This allocates a plain ArrayBuffer, so
+// saying so costs nothing and is true.
+export function fromBase64(base64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
