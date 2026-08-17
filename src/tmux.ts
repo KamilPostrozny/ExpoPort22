@@ -24,7 +24,7 @@ import {
   type SearchHit,
   type WindowSearch,
 } from '@/search-model';
-import { getSettings, pollSession, SESSION_NAME, updateSettings, usesTmux } from '@/settings';
+import { getHost, getSettings, pollSession, SESSION_NAME, updateHost, usesTmux } from '@/settings';
 import {
   APPLY_AND_VERIFY,
   CONF_DIRECTORIES,
@@ -143,7 +143,7 @@ export function useTmux(): TmuxState {
 /** The §4.5 Settings row: off / applied / not-applied. Reactive callers pair it with
  *  `useSettings()` + `useTmux()` and derive — this form is for one-shot reads (T12 wires it). */
 export function configStatus(): ConfigStatus {
-  return deriveConfigStatus(usesTmux(getSettings()), state.config);
+  return deriveConfigStatus(usesTmux(getHost()), state.config);
 }
 
 /* --- the exec seam --- */
@@ -249,7 +249,7 @@ export async function startTmux(): Promise<void> {
   // appears (user, 2026-08-12). Nothing in the poll depends on the conf.
   void tick();
   void cacheSessions();
-  if (usesTmux(getSettings())) await configure();
+  if (usesTmux(getHost())) await configure();
 }
 
 /** The session went away, whichever way. Everything resets: the next connect re-probes, and a
@@ -311,7 +311,7 @@ async function poll(): Promise<void> {
   polling = true;
   try {
     // Ask about OUR session, not whichever one tmux last touched (see `pollCommand`).
-    const wanted = pollSession(getSettings());
+    const wanted = pollSession(getHost());
     if (wanted !== aimedAt) {
       aimedAt = wanted;
       console.log(`[tmux] poll aimed at ${wanted === null ? 'nothing (untargeted)' : `session ${wanted}`}`);
@@ -353,9 +353,9 @@ async function poll(): Promise<void> {
 async function cacheSessions(): Promise<void> {
   try {
     const names = parseSessions(await run1(LIST_SESSIONS));
-    const known = getSettings().knownSessions;
+    const known = getHost().knownSessions;
     if (names.length !== known.length || names.some((name, i) => name !== known[i])) {
-      updateSettings({ knownSessions: names });
+      updateHost({ knownSessions: names });
     }
   } catch {
     // One list nobody is looking at yet; the next connect asks again.

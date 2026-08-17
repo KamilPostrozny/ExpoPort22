@@ -36,6 +36,12 @@ public class ExpoSSHModule: Module {
       await self.session.resolveHostKey(accept)
     }
 
+    // Connectionless (T16): the key screen imports before there is ever a session, so this is a
+    // static call on the session type rather than something the actor's state takes part in.
+    AsyncFunction("importPrivateKey") { (text: String, passphrase: String?) -> String in
+      try SSHSession.importSeed(text, passphrase: passphrase).base64EncodedString()
+    }
+
     AsyncFunction("disconnect") {
       await self.session.disconnect()
     }

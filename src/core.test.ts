@@ -10,6 +10,15 @@ mock.module('@react-native-async-storage/async-storage', () => ({
   default: { getItem: async () => null, setItem: async () => {} },
 }));
 
+// T17's host ids. Sequential rather than random so a failure names the host it means. `mock.module`
+// is process-wide and the last registration wins, so this stub carries `getRandomBytes` too —
+// without it, whichever file runs after this one gets a key module that cannot make a key.
+let uuids = 0;
+mock.module('expo-crypto', () => ({
+  randomUUID: () => `id-${++uuids}`,
+  getRandomBytes: () => new Uint8Array(32),
+}));
+
 mock.module('expo-secure-store', () => ({
   WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'stub',
   getItemAsync: async () => null,
@@ -22,16 +31,23 @@ const { DARK_THEMES, LIGHT_THEMES, THEMES, resolveTheme } = await import('@/them
 const { SCHEMES } = await import('@/themes-generated');
 const {
   DEFAULTS,
+  HOST_DEFAULTS,
   clampFontSize,
   decode,
+  decodeHost,
   endpoint,
   startupLine,
   themeNameFor,
   usesTmux,
   validate,
 } = await import('@/settings');
+
 const { isHttpLink, parseOsc52 } = await import('@/terminal-protocol');
 const { hostKeyVerdict } = await import('@/host-keys');
+
+/** The per-host half, with an id the tests can ignore — every function under test takes one of
+ *  these and none of them reads the id. */
+const aHost = () => decodeHost({});
 
 const cat = (flavour: 'mocha' | 'latte', colour: string) =>
   (flavors[flavour].colors as Record<string, { hex: string }>)[colour].hex;
@@ -161,7 +177,7 @@ test('an author who publishes the colour outranks our arithmetic', () => {
 });
 
 test('following the system picks per appearance, ignoring it picks once', () => {
-  const s = { ...DEFAULTS, followSystem: true, themeDark: 'nord', themeLight: 'ayu-light' };
+  const s = { ...decode({}), followSystem: true, themeDark: 'nord', themeLight: 'ayu-light' };
   expect(themeNameFor(s, true)).toBe('nord');
   expect(themeNameFor(s, false)).toBe('ayu-light');
   expect(themeNameFor({ ...s, followSystem: false, theme: 'dracula' }, true)).toBe('dracula');
@@ -185,13 +201,25 @@ test('a theme flip notifies the host with the right DECSET 2031 code', () => {
   expect(THEMES.latte.colorSchemeNotification).toBe('\x1b[?997;2n');
 });
 
+/** A decoded blob minus the ids, which are freshly minted and not what these tests are about. */
+const shape = (raw: unknown) => {
+  const s = decode(raw);
+  return { ...s, hosts: s.hosts.map(({ id, ...rest }) => rest) };
+};
+const globals = { ...DEFAULTS, activeHostId: expect.any(String) };
+
 test('decode fills gaps, rejects wrong types, and drops unknown keys', () => {
-  expect(decode({})).toEqual(DEFAULTS);
-  expect(decode(null)).toEqual(DEFAULTS);
-  expect(decode({ port: '2222', theme: 'chartreuse', configureTmux: 'yes' })).toEqual(DEFAULTS);
-  expect(decode({ host: 'box', keyRow: ['gone'] })).toEqual({ ...DEFAULTS, host: 'box' });
-  expect(decode({ theme: 'frappe', fontSize: 99 })).toEqual({
-    ...DEFAULTS,
+  const blank = { ...globals, hosts: [HOST_DEFAULTS] };
+  expect(shape({})).toEqual(blank);
+  expect(shape(null)).toEqual(blank);
+  expect(shape({ port: '2222', theme: 'chartreuse', configureTmux: 'yes' })).toEqual(blank);
+  expect(shape({ host: 'box', keyRow: ['gone'] })).toEqual({
+    ...globals,
+    hosts: [{ ...HOST_DEFAULTS, host: 'box' }],
+  });
+  expect(shape({ theme: 'frappe', fontSize: 99 })).toEqual({
+    ...globals,
+    hosts: [HOST_DEFAULTS],
     followSystem: false, // a named theme in the old field is a user who had opted out of auto
     theme: 'frappe',
     fontSize: 32,
@@ -199,15 +227,100 @@ test('decode fills gaps, rejects wrong types, and drops unknown keys', () => {
 });
 
 test('a startup command written by an older build still runs, as the custom mode', () => {
-  const migrated = decode({ host: 'box', startupCommand: 'tmux attach' });
+  const migrated = decode({ host: 'box', startupCommand: 'tmux attach' }).hosts[0];
   expect(migrated.startMode).toBe('custom');
   expect(startupLine(migrated)).toBe('tmux attach');
   // A stored blob with no line at all takes the new default rather than a silent plain shell.
-  expect(decode({ host: 'box' }).startMode).toBe('session');
+  expect(decode({ host: 'box' }).hosts[0].startMode).toBe('session');
+});
+
+/**
+ * T17's migration, and the one thing about it that can silently lose the user's setup: the storage
+ * key did not change, so a blob written by any build before the split has its nine per-host fields
+ * at the top level and must come back as one host with every one of them intact.
+ */
+test('a pre-T17 blob becomes one host, whole, and that host is the active one', () => {
+  const old = {
+    host: 'box.lan',
+    port: 2222,
+    username: 'kamil',
+    startMode: 'attach',
+    attachSession: 'work',
+    knownSessions: ['work', 'port22'],
+    startupCommand: 'tmux attach -t work',
+    lastUploadDir: '/home/kamil/drop',
+    // The globals ride along in the same blob and must stay global rather than following the host.
+    fontSize: 17,
+    followSystem: false,
+    theme: 'nord',
+    themeDark: 'dracula',
+    themeLight: 'latte',
+    tmuxExtras: false,
+  };
+  const s = decode(old);
+  expect(s.hosts).toHaveLength(1);
+  const [host] = s.hosts;
+  expect(host).toEqual({
+    id: host.id,
+    host: 'box.lan',
+    port: 2222,
+    username: 'kamil',
+    startMode: 'attach',
+    attachSession: 'work',
+    knownSessions: ['work', 'port22'],
+    startupCommand: 'tmux attach -t work',
+    lastUploadDir: '/home/kamil/drop',
+  });
+  // A real id, and the one `getHost` will find — an install that upgrades and cannot point at its
+  // own host is the same failure as losing it.
+  expect(host.id).not.toBe('');
+  expect(s.activeHostId).toBe(host.id);
+  // The app's half stayed the app's.
+  expect(s).toMatchObject({
+    fontSize: 17,
+    followSystem: false,
+    theme: 'nord',
+    themeDark: 'dracula',
+    themeLight: 'latte',
+    tmuxExtras: false,
+  });
+  // Nothing of the host leaked back up into the globals.
+  expect(s).not.toHaveProperty('host');
+  expect(s).not.toHaveProperty('lastUploadDir');
+  // And the round trip is stable: re-decoding what we would write keeps the same id, so the pin
+  // and the upload directory stay attached to the same row across a restart.
+  const again = decode(JSON.parse(JSON.stringify(s)));
+  expect(again).toEqual(s);
+});
+
+test('a multi-host blob keeps its order, its ids and its pick', () => {
+  const s = decode({
+    hosts: [
+      { id: 'a', host: 'one.lan', startMode: 'shell' },
+      { id: 'b', host: 'two.lan', lastUploadDir: '/srv' },
+    ],
+    activeHostId: 'b',
+  });
+  expect(s.hosts.map((h) => h.id)).toEqual(['a', 'b']);
+  expect(s.hosts[1].lastUploadDir).toBe('/srv');
+  expect(s.activeHostId).toBe('b');
+  // A pick at a host that is not there would leave Setup editing a row it never highlights.
+  expect(decode({ hosts: [{ id: 'a' }], activeHostId: 'gone' }).activeHostId).toBe('a');
+  // An empty list is not a state the app has: Setup would need an empty version of itself.
+  expect(decode({ hosts: [] }).hosts).toHaveLength(1);
+});
+
+/** T15. Off by default — an app that wants a face before it has ever reached a host is not the
+ *  first run anyone wants — and global rather than per-host, so it does not ride in `hosts[0]`. */
+test('the auth gate is off until it is asked for, and it is the app’s answer, not a host’s', () => {
+  expect(decode({}).requireAuth).toBe(false);
+  expect(decode({ requireAuth: true }).requireAuth).toBe(true);
+  expect(decode({ requireAuth: 'yes' }).requireAuth).toBe(false); // junk takes the default
+  expect(decode({ requireAuth: true }).hosts[0]).not.toHaveProperty('requireAuth');
 });
 
 test('each start mode is one line the host shells all parse the same way', () => {
-  const s = { ...DEFAULTS };
+  const s = aHost();
   expect(startupLine({ ...s, startMode: 'shell' })).toBeNull();
   expect(startupLine({ ...s, startMode: 'session' })).toBe('tmux new-session -A -D -s port22');
   // Nothing picked yet: the most recent, and the same session the other mode makes if there is none.
@@ -227,7 +340,7 @@ test('each start mode is one line the host shells all parse the same way', () =>
 });
 
 test('the conf is pushed for a tmux mode, and for a custom line that starts one', () => {
-  const s = { ...DEFAULTS };
+  const s = aHost();
   expect(usesTmux({ ...s, startMode: 'session' })).toBe(true);
   expect(usesTmux({ ...s, startMode: 'attach' })).toBe(true);
   expect(usesTmux({ ...s, startMode: 'shell' })).toBe(false);
@@ -260,7 +373,7 @@ test('only http(s) links are offered to the browser', () => {
 });
 
 test('validation says what is wrong in plain English', () => {
-  const ok = { ...DEFAULTS, host: 'box.lan', username: 'kamil' };
+  const ok = { ...aHost(), host: 'box.lan', username: 'kamil' };
   expect(validate(ok)).toBeNull();
   expect(validate({ ...ok, host: '   ' })).toBe('Host cannot be empty.');
   expect(validate({ ...ok, port: 0 })).toBe('Port must be between 1 and 65535.');

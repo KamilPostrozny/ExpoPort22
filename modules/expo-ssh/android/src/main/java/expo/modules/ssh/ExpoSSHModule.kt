@@ -49,6 +49,15 @@ class ExpoSSHModule : Module() {
       session.resolveHostKey(accept)
     }
 
+    // Connectionless (T16): the key screen imports before there is ever a session, so this is a
+    // companion call rather than session state. Still on `Dispatchers.IO` — bcrypt-pbkdf on an
+    // encrypted key is deliberately slow, and the module queue is one thread.
+    AsyncFunction("importPrivateKey") Coroutine { text: String, passphrase: String? ->
+      withContext(Dispatchers.IO) {
+        Base64.encodeToString(SSHSession.importSeed(text, passphrase), Base64.NO_WRAP)
+      }
+    }
+
     AsyncFunction("disconnect") Coroutine { ->
       withContext(Dispatchers.IO) { session.disconnect() }
     }

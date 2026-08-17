@@ -52,9 +52,10 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppearanceCard, { switchColors } from '@/appearance';
+import RequireAuthRow from '@/auth';
 import { sheetShouldDismiss } from '@/input-model';
 import { forgetPinnedHostKey } from '@/session';
-import { endpoint, updateSettings, useSettings, usesTmux } from '@/settings';
+import { endpoint, updateSettings, useHost, useSettings, usesTmux } from '@/settings';
 import {
   GRABBER,
   leading,
@@ -89,6 +90,7 @@ export default function SettingsSheet({
   onDisconnect: () => void;
 }) {
   const settings = useSettings();
+  const host = useHost();
   const insets = useSafeAreaInsets();
   const ty = useSharedValue(TRAVEL);
   const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
@@ -155,7 +157,7 @@ export default function SettingsSheet({
   const forget = () =>
     Alert.alert(
       'Forget this host key?',
-      `The next connection to ${endpoint(settings)} will ask you to trust a key again — and if ` +
+      `The next connection to ${endpoint(host)} will ask you to trust a key again — and if ` +
         'something is answering in the machine’s place, that is the key you would be trusting.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -207,7 +209,7 @@ export default function SettingsSheet({
 
               {/* Only on a tmux session: on any other the toggle governs nothing, and a row that
                   explains why it is inert is worse than no row. */}
-              {usesTmux(settings) && (
+              {usesTmux(host) && (
                 <>
                   <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>
                     TMUX
@@ -227,7 +229,10 @@ export default function SettingsSheet({
               )}
 
               <Text style={[styles.header, styles.headerGap, { color: theme.muted }]}>SESSION</Text>
-              <View style={[styles.card, { backgroundColor: theme.surface }]}>
+              {/* T15: the lock in front of the next connect, above the button that ends this one —
+                  the two answers about "who gets back into this session" side by side. */}
+              <RequireAuthRow theme={theme} card={theme.surface} />
+              <View style={[styles.card, styles.cardGap, { backgroundColor: theme.surface }]}>
                 <Pressable
                   onPress={onDisconnect}
                   style={({ pressed }) => [
@@ -281,6 +286,8 @@ const styles = StyleSheet.create({
   header: { ...SECTION_HEADER, paddingHorizontal: SPACE.gutter, paddingBottom: 7 },
   headerGap: { paddingTop: 14 },
   card: { borderRadius: RADIUS.card, overflow: 'hidden' },
+  /** The gap under the note of the card above it, so two cards in one section do not touch. */
+  cardGap: { marginTop: 10 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

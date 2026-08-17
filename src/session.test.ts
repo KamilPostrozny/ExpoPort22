@@ -35,14 +35,35 @@ mock.module('expo-secure-store', () => ({
   setItemAsync: async () => {},
   deleteItemAsync: async () => {},
 }));
-mock.module('expo-crypto', () => ({ getRandomBytes: () => new Uint8Array(32) }));
+mock.module('expo-crypto', () => ({
+  getRandomBytes: () => new Uint8Array(32),
+  randomUUID: () => 'id-fixed', // T17 host ids; this file never reads one
+}));
+/** T15's gate: what the biometric prompt answers, and how many times it was raised. */
+let authResult: { success: boolean; error?: string } = { success: true };
+let prompts = 0;
+/** How many times a socket was actually opened — the gate's whole job is that a refusal leaves
+ *  this at zero. */
+let connects = 0;
+
+mock.module('expo-local-authentication', () => ({
+  authenticateAsync: async () => {
+    prompts += 1;
+    return authResult;
+  },
+  getEnrolledLevelAsync: async () => 3,
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 },
+}));
+
 mock.module('../modules/expo-ssh/src/ExpoSSHModule', () => ({
   default: {
     addListener: (event: string, handler: (payload: unknown) => void) => {
       handlers[event] = handler;
       return { remove: () => {} };
     },
-    connect: async () => {},
+    connect: async () => {
+      connects += 1;
+    },
     disconnect: async () => {},
     startShell: async () => {},
     send: async (text: string) => {
@@ -59,12 +80,16 @@ mock.module('../modules/expo-ssh/src/ExpoSSHModule', () => ({
   },
 }));
 
-const { attachTerminal, connect, disconnect, send, setSize } = await import('@/session');
+const { attachTerminal, authNeeded, connect, disconnect, getSession, send, setSize } =
+  await import('@/session');
+const { updateSettings } = await import('@/settings');
 
 // The session is a module singleton, so the replay buffer outlives a test. `disconnect` is the
 // real thing that empties it — the same path the Disconnect button takes.
 beforeEach(async () => {
   await disconnect();
+  updateSettings({ requireAuth: false });
+  authResult = { success: true };
 });
 
 const shell = (data: string) => handlers.onShellData?.({ data });
@@ -72,6 +97,58 @@ const shell = (data: string) => handlers.onShellData?.({ data });
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 /** Long enough for the slowest write below to settle and the queue behind it to drain. */
 const settled = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+/* --- T15's gate --- */
+
+/** The grace decision, without a clock: five minutes of cover for the foreground reconnects §4.9
+ *  makes, and never a persisted one. `MINUTE`s are handed in, so nothing here waits. */
+test('one unlock covers five minutes of reconnects, and a cold start has none', () => {
+  const min = 60_000;
+  // Off is off, whatever the timestamps say.
+  expect(authNeeded(false, null, 0)).toBe(false);
+  expect(authNeeded(false, 0, 99 * min)).toBe(false);
+  // A cold launch: `lastAuthAt` is module state, so it is null however recently the user unlocked.
+  expect(authNeeded(true, null, 12 * min)).toBe(true);
+  expect(authNeeded(true, 0, 4 * min)).toBe(false); // inside
+  expect(authNeeded(true, 0, 5 * min)).toBe(true); // the edge is asked, not waved through
+  expect(authNeeded(true, 0, 60 * min)).toBe(true);
+  // A phone whose clock moved backwards hands us a timestamp from the future. That is not a grace
+  // anyone granted — ask again rather than trust it.
+  expect(authNeeded(true, 10 * min, 1 * min)).toBe(true);
+});
+
+test('a refused gate never opens a socket, and says so in plain English', async () => {
+  updateSettings({ requireAuth: true });
+  authResult = { success: false, error: 'user_cancel' };
+  connects = 0;
+  prompts = 0;
+
+  await connect();
+
+  expect(prompts).toBe(1);
+  expect(connects).toBe(0); // the whole point: nothing was dialled
+  const session = getSession();
+  expect(session.status).toBe('failed');
+  // The §4.9 screen's sentence, not whatever the SSH stack would have said, and not a mismatch —
+  // that is the one failure with a recovery button of its own.
+  expect(session.status === 'failed' && session.message).toContain('locked');
+  expect(session.status === 'failed' && session.mismatch).toBe(false);
+});
+
+/** Order-independent on purpose: whatever `lastAuthAt` is when this starts, the *second* connect is
+ *  inside the grace the first one opened and must not ask again. Backgrounding is what makes this
+ *  matter — §4.9 reconnects on every foreground. */
+test('a reconnect inside the grace window does not ask again', async () => {
+  updateSettings({ requireAuth: true });
+  await connect();
+  const asked = prompts;
+
+  await disconnect();
+  await connect();
+
+  expect(prompts).toBe(asked);
+  expect(getSession().status).toBe('connected');
+});
 
 test('a burst of chunks crosses into the terminal as one batch, in order', async () => {
   const seen: string[][] = [];

@@ -76,9 +76,10 @@ import {
 } from '@/session';
 import {
   endpoint,
-  getSettings,
+  getHost,
   pollSession,
-  updateSettings,
+  updateHost,
+  useHost,
   useSettings,
   usesTmux,
 } from '@/settings';
@@ -147,8 +148,9 @@ import UploadSheet from '@/upload-sheet';
 export default function SessionScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const settings = useSettings();
-  const { fontSize, host, lastUploadDir } = settings;
+  const { fontSize } = useSettings();
+  const activeHost = useHost();
+  const { host, lastUploadDir } = activeHost;
   const session = useSession();
   const tmux = useTmux();
   const sending = useUploadBusy();
@@ -329,7 +331,7 @@ export default function SessionScreen() {
     if (fingerprint === null) return;
     Alert.alert(
       'Unknown host',
-      `${endpoint(getSettings())} has not been seen before.\n\ned25519 ${fingerprint}\n\n` +
+      `${endpoint(getHost())} has not been seen before.\n\ned25519 ${fingerprint}\n\n` +
         'Check it against `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the machine itself. ' +
         'Trusting it pins it: a different key later is refused, not asked about.',
       [
@@ -363,7 +365,7 @@ export default function SessionScreen() {
     if (pendingUpload === null) return;
     const { base64 } = pendingUpload;
     setPendingUpload(null);
-    updateSettings({ lastUploadDir: dir }); // §4.6: the sheet remembers where it was
+    updateHost({ lastUploadDir: dir }); // §4.6: the sheet remembers where it was
     // Saves silently: on success nothing is typed and nothing is shown (§4.6). `sendFile` owns
     // the failure alert.
     await sendFile(base64, joinPath(dir, filename));
@@ -2788,7 +2790,7 @@ export default function SessionScreen() {
             <TabsHintPopover
               theme={theme}
               bottom={popBase}
-              text={tabsHint(tmux.present, usesTmux(settings), pollSession(settings) !== null)}
+              text={tabsHint(tmux.present, usesTmux(activeHost), pollSession(activeHost) !== null)}
             />
           ) : open === 'clipboard' ? (
             <ClipboardPopover
@@ -3017,7 +3019,7 @@ function Status({
   // Nerd Font glyphs: the font is bundled and already loaded, so this is an icon without an icon
   // set. \uf1e6 is a plug, \uf071 a warning triangle — written as escapes so a copy of this file
   // through a tool that does not carry the private-use plane still says what it meant.
-  const where = endpoint(getSettings());
+  const where = endpoint(getHost());
   const face =
     session.status === 'disconnected'
       ? {
