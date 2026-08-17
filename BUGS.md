@@ -1169,7 +1169,7 @@ the user's tmux conf (`src/tmux-model.ts:145-157`); and the tabs circle is greye
 longer keyed on the conf (`tabsAvailable = present && attached`). The numeric window badge no longer
 exists as UI at all — the switcher's active card is now the only reader of `windowIndex`.
 
-### The switcher lists — and can kill — windows of a session the phone is not attached to — OPEN, dangerous
+### The switcher lists — and can kill — windows of a session the phone is not attached to — FIXED, Android-verified 2026-08-17
 
 Found by the T10 walk (2026-08-17). `LIST_WINDOWS` (`src/tmux-model.ts:230`) is `tmux list-windows
 -F …` with **no `-t <session>`**, run on an exec channel that is outside any tmux client. tmux
@@ -1214,7 +1214,7 @@ Invalid color value: "rgba(0,0,0,7.852042303549444e-7)"
 Red box, fires repeatedly on card swipes. Shared code, so iOS is likely exposed too — this is not an
 Android divergence. Clamp or round the alpha before interpolating it into the string.
 
-### `move-window` carries no `-d`, so a drag-reorder also switches the user's window
+### `move-window` carries no `-d`, so a drag-reorder also switches the user's window — FIXED, Android-verified 2026-08-17
 
 `src/tmux-model.ts:341`. Not in any Expect and not previously noticed; reordering cards in the grid
 therefore moves the attached client to the window that was dragged. Needs a decision rather than a
@@ -1239,3 +1239,135 @@ It is shared with the iOS build, so `[switcher]` / `[ribbon]` lines in it can co
 device. A burst that looks like the emulator acting on its own may be a human on the phone. Any walk
 that reasons from that log must corroborate against host-side `tmux list-windows -t <session>` or
 video frames before blaming the app.
+
+## Found by the T11 walk (2026-08-17)
+
+### `less`'s `/` prompt and the keyboard are mutually exclusive — OPEN
+
+T11.10. From a clean launch the cap logs `[ribbon] cap /`, raises the keyboard, and refits the
+terminal `50 × 45` → `50 × 26`. The SIGWINCH redraw then **cancels less's pending `/` prompt** —
+`capture-pane` shows the plain status line. When the keyboard does not rise, `/` stays up. So the
+user can have the search prompt or the means to type into it, never both, and `n` is untestable in
+consequence.
+
+`htop` survives the identical resize (T11.11 passes), so this is specific to less's transient prompt
+rather than a general resize fault. Worth checking whether the cap can raise the keyboard *first* and
+send `/` only once the refit has settled — the reverse of the current order.
+
+### The agent ribbon band has three caps instead of ten, and will not scroll — OPEN
+
+T11.12, driven with a real process named `aider`. The row shows only
+`⚠ ^C ^C quit · /clear · /context`; `/model`, `/usage`, `/config`, `/plugins`, 📎, ⇧⇥ and ⎋ are all
+absent. Neither a 550px flick nor a slow 500px drag moves it, and the log reads
+`[ribbon] band 259/252 scroll=true` — 259pt of content where the case predicts `9xx`.
+
+The `›` chevron also sits on top of `/context` and slices it to `/conte›`, which is the exact thing
+the Expect forbids.
+
+Arming, `/context`, `/clear`-disarm, the 4s timeout and the two-tap quit all behave correctly, so the
+band's machinery is fine — it is the recipe's cap list that is short.
+
+### The neighbour preview during a bar swipe can be arbitrarily stale — DECISION NEEDED, not a plain bug
+
+T11.2. With `watch -n1 date` running in the neighbour: last switcher visit 19:47:38, 45s of
+stillness, swipe held open at 19:50:27 — the page read **19:49:11**, i.e. exactly when the *previous*
+bar swipe ended. Repeated twice. So the preview is fresher than the last grid visit but has no bound.
+
+This is a conflict between the test and a deliberate design, not a defect: `onBarSwipe('start')`
+takes no capture, and the comment at `src/app/terminal.tsx:1679` says the refresh is skipped there on
+purpose — "a capture per window on the JS thread is the stutter". Either the Expect gives, or the
+warm-only design does. Do not "fix" it by adding the capture back without weighing that comment.
+
+### More stale Expects in TESTS.md
+
+Annotated in place during the T11 walk; in each case the app is right and the test is behind:
+the bar has **no numeric badge** any more (the count lives in the grid footer); the last window no
+longer rubber-bands leftward, because `slots = windows.length + 1` makes the new-tab page a real
+neighbour that rides 1:1 and births a window when committed onto; fish prints
+`terminated by signal SIGKILL (Forced quit)` rather than `Killed`; and T11.12's "peach ✳" is
+U+F0D0, a wand, correctly peach.
+
+### Harness note: drive the ribbon through the accessibility tree, not pixels
+
+The chip and caps expose `content-desc` (`"htop actions"`, `"Destructive: kill"`, `"sort"`, …), so
+`ui_tap` is far more reliable than coordinates, which shift the moment the keyboard state changes.
+Two bogus results in the T11 run came from tapping stale coordinates.
+
+## Found by the T12 / T12A walk (2026-08-17)
+
+### The system back button loses the terminal route — OPEN
+
+T12A.4. Back backgrounds the app but returning lands on **Setup with a live session** — the route is
+gone while the session is not. `BackHandler.exitApp()` (`src/app/terminal.tsx:1403`) finishes and
+recreates `MainActivity` on RN 0.86 / targetSdk 36 / API 36, so the React root remounts at the
+initial route while the JS session survives underneath it.
+
+The comment above that call asserts it does `moveTaskToBack`. It does not. Control: `keyevent 3`
+(HOME) from the same state returns to the terminal correctly, which is exactly what back should have
+done.
+
+### The keyboard never returns after the settings sheet closes — OPEN
+
+T12.2. With the keyboard up before opening, all three close paths (scrim, grabber, system back) leave
+`mInputShown=false`. `keysWereUp` / `setFocusSignal` (`terminal.tsx:368,377`) does not raise the IME
+on Android.
+
+**This is the third instance of the same shape** — see also "The key bar's swipe up does not raise
+the keyboard" and "`+` does not raise the keyboard on a birth". Every path that is supposed to bring
+the keyboard back on Android fails to. Worth fixing as one thing: find what actually raises the IME
+on Android and route all three through it, rather than three separate patches.
+
+### `CSI ?2031n`'s push never reaches the host — OPEN, needs the iOS half before blaming Android
+
+T12.12. The *query* half is perfect in both directions (`;1` / `;2` correctly). The theme flip never
+pushes the unsolicited notification — four observations.
+
+Caveat recorded honestly: every observation was under tmux, which may swallow an unsolicited DSR
+reply. Walk the iOS half before calling this Android-specific.
+
+### Android's `Alert` ignores `style: 'destructive'` — parity divergence
+
+FORGET on the host-key dialog renders in the same Material teal `colorPrimary` as CANCEL, where iOS
+draws it red. RN exposes no colour props for the native alert, so this cannot be fixed while the
+dialog is `Alert.alert` — same class as the already-fixed Material switch-thumb teal, and the same
+root as the TOFU-prompt parity entry above. Both point at building these dialogs out of the app's own
+sheet chrome.
+
+A destructive action that does not read as destructive is worth more than a cosmetic note.
+
+### Tapping the gap above the upload sheet does not cancel it — OPEN
+
+T12A.2. Measured while there: corner radius 24dp and top gap 60.2dp, both matching the values on
+file, so the sheet's geometry is right and only the dismiss target is missing.
+
+### Held-backspace repeat is flat on Android
+
+~17–19 DEL/s at both 2s and 5s. The "accelerates" in the Expect is iOS's own keyboard curve, not
+something the app drives — recorded as a divergence we probably cannot close rather than a bug.
+
+## Harness corrections — these invalidate earlier "NOT PROVABLE" verdicts
+
+- **Multitouch IS injectable after all**: protocol-B `sendevent` on `/dev/input/event2` after
+  `adb root`. This drove §4.8's two-finger door in the T12A walk. Earlier walks (T6.6, T7.12, and the
+  T10 two-finger cases) marked two-finger tests NOT PROVABLE on the strength of failed injection —
+  **those verdicts are wrong and those cases are re-walkable.** Note `adb root` clears `adb reverse`;
+  re-add it afterwards.
+- **Velocity is still not injectable**: best achievable is ~250 dp/s over a short drag, against a
+  500 dp/s flick threshold. Fling-specific cases remain genuinely unprovable here.
+- `input swipe` does not reliably reach the RNGH ScrollView inside a sheet; a `sendevent` drag does.
+- The accessibility dump lags the screen and reports garbage bounds for content scrolled out of a
+  clipped ScrollView — screenshot-then-tap is needed inside the theme list.
+- Gboard's stylus-handwriting onboarding overlay can hijack input mid-run:
+  `settings put secure stylus_handwriting_enabled 0`.
+
+### More stale Expects (T12 section)
+
+T12.1's scrim is opaque `crust` so nothing shows behind the sheet, APPEARANCE is `Follow system` plus
+26-scheme lists rather than "Auto + four flavour swatch rows", and TMUX has no status row. T12.6
+describes a control that no longer exists at all. T12.4's "Mocha ↔ Latte" predates the two-slot
+design and its "keyboard appearance" is iOS-only. T12.3's four flavours are reachable only with
+`Follow system` off. And T11.1's rubber-band clause is wrong in a new way: hopping off the last
+window now *creates* a third window.
+
+**New, found while walking:** Setup's `Command` row label wraps as `Comman` / `d` beside a long start
+line, in both flavours.

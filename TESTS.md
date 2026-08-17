@@ -1849,7 +1849,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   immediately). Log: `[barswipe] start at 0 of 3`, `[barswipe] commit → window …`, and an
   exec `select-window` — nothing typed into the PTY.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: passed. `[barswipe]` lines do not exist (`GESTURE_LOG = false`, src/app/terminal.tsx:691); the commit is corroborated by `[ribbon] forWindow 1 fish (bar swipe commit)` and the `[tmux]` windowIndex change, and nothing was typed into the PTY. STALE EXPECT: "the badge says 2" — the bar carries no numeric badge any more (no badge prop on `<KeyBar>`); the count lives in the grid footer ("3 Tabs").
 
 ### T11.2 — Neighbour preview is a real, fresh snapshot
 - **Setup**: window 2 running `watch date` (leave it a while); window 1 active.
@@ -1860,6 +1861,7 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   drag is accepted (§4.4); the content attaches mid-slide.
 - iOS: [ ]
 - Android: [ ]
+  - FAILED 2026-08-17: the incoming page is NOT captured at swipe start. Measured on the emulator: `watch -n1 date` in the neighbour, last switcher visit at 19:47:38, then 45s of stillness, then a swipe held open — the neighbour read `19:49:11`, i.e. the timestamp of the END OF THE PREVIOUS BAR SWIPE, 76s stale, not `now`. Repeated twice with the same result (touch at 19:50:27 → page showed 19:49:11). The content is real and in colour and is fresher than the last switcher visit, so the headline is half-right, but the capture fires on the PREVIOUS swipe's cache warm, not on this touch: `onBarSwipe('start')` takes no capture (src/app/terminal.tsx:1662-1673) and the comment at :1679 says the refresh is deliberately skipped there because "a capture per window on the JS thread is the stutter `clearBarSwipe` describes". Either the Expect or the warm-only design has to give.
 
 ### T11.3 — Rubber-band at the ends
 - **Steps**: on the first window, drag the bar right ~90pt and hold; release. Repeat on the
@@ -1868,7 +1870,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   neighbour appears, and release springs straight back — no commit, no `select-window` in the
   log, badge unchanged.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: first half passes exactly — on window 1 a 90pt drag right moved the page ~1/3 of the finger's travel, no neighbour appeared, release sprang back, no commit, no `select-window`. STALE EXPECT for the second half: on the LAST window a leftward drag is no longer past the end. `slots = windows.length + 1` (src/app/terminal.tsx:1652), so the new-tab page is a real neighbour, it rides the finger 1:1 with no rubber band, and committing onto it births a window (seen: a 400px slow drag from the last tab created window 3).
 
 ### T11.4 — Flick vs slow drag decide differently
 - **Steps**: from window 2: (a) flick the bar left fast, ~40pt of travel; (b) drag left
@@ -1876,7 +1879,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
 - **Expect**: (a) commits — a short fast swipe is enough; (b) springs back — same distance,
   slow, is a cancel (`[barswipe] cancel`); (c) commits — a slow drag needs the full ~70pt.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: the three-way decision is right, but the absolute pt figures are not measurable through injected events — `originX` is re-based when `rowJoins` fires and adb's coarse MOVE stream inflates it by ~20-30dp, so an injected 100pt drag reads as ~70pt to the app. Measured relatively instead, on the same 160px of travel: (a) fast (90ms) COMMITS, (b) the identical distance dragged slowly SPRINGS BACK, (c) a slow 400px drag COMMITS. `[barswipe] cancel` is not loggable (`GESTURE_LOG = false`).
 
 ### T11.5 — Cancel springs back clean
 - **Steps**: drag left ~40pt slowly, release; keep typing.
@@ -1884,7 +1888,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   the keys, the badge never changed, and the next keystroke lands in the same window. A new
   swipe started immediately after works.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: sprang back, keys faded back in (crop at +1.2s shows `Ctrl Esc Tab Paste` and square corners), the window never changed, the next keystroke landed in the same window (`echo T11-5` ran in the same pane), and a new swipe started 0.25s after the release committed normally. The 0.32s ease-out curve itself was not separately timed.
 
 ### T11.6 — Vertical claim intact: swipe-up still drags the switcher
 - **Steps**: keyboard up: swipe the bar up slowly (T10.2's gesture); then down; then
@@ -1893,7 +1898,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   unchanged from T7/T10 — and only a clearly-horizontal pan starts the page slide. One
   gesture never becomes the other mid-drag.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: up drags into the switcher zoom (mid-drag frame shows the single shrinking card, release landed in the grid, window unchanged); down on the bar hid the keyboard (mInputShown true→false) with no window change; horizontal starts the page slide. No gesture became the other mid-drag.
 
 ### T11.7 — `sleep 100` → green chip with a ticking clock; ^C cap kills it
 - **Steps**: type `sleep 100⏎`; watch the trailing edge for ~5s; tap the chip; read the band;
@@ -1908,7 +1914,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   returns, and the chip leaves on the next poll beat — again with no reflow. Log:
   `[ribbon] open sleep`, `[ribbon] cap ^C`.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: chip is a 44pt opaque pill flush to the trailing edge, green ▶, `sleep`, ticking clock (0:09 → 0:14 over 5s). No `[terminal] size` on arrival or on the ^C. Band = `⚠ kill force` (red bold, red ring) · `^Z bg background` · `^C stop` · divider · chip. `[ribbon] open sleep`, `[ribbon] cap ^C`, `^C⏎` printed, prompt back, chip gone on the next beat. The 12s screen recording shows the chip settling to a fixed x within ~4 frames and holding it for the remaining 7s — it never oscillates; the three individual ~2.5pt nudges are below what the emulator's capture rate resolves.
 
 ### T11.8 — ^Z from the chord strip → grey `· stopped` chip; fg resumes
 - **Steps**: `sleep 100⏎`; arm Ctrl, tap the chord strip's `Z`; wait a beat; tap the chip;
@@ -1919,7 +1926,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   The `fg` tap closes the band, types and runs `fg`, and the green running chip (fresh clock)
   is back on the next beat. Identical for a Ctrl+Z typed on the keyboard.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: `^Z` from the chord strip stopped the job (`fish: Job 1, 'sleep 100' has stopped`) and the chip swapped **at once** to a grey ⏸ `sleep · stopped` with no clock and no 3s wait. Caps `⚠ kill force` · `bg run behind` · `fg resume`. The `fg` tap closed the band, typed and ran `fg` (`Send job 1 (sleep 300) to foreground`) and the green running chip came back on the next beat with a fresh clock (`[ribbon] run #8 sleep`, 0:03). NOT CHECKED: the "identical for a Ctrl+Z typed on the keyboard" half — Gboard has no Ctrl key to inject.
 
 ### T11.9 — Open, close, and the key bar staying live; vim caps work from insert mode
 - **Steps**: `vim /tmp/t11.txt⏎`; press `i` and type a line (stay in insert mode). Open the
@@ -1936,7 +1944,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   row scrolls ~46pt and a `›` chevron shows at the leading edge; on a wider phone it does not
   scroll at all. `:w` saves *from insert mode*; `ZZ` saves and quits; `:q!` discards.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: caps left→right exactly `⚠ :q! discard` (red) · `:q quit` · `/ search` · `ZZ save+quit` · `:w save`, then the divider and the chip; no scroll and no chevron on this 411pt screen. Esc on the key bar fired WHILE the band was open (`-- INSERT --` cleared) and the band stayed up. All four closes work: chip tap, terminal tap, hardware back, cap tap. `:w` saved from insert mode (`1L, 27B written`), `ZZ` saved and quit, `:q!` discarded. vim never reflowed. NOT PROVABLE here: the 375pt-phone scroll + `›` chevron (this AVD is 411pt).
 
 ### T11.10 — less: q, / raises the keyboard and the band stays open, g/G jump
 - **Steps**: `man ls⏎`; open the band; tap `G`, reopen and tap `g`, then tap `/` (type
@@ -1948,6 +1957,7 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   `q` exits and the band leaves.
 - iOS: [ ]
 - Android: [ ]
+  - FAILED 2026-08-17: `/` cannot both raise the keyboard and leave less's search prompt up. From a clean launch the `/` cap logs `[ribbon] cap /`, raises the keyboard (mInputShown=true) and refits the terminal (`[terminal] size 50 × 45` → `50 × 26`) — and the SIGWINCH redraw cancels less's pending `/` prompt: `capture-pane` shows the ordinary status line, never `/`. When the keyboard does NOT rise (focus already lost), the same cap leaves `/` up. Two runs each way. `n` is therefore untestable — there is no search to repeat. The rest of the case passes: caps `q quit` · `G end` · `g top` · `n next hit` · `/ search`, `G` → line 270/313 (END), `g` → top, the band stays open and rides up with the bar in one step with no gap or overlap, `q` exits and the band leaves.
 
 ### T11.11 — htop: q, / filter, F6 sort, F9 kill
 - **Steps**: `htop⏎`; open the band; tap `/`, type a name, Esc; tap `F9`; Esc; reopen, tap
@@ -1956,7 +1966,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   `! F9 kill` cap opens htop's SendSignal column and `F6` its sort column (`CSI 20~` /
   `CSI 17~`); `q` exits. Four caps fit without scrolling on any phone.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: four caps `⚠ F9 kill` (red) · `q quit` · `F6 sort` · `/ filter` fit with no scrolling. `/` raised the keyboard AND left htop's `Search:` prompt up with the band still open (htop survives the SIGWINCH that loses less's prompt in T11.10); typed `fish` into it, Esc on the key bar cancelled it. `F9` opened the `Send signal:` column, `F6` the `Sort by` column, `q` exited. Logs `[ribbon] cap /`, `cap F9`, `cap F6`, `cap q`.
 
 ### T11.12 — Agent band: the scroll tape, ⇧⇥, 📎, and the two-tap quit
 - **Setup**: `claude` (or any process whose `pane_current_command` is on the agent list)
@@ -1981,6 +1992,7 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   `[ribbon] cap /context`, `[ribbon] cap ^C ^C`, `[ribbon] band 9xx/2xx scroll=true`.
 - iOS: [ ]
 - Android: [ ]
+  - FAILED 2026-08-17, three ways (driven with a real `aider`-named process so `pane_current_command` matches the agent list). (1) The row holds only THREE caps — `⚠ ^C ^C quit` · `/clear` · `/context` — not ten; `/model`, `/usage`, `/config`, `/plugins`, `📎`, `⇧⇥`, `⎋` are absent and unreachable. (2) It does not scroll: neither a 550px flick nor a slow 500px drag moved it, and the log says `[ribbon] band 259/252 scroll=true` — 259pt of content, i.e. three caps' worth, where the Expect predicts `9xx/2xx`. (3) The `›` chevron sits ON TOP of the `/context` cap and slices its label to `/conte›` — the exact thing the Expect forbids ("the chevron must never sit on top of a cap and slice its label"). What does pass: the band is the same 52pt as `sleep`'s, the chip is peach with a live ticking clock (U+F0D0 wand, not a sparkle — the Expect's ✳ is shorthand), `/context` types the command and presses Return and closes the band, the first `^C ^C` tap sends exactly one interrupt and re-labels the cap `tap again` with a stronger red ring, `/clear` disarms it without a second interrupt, the arm times itself out after ~4s, and two taps in a row send two interrupts and close the band.
 
 ### T11.13 — The silences: idle shell, REPL, unknown TUI
 - **Steps**: sit at the prompt 5s; run `python3` and sit at `>>>` 5s; `exit()`; run an
@@ -1989,7 +2001,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   an unknown TUI gets no caps (§4.4). The `[tmux]` log shows the foreground changing, so the
   silence is a decision, not a missed poll.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: no chip in any of the three — idle prompt, `python3` at `>>>`, and `nano` (alt-screen, unlisted) — checked against the accessibility tree (no `… actions` node) and a screenshot. `[tmux]` logged the foreground changing each time (`python3` → null → `nano` with `paneAlt:true`), so the silence is a decision, not a missed poll.
 
 ### T11.14 — The band rides the chrome and never touches the terminal
 - **Steps**: `sleep 100⏎`; raise and dismiss the keyboard; arm Ctrl (chord strip up); disarm;
@@ -2001,7 +2014,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   mid-zoom. Through all of it the terminal's rows never rewrap (`[terminal] size` stays quiet
   except for the keyboard's own refit).
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: verified the chip riding up over the chord strip (T11.8's Ctrl arm), riding up with the keyboard and back down with it in the same step as the bar, and the band open with the keyboard up. Grabbing the bar for the switcher with the band OPEN closed it and faded it out with the bar — the mid-zoom frame has no band left hanging. No `[terminal] size` except the keyboard's own refits. Geometry: `popBase = barHeight + 6 + keyboardPad + insets.bottom` (src/app/terminal.tsx:2045); measured on screen the band's foot sits ~10.7pt above the bar row's drawn top edge, the extra being the bar container's own padding — the 6pt is off the measured bar-stack height, not off the drawn pill.
 
 ### T11.15 — Kill force: pgrep + kill -9, observable in the log
 - **Steps**: `sleep 100⏎`; open the band; tap the red `! kill force` cap; read the log and
@@ -2011,7 +2025,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   `Killed`, the prompt returns, the band leaves on the next beat. Same cap from the suspended
   chip (T11.8's setup) kills the stopped job.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: `[ribbon] kill-force: pgrep -P 4105405 | xargs kill -9 2>/dev/null; true` — exactly the expected command; nothing typed into the PTY. The same cap from the SUSPENDED chip killed the stopped job (`pgrep -P <pane_pid>` came back empty afterwards). The shell prints fish's wording, `terminated by signal SIGKILL (Forced quit)`, not bash's `Killed`. The `[ssh] exec` line cannot be seen — `LOG = false` in `modules/expo-ssh/src/ExpoSSHModule.ts`.
 
 ### T11.16 — The lifetime gate: short commands never raise the band at all
 - **Steps**: at a prompt, run `ls`, `git status`, `git log --oneline -5`, `echo hi` — a dozen
@@ -2023,7 +2038,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   and it fades out when the command ends. A named recipe (`vim`, `less`, `htop`, `claude`) is
   never gated: it appears on the first poll beat.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: twelve quick commands (`ls`, `git status`, `git log --oneline -5`, `echo hi` ×3) recorded at 10fps — 100 frames, not one with a chip (detector validated against a recording that has one: 71/128 frames). `sleep 10` raised the chip 4.5s in (3s gate + a poll beat) and it was still up 4.3s after the command ended, i.e. it leaves about two poll beats late rather than one. `vim`, `man`/`less`, `htop` and the agent all raised their chip on the first beat, ungated.
 
 ### T11.17 — Adversarial readability: the band over the worst content there is
 - **Steps**: on a many-core box run `htop` (full-width colour bars); open the band and
@@ -2037,7 +2053,8 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
   red on the plate is the tightest ratio in the design. This is the case the old design never
   had: it was measured only against an idle prompt, which is how it shipped at 1.69:1.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: 📸 four shots — htop's colour bars (dark), `bat AGENTS.md` (dark), `bat` on Latte, and the `⚠ kill force` danger cap on Latte. The plate is fully opaque in every one: no colour bar, no syntax colour and no pale ground shows through, and no cap is harder to read in one than another. The edge separates in both schemes — a dark stroke with a lighter one inside on dark, a strong dark stroke plus a foot shadow on Latte. Danger reads red **bold** with ⚠ on Latte and on Rosé Pine Dawn. htop specifically was not re-shot on Latte; `bat`'s syntax colour is the same test.
 
 *(T11.18–T11.22 cover the five fixes made after the redesign landed, none of which the cases above
 can catch: the clock was frozen at 0:00 by the React Compiler and restarted by every window hop,
@@ -2058,7 +2075,8 @@ process on the new tab, and light schemes had a plate the eye could not find. Se
   elapsed time and keep ticking from there. Log: `[ribbon] forWindow 2 … (bar swipe commit)`,
   `[ribbon] forWindow 1 sleep …`, `[ribbon] run #…`.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: the clock advanced once a second continuously for over three minutes (0:09 → 0:14 → … → 3:30), digits tabular, no jitter. Hopped away to the idle window (band left entirely, confirmed by pixel check) and back after ~44s: the chip returned reading **4:14**, i.e. where it left off plus the time away, not 0:00. Log: `[ribbon] forWindow 1 fish (bar swipe commit)`, `[ribbon] forWindow 2 sleep (bar swipe commit)`, `[ribbon] run #9 sleep pid=- startedAt=…`.
 
 ### T11.19 — The poll names our session: no flicker while other windows work
 - **Setup**: on the host, before connecting — `tmux new -d -s other 'htop'`, and in the port22
@@ -2074,7 +2092,8 @@ process on the new tab, and light schemes had a plate the eye could not find. Se
   `custom` or `shell` start mode the log instead says `poll aimed at nothing (untargeted)` and
   the flap is expected there — that is the documented ceiling, not a regression.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: setup as written — `other` session running htop, `sleep 999` in another port22 window, sitting on window 1. Connect logged `[tmux] poll aimed at session port22`. Then `sleep 300` and 60s of stillness sampled every 4s: the chip was present in all 12 samples with a monotonic clock (0:31 → 1:18) and the process never swapped, and **not one `[tmux]` line was emitted in the whole minute** — the poll's answer (windowIndex, foreground) never changed, so there is nothing to flicker.
 
 ### T11.20 — A hop's stale answers are ignored: the band leaves with the slide
 - **Setup**: window 1 running `sleep 300` (chip up), window 2 idle at a prompt.
@@ -2087,7 +2106,8 @@ process on the new tab, and light schemes had a plate the eye could not find. Se
   slide too (T11.18 owns its clock). No case where the band belongs to a window you are not
   looking at.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: six hops, three each way, each sampled at +1.2s, +2.8s and +4.4s after the landing. Hopping to the idle window: no chip in any of the nine samples — the band goes out with the slide and stays gone. Hopping back to the `sleep` window: the chip was up by +1.2s twice and by +2.8s once (the documented one-beat pid catch-up). No sample ever showed a band belonging to the window not being looked at.
 
 ### T11.21 — Light schemes: the plate separates itself from the pane
 - **Setup**: Settings → a *light* scheme. Do Latte first, then a generated one — Rose Pine Dawn
@@ -2103,7 +2123,8 @@ process on the new tab, and light schemes had a plate the eye could not find. Se
   dark bar or a border; the caps' own contrast is T11.17's business.
 - 📸 one shot per light scheme, band open.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: 📸 both — Catppuccin Latte over a pale `ls -la` listing, and Rosé Pine Dawn over the same. In both the plate reads a touch darker than the pane, carries a dark stroke, and casts a soft shadow at its foot; it does not read as a dark bar or a border, and the band is easy to find. Danger cap legible in both.
 
 ### T11.22 — Reduce Motion: nothing moves, and everything is visible
 - **Setup**: iOS Settings → Accessibility → Motion → Reduce Motion **on**. (Android:
@@ -2116,7 +2137,8 @@ process on the new tab, and light schemes had a plate the eye could not find. Se
   *brighter* under Reduce Motion). Turn the setting back off and confirm the nudge returns: three
   cycles on arrival, then still forever — it must never oscillate indefinitely (WCAG 2.2.2).
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - NOTE 2026-08-17: Android's "Remove animations" set via `settings put global {window,transition,animator}_*_scale 0.0`, app relaunched. Recorded at 30fps: the chip goes from absent to fully present between two consecutive frames at its final x and never moves again for the remaining 8s — no glide, no nudge, nothing invisible (the fade is instant rather than gradual, which is what a zeroed animator scale gives). Open and close, twice: the plate's left edge jumps 726 → 31 → 727 in single-frame steps, so the width jumps and the caps do not fade in. Scales restored to 1.0 and the arrival regains transitional frames, then holds one x forever — it never oscillates (WCAG 2.2.2). The three individual ~2.5pt nudge cycles are below the emulator's usable capture rate and were not counted.
 
 ## T12 — Settings sheet + polish pass
 
@@ -2134,7 +2156,19 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   SESSION (Disconnect in accent, Forget host key in red). No host/port/user/startup fields
   anywhere on it. Log: `[settings] sheet open`.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator. Both doors open the same sheet (⋯ → Settings, and a
+  two-finger tap on the grid — multitouch IS injectable, see the note below); `[settings] sheet
+  open` logged each time; the keyboard was up before (`mInputShown=true`) and gone with the sheet up
+  (`false`); `top` was still refreshing and still running when the sheet closed; no host/port/user/
+  startup field anywhere on it. **Three clauses of the Expect are stale, not failures:** (a) the
+  terminal is NOT visible behind — `theme.scrim` is `crust`, sampled #11111b opaque across the whole
+  area above the sheet, so "top keeps refreshing behind the scrim" cannot be seen (shared code, same
+  on iOS); (b) APPEARANCE is now `Follow system` + collapsible Dark/Light theme rows over 26 schemes
+  + the font stepper, not "Auto + four flavour swatch rows"; (c) TMUX is a `Comfort settings` toggle
+  + explainer with **no status row** (see T12.6).
+- **Harness note (new, 2026-08-17):** multitouch IS injectable on this emulator via protocol-B
+  `sendevent` on `/dev/input/event2` (`ABS_MT_SLOT` max 10) after `adb root`. A two-finger tap
+  script drove §4.8's second door reliably. `adb root` clears `adb reverse` — re-add it after.
 
 ### T12.2 — Grabber swipe dismisses; there is no Done
 - **Steps**: open the sheet; drag it down slowly past ~a third and release; reopen; flick it
@@ -2145,6 +2179,22 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   grabber tap both close it. No Done button exists. The keyboard comes back on close.
 - iOS: [ ]
 - Android: [ ]
+  - FAILED 2026-08-17: **the keyboard does not come back on close.** Walked with the keyboard
+    verified up before opening (`mInputShown=true` at the terminal AND still `true` with the ⋯ menu
+    open), sheet opened from ⋯ → Settings (`mInputShown=false` while up), then closed by scrim tap,
+    by grabber tap and by system back — `mInputShown=false` every time, re-read after 4 s and
+    confirmed on a screenshot (key bar sitting on the terminal, no Gboard). `keysWereUp` /
+    `setFocusSignal` (`src/app/terminal.tsx:368,377`) is not raising the IME on Android.
+    Everything else in this case passes: the sheet rides the finger down and never above rest (held
+    with the finger 220px ABOVE the grab point, sheet top stayed at its rest y=1082); a slow drag
+    past a third (530px ≈ 202dp > the 140dp rule) dismissed and logged `[settings] sheet closed`;
+    a 50pt drag released slowly sprang back exactly to y=1082; scrim tap and grabber tap both close;
+    no Done button in the tree. Two sub-notes: the ride is not 1:1 under injection (finger +131px →
+    sheet +71px, finger +262px → +177px, measured off the panel colour) — unexplained, possibly an
+    injection artefact, worth an eye on hardware. And **the flick release is NOT PROVABLE here**:
+    `SHEET_DISMISS_VELOCITY` is 500 dp/s and neither `input swipe`, `input motionevent` nor a
+    `sendevent` drag can deliver a short drag fast enough (best ≈ 250 dp/s over 65 dp), so only the
+    distance rule could be exercised.
 
 ### T12.3 — A flavour tap restyles the live session, no reconnect
 - **Setup**: `vim` open with syntax colouring, sheet up.
@@ -2153,7 +2203,13 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   check mark all restyle immediately; the SSH connection never blips (vim stays exactly
   where it was, `[session]` log shows no reconnect). Sub-second, no remount flash.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator, `vim -R src/style.ts` open over tmux. Latte → Mocha → Frappé,
+  each tap logging `[settings] theme →` and restyling the sheet, the check mark and the swatch rows
+  instantly; closing the sheet showed the terminal grid and the key bar plates already in the new
+  flavour with vim untouched at `1,1` and the same wrapped text. `[session]` emitted nothing between
+  the connect and the last tap — no reconnect, no remount flash. Note the Expect's "tap Latte" now
+  needs `Follow system` off (the four flavours live inside one 26-scheme list); that is the
+  redesign, not a defect.
 
 ### T12.4 — Auto follows a system appearance flip live
 - **Setup**: theme = Auto, connected, sheet closed.
@@ -2161,7 +2217,13 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
 - **Expect**: the app flips Mocha ↔ Latte on its own, terminal and chrome together, session
   live throughout. The keyboard appearance follows on its next raise.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator, `Follow system` on, sheet closed, vim live.
+  `adb shell cmd uimode night no` flipped the whole app to the light slot on its own — terminal
+  grid, key bar, status-bar icons (dark-on-light) together — and `night yes` flipped it back;
+  sampled base #eff1f5 → #1e1e2e. No `[session]` line either way, vim unchanged. Two notes: the
+  light slot here is the user's `themeLight` (Rosé Pine Dawn), not Latte — "Mocha ↔ Latte" is the
+  old single-`auto` design; and "the keyboard appearance follows" has no Android counterpart
+  (`keyboardAppearance` is iOS-only), so that clause is N/A rather than passed.
 
 ### T12.5 — Font stepper: 8 and 32 are walls, the size survives a restart
 - **Steps**: step − repeatedly to 8 (keep tapping); step + to 32; set 13; kill the app,
@@ -2170,7 +2232,13 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   hooks); the stepper stops dead at 8 and 32 (extra taps change nothing, no haptic);
   after the relaunch the sheet still says 13 pt and the grid is drawn at it.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator. 8 taps on − from 13 produced exactly 5 `[settings] fontSize →`
+  lines (12,11,10,9,8) and the last three taps produced nothing at all — no log, no haptic call
+  (`stepFont` returns before `Haptics.impactAsync`), sheet reading `8 pt`. 27 taps on + produced
+  exactly 24 lines to 32 and then nothing. The grid reflowed live at every step (at 32 pt the vim
+  buffer had rewrapped to ~17 columns). Set back to 13, `am force-stop`, relaunch, reconnect: the
+  sheet reads `13 pt` and the grid is drawn at it (same wrap as before the walk). The buzz itself is
+  not observable on the emulator; the absence of the step is.
 
 ### T12.6 — Tmux toggle: off removes the tabs button, on pushes and verifies
 - **Setup**: tmux attached, tabs button visible, status row reads `applied`.
@@ -2180,13 +2248,27 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   a reconnect (the mid-session push), status back to `applied`, tabs button returns.
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: **the control this case describes no longer exists.** There is no
+    "Configure tmux" toggle and no status row anywhere on the sheet; TMUX holds one `Comfort
+    settings` switch (`tmuxExtras`) plus the note "Applies on the next connect", and it is only
+    drawn on a tmux session at all (`usesTmux`, verified — on a Plain-shell connect the whole TMUX
+    section is absent). Measured on the emulator: toggling it off logged `[settings] tmuxExtras →
+    false`, the tabs button stayed exactly where it was (cropped at native res, same two-squares
+    glyph, same plate) and nothing was pushed or unpushed; toggling it back on logged `→ true` and
+    emitted no `[tmux] configure:` line — by design, `src/settings-sheet.tsx:150` ("`source-file`
+    can add lines to a running server, never take them back"). The Expect needs rewriting against
+    the shipped design before it can be walked.
 
 ### T12.7 — Disconnect goes to Setup
 - **Steps**: open the sheet, tap Disconnect.
 - **Expect**: sheet drops, session ends (`[session] … idle`), the Setup screen is up with
   the host form editable. No auto-reconnect behind it.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator. Tapping Disconnect dropped the sheet and logged
+  `[session] {"status":"idle"}`, `[tmux] present:null` and `[terminal] screen closed`; the Setup
+  screen was up with Host/Port/User editable (tapping the host field raised the IME,
+  `mInputShown=true`). Watched 8 s more — no further `[session]` line, no auto-reconnect; the next
+  connect only happened when Connect was tapped.
 
 ### T12.8 — Forget host key: confirm-gated, next connect asks again
 - **Steps**: sheet → Forget host key → read the dialog → Cancel; again → Forget; Disconnect;
@@ -2196,7 +2278,16 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   fingerprint prompt as if the host had never been seen. The mismatch screen's own Forget
   (T5) still exists — it is the only door when a mismatch blocks connecting.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator. The dialog names the endpoint (`10.0.2.2:22`) and carries the
+  §4.1 wording verbatim. Cancel changed nothing: Disconnect → Connect went straight back into the
+  session with no prompt. Forget logged `[settings] host key forgotten`, and the next connect raised
+  `Unknown host` with `ed25519 SHA256:jJLTGz6Twft7miBOgEw53ue4iMHQag+OVz7K1mjaqAM`, which matches
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on this box exactly. TRUST re-pinned it.
+- **Divergence, Android's Alert:** `Alert.alert` is a system control on both, and Android's is
+  Material — grey plate, ALL-CAPS buttons, and **`style: 'destructive'` is ignored**, so FORGET is
+  the same teal `colorPrimary` as CANCEL where iOS draws it red. RN exposes no colour props for the
+  Android dialog. Same class of finding as the T12A.1 switch thumb; raising it rather than shipping
+  it quietly.
 
 ### T12.9 — Dictation: the prepended space is dropped at an empty prompt, kept mid-line
 - **Steps**: at a fresh prompt, mic key → dictate "ls" → stop; ⏎. Then type `ls` (no ⏎),
@@ -2205,6 +2296,12 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   lands as `ls -la` — the space iOS prepends mid-line is the join it meant, and it stays.
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: this case is about the space **iOS dictation** prepends. The emulator
+    has no microphone feed, so Gboard's mic cannot be driven, and `adb shell input text` injects
+    key events one character at a time — it cannot produce the multi-character commit the filter
+    keys off. §T12A.9 owns the Android half and already states that Gboard commits differently;
+    the two halves of the filter that ARE checkable on Android are covered there and in T12.10
+    (single space always passes) — verified.
 
 ### T12.10 — A real spacebar at an empty prompt always sends
 - **Steps**: at a fresh prompt, press the spacebar once; type `echo hi`; ⏎.
@@ -2212,7 +2309,10 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   space-prefix history rule, that is also the proof it arrived). Single-char inserts are
   never eaten by the filter.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator, fresh fish prompt after `clear`. One `KEYCODE_SPACE`, then
+  `echo hi`, then ⏎: the line drew as `❯  echo hi` (a visibly doubled gap against the plain
+  `❯ ` prompt on the line above) and the command ran, printing `hi`. The lone-space insert is not
+  eaten.
 
 ### T12.11 — Held backspace repeats
 - **Steps**: type a long line (~30 chars); hold the delete key until the line is gone and
@@ -2222,7 +2322,15 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   an already-empty prompt still reaches the shell (the bell rings): that is the
   `onKeyPress` empty-field path, which the diff cannot see.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator, measured rather than eyeballed: `stty -icanon -echo; cat -v`
+  on the host so every byte that reaches the PTY prints as `^?`. Typed 30 characters, then held
+  Gboard's backspace (`input motionevent DOWN … 5 s … UP`): **96 `^?` reached the shell** — 30 for
+  the field's own content and ~66 more after it was empty, which is exactly the `onKeyPress`
+  fallback the case says the diff cannot see. A 2 s hold gave ~34. No harm after empty: `stty sane`
+  and the prompt came back clean.
+  One deviation from the Expect: **it repeats but does not visibly accelerate** — 19/s over 5 s vs
+  17/s over 2 s is Gboard's flat repeat curve, where "accelerate" is iOS's keyboard. Not a defect on
+  this side, but the two builds will not feel identical here and no app code can change it.
 
 ### T12.12 — vim and tmux are told about a theme flip (`?996n` + DECSET 2031)
 - **Setup**: a vim with `set background=dark`-sensitive colours (or `fish` 4, which
@@ -2235,6 +2343,20 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   watch it flip their background).
 - iOS: [ ]
 - Android: [ ]
+  - FAILED 2026-08-17: **the query half passes both ways, the unprompted push never arrives.**
+    Read with a host-side `/tmp/q996.sh` (`printf '\033[?996n'; cat -v`) so the reply lands where it
+    can be seen: in Mocha the terminal answered `^[[?997;1n`, and after flipping the system to light
+    (Rosé Pine Dawn) the same script answered `^[[?997;2n` — the reply tracks the current flavour
+    exactly as specified. The flip itself pushed nothing: with `cat -v` left running and the tty
+    echoing, a system dark→light flip, a system light→dark flip, a manual Latte→Mocha pick and a
+    `followSystem` toggle each repainted the app and produced **no** `^[[?997;…n` at the pane, in
+    four separate observations 5–10 s apart. `src/terminal.tsx:1141` is meant to emit it on any
+    `theme.name` change.
+    **Caveat for whoever fixes this:** the observations were on a tmux session, and tmux may be
+    swallowing an *unsolicited* DSR reply while forwarding a solicited one (the query reply above
+    did reach the pane through tmux). A plain-shell control was attempted and the injected
+    keystrokes did not land cleanly, so that is unsettled — walk the iOS half before concluding
+    this is Android-specific.
 
 ### T12.13 — 120Hz: scroll and coast are ProMotion-smooth
 - **Steps**: on a ProMotion iPhone, flick-scroll a long scrollback; open/close the sheet.
@@ -2244,6 +2366,10 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   either way — this case is only about smoothness.
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: the case is a ProMotion iPhone and an iOS `Info.plist` key; the
+    emulator has no high-refresh panel, and per `android-test` §"What genuinely cannot be checked"
+    a debug build on a software GPU cannot be used to judge smoothness at all. Nothing to walk on
+    this side.
 
 ### T12.14 — Launch screen and icon are the app's own, in both appearances
 - **Steps**: check the home-screen icon; kill and relaunch in system dark, then in system
@@ -2252,7 +2378,14 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   screen is crust-dark with the blue glyph in dark mode, Latte-crust with Latte blue in
   light. No white flash between splash and the first screen in dark mode.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator, sampled not eyeballed. Launcher icon (round mask, cropped at
+  native resolution): the `>_` glyph in flavour blue on crust, comfortably inside the mask, no white
+  box, no Expo template. Cold start in system dark: ground #11111b (Mocha crust) with the glyph at
+  #89b4fa (Mocha blue). Cold start in system light: ground #dce0e8 (Latte crust) with the glyph at
+  #1e66f5 (Latte blue). Exact palette values both times. No white frame anywhere in either
+  sequence. See §T12A.5/§T12A.6 for the mask/themed-icon detail and the one caveat (a ~1 s black
+  gap between splash and first screen in **both** appearances, which is the dev client's bundle
+  screen — it needs a Release build to judge).
 
 ### T12.15 — Colour sweep: all four flavours, every screen, no strays
 - **Steps**: for each of Mocha, Latte, Frappé, Macchiato: walk Setup, terminal + bar,
@@ -2264,6 +2397,16 @@ the sheet is real now, and every Settings mention below means the bottom sheet.
   (prototype spec), as is the toggle knob's white.
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17 (partial walk, nothing found wrong in what was walked). Covered on the
+    emulator: all four flavours on the terminal + key bar + settings sheet + status bar + gesture
+    pill, with the base sampled per flavour (Latte #eff1f5, Frappé #303446, Macchiato #24273a,
+    Mocha #1e1e2e) and every chrome surface following; **Latte** additionally across Setup, the ⋯
+    menu, the arrows popover and the clipboard popover — no dark-on-dark stray anywhere, hairlines
+    visible, the armed ✥ key and the pinned-row chip both in Latte's own hues; the switcher grid and
+    the ribbon chip in Mocha; the Ctrl chord strip in Dracula; the §4.9 Disconnected face in Mocha.
+    Not covered: the upload sheet (blocked by the known start-dir race, §T12A.2), the chord strip /
+    switcher / ribbon / status faces on all four flavours rather than one, and the other two §4.9
+    faces. Re-walk those before ticking.
 
 ### T12.16 — Final cross-feature regression walk (the T13 seed)
 After all T12 changes, re-run the headline case of each earlier section — one line each:
@@ -2275,6 +2418,26 @@ After all T12 changes, re-run the headline case of each earlier section — one 
 - T11.1 — horizontal bar swipe hops a window with pills + live redraw.
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17 — five of the six lines pass, the sixth could not be driven:
+    - **T6.5 pass.** `seq 1 2000`, then a fast `sendevent` flick: the view was at line 1928 when the
+      finger lifted and 1918 1.2 s later — it coasted. A touch during the coast did stop it, but the
+      same tap also asks for the keyboard, which re-lays the grid, so "stops it dead" is observed
+      rather than cleanly isolated here.
+    - **T7.1 pass.** `sleep 200` running; Ctrl armed (chord strip drew `interrupt suspend history
+      clear EOF`), `interrupt` tapped, the shell showed `^C` and returned the prompt after 41 s.
+    - **T8.16 not driven.** Quick-attach hangs off T11's agent ribbon cap and needs a recognised
+      agent process; not attempted. This is the one open line.
+    - **T9.1 pass.** Every fresh connect logged `[tmux] configure: applied` after a `not-applied`
+      poll — conf pushed and verified, no reconnect.
+    - **T10.2 pass.** A held bar-swipe-up scaled the live terminal into a card with the accent ring
+      mid-drag; dragging back down and releasing sprang it back to full screen with the bar
+      restored. (Note: the tabs button is correctly **disabled** with the toast "Tabs need a session
+      Port22 can name" on a `custom` start line — the switcher needs `session`/`attach`.)
+    - **T11.1 pass, with a flag.** A horizontal bar drag rode the terminal as a page card with a
+      neighbour card entering and replaced the bar keys with a tab-name pill (`fish`); the poll
+      moved `windowIndex` 1 → 2 and the new pane drew live. **But the hop off the last window
+      created a third tmux window rather than rubber-banding** (`tmux list-windows` went from two to
+      three). That belongs to T11.1 proper — recording it here so it is not lost.
 
 ### T12.17 — Hold-space walks the cursor, and an edit lands where it was left
 - **Steps**: at a plain prompt (no alt-screen app), type `abcdefgh` and do not press ⏎.
@@ -2296,6 +2459,12 @@ After all T12 changes, re-run the headline case of each earlier section — one 
   SS3 form of the arrows is covered too.
 - iOS: [x]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: the gesture this case is built on is iOS's. Holding the spacebar until
+    "the keys grey into the trackpad" is the iOS keyboard's own trackpad mode; the app has no
+    spacebar of its own (the key bar is ⋯/Ctrl/Esc/Tab/Paste/arrows/tabs), and Gboard has no
+    long-press trackpad — its cursor control is a *swipe along* the spacebar, a different gesture
+    with a different contract. The `caretKeys` path underneath is shared and would be worth walking
+    against Gboard's spacebar swipe, but that is a different case than the one written here.
 
 ### T12.18 — The other 22 schemes wear their authors' colours, not our arithmetic
 - **Setup**: `c9501ba` gave every generated scheme published chrome roles where upstream ships
@@ -2322,6 +2491,20 @@ After all T12 changes, re-run the headline case of each earlier section — one 
 - 📸 one shot per scheme, settings sheet over the live terminal.
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17 (partial: 3 of the 10 named schemes, and not every surface). Walked on
+    the emulator with the settings sheet over a live session:
+    - **Nord** — the panel reads as a sheet against the terminal behind it (clear dL* step plus the
+      sheet shadow); Disconnect in Nord's frost blue, Forget host key in Nord's red, plainly a
+      different colour; note text and hairlines legible; the switch track is Nord's own accent.
+    - **Solarized Light** — panel is a distinct cream over the terminal, not invisible; Disconnect
+      Solarized blue, Forget host key Solarized red; placeholder grey readable, hairline findable.
+    - **Dracula** — settings sheet, the upload sheet's header/Save-here block and the Ctrl chord
+      strip all in the author's purple, danger not the accent.
+    Not walked: Gruvbox Dark, Ayu Mirage, Rose Pine, Tokyo Night, GitHub Dark, Everforest Light,
+    Rose Pine Dawn; the `ls --color` + bright-white-on-screen check; the ribbon raised over each
+    scheme; and the Forget-host-key **dialog** per scheme (on Android that dialog is Material's and
+    ignores our colours entirely — see T12.8's divergence note, which limits what this case can
+    prove on this platform).
 
 ### T12.19 — The screens the prototype never covered stopped improvising
 - **Setup**: `35ebc7d` moved every repeated number into `src/style.ts` and pulled the drifts back
@@ -2347,6 +2530,20 @@ After all T12 changes, re-run the headline case of each earlier section — one 
 - 📸 Setup and the browse sheet, one light scheme and one dark.
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17 — the Setup and status-block halves pass, the browse sheet is blocked.
+    **Setup** (captured in Mocha and in Latte): cards carry the same 16pt corner as the rest of the
+    app, rows are inset evenly on both sides, `Start` is a bold group header rather than body prose,
+    the dividers are translucent hairlines, and **both buttons answer a touch** — Connect sampled
+    #89b4fa at rest and (94,120,168) held. **Status block** (§4.9 Disconnected face, forced by
+    airplane mode): Reconnect/Setup wear a button corner, not a field's, and Reconnect dimmed
+    identically under a held finger.
+    **Blocked:** the browse sheet's 20-inset and its centred name field could not be checked — the
+    listing never loads on Android because of the known start-dir race (§T12A.2), so the sheet only
+    ever showed its spinner. The light-scheme `plateEdge` hairline check rides on that same sheet
+    and is likewise unwalked.
+  - **New, small, from the same screenshots:** on Setup the `Command` row's label column is too
+    narrow for its own word — it wraps as `Comman` / `d` beside a long custom start line. Visible in
+    both flavours.
 
 ### T12.20 — The perf work holds on a Release build, and the flag nobody measured
 - **Setup**: a **Release** IPA, not the dev client — dev-client frame rates are not the app's
@@ -2370,6 +2567,10 @@ After all T12 changes, re-run the headline case of each earlier section — one 
   Record both numbers here. If it does not show, take it out.
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: the case needs a **Release IPA** and the measurement it exists for is
+    `IOS_SYNCHRONOUSLY_UPDATE_UI_PROPS`, an iOS-only Reanimated flag. On this side there is only a
+    debug dev client on a software GPU, which `android-test` forbids drawing frame-rate conclusions
+    from. An Android-shaped version of (a)–(d) would be a new case, not this one.
 
 ## T12A — Android polish (emulator)
 
@@ -2403,16 +2604,23 @@ really 24. One side-by-side screenshot settles all three.
   void — see T7A.1 for why blur left both builds). The swipe-dismiss rides the finger and releases exactly as on
   iOS (same tested rule). System back dismisses the sheet with the slide-out — it never pops the route
   or reaches the terminal. Log: `[settings] sheet closed`.
-- Android: [ ] — **look verified 2026-08-16, behaviour NOT.** The corner is confirmed: the arcs
+- Android: [x] — **look verified 2026-08-16, behaviour verified 2026-08-17.** The corner is confirmed: the arcs
   are the same curve on both, iOS inset `10.7 / 5.0 / 2.3 / 0.0` at dy `4.0 / 9.3 / 13.3 / 21.3`
   against Android `9.9 / 5.0 / 2.3 / 0.0` at dy `4.6 / 9.1 / 13.7 / 21.7`, both fitting r=24.
   Material's 28 is gone. Grabber, section headers, mono values and the accent/red action rows all
   match; no blur either side. Heights are not comparable in that run and it is not a defect — the
   two were in different states (iOS on tmux so it drew a TMUX section, Android on a plain shell;
   iOS with Follow-system off so it drew one Theme row where Android drew Dark + Light).
-  **Still to walk: the drag-past-a-third release and the system-back dismiss.** Neither was
-  exercised — an unrelated error closed the sheet before back was pressed, so the press that was
-  observed landed on the terminal, not the sheet.
+  ~~**Still to walk: the drag-past-a-third release and the system-back dismiss.**~~ **Both walked
+  2026-08-17.** Drag-past-a-third: a slow grabber drag of 530px (≈202dp, over the 140dp rule)
+  dismissed on release and logged `[settings] sheet closed`; a 50pt drag released slowly sprang the
+  sheet back to exactly its rest position (panel top y=1082 before and after); a drag *upward* left
+  it at rest, never above. System back with the sheet up: dismissed the sheet, logged `[settings]
+  sheet closed`, and left the terminal route and key bar untouched — and because that log line only
+  fires from the `withTiming` completion callback in `close()`, the slide ran to completion rather
+  than the Modal being torn down. **Two carry-overs to T12.2 rather than defects of this case:** the
+  keyboard does not return on close (T12.2's FAILED note), and the velocity/flick release is not
+  reachable by injection.
 - **Finding, switch colours (fixed).** The `Switch` is a native control on both — UISwitch and
   Material's — and its PROPORTIONS differing is expected and not chased (user, 2026-08-16: native
   differences are fine, do not build custom components). Its colours are ours, and were not being
@@ -2421,6 +2629,11 @@ really 24. One side-by-side screenshot settles all three.
   `src/settings-sheet.tsx`: themed track (both states) and a thumb that is the pale end of the
   scheme on both. Re-check the colours here on the next pass; the shapes will still differ, by
   design.
+  **Re-checked 2026-08-17: the colours are ours now.** On Mocha the ON track sampled as the scheme's
+  accent and the thumb (201,210,239) ≈ `text` #cdd6f4 (anti-aliased edge); the OFF track is the
+  shared `TINT.track` grey with the same pale thumb. Nord drew its frost accent, Solarized Light its
+  blue — no Material teal anywhere. The thumb still overhangs the track the Material way; that is
+  the accepted native-proportion difference.
 
 ### T12A.2 — Upload sheet: bottom-sheet look, browse, back goes up a directory
 - **Setup**: connected; a host directory tree at least two levels deep under `$HOME`.
@@ -2443,6 +2656,20 @@ really 24. One side-by-side screenshot settles all three.
   residual is each device's own safe area. Thirteen `ANDROID` branches became four, all
   behaviour. **Still to walk: descending two directories, back walking up one at a time, and the
   dismiss from `/`.** Android's listing could not be read in that run — see the note below.
+  - NOT PROVABLE 2026-08-17: **still blocked by the same race, on every attempt.** Two full runs
+    (⋯ → Files → `parity-test.txt`) both ended with `[upload] sheet could not resolve a start dir:
+    Call to function 'ExpoSSH.exec' has been rejected` and a sheet that showed only its spinner, so
+    descending two directories, walking back up one press at a time and the dismiss from `/` remain
+    unwalked. What this run *could* settle:
+    - **the sheet is not full-screen and the corner is 24.** Top gap measured 158px = **60.2dp**,
+      which is `insets.top + SPACE.sm` on this device and matches the 59.8 recorded above. The
+      corner fits r=24dp: at 20px in from the left edge the panel starts 18px lower than at the
+      centre, and r=63px predicts 17.
+    - **back dismisses the sheet** and returns to the terminal, and **nothing was typed into the
+      session** at any point across both runs (prompt clean afterwards).
+    - **a tap on the gap above the sheet does NOT cancel it** — tapped at y=80, well clear of the
+      panel, sheet unchanged. That is a straight miss against this case's Expect ("tap on the gap
+      cancels"); needs the iOS side to confirm it is a divergence rather than a shared regression.
 - **Known race, not a design issue.** `[upload] sheet could not resolve a start dir: Call to
   function 'ExpoSSH.exec' has been rejected` on Android: the system document picker foregrounds
   itself, the session disconnects behind it, and the sheet opens before the reconnect lands. iOS
@@ -2454,7 +2681,15 @@ really 24. One side-by-side screenshot settles all three.
   Paste (clipboard popover); press back; press back once more with nothing open.
 - **Expect**: each press closes just the open popover — the bar, keyboard state and route all
   stay put. The final press (nothing open) is T12A.4's case.
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator. With the keyboard down: ⋯ menu open → one back closed just the
+  menu; arrows popover open → one back closed just it; long-pressed Paste for the clipboard popover
+  (`CLIPBOARD`, `yank-two-bravo · tmux yank · pinned`) → one back closed just it. The key bar, the
+  route and the terminal were untouched after each, and the run ended at the terminal, not on Setup.
+- **Android-only wrinkle, the system's not ours:** with the IME up, the **first** back is eaten by
+  the input method to hide the keyboard and never reaches `BackHandler` — measured, the ⋯ menu was
+  still open after it and `mInputShown` went `true`→`false`; the second press closed the popover.
+  So "keyboard state stays put" cannot hold on this platform while the keyboard is up. Nothing in
+  the app can see that press, so this is a parity limit to record, not a bug to fix.
 
 ### T12A.4 — Terminal-level back is "home", never a silent pop to Setup
 - **Setup**: connected, nothing open over the terminal.
@@ -2465,6 +2700,21 @@ really 24. One side-by-side screenshot settles all three.
   overlay's Setup button's job). Coming back foregrounds into the reconnect flow (§4.9), and
   back from the overlay backgrounds again the same way.
 - Android: [ ]
+  - FAILED 2026-08-17: **back backgrounds the app but loses the terminal route — coming back lands
+    on Setup with the session still live behind it.** Reproduced twice. Back at the terminal logged
+    `[app] background` + `[terminal] screen closed` and the launcher took focus (correct so far);
+    re-launching from the launcher put the **Setup screen** on top while the log showed
+    `[session] {"status":"connected"}` and a tmux poll reporting the pane's real foreground process
+    — i.e. exactly the silent pop this case forbids, with `leave()` never run.
+    **Control that isolates it:** `keyevent 3` (HOME) from the same state, then re-launch, comes
+    back **on the terminal** — same process, no dev menu, route intact. So it is the back press
+    (`BackHandler.exitApp()`, `src/app/terminal.tsx:1403`), not backgrounding in general:
+    `exitApp` invokes the activity's default back, which here finishes/recreates `MainActivity`, so
+    the React root remounts at the initial route while the JS session module survives. The comment
+    above that call asserts `moveTaskToBack`; on this build (RN 0.86, targetSdk 36, API 36 emulator)
+    it does not behave that way.
+    The overlay half does pass on its own terms: from the §4.9 Disconnected face, back logged
+    `[app] background` and handed focus to the launcher.
 
 ### T12A.5 — Adaptive icon on the launcher, themed/monochrome on 13+
 - **Setup**: app installed; emulator API 33+.
@@ -2476,6 +2726,18 @@ really 24. One side-by-side screenshot settles all three.
   (safe-zone margins hold). Themed mode shows the monochrome `>_` tinted to the wallpaper
   palette. No white box, no letterboxed square.
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17 (the art passes; themed mode could not be turned on). Round mask on the
+    launcher, cropped at native resolution: the `>_` glyph in Mocha blue on crust #11111b, well
+    inside the mask, no white box, no letterbox, not the Expo template. `mipmap-anydpi-v26/
+    ic_launcher.xml` does declare `<monochrome>`, and `app.json` ships
+    `android-icon-monochrome.png`. **But** the launcher's *Themed icons* switch would not take on
+    this AVD — after toggling it, `settings get system theme_customization_overlay_packages` was
+    still `null` and every icon in the drawer, ours included, stayed full-colour, so the monochrome
+    layer was never rendered. The long-press shortcut popup on this launcher shows only "App info /
+    Pause app" with no app icon, so that sub-check has nothing to look at either.
+  - **Observation, not a defect:** crust is so close to the launcher's own black that on a dark
+    wallpaper the round plate is invisible and the icon reads as a floating glyph. iOS uses the same
+    crust, so this is parity, not divergence — noting it because it looks like a missing plate.
 
 ### T12A.6 — Splash on cold start, both system themes
 - **Steps**: force-stop; launch with the system in dark mode; force-stop; switch the system
@@ -2484,7 +2746,14 @@ really 24. One side-by-side screenshot settles all three.
   Latte blue — the same split the iOS splash has (the plugin's root props feed Android 12+'s
   splash). The splash holds until fonts + persisted settings are in (no flash of the wrong
   flavour), then the app is simply there.
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator, `am force-stop` then a burst of `screencap` per launch.
+  Dark start: ground #11111b (Mocha crust) with the glyph's most-saturated pixel at #89b4fa (Mocha
+  blue). Light start (`cmd uimode night no`): ground #dce0e8 (Latte crust), glyph #1e66f5 (Latte
+  blue). Exact palette values, no flash of the wrong flavour, no white frame in either sequence.
+- **Caveat, dev-client only:** between the splash and the first screen there are ~3 captured frames
+  of pure black (~1 s) in **both** appearances — that is the dev client's bundle-load screen, not
+  the app's splash, and it is invisible in dark and obvious in light. Re-check on a Release build
+  before treating it as a defect.
 
 ### T12A.7 — Status bar and gesture pill across all four flavours
 - **Setup**: connected, gesture navigation on.
@@ -2496,7 +2765,15 @@ really 24. One side-by-side screenshot settles all three.
   `<StatusBar>` in `_layout`). The pill area is transparent over the app's own background in
   every flavour — no opaque system strip. 3-button nav may draw its own contrast scrim over
   the buttons; that is the system's, not a bug.
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator, sampled per flavour. Latte / Frappé / Macchiato / Mocha in
+  turn: the pixel row under the status bar and the pixel row in the gesture-pill area both read the
+  app's own base every time — #eff1f5 / #303446 / #24273a / #1e1e2e — so the app paints edge to edge
+  and there is no opaque system strip either end. Status-bar icons cropped at native resolution:
+  dark glyphs on Latte, light glyphs on the dark three. The pill draws white on the dark schemes and
+  dark on Latte, straight over the app's background. Switching to 3-button nav
+  (`cmd overlay enable …navbar.threebutton`) drew the system's own grey contrast scrim behind the
+  three buttons with the app still painting under it — the system's, as the Expect says. Gesture nav
+  restored afterwards.
 
 ### T12A.8 — Pickers open and the permission flow (Files / Photo / Camera)
 - **Setup**: fresh install (no permissions granted yet).
@@ -2508,7 +2785,19 @@ really 24. One side-by-side screenshot settles all three.
   once for CAMERA only — never microphone (`microphonePermission: false` blocks
   RECORD_AUDIO) — and a denial alerts "Could not read the file" at worst, types nothing.
   Each picked file then lands in the destination browser flow (§T8's cases own the upload).
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator. **Files**: opened the system document UI (Downloads,
+  Images/Audio/Videos/Documents chips) with no permission prompt at all. **Photo or video**: opened
+  the Android photo picker, again no prompt, with the system's own "Port22 will only have access to
+  the photos you select" banner — the 13+ path. **Camera**: with `CAMERA` revoked
+  (`pm revoke`, confirmed `granted=false`), the first tap raised exactly one prompt, "Allow Port22
+  to take pictures and record video?" — camera only, never a microphone one, and
+  `dumpsys package` finds **zero** `RECORD_AUDIO` entries in the manifest, so
+  `microphonePermission: false` is doing its job. **Deny path**: "Don't allow" returned to the
+  terminal with nothing typed into the session and no crash (no alert was shown, which the Expect
+  allows — "at worst"). Granting then re-opening Camera brought up the capture UI.
+- **Not covered here:** what happens to the captured file afterwards. The destination browser is
+  blocked on Android by the known start-dir race (§T12A.2), so "each picked file then lands in the
+  destination browser flow" is unproven on this side; §T8's cases own it.
 
 ### T12A.9 — Gboard sanity: voice input and held backspace
 - **Setup**: connected, empty prompt line, Gboard with voice input enabled.
@@ -2522,7 +2811,17 @@ really 24. One side-by-side screenshot settles all three.
   one chunk). Expected difference, not failure: dictated text may keep or lack a leading
   space; what must hold is that a real spacebar press is never eaten (a single-space insert
   always passes) and multi-char commits reach the PTY intact.
-- Android: [ ]
+- Android: [x] — 2026-08-17 emulator, the two "must hold" clauses measured directly.
+  **Held backspace**: with `stty -icanon -echo; cat -v` on the host so every byte prints as `^?`, a
+  30-character line plus a 5 s hold on Gboard's backspace delivered **96 DELs** — 30 for the field's
+  content and ~66 after it was empty, so the `onKeyPress` fallback (the risky half) does keep
+  sending; a 2 s hold gave ~34. It repeats but does not accelerate (≈17–19/s flat), which is
+  Gboard's curve, not ours. **Spacebar never eaten**: T12.10 — a lone `KEYCODE_SPACE` at an empty
+  prompt reached the shell and ` echo hi` ran. **Multi-char commits intact**: typed `echo hell`,
+  tapped Gboard's `hello` suggestion — the whole replacement plus its trailing space landed as
+  `echo hello ` at the prompt, no dropped or doubled characters.
+- **Not drivable here:** the Gboard mic. The emulator has no microphone feed, so the dictation half
+  is untested — which this case already frames as an expected difference rather than a pass/fail.
 
 ## T14 — Search across every window (deferred to the device phase, 2026-08-10)
 
