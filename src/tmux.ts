@@ -17,15 +17,14 @@ import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
 import { toBase64 } from '@/base64';
 import { makePool, retryRefused } from '@/exec-pool';
 import { parseSearchOutput, searchPaneCommand, type SearchHit } from '@/search-model';
-import { getSettings, pollSession, updateSettings, usesTmux } from '@/settings';
+import { getSettings, pollSession, SESSION_NAME, updateSettings, usesTmux } from '@/settings';
 import {
   APPLY_AND_VERIFY,
   CONF_DIRECTORIES,
   CONF_PATH,
   LIST_SESSIONS,
-  LIST_WINDOWS,
-  NEW_WINDOW,
-  POLL,
+  listWindowsCommand,
+  newWindowCommand,
   pollCommand,
   PROBE,
   capturePaneCommand,
@@ -64,6 +63,13 @@ export type TmuxState = {
   /** A client is attached to the session our exec commands resolve to — for this app's one user,
    *  the phone's own PTY (the ceiling is in tmux-model's POLL comment). */
   attached: boolean;
+  /** The session the last poll answered for BY NAME, or `null` — not attached, or a start mode
+   *  with no name to give (`custom`, `shell`, `attach` on "most recent").
+   *
+   *  This is the one fact every window command is scoped to (`scope`) and the one the switcher
+   *  lives or dies by (`tabsAvailable`): a grid must never outlive the session it belongs to, and
+   *  a list must never be answered by a session nobody chose. See `sessionScope`. */
+  session: string | null;
   /** The active window index while attached — T7's badge. `null` = not attached, badge default. */
   windowIndex: number | null;
   /** The active pane's non-shell foreground process — what T11's ribbon keys on. `null` = idle
@@ -80,6 +86,7 @@ const DOWN: TmuxState = {
   present: null,
   config: 'not-applied',
   attached: false,
+  session: null,
   windowIndex: null,
   foreground: null,
   paneAlt: false,
@@ -107,6 +114,7 @@ function set(patch: Partial<TmuxState>) {
     next.present === state.present &&
     next.config === state.config &&
     next.attached === state.attached &&
+    next.session === state.session &&
     next.windowIndex === state.windowIndex &&
     next.paneAlt === state.paneAlt &&
     next.foreground?.command === state.foreground?.command &&
@@ -243,7 +251,8 @@ export function stopTmux(): void {
   if (timer !== null) clearTimeout(timer);
   timer = null;
   ticks = 0;
-  set(DOWN);
+  aimedAt = undefined; // the next connect says what it is aiming at, even if it is the same name
+  set(DOWN); // `session` goes with it: no scope, no window commands, no grid (see `scope`)
 }
 
 /**
@@ -293,19 +302,33 @@ async function poll(): Promise<void> {
   if (polling) return; // a slow link answers late; never stack channels on top of it
   polling = true;
   try {
-    // Ask about OUR session, not whichever one tmux last touched (see `pollCommand`). If the name
-    // turns out to be wrong — a session renamed or killed under us — the targeted form answers
-    // nothing, and the untargeted one is better than going blind and dropping the tabs button.
-    const session = pollSession(getSettings());
-    if (session !== aimedAt) {
-      aimedAt = session;
-      console.log(`[tmux] poll aimed at ${session === null ? 'nothing (untargeted)' : `session ${session}`}`);
+    // Ask about OUR session, not whichever one tmux last touched (see `pollCommand`).
+    const wanted = pollSession(getSettings());
+    if (wanted !== aimedAt) {
+      aimedAt = wanted;
+      console.log(`[tmux] poll aimed at ${wanted === null ? 'nothing (untargeted)' : `session ${wanted}`}`);
     }
+    // The session that answered last time is asked first — it is where the shell actually IS, and
+    // that does not change because a setting did (a start-mode change takes effect on the next
+    // connect). It also keeps the retry below a one-off rather than a doubled poll every beat.
+    let session = state.session ?? wanted;
     let answer = parsePoll(await run1(pollCommand(session)));
-    if (answer === null && session !== null) answer = parsePoll(await run1(POLL));
+    // The one retry, and it is another NAME rather than the untargeted form. `attach` mode's pick
+    // can be gone by morning, and `startupLine` says exactly where the shell went when it was:
+    // `port22`, the session both tmux modes fall back to creating. Asking that by name cannot be
+    // answered by a session nobody chose — which is precisely what the old untargeted fallback
+    // could do, and did (BUGS: the grid re-listing onto the user's session after ours ended).
+    if (answer === null && session !== null && session !== SESSION_NAME) {
+      session = SESSION_NAME;
+      answer = parsePoll(await run1(pollCommand(session)));
+    }
     if (!up) return;
+    const attached = answer?.attached ?? false;
     set({
-      attached: answer?.attached ?? false,
+      attached,
+      // Only a session we NAMED and that answered gets to scope a window command or hold a grid
+      // open. Nothing here can ever be a session tmux picked for us.
+      session: attached ? session : null,
       windowIndex: answer?.attached ? answer.windowIndex : null,
       foreground: foregroundFrom(answer),
       paneAlt: answer?.attached === true && answer.paneAlt,
@@ -333,8 +356,21 @@ async function cacheSessions(): Promise<void> {
 
 /* --- window helpers (T10's switcher, T11's swipe) --- */
 
+/**
+ * The session every session-relative command is scoped to — the one the last poll answered for by
+ * name. Throws rather than degrading to an untargeted command: tabs are not offered at all without
+ * it (`tabsAvailable` reads the same field), so getting here with no name is a bug in this app, not
+ * a mode the user can be in. An untargeted `list-windows` is how the grid came to show — and offer
+ * a ✕ for — a detached session's windows (BUGS, 2026-08-17).
+ */
+function scope(): string {
+  const { session } = state;
+  if (session === null) throw new Error('tmux: no named session to scope this command to');
+  return session;
+}
+
 export async function listWindows(): Promise<TmuxWindow[]> {
-  return parseWindows(await run1(LIST_WINDOWS));
+  return parseWindows(await run1(listWindowsCommand(scope())));
 }
 
 /** The window's active pane with its colours as escapes (`-e`) — feed it to a terminal, not a
@@ -383,13 +419,13 @@ export async function killWindow(windowId: string): Promise<void> {
 // Deferred like `selectWindow`: committing a swipe past the last tab births a window, and that
 // commit is followed by the same slide.
 export async function newWindow(): Promise<void> {
-  await run1(NEW_WINDOW);
+  await run1(newWindowCommand(scope()));
   setTimeout(() => void poll(), NUDGE_AFTER_SLIDE_MS);
 }
 
 /** Reorder for T10's drag-drop. Landing indices depend on the user's base-index/renumber
  *  options, so re-list after — the answer is what tmux did, not what we asked. */
 export async function moveWindow(from: number, to: number): Promise<void> {
-  await run1(moveWindowCommand(from, to));
+  await run1(moveWindowCommand(scope(), from, to));
   void poll();
 }

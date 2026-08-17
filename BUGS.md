@@ -1168,3 +1168,74 @@ test is out of date: the conf marker is v4 not v1; the app no longer appends a `
 the user's tmux conf (`src/tmux-model.ts:145-157`); and the tabs circle is greyed-not-hidden and no
 longer keyed on the conf (`tabsAvailable = present && attached`). The numeric window badge no longer
 exists as UI at all — the switcher's active card is now the only reader of `windowIndex`.
+
+### The switcher lists — and can kill — windows of a session the phone is not attached to — OPEN, dangerous
+
+Found by the T10 walk (2026-08-17). `LIST_WINDOWS` (`src/tmux-model.ts:230`) is `tmux list-windows
+-F …` with **no `-t <session>`**, run on an exec channel that is outside any tmux client. tmux
+resolves the target with its "best session" heuristic — newest `session_activity`, attachment
+irrelevant. Reproduced by hand:
+
+```
+port22:   2 windows            # the user's real work, DETACHED
+t13walk4: 5 windows (attached) # the phone's session
+$ env -u TMUX tmux list-windows -F '#{window_id} #{window_name}'
+@150 claude
+@174 fish                      # port22's windows, not t13walk4's
+```
+
+Typing one character into the phone's PTY bumps its activity and the same command then answers
+correctly — which is why this hides in normal use and surfaces when the phone has been idle.
+
+**Twice during that walk the emulator's grid rendered the user's live Claude Code windows, each with
+a working ✕ and one wearing the "active" ring.** Nothing was tapped. A tap would have killed real
+work from a screen that looked like the phone's own tabs.
+
+This is the same untargeted-command family as the FIXED entry "The foreground poll answers about a
+window you are not looking at" — that fix targeted `pollCommand(session)` and left every *other*
+command untargeted. `@id` addressing (fixed earlier today) makes each command hit the window it
+names, but the *list* those ids come from is the wrong session's to begin with.
+
+**Two fixes, both needed.** Scope every window command to the attached session, not just the poll —
+and make `attached:false` tear the grid down. T10A.8 caught the second half: after the phone's own
+session ended, the app logged `[tmux] {"attached":false}` and then re-listed onto the user's session
+instead of dropping to §4.9 Disconnected.
+
+### A settling card-swipe spring puts Reanimated's colour parser into exponential notation — OPEN
+
+`src/switcher.tsx:903` builds `boxShadow: \`0 18px 30px rgba(0,0,0,${0.55 * lift.value})\``. As the
+spring settles, `lift.value` gets small enough that JS renders the alpha in exponential form and
+Reanimated rejects it:
+
+```
+Invalid color value: "rgba(0,0,0,7.852042303549444e-7)"
+```
+
+Red box, fires repeatedly on card swipes. Shared code, so iOS is likely exposed too — this is not an
+Android divergence. Clamp or round the alpha before interpolating it into the string.
+
+### `move-window` carries no `-d`, so a drag-reorder also switches the user's window
+
+`src/tmux-model.ts:341`. Not in any Expect and not previously noticed; reordering cards in the grid
+therefore moves the attached client to the window that was dragged. Needs a decision rather than a
+reflexive fix — `-d` is one flag, but "reorder follows the finger" may be intended.
+
+### `+` does not raise the keyboard on a birth (T10A.3)
+
+`mInputShown=false` 8s after the new window lands, whether the keyboard was up or down beforehand.
+Related to the key bar's missing raise (see "The key bar's swipe up does not raise the keyboard") —
+both are cases where the app is expected to bring the keyboard back and no code path does it.
+
+### Two native SIGSEGVs, noted not diagnosed
+
+`MountingCoordinator::pullTransaction` on the `mqt_v_js` thread, twice while relaunching just after
+the Reanimated red-box storm above; a third launch was clean. A separate one was seen at startup
+during the T7 walk. Not deliberately reproduced, recorded so the next one is not treated as the
+first.
+
+### Walk hygiene: `/tmp/metro.log` is NOT a single-device stream
+
+It is shared with the iOS build, so `[switcher]` / `[ribbon]` lines in it can come from another
+device. A burst that looks like the emulator acting on its own may be a human on the phone. Any walk
+that reasons from that log must corroborate against host-side `tmux list-windows -t <session>` or
+video frames before blaming the app.

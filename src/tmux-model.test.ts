@@ -14,8 +14,8 @@ import {
   CONF_PATH,
   CONF_VERSION,
   LIST_SESSIONS,
-  LIST_WINDOWS,
-  NEW_WINDOW,
+  listWindowsCommand,
+  newWindowCommand,
   POLL,
   POLL_MS,
   PROBE,
@@ -132,11 +132,16 @@ test('sessions: names only, tmux’s own chatter dropped', () => {
 test('the greyed tabs button names the actual reason, not a generic one', () => {
   // The question that matters: a tmux mode chosen against a host that has no tmux. Sending that
   // user to Settings to "choose a tmux start mode" would be advice they have already taken.
-  expect(tabsHint(false, true)).toContain('has not got it');
-  expect(tabsHint(false, false)).toContain('has not got it'); // the host still decides first
-  expect(tabsHint(true, false)).toContain('Settings');
-  expect(tabsHint(null, false)).toContain('Settings'); // probe still out, mode is answer enough
-  expect(tabsHint(true, true)).toBe('Waiting for tmux…'); // pushing the conf, or not attached yet
+  expect(tabsHint(false, true, true)).toContain('has not got it');
+  expect(tabsHint(false, false, false)).toContain('has not got it'); // the host still decides first
+  expect(tabsHint(true, false, false)).toContain('Settings');
+  expect(tabsHint(null, false, false)).toContain('Settings'); // probe still out, mode is answer enough
+  expect(tabsHint(true, true, true)).toBe('Waiting for tmux…'); // pushing the conf, or not attached yet
+  // A tmux mode whose session has no name to give (`custom`, or `attach` on "most recent"): the
+  // button is dark because the grid refuses to list windows it cannot attribute, and the advice is
+  // the choice that gives it a name — not "choose a tmux start mode", which they already did.
+  expect(tabsHint(true, true, false)).toContain('name');
+  expect(tabsHint(true, true, false)).toContain('Settings');
 });
 
 /* --- probe / apply / verify --- */
@@ -228,7 +233,7 @@ test('window commands target by tmux window id, never by index', () => {
   // a highlighted run that reaches past its last letter.
   expect(capturePaneCommand('@12')).toBe('tmux capture-pane -p -e -N -t @12');
   // Always the end of the list, never tmux's lowest free index; quoted so fish leaves `{end}` be.
-  expect(NEW_WINDOW).toBe("tmux new-window -a -t ':{end}'");
+  expect(newWindowCommand('port22')).toBe("tmux new-window -a -t '=port22:{end}'");
   // The injection guard: an id is `@` and digits or it is nothing. An INDEX is now rejected too —
   // `-t :7` also falls back to matching a window NAMED `7`, which is how a capture reached the
   // wrong pane and exited 0.
@@ -239,9 +244,54 @@ test('window commands target by tmux window id, never by index', () => {
   expect(() => capturePaneCommand('%2')).toThrow(); // a PANE id is not a window id
 });
 
-test('move-window inserts before when moving down, after when moving up', () => {
-  expect(moveWindowCommand(4, 1)).toBe('tmux move-window -b -s :4 -t :1');
-  expect(moveWindowCommand(1, 4)).toBe('tmux move-window -a -s :1 -t :4');
+test('move-window inserts before when moving down, after when moving up, and never selects', () => {
+  // `-d`: a reorder is not a selection. Without it the drag also switches the attached client to
+  // the moved window — a tab the user never chose, while they are looking at the grid.
+  expect(moveWindowCommand('port22', 4, 1)).toBe(
+    "tmux move-window -d -b -s '=port22:4' -t '=port22:1'",
+  );
+  expect(moveWindowCommand('port22', 1, 4)).toBe(
+    "tmux move-window -d -a -s '=port22:1' -t '=port22:4'",
+  );
+  expect(() => moveWindowCommand('port22', -1, 0)).toThrow();
+  expect(() => moveWindowCommand('port22', 1.5, 0)).toThrow();
+});
+
+test('no window command can be built without a session to scope it to', () => {
+  // The bug this whole family exists to prevent: an exec channel is outside any tmux client, so an
+  // untargeted command is aimed by tmux's "best session" heuristic — newest activity, attachment
+  // irrelevant — and the grid listed (and offered a ✕ for) a DETACHED session's windows.
+  for (const built of [
+    listWindowsCommand('port22'),
+    newWindowCommand('port22'),
+    moveWindowCommand('port22', 0, 1),
+  ]) {
+    expect(built).toContain('=port22:'); // exact-name scope, not a prefix match and not "current"
+    expect(built).toMatch(/-t '=port22:/); // ...and it is the TARGET that carries it
+  }
+  // Empty is the only way a name can arrive absent, and it throws rather than producing `:` — which
+  // is what "whatever session tmux calls current" is spelled as.
+  for (const build of [listWindowsCommand, newWindowCommand]) expect(() => build('')).toThrow();
+  expect(() => moveWindowCommand('', 0, 1)).toThrow();
+  expect(() => model.sessionScope('')).toThrow();
+  // A session name is user-typed on the attach picker: same quoting as everywhere else.
+  expect(listWindowsCommand(`it's`)).toContain(`-t '=it'\\''s:'`);
+  // The grid's own commands still address a WINDOW by id, and an id is server-global — scoping
+  // them would add nothing. What the scope above buys is that the ids came from the right session.
+  expect(killWindowCommand('@7')).toBe('tmux kill-window -t @7');
+});
+
+test('a session that stops answering takes the tabs, and so the grid, with it', () => {
+  // T10A.8: our session ended, the app logged `attached:false` and then re-listed onto the USER's
+  // session. The two halves of why it cannot any more, both pure:
+  //
+  // 1. There is no session to scope a list to — `src/tmux.ts` writes `session` only when a NAMED
+  //    ask came back attached, so a dead session leaves null...
+  expect(tabsAvailable(true, null)).toBe(false);
+  // 2. ...and null is not a name a command can be built from. Not "build it untargeted": throw.
+  expect(() => listWindowsCommand(null as unknown as string)).toThrow();
+  // The falling edge of exactly this is what tears the grid down (`showTabs` in app/terminal.tsx).
+  expect(tabsAvailable(true, 'port22')).toBe(true);
 });
 
 /* --- the poll --- */
@@ -291,7 +341,7 @@ test('foreground: shells are idle, everything else is a process for the ribbon',
 });
 
 test('poll and list commands go quiet instead of erroring without a server', () => {
-  for (const command of [POLL, LIST_WINDOWS]) {
+  for (const command of [POLL, listWindowsCommand('port22')]) {
     expect(command.endsWith(`2>/dev/null; true`)).toBe(true);
   }
 });
@@ -302,12 +352,14 @@ test('config status is the §4.5 trio, and tabs follow tmux whoever started it',
   expect(deriveConfigStatus(false, 'applied')).toBe('off'); // the toggle wins
   expect(deriveConfigStatus(true, 'applied')).toBe('applied');
   expect(deriveConfigStatus(true, 'not-applied')).toBe('not-applied');
-  expect(tabsAvailable(true, true)).toBe(true);
-  expect(tabsAvailable(false, true)).toBe(false); // no tmux on the host, whatever is attached
-  expect(tabsAvailable(null, true)).toBe(false); // not probed yet = not available yet
+  expect(tabsAvailable(true, 'port22')).toBe(true);
+  expect(tabsAvailable(false, 'port22')).toBe(false); // no tmux on the host, whatever is attached
+  expect(tabsAvailable(null, 'port22')).toBe(false); // not probed yet = not available yet
   // Installed, but this PTY never entered tmux: the switcher's commands would target a session
-  // that is not the one on screen, so the button stays dark (T13/T9.4).
-  expect(tabsAvailable(true, false)).toBe(false);
+  // that is not the one on screen, so the button stays dark (T13/T9.4). `null` is also what a
+  // poll that could not find OUR session leaves behind — which is the grid's teardown (T10A.8):
+  // the button goes dark on the same fact the terminal screen closes the switcher on.
+  expect(tabsAvailable(true, null)).toBe(false);
 });
 
 test('shell quoting survives quotes, spaces, and stays literal', () => {

@@ -1409,6 +1409,36 @@ the shell) unless said otherwise. The switcher logs every action as `[switcher] 
 never through the PTY. Reorder assertions read `tmux list-windows` on a laptop attached to the
 same session.
 
+**Three Expect clauses in this section are stale (Android walk, 2026-08-17).** (a) There is no
+numeric window badge any more — the switcher's active card is the only reader of `windowIndex`, so
+every "badge shows N" line tests a control that was removed. (b) `LOG = false` in
+`modules/expo-ssh/src/ExpoSSHModule.ts`, so the `[ssh] exec` trace this preamble promises does not
+exist; the exec-vs-PTY split is judged on effects (the command never appears in the terminal) and on
+host-side `tmux list-windows`. (c) `GESTURE_LOG = false` in `src/app/terminal.tsx:691`, so
+`[switcher] open (bar drag)` is never printed either.
+
+**READ THIS BEFORE WALKING ANY T10 CASE — the switcher can be pointed at the wrong tmux session.**
+Proven on the emulator 2026-08-17, see T10A.8. `LIST_WINDOWS` (`src/tmux-model.ts:230`) is
+`tmux list-windows -F …` with **no `-t <session>`**, and it runs on an exec channel, i.e. outside
+any tmux client. tmux then resolves the target with its "best session" heuristic, which is the
+session with the newest `session_activity` — not the session this PTY is attached to, and not even
+an attached one. With the phone attached to session A and the user's session B more recently
+active, the grid draws B's windows, and ✕ / tap / reorder all address B. Reproduced by hand:
+
+```
+$ tmux ls
+port22:    2 windows          # user's real work, DETACHED
+t13walk4:  5 windows (attached)   # the phone's session
+$ env -u TMUX tmux list-windows -F '#{window_id} #{window_name}'
+@150 claude
+@174 fish                      # port22's windows, not t13walk4's
+```
+
+Type one character into the phone's PTY (which bumps that session's activity) and the same command
+answers with t13walk4. During this walk the emulator's grid twice rendered the user's live Claude
+Code windows, each with a working ✕. **Do that bump before any destructive step, and read the card
+names before tapping anything.**
+
 ### T10.1 — Open via tabs tap: terminal zooms into its card slot
 - **Setup**: attached, three windows, window 2 active (badge shows 2).
 - **Steps**: tap the tabs circle.
@@ -1417,7 +1447,12 @@ same session.
   transition, and the bottom (bar area) clipped away — then fades, leaving the grid. Log:
   `[switcher] open (tabs tap)`.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17, emulator, 30fps capture. Keyboard up before the tap
+  (`mInputShown=true`), `mInputShown=false` after; `[switcher] open (tabs tap)` in the log. Frames
+  53→64: Gboard slides out, then the live pane shrinks with rounding corners and a #89b4fa ring,
+  the key-bar band clipped off its bottom, travelling to the TOP-RIGHT slot — the second of three
+  (`home`·`colors`·`vim`, `colors` active) — and the card takes over there. The "badge shows 2"
+  in Setup is stale: no numeric badge exists.
 
 ### T10.2 — Open via bar-swipe-up: progress tracks the finger, cancel springs back
 - **Setup**: keyboard up (tap the bar first if not).
@@ -1431,6 +1466,19 @@ same session.
   keyboard (T7.9 behaviour unchanged).
 - iOS: [ ]
 - Android: [ ]
+  - FAILED 2026-08-17: **both switcher halves pass; the last sentence does not.** Driven with
+    `input motionevent` (a `swipe` is not a held gesture). Long drag, bar y=1436 → y=500: Gboard
+    goes, the pane shrinks continuously under the finger with rounding corners and the accent ring,
+    release past the threshold leaves the grid up (`5 Tabs`, search bar, `mInputShown=false`) and
+    the shell is told it grew — `[terminal] size 50 × 45`. Short drag to y≈1140 with a 5-point
+    wiggle including two sideways excursions (x 400…700): the pane grows and shrinks with the
+    finger and drifts sideways with it, and the release springs it back to full screen with no grid
+    — keyboard dismissed as the drag began, restored on the spring-back. `[switcher] open (bar
+    drag)` is never logged because `GESTURE_LOG = false` (`src/app/terminal.tsx:691`) — stale
+    Expect, not a miss. What fails is the keyboard-DOWN clause: an identical upward drag on the bar
+    with Gboard down does nothing at all — `mInputShown` stays false, no `[terminal] size`, no
+    switcher. That is T7.9's already-recorded Android ↑ failure (see its FAILED note), not a new
+    T10 bug; re-tick this case when T7.9's ↑ is fixed.
 
 ### T10.3 — Grid shows every window: name, directory, colour snapshot
 - **Setup**: window 1 at a shell in `~`, window 2 running `ls --color` output in `/tmp`,
@@ -1441,7 +1489,14 @@ same session.
   shows `ls --color`'s colours (blue directories on the card, not grey text); card 3 shows
   vim's UI shape. Text is JBMono, sized so the pane's full width fits the card.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17. Three cards, 2-column grid over crust (background sampled
+  `#11111b`, card surface `#1e1e2e`): `home`/`kamil`, `colors`/`tmp`, `vim`/`kamil` — name in
+  JBMono over directory leaf. Card 2 carries `ls --color`'s palette (blue folder glyphs, cyan
+  symlinks, pink/green permission bits at 3× zoom), card 3 the vim splash with its tilde gutter.
+  Width fits: the pane's longest captured line is 48 columns (`Uptime: 8 days, 22 hours, 19 mins`)
+  and it lands inside the ring with room. Note the sizing rule is `min(window width, live pane
+  width)` (`src/switcher.tsx:937`, 2026-08-11), so an 80-column background window is drawn at the
+  50 columns it is about to be resized to and clips — by design, not a fit bug.
 
 ### T10.4 — Active card wears the accent ring
 - **Steps**: open the switcher from window 2; look; Done; `tmux select-window -t :1` from the
@@ -1449,7 +1504,11 @@ same session.
 - **Expect**: the active card (and only it) has the accent-coloured 2pt ring and accent-tinted
   name; after the laptop switch, the ring is on window 1's card (one ~2s beat allowed).
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17. Opened from window 2: `colors`' card carries a 5px ring sampled
+  `#89b4fa` (Mocha blue = `theme.accent`) — 5px at density 420 is 1.9dp, i.e. the 2pt ring — and
+  its name is the same blue; the other two carry the 1px `#6c7086` idle border and white names.
+  `tmux select-window -t :1` from the host, one beat: the ring and the blue name are on `home` and
+  `colors` has gone grey. Poll logged `windowIndex: 1`.
 
 ### T10.5 — Tap selects: `select-window` + zoom back down
 - **Steps**: from window 1, open the switcher, tap window 3's card.
@@ -1461,7 +1520,12 @@ same session.
   `windowIndex: 2`, and the screen came back on that window (its `/tmp` prompt under the
   `ls --color` output) with the badge reading 2 and the keyboard up. Zero `send` lines carried
   the command — it went out on the exec channel, as §4.5 requires.
-- Android: [ ]
+- Android: [x] — 2026-08-17. From window 1, tapped `vim`'s card: `[switcher] select @163`, host
+  `list-windows` flipped to `3 vim @163 (active)`, poll `windowIndex: 3`, keyboard back up
+  (`mInputShown=true`). Frames: the ring hands over from `home`'s card to `vim`'s, then the pane
+  grows out of card 3's bottom-left slot to full screen with the ring fading, landing on vim's
+  empty buffer (`0,0-1 All`). Nothing was typed into the PTY — the terminal shows no command text.
+  Two stale clauses: there is no badge, and no `[ssh] exec` line exists (`LOG = false`).
 
 ### T10.6 — Snapshots refresh while the grid is open
 - **Setup**: in a background window run `watch date`; open the switcher from another window.
@@ -1470,7 +1534,9 @@ same session.
   grid being touched. Scroll position and card order do not jump when it refreshes.
 - iOS: [x] — `watch -n1 date` on a card read `09:59:20` in one frame and `09:59:50` in the next, grid
   untouched between them; order and scroll position held.
-- Android: [ ]
+- Android: [x] — 2026-08-17. `watch -n1 date` in a background window; three screenshots 5s apart
+  with the grid untouched read `18:58:46`, `18:58:50`, `18:58:56` on that card. All five cards kept
+  their slots and the grid its scroll offset across the three.
 
 ### T10.7 — ✕ closes a window
 - **Steps**: open the switcher; tap the ✕ on a non-active card.
@@ -1479,7 +1545,10 @@ same session.
   The remaining cards keep their order.
 - iOS: [x] — `[switcher] kill @5` → `[ssh] exec tmux kill-window -t :1`; the host went from three
   windows to `2: colors`, `3: fish`, the survivors keeping their indices.
-- Android: [ ]
+- Android: [x] — 2026-08-17. ✕ on the non-active `home` card: `[switcher] kill @161`, the card
+  fades out over ~8 frames, the header steps `3 Tabs` → `2 Tabs` and the survivors reflow into
+  slots 1 and 2 keeping their order (`colors`, `vim`); host `list-windows` lost `1 home @161` and
+  kept `2 colors @162`, `3 vim @163`. No `[ssh] exec` line to read (`LOG = false`).
 
 ### T10.8 — Left fling closes, right swipe rubber-bands
 - **Steps**: on one card, drag left slowly past half the card width and release. On another,
@@ -1489,7 +1558,30 @@ same session.
   card only a third of the finger's travel and springs back — rightward never closes. A
   vertical drag on a card scrolls the grid instead.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17, all four clauses measured off 30fps captures (card width 470px, so
+  "half a card" is a 238px threshold). **Slow left past half:** two 320px `motionevent` drags each
+  closed their card (`[switcher] kill @166`, `@167`, host confirmed). **1:1:** a sub-threshold
+  150px left drag moved the card's right edge 518→397px in exact 15px steps matching the 15px
+  `MOVE` steps, then sprang back through an overshoot to 533 and settled at 516. **Fades as it
+  goes:** the card's interior blended `#1c1c2c` → `#181826` toward the crust over that travel,
+  matching `swipeOpacity`'s 1 − 46/173 = 0.73 at that offset. **Fast flick:** `input swipe … 160px
+  in 50ms` closed a card from 160px, well under the 238px slow threshold (100ms also closed, 30ms
+  did not — the pan never cleared its 10px activation). **Right:** a 300px right drag moved the
+  card only 83px (0.28, a third) and sprang back — never closed. **Vertical:** an 800px vertical
+  drag started on a card scrolled the grid a full row, killed nothing, logged nothing.
+  - FOUND WHILE WALKING, separate bug, 2026-08-17: **a card swipe can throw a Reanimated red box.**
+    `[Reanimated] Invalid color value: "rgba(0,0,0,7.852042303549444e-7)"` from
+    `processColor` ← `shadows.ts` ← the card's `boxShadow: \`0 18px 30px rgba(0,0,0,${0.55 *
+    lift.value})\`` (`src/switcher.tsx:903`). A settling spring drives `lift.value` through
+    denormal-sized numbers, JS stringifies `4.3e-7` in exponential notation, and Reanimated's colour
+    parser rejects it. Fires repeatedly once it starts; a dev-build red box, unknown behaviour in
+    Release. Shared code, so iOS is presumably exposed too. Fix is to clamp/round the alpha
+    (e.g. `Math.max(0, 0.55 * lift.value).toFixed(3)`).
+  - ALSO SEEN, 2026-08-17: two consecutive native `SIGSEGV`s in
+    `facebook::react::MountingCoordinator::pullTransaction` on `mqt_v_js` while relaunching right
+    after that red-box storm — the app died at launch twice, then launched cleanly on the third
+    try. Not reproduced deliberately; recorded because the timing points at the same animated-style
+    path.
 
 ### T10.9 — Long-press lifts, drag reorders, drop issues `move-window`
 - **Setup**: windows 1·2·3 in order; laptop watching `watch -n1 'tmux list-windows'`.
@@ -1505,7 +1597,21 @@ same session.
   survives the ~2s beats and a switcher close/reopen. Host-side index swap was proven on the
   laptop during the earlier bug hunt. The reorder-snap glitch this case used to trip is fixed —
   see the RESOLVED section at the top.
-- Android: [ ]
+- Android: [x] — 2026-08-17, `motionevent` DOWN, 0.8s hold, stepped MOVEs, UP (a `swipe` produces
+  no lift at all). Windows were `1 wind`·`2 vim`·`3 wine`; card 1 held and dragged to slot 3.
+  Frames show the lift: the card grows (470 → 508px wide, ~8%), tilts a couple of degrees, and its
+  ring turns `#f5c2e7`; the two neighbours spring up one slot each and a dashed placeholder tracks
+  the target slot. Drop: the card settles into slot 3, `[switcher] reorder {"from":1,"to":6}` (the
+  numbers are tmux INDICES, and this session's were 1·3·6 — not ordinals), host `list-windows` went
+  from `1 wind, 3 vim, 6 wine` to `3 vim, 6 wine, 7 wind`, and the phone's order survived several
+  ~2s beats with no jump back. A separate hold-and-drop-on-its-own-slot ran no command at all: log
+  silent, host order unchanged. Three notes: the ring is `theme.accentAlternate`, which is Mocha
+  **pink** `#f5c2e7` and not mauve — the Expect's wording and the code comment at
+  `src/switcher.tsx:909` are both wrong about the role's colour; the `boxShadow` is `rgba(0,0,0,
+  0.55)` over a `#11111b` crust and so is invisible either way, on both platforms; and the haptic
+  tick cannot be judged on an emulator. Also observed: `move-window` carries no `-d`
+  (`src/tmux-model.ts:341`), so a reorder ALSO makes the moved window active — the poll went to
+  `windowIndex: 7`. Not in the Expect, shared with iOS, worth a decision.
 
 ### T10.10 — + births a new terminal out of the button
 - **Steps**: open the switcher, tap +.
@@ -1514,14 +1620,24 @@ same session.
   attached client); exec log shows `new-window`; the badge shows the new index; reopening the
   switcher shows one more card and the header count up by one.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17. `[switcher] new window` + `[ribbon] forWindow 8 fish (new window)`;
+  host gained `8 fish` and made it active; the PTY landed on a fresh fish prompt in `~`; header
+  went `3 Tabs` → `4 Tabs` with a fourth card in the grid. Two stale clauses: there is no badge,
+  and the birth does NOT grow out of the + button — per `birthCard`'s own comment
+  (`src/app/terminal.tsx:1208`, user 2026-08-10) "the new card pops into the grid first, then the
+  surface flies into it", and that is exactly what the frames show: the fourth card appears in the
+  grid, then the live surface grows out of THAT slot. Rewrite the Expect to match.
 
 ### T10.11 — Done ✓ returns to the active window
 - **Steps**: open the switcher; scroll or do nothing; tap the ✓ circle.
 - **Expect**: the terminal zooms out of the *active* card's slot back to full screen; same
   window as before, nothing selected, no tmux command in the log; keyboard returns.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17. Tapped ✓ from the grid opened on window 2: frames show the pane
+  growing out of the top-right (active) card's slot back to full screen with the key bar; still on
+  `colors`/`/tmp`; `mInputShown=true` after. The log printed nothing at all between the tap and the
+  landing — there is no `[switcher] close` line in the codebase, so silence here is the whole of
+  "no tmux command".
 
 ### T10.12 — Closing the last window ends the session
 - **Setup**: one window left (header says "1 Tab").
@@ -1532,6 +1648,13 @@ same session.
   shell, per §4.9 no auto-attach.
 - iOS: [ ]
 - Android: [ ]
+  - FAILED 2026-08-17 — and the Steps are stale before the Expect even starts. The lone card has
+    no ✕ at all and a left fling on it rubber-bands (verified: the card rides the finger 518→208px
+    and springs back to 517, window count and `1 Tab` unchanged), per the 2026-08-10 decision in
+    the RESOLVED section at the top of this file. So the last window cannot be closed from the
+    grid; it has to come from the host, which is what T10A.8 says. What happens then is a failure
+    and it is the section-preamble session bug: see T10A.8's note. Rewrite this case to match
+    T10A.8 rather than re-walking it as written.
 
 ### T10.13 — No haptic on tab select
 - **Steps**: with the phone in hand, tap a card to select it; then long-press one to lift it.
@@ -1540,6 +1663,11 @@ same session.
   key (T7's rule, unchanged).
 - iOS: [ ]
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: an emulator has no haptics engine and Android's
+    `performHapticFeedback` leaves no log line, so neither the presence nor the absence of a tick
+    can be read here. What IS checkable and did hold: `selectCard` carries the explicit
+    `// §7: no haptic on tab select` and no haptic call (`src/app/terminal.tsx:1109`), and dozens
+    of selects and lifts during this walk crashed nothing. Needs a hand on the phone.
 
 ### T10.14 — Header count tracks reality
 - **Steps**: open the switcher with 3 windows; from the laptop `tmux new-window`; wait a
@@ -1548,7 +1676,11 @@ same session.
   match — the grid follows tmux even when the phone did not cause the change. (One window
   reads "1 Tab", not "1 Tabs".)
 - iOS: [ ]
-- Android: [ ]
+- Android: [x] — 2026-08-17. Grid open, untouched: `tmux new-window` from the host and the header
+  read `4 Tabs` 2.5s later with a fourth card (`extra`/`etc`) in the grid wearing the accent ring;
+  `tmux kill-window -t :4` and it was back to `3 Tabs` 2.5s later with the card gone. Ran twice.
+  The singular was seen separately when the session was down to one window: the header read
+  `1 Tab`.
 
 ## T10A — Tab switcher, Android (emulator)
 
@@ -1571,7 +1703,13 @@ misbehaves.
   accent ring, fading out only at the end (the card takes over) — the same motion as iOS
   §T10.1/T10.2, per the Android prototype which shares the transform verbatim. The drag-follow
   rides the finger, drifts with it horizontally, and a short release springs back to rest.
-- Android: [ ]
+- Android: [x] — 2026-08-17, three 30fps captures, evidence written up under the shared cases.
+  Enter by tabs tap (T10.1): the live pane shrinks into the active card's slot with rounding
+  corners and the `#89b4fa` ring, still opaque most of the way, the card taking over at the end.
+  Exit by card tap (T10.5): the same motion in reverse out of the tapped card's slot, ring fading.
+  Bar drag (T10.2): the shrink rides the finger continuously, drifts sideways with it, and a short
+  release springs back to full screen. No divergence from the iOS descriptions found; iOS side not
+  re-shot this session.
 
 ### T10A.2 — The bottom bar is the iOS bottom bar
 - **Setup**: switcher open. An iOS screenshot of the same switcher — **ask the user**.
@@ -1595,13 +1733,29 @@ misbehaves.
   keyboard raised; `list-windows` shows 4 windows with the new one active. `[switcher] new
   window` and T9's `new-window` exec line in the log.
 - Android: [ ]
+  - FAILED 2026-08-17 on the keyboard clause; the rest is stale or passes. Passing: `[switcher] new
+    window` logged, host `list-windows` gained a window and made it active, the PTY landed on a
+    fresh fish prompt. Stale: there is no FAB any more (see this section's own preamble, b427712)
+    and the birth origin is not a button on either platform — it is the new card's grid slot, see
+    T10.10's note. **Failing:** the keyboard is NOT raised after the birth. Tested both ways —
+    keyboard down before opening the switcher, and keyboard up before opening it — and in both runs
+    `mInputShown=false` for 8s+ after the new terminal landed, with the shell reporting its
+    full-height `50 × 44` grid. Selecting a card (T10.5) and Done (T10.11) both restore it in the
+    same session, so this is the birth path alone: `birthCard` finishes through `springBack`
+    (`src/app/terminal.tsx:1234`), whose "nothing to fly home from" branch clears `keysWereUp`
+    (`:809`). Shared code, so iOS probably does the same — needs the iOS check to say whether the
+    Expect or the app is wrong.
 
 ### T10A.4 — Done returns to the active window
 - **Steps**: open the switcher, scroll the grid a little, tap Done.
 - **Expect**: the terminal grows back out of the active card's on-screen slot (scroll
   respected), same window as before, keyboard re-raised. No `select-window` in the log —
   returning is not a selection.
-- Android: [ ]
+- Android: [x] — 2026-08-17. Keyboard up, switcher opened, grid scrolled one row so the active
+  card sat lower on screen, then Done: the frames show the pane growing out of that card's
+  **scrolled** on-screen slot, not its unscrolled one. Same window (host `9 [tmux]` still active),
+  `mInputShown=true` after, and the log printed nothing between the tap and the landing — no
+  `select-window`.
 
 ### T10A.5 — Select, ✕/fling close, long-press reorder still work on Android
 - **Steps**: walk §T10.5 (tap selects), §T10.7/T10.8 (✕ and left-fling close, right swipe
@@ -1609,7 +1763,14 @@ misbehaves.
   confirms the order) on the emulator.
 - **Expect**: identical behaviour to the iOS cases — the gesture code is shared, so any
   divergence here is an Android RNGH/Reanimated fault worth its own write-up.
-- Android: [ ]
+- Android: [x] — 2026-08-17. All four were walked on the emulator as their own cases, and all four
+  behave as the iOS text describes: T10.5 (tap selects, `[switcher] select @163`), T10.7 (✕ closes,
+  `kill @161`, grid reflows), T10.8 (slow-left closes at 1:1, fast flick closes from less travel,
+  right drag moves a third and springs back, vertical scrolls), T10.9 (long-press lift → dashed
+  placeholder → drop → `reorder`, host order changed, no jump back). One Android-side divergence
+  turned up and it IS an RNGH/Reanimated fault: the `boxShadow` alpha red box written up under
+  T10.8. Note for whoever repeats this: `adb shell input swipe` never produces a lift — the drag
+  cases need `input motionevent` with a real pause between DOWN and the first MOVE.
 
 ### T10A.6 — System back closes the grid, never the app
 - **Setup**: switcher open.
@@ -1619,13 +1780,22 @@ misbehaves.
 - **Expect**: the grid closes into the active pane — the same exit as Done — and the app
   stays exactly where it was: not backgrounded, not popped to Setup. Back pressed again
   mid-transition is swallowed (nothing double-fires).
-- Android: [ ]
+- Android: [x] — 2026-08-17. Three `keyevent 4`s 150ms apart from the open grid: the first closes
+  it with the same growth out of the active card's slot as Done, and the second and third do
+  nothing — after all three `dumpsys activity` still reports
+  `topResumedActivity=…port22/.MainActivity`, the screen is the terminal with its key bar, and
+  `ui_text` shows no Setup fields. Used the same way half a dozen more times during this walk with
+  the same result. (Only the hardware/injected back key; the predictive-back edge swipe is not
+  separable on this AVD.)
 
 ### T10A.7 — Snapshots refresh while the grid is open
 - **Steps**: §T10.6 on the emulator: with the switcher open, `yes | head -50` from the laptop
   in another window's pane; wait ~2s beats.
 - **Expect**: that window's card repaints with the new output while the grid stays open.
-- Android: [ ]
+- Android: [x] — 2026-08-17. Grid open and untouched, `yes | head -50` sent to the `wind` window
+  from the host: within one ~2s beat that card repainted from its neofetch banner to a column of
+  `y`s, every other card and the scroll offset unchanged. (A `watch -n1 date` card ticking three
+  times across 15s is the same evidence, recorded under T10.6.)
 
 ### T10A.8 — Closing the last window ends the session
 - **Steps**: §T10.12 on the emulator: close windows until one remains (its ✕ is gone and a
@@ -1634,6 +1804,23 @@ misbehaves.
 - **Expect**: the grid drops, §4.9's Disconnected state owns the screen; no crash, no orphan
   grid over a dead PTY.
 - Android: [ ]
+  - FAILED 2026-08-17, and this is the one that proved the session bug in the T10 preamble. Setup
+    half passes: down to one window the card has no ✕ and a left fling rubber-bands (card rides
+    518→208px and springs back to 517, header stays `1 Tab`, nothing killed). Then
+    `tmux kill-window -t t13walk4:9` from the host, which ends the session. **The grid did not drop
+    and §4.9 never appeared. The switcher re-listed and drew the USER'S OTHER SESSION** — two cards
+    reading `claude`/`ClaudeLoop` and `fish`/`kamil`, header `2 Tabs`, the `claude` card wearing
+    the accent "active" ring and a live ✕ — i.e. exactly the "orphan grid over a dead PTY" this
+    Expect forbids, pointed at somebody else's work. Log for the same moment:
+    `[switcher] 1 of 1 captures failed: @172(:9) … Command exited 1` (benign, that is the window
+    just killed) followed by `[tmux] {"attached":false,…}`, so the app KNEW it had lost its
+    session and re-listed anyway. Closing the grid with back left the PTY at a bare shell showing
+    `[exited]` under the startup line, with the tabs circle correctly greyed — so the only thing
+    standing between a tap and `kill-window` on a real Claude Code window was the grid already
+    being open. Root cause is the unscoped `tmux list-windows` in `src/tmux-model.ts:230` (full
+    write-up in this section's T10 preamble). Two fixes are needed and they are separate: scope
+    every window command to the session this PTY is attached to, and make the poll's
+    `attached:false` tear the grid down into §4.9 instead of re-listing.
 
 ## T11 — Bar-swipe window switching + context ribbon
 

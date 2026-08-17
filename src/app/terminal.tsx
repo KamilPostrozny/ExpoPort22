@@ -74,7 +74,14 @@ import {
   useSession,
   type Session,
 } from '@/session';
-import { endpoint, getSettings, updateSettings, useSettings, usesTmux } from '@/settings';
+import {
+  endpoint,
+  getSettings,
+  pollSession,
+  updateSettings,
+  useSettings,
+  usesTmux,
+} from '@/settings';
 import { SEARCH_HIGHLIGHT_MS, normalizeQuery, windowSurvives } from '@/search-model';
 import Switcher, {
   Snapshot,
@@ -410,7 +417,11 @@ export default function SessionScreen() {
   const stageSV = useSharedValue({ w: 390, h: 800 });
 
   const connected = session.status === 'connected';
-  const showTabs = tabsAvailable(tmux.present, tmux.attached);
+  // `tmux.session` rather than `tmux.attached`: tabs exist only for a session the app can NAME, and
+  // so scope its window commands to (BUGS "The switcher lists — and can kill — windows of a session
+  // the phone is not attached to"). It goes null the moment our session does — which is what the
+  // teardown below hangs on.
+  const showTabs = tabsAvailable(tmux.present, tmux.session);
   // T11's page-slide state lives up here with the switcher's: the snapshot cache has to know
   // when a slide is running, and it is the same "nothing may change while something is moving"
   // rule the zoom needs. Everything else about the slide is in its own block below.
@@ -717,6 +728,31 @@ export default function SessionScreen() {
       setFocusSignal((n) => n + 1);
     }
   };
+
+  /**
+   * A grid must never outlive the session it belongs to (BUGS, T10A.8: after the phone's own
+   * session ended the app logged `attached:false` and then re-listed onto the USER's session
+   * instead of tearing down). `showTabs` is now "we are attached to a session we can name", so its
+   * falling edge is exactly that moment — the cards in hand describe windows nobody can vouch for
+   * any more, and every ✕ on them is aimed at an id from a list that can no longer be refreshed.
+   *
+   * It snaps rather than flying home: there is nothing left to fly out of, and the flight's
+   * completion callbacks are what would otherwise land `sw` back in `open`.
+   */
+  useEffect(() => {
+    if (showTabs || swRef.current === 'closed') return;
+    console.log('[switcher] tearing the grid down: the session it belongs to is gone');
+    cancelAnimation(prog);
+    cancelAnimation(dragX);
+    cancelAnimation(flight);
+    prog.value = 0;
+    dragX.value = 0;
+    flight.value = 1;
+    alpha.value = 1;
+    setZoomId(null);
+    setCards([]);
+    finishClose();
+  }, [showTabs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* --- probe: the one-hitch-per-flight on a switch to another window (T10, temporary) ---
    * Everything that could stall a frame, stamped against the tap: the flight leaving, each chunk
@@ -2661,7 +2697,7 @@ export default function SessionScreen() {
             <TabsHintPopover
               theme={theme}
               bottom={popBase}
-              text={tabsHint(tmux.present, usesTmux(settings))}
+              text={tabsHint(tmux.present, usesTmux(settings), pollSession(settings) !== null)}
             />
           ) : open === 'clipboard' ? (
             <ClipboardPopover

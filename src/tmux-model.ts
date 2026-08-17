@@ -209,6 +209,31 @@ export function parseSessions(stdout: string): string[] {
 
 /* --- windows (§4.5: always exec channels, never the attached PTY) --- */
 
+/**
+ * The scope EVERY session-relative command carries: `=name:` — that session by exact name (`=`, so
+ * `port22x` cannot answer for `port22`), optionally a slot inside it.
+ *
+ * The name is required, and that is the whole point. An exec channel is outside any tmux client, so
+ * an untargeted command is aimed by tmux's "best session" heuristic — newest `session_activity`,
+ * attachment irrelevant. That is how the grid came to list, with a working ✕ on each card, windows
+ * of a DETACHED session the phone was never attached to (BUGS, T10 walk 2026-08-17: the user's real
+ * Claude Code windows rendered twice, one wearing the active ring). The phone's own session answers
+ * correctly the moment a key is typed into it, which is exactly why this hides in normal use.
+ *
+ * `@id` commands (capture/select/kill/search) are not scoped and do not need to be — an id is
+ * unique server-wide and never reused. What made them dangerous was the LIST the ids came from.
+ *
+ * There is no null-taking overload on purpose: a mode that cannot name its session
+ * (`custom`, `shell`, `attach` on "most recent") gets no window commands at all rather than a
+ * silent degrade to the untargeted form — see `tabsAvailable`.
+ */
+export function sessionScope(session: string, slot: string = ''): string {
+  // Runtime, not just the type: the whole failure mode is a name that isn't there, and a `null`
+  // that arrives through an `any` would otherwise become the literal target `=null:`.
+  if (typeof session !== 'string' || session === '') throw new Error(`not a session name: ${session}`);
+  return shellQuote(`=${session}:${slot}`);
+}
+
 /** The same marker byte separates the window fields. Unlikely in a path; a window NAME may contain
  *  anything at all, which is why name is the LAST field: the parser rejoins the tail and a name
  *  full of separators (or tabs, or colons) shifts nothing. */
@@ -227,10 +252,15 @@ export type TmuxWindow = {
   command: string;
 };
 
-export const LIST_WINDOWS =
-  `tmux list-windows -F '` +
-  ['#{window_id}', '#{window_index}', '#{window_active}', '#{pane_current_path}', '#{pane_width}', '#{pane_current_command}', '#{window_name}'].join(SEP) +
-  `' 2>/dev/null; true`;
+/** The windows of ONE session — the one the phone is attached to (see `sessionScope`). Every id the
+ *  grid ever addresses comes from here, so this is the command that makes the rest trustworthy. */
+export function listWindowsCommand(session: string): string {
+  return (
+    `tmux list-windows -t ${sessionScope(session)} -F '` +
+    ['#{window_id}', '#{window_index}', '#{window_active}', '#{pane_current_path}', '#{pane_width}', '#{pane_current_command}', '#{window_name}'].join(SEP) +
+    `' 2>/dev/null; true`
+  );
+}
 
 /** A line that is not seven-plus fields with an `@N` id and numeric index/width is not a window —
  *  tmux writes its own diagnostics into this stream, and one of those must not become a card. */
@@ -322,23 +352,39 @@ export function killWindowCommand(id: string): string {
  * Quoted because the remote shell sees this string first and fish expands a lone `{end}` to `end`
  * — bash leaves single-element braces alone, fish does not, and the host's shell is not ours to
  * assume. It still makes the window active, so the attached client is already looking at it.
+ *
+ * `:{end}` alone was "the end of whatever session tmux picks" — the same untargeted aim as the old
+ * `LIST_WINDOWS`, i.e. the + could plant a window in the user's own session.
  */
-export const NEW_WINDOW = "tmux new-window -a -t ':{end}'";
+export function newWindowCommand(session: string): string {
+  return `tmux new-window -a -t ${sessionScope(session, '{end}')}`;
+}
 
-/** `-b`/`-a` shuffle neighbours out of the way (tmux ≥ 3.2) — a bare move-window refuses an
- *  occupied index, and a drag-reorder's drop slot is always occupied. Landing indices depend on
- *  the user's own base-index/renumber-windows, so T10 re-lists after every move. */
-/* ponytail: the one window command still on `:index`. A drop slot IS a position — `-b`/`-a` is
- * chosen by `to < from`, which ids cannot answer — and its two indices come from a list taken at
- * the drag's start and are re-listed the moment the move lands, so the window it can address by
- * mistake is a neighbour it was about to shuffle anyway. Nothing is destroyed either way. Give
- * `reorderArgs` a direction and this can take ids too. */
-export function moveWindowCommand(from: number, to: number): string {
+/**
+ * `-b`/`-a` shuffle neighbours out of the way (tmux ≥ 3.2) — a bare move-window refuses an
+ * occupied index, and a drag-reorder's drop slot is always occupied. Landing indices depend on
+ * the user's own base-index/renumber-windows, so T10 re-lists after every move.
+ *
+ * `-d` because a reorder is not a selection. Without it move-window makes the moved window the
+ * current one, so dragging a card in the grid also switches the attached client — and the user is
+ * looking at the GRID while they drag, so the tab they are moved to is one they never chose and do
+ * not see until they close it. The app already has one way to say "put me in this window", and it
+ * is a tap on the card; "reorder follows the finger" would mean a drag that reads as rearranging
+ * silently changes what you are working in. (Judged, not reflexive: BUGS asked for a decision.)
+ * It also keeps the active ring where the user left it — the ring is `window_active` from the
+ * re-list, so without `-d` it would jump to whatever was dragged.
+ */
+/* ponytail: the indices are still positions — `-b`/`-a` is chosen by `to < from`, which ids cannot
+ * answer — but they are now positions IN A NAMED SESSION, and they come from a list taken at the
+ * drag's start and re-listed the moment the move lands. The window a stale index can address by
+ * mistake is a neighbour it was about to shuffle anyway. Give `reorderArgs` a direction and this
+ * can take ids too. */
+export function moveWindowCommand(session: string, from: number, to: number): string {
   const slot = (index: number) => {
     if (!Number.isInteger(index) || index < 0) throw new Error(`not a window index: ${index}`);
-    return `:${index}`;
+    return sessionScope(session, String(index));
   };
-  return `tmux move-window ${to < from ? '-b' : '-a'} -s ${slot(from)} -t ${slot(to)}`;
+  return `tmux move-window -d ${to < from ? '-b' : '-a'} -s ${slot(from)} -t ${slot(to)}`;
 }
 
 /* --- the poll (badge for T7, foreground process for T11's ribbon) --- */
@@ -400,7 +446,7 @@ export function pollDelay(attached: boolean, ticks: number): number {
  * you do want arrows), so the two facts stay separate — see `selectRecipe` and `scrollRoute`.
  */
 export function pollCommand(session: string | null): string {
-  const target = session === null ? '' : ` -t ${shellQuote(`=${session}:`)}`;
+  const target = session === null ? '' : ` -t ${sessionScope(session)}`;
   return (
     `tmux display-message${target} -p '` +
     ['#{session_attached}', '#{window_index}', '#{pane_pid}', '#{alternate_on}', '#{pane_current_command}'].join(SEP) +
@@ -408,8 +454,17 @@ export function pollCommand(session: string | null): string {
   );
 }
 
-/** The untargeted form, still the fallback when we cannot name the session (`custom` start mode,
- *  or an `attach` that never picked one) and when a targeted poll answers nothing. */
+/**
+ * The untargeted form, and the ONLY command still allowed to be one: the modes that cannot name a
+ * session (`custom`, `shell`, `attach` on "most recent") still want a badge and a ribbon, and the
+ * worst a wrong answer does there is describe another window — the flap BUGS.md already records.
+ *
+ * It is no longer a *fallback* for a targeted poll that answered nothing. That fallback is what let
+ * the app keep believing it was attached after its own session ended: the targeted ask went quiet,
+ * the untargeted one was answered by the user's session, `attached` stayed true, and the grid
+ * re-listed onto their windows instead of tearing down (T10A.8). A named ask that goes quiet now
+ * means what it says — that session is gone.
+ */
 export const POLL = pollCommand(null);
 
 export type TmuxPoll = {
@@ -483,11 +538,20 @@ export function deriveConfigStatus(
  * — the button used to open a switcher onto someone else's windows, where taps quietly drove another
  * client and the phone's grid never changed (found on device, T13/T9.4).
  *
+ * The attached term is now carried by the NAME: `session` is the session a targeted poll actually
+ * answered for (`src/tmux.ts`), so non-null means both "a client is attached" and "we can scope a
+ * window command to it". A mode that cannot name its session — `custom`, `shell`, `attach` on "most
+ * recent" — therefore gets no tabs at all, and that is the deliberate answer to the second half of
+ * this bug: the untargeted `list-windows` those modes would need is exactly the command that put
+ * another session's windows in the grid with a working ✕. Degrading silently is not on the table;
+ * the button greys and `tabsHint` says which choice in Settings gives it a name back.
+ *
  * Ceiling, inherited from the probe: "attached" is `#{session_attached} > 0`, so a desktop client
- * attached while the phone is not still reads as attached. Same ponytail note as in `probe`.
+ * attached to OUR named session while the phone is not still reads as attached. Same ponytail note
+ * as in `probe` — but it is now bounded to one session we chose, not to any session on the host.
  */
-export function tabsAvailable(present: boolean | null, attached: boolean): boolean {
-  return present === true && attached;
+export function tabsAvailable(present: boolean | null, session: string | null): boolean {
+  return present === true && session !== null;
 }
 
 /**
@@ -498,9 +562,18 @@ export function tabsAvailable(present: boolean | null, attached: boolean): boole
  * The answer has to name the actual reason or it is worse than silence: a host with no tmux and a
  * session that merely chose not to use it need opposite advice.
  */
-export function tabsHint(present: boolean | null, usesTmuxMode: boolean): string {
+export function tabsHint(
+  present: boolean | null,
+  usesTmuxMode: boolean,
+  /** Does the start mode name a session? (`pollSession` !== null.) The MODE's own fact, not the
+   *  live one — "not attached yet" must still read as "Waiting for tmux…", not as bad Settings. */
+  nameable: boolean,
+): string {
   if (present === false) return 'Tabs need tmux, and this host has not got it.';
   if (!usesTmuxMode) return 'Tabs need a tmux session — choose a tmux start mode in Settings.';
+  if (!nameable) {
+    return 'Tabs need a session Port22 can name — pick one in Settings, not “most recent” or a custom line.';
+  }
   return 'Waiting for tmux…';
 }
 
