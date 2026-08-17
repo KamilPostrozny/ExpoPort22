@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { router, Stack } from 'expo-router';
+import { router, Stack, useNavigation } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -369,6 +369,18 @@ export default function SessionScreen() {
     // Saves silently: on success nothing is typed and nothing is shown (§4.6). `sendFile` owns
     // the failure alert.
     await sendFile(base64, joinPath(dir, filename));
+  };
+
+  // T16: the key screen, through the ⋯ menu. A pushed route, not a sheet: the terminal stays
+  // mounted underneath and the session stays up, which is the whole point — "Add to
+  // authorized_keys" needs an authenticated session, and the only other door to that screen is
+  // Setup, which this screen reaches through `leave()`, i.e. by disconnecting on the way. The
+  // keyboard goes away as it does for Settings; unlike Settings there is no close callback to give
+  // it back, and a route that came back with the keys up would be raising them for no one.
+  const openKeys = () => {
+    setOpen('none');
+    Keyboard.dismiss();
+    router.push({ pathname: '/keys', params: { from: 'Terminal' } });
   };
 
   // T12: the Settings sheet (§4.8). Both doors — the ⋯ menu row and the two-finger tap on the
@@ -1490,9 +1502,16 @@ export default function SessionScreen() {
    *  own state, and a `rbOpen` in this effect's dependency array would be a temporal-dead-zone
    *  throw on the first render (the same reason the key bar's handlers ride a ref). */
   const rbOpenRef = useRef(false);
+  const navigation = useNavigation();
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // This screen stays MOUNTED under a route pushed on top of it (T16's key screen), and RN
+      // runs the newest subscription first — so without this the terminal's ladder would answer a
+      // back press meant for the screen in front and background the app instead of popping. Read
+      // at press time, not through `useIsFocused`, which would re-render the terminal on every
+      // navigation. `false` passes the press down to React Navigation's own handler.
+      if (!navigation.isFocused()) return false;
       if (sw !== 'closed') {
         if (sw === 'open') doneToActive(); // mid-transition: swallowed, the zoom owns the screen
       } else if (open !== 'none') {
@@ -2805,6 +2824,7 @@ export default function SessionScreen() {
               theme={theme}
               bottom={popBase}
               onUpload={startUpload}
+              onOpenKeys={openKeys}
               onOpenSettings={openSettings}
             />
           )}

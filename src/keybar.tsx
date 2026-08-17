@@ -1026,6 +1026,7 @@ export function BarMenu({
   theme,
   bottom,
   onUpload,
+  onOpenKeys,
   onOpenSettings,
 }: {
   theme: Theme;
@@ -1033,6 +1034,11 @@ export function BarMenu({
   bottom: number;
   /** §4.6's destination flow: the screen runs picker → destination sheet → silent SFTP save. */
   onUpload: (kind: 'files' | 'photo' | 'camera') => void;
+  /** T16's key screen. It is here rather than only on Setup because Upload ("Add to
+   *  authorized_keys") needs a session that is already up, and the only other door to that screen
+   *  is Setup — which the terminal reaches through `leave()`, i.e. by disconnecting first. Through
+   *  this row the session stays up underneath, exactly as it does for Settings. */
+  onOpenKeys: () => void;
   onOpenSettings: () => void;
 }) {
   return (
@@ -1056,6 +1062,15 @@ export function BarMenu({
           </Pressable>
         ))}
         <View style={[styles.menuBreak, { backgroundColor: theme.scrim }]} />
+        <Pressable
+          onPress={onOpenKeys}
+          style={({ pressed }) => [
+            styles.menuRow,
+            { borderTopColor: hairline(theme) },
+            pressed && { backgroundColor: keyTint(theme) },
+          ]}>
+          <Text style={[styles.menuLabel, { color: theme.foreground }]}>Key</Text>
+        </Pressable>
         <Pressable
           onPress={onOpenSettings}
           style={({ pressed }) => [

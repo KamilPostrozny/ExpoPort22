@@ -44,6 +44,20 @@ export async function loadOrCreateKey(comment = 'port22'): Promise<KeyPair> {
     seedBase64 = toBase64(Crypto.getRandomBytes(32));
     await SecureStore.setItemAsync(SEED_KEY, seedBase64, STORE_OPTIONS);
   }
+  return deriveKey(seedBase64, comment);
+}
+
+/**
+ * Seed → public line: the one derivation path, which every key comes through — loaded, generated
+ * and imported alike.
+ *
+ * It is separate from the store so that a REPLACEMENT can derive before it writes. Everything that
+ * can fail then fails while the old seed is still in place, which is what lets the screen say
+ * "nothing has changed" and be telling the truth; the write is the last await in `regenerateKey`
+ * and in `importKey`, so past it the replacement has happened and nothing after it may report
+ * otherwise.
+ */
+async function deriveKey(seedBase64: string, comment = 'port22'): Promise<KeyPair> {
   // Imported here rather than at the top of the file. `keys.ts` is on the initial route's module
   // graph, and `@noble/curves/ed25519.js` evaluates the FROST, OPRF and ristretto255 constructions
   // at its own top level — none of which this app calls, and all of which survive tree shaking
@@ -64,14 +78,25 @@ export async function loadOrCreateKey(comment = 'port22'): Promise<KeyPair> {
  * `ExpoSSHModule.fingerprint` prints for host keys, over the same wire-format blob, so the two read
  * alike on screen. In JS rather than native because the key screen shows it with no connection up.
  *
+ * It throws where the platform throws, and that is fine: it is the one part of a key that is pure
+ * decoration, so the screen catches it and degrades the card (`NO_FINGERPRINT`) rather than letting
+ * a digest take an action down with it.
+ *
  * (`micro-key-producer/ssh.js` would hand this over along with a keygen — it is `@noble`'s author
  * and RN-clean — but it is generate-only, `expo-crypto` is already here, and this is four lines.)
  */
 export async function fingerprint(publicKeyLine: string): Promise<string> {
   const blob = fromBase64(publicKeyLine.split(/\s+/)[1] ?? '');
-  // `fromBase64` allocates its own buffer, so this IS the blob and nothing else; the cast is only
-  // TypeScript's `ArrayBufferLike` generic, not a copy or a slice.
-  const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, blob.buffer as ArrayBuffer);
+  // The Uint8Array itself, NOT `blob.buffer`. expo-crypto's shipped `.d.ts` says `BufferSource`, so
+  // both type-check, and the iOS converter really does take either — but the Android one is
+  // `digest(algorithm, output: TypedArray, data: TypedArray)` (expo-crypto's `CryptoModule.kt`), and
+  // a bare ArrayBuffer throws `Cannot convert '[object ArrayBuffer]' to a Kotlin type`. That threw
+  // here on every call: the key screen read `reading…` forever, and worse, `fingerprint` was
+  // awaited AFTER the seed was written and inside the same try, so Generate reported "Could not
+  // write the new key" over a replacement that had already succeeded — a false failure on an
+  // irreversible action (emulator, 2026-08-17). Both halves are fixed: the byte type here, and the
+  // structure that let a digest speak for a write (see `regenerateKey` and the screen's `show`).
+  const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, blob);
   return `SHA256:${toBase64(new Uint8Array(digest)).replace(/=+$/, '')}`;
 }
 
@@ -81,8 +106,16 @@ export async function fingerprint(publicKeyLine: string): Promise<string> {
  * no host yet.
  */
 export async function regenerateKey(): Promise<KeyPair> {
-  await SecureStore.setItemAsync(SEED_KEY, toBase64(Crypto.getRandomBytes(32)), STORE_OPTIONS);
-  return loadOrCreateKey(); // reads it straight back, so the line is derived by the one path
+  const seedBase64 = toBase64(Crypto.getRandomBytes(32));
+  // Derive first, store second. It used to write and then read back, which put two awaits — the
+  // noble import and the derivation — after the point of no return, and the screen then took a
+  // third (the fingerprint) after that. When the third threw on Android, Generate reported "Could
+  // not write the new key" over a replacement that had already succeeded: a false failure on an
+  // action with no undo (emulator, 2026-08-17). With the write last, a throw out of here means the
+  // old key is still the key, and that is the only thing the caller has to know.
+  const key = await deriveKey(seedBase64);
+  await SecureStore.setItemAsync(SEED_KEY, seedBase64, STORE_OPTIONS);
+  return key;
 }
 
 export type ImportResult =
@@ -113,8 +146,11 @@ export async function importKey(text: string, passphrase: string): Promise<Impor
     console.log('[keys] import failed:', error);
     return { problem: UNREADABLE };
   }
+  // Same order as `regenerateKey`, and for the same reason: the store is touched only once the new
+  // line is in hand, so every refusal AND every surprise is still "nothing here has changed".
+  const key = await deriveKey(seedBase64);
   await SecureStore.setItemAsync(SEED_KEY, seedBase64, STORE_OPTIONS);
-  return { key: await loadOrCreateKey() };
+  return { key };
 }
 
 /**
