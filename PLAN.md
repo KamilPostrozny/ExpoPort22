@@ -733,7 +733,7 @@ this half: §5d's clipboard-as-bottom-sheet and the upload snackbar-with-UNDO (d
 task slices never claimed — future Android polish), and Gboard's held-delete `onKeyPress`
 coverage plus dictation-chunk shape, flagged in T12A.9 rather than guessed at.
 
-**T13 — Device verification + builds** deps: all
+**T13 — Device verification + builds** ⚙ Android walked 2026-08-17 (111 of 146 cases); iOS not started · deps: all
 Walk §4 acceptance criteria on physical iPhone & Android. *Accept*: checklist in repo with every
 item ticked on hardware.
 T6–T12 are implemented but untested on device; TESTS.md (T6.1–T12.16) is the walk.

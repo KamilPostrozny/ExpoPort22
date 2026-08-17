@@ -2843,7 +2843,9 @@ on both platforms (b427712).
   ~300ms settle + one grep round trip. Name/cwd fragments show the yellow highlight on the
   card's name/directory label.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - STALE EXPECT 2026-08-17: the "(Android: "N of M tabs")" parenthetical is void — the 2026-08-16
+    inversion makes iOS the spec, and Android renders "1 of 5 Tabs", capital T, same string.
 
 ### T14.2 — First occurrence visible and highlighted in the card
 - **Setup**: a window whose scrollback holds the query far above the visible screen (e.g.
@@ -2854,14 +2856,14 @@ on both platforms (b427712).
   context is a coloured capture). Disarm (✕): the card returns to the live bottom-of-pane
   snapshot on the next beat.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
 
 ### T14.3 — No window contains it
 - **Steps**: with the switcher open, type a string in no window (`zzqx7`).
 - **Expect**: every card falls away, the centered "No window contains “zzqx7”" state shows,
   the label reads "0 of M". Backspacing to a matching prefix brings cards back.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
 
 ### T14.4 — Card tap lands armed: highlights, i/N, prev/next, keys as you left them
 - **Setup**: search armed on a string with ≥2 occurrences in one window's scrollback. Do it
@@ -2879,7 +2881,14 @@ on both platforms (b427712).
   differently — BUGS.md §1 and §2, root-caused into the xterm search addon's decoration path and
   open. Tick this case on the rest; note those two as the known fail.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - STALE EXPECT 2026-08-17: the "Known failing" clause is void. `@xterm/addon-search` is gone
+    (2c5d715) and the overlay draws the marks, so the active hit DOES draw differently — yellow
+    `#f9e2af` fill on the current occurrence, grey on the other 5, measured at every step of a
+    1/6 → 6/6 → 1/6 walk. What is still not built, and deliberately so, is scrolling to a hit:
+    only on-screen occurrences are steppable, and the off-screen ones are reported by the count
+    instead (BUGS.md §6). Keyboard-as-it-was verified both ways: opened with the keys down
+    → landed `mImeHeight=0`; opened with them up → landed `mImeHeight=820`.
 
 ### T14.5 — Edit in the terminal, return to the grid: same search, new narrowing
 - **Setup**: T14.4's end state.
@@ -2889,7 +2898,7 @@ on both platforms (b427712).
   reopened grid arrives with the field already holding the edited string and the narrowing
   already re-run for it (grep settle ≤ ~1s after open). The search never disarmed in between.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
 
 ### T14.6 — Disarm from either side, birth disarms, reorder locked while filtered
 - **Steps**: (a) with search armed, tap the field's ✕ in the switcher — check the terminal's
@@ -2900,7 +2909,9 @@ on both platforms (b427712).
   (c) the card never lifts: reorder is off while filtered (tap and swipe-to-close still
   work). (d) the new window births with the search disarmed and the keyboard up.
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - Note 2026-08-17: swipe-to-close is LEFT only (right rubber-bands, `switcher.tsx`'s own
+    comment) — a rightward emulator fling snapping back is the design, not a fail.
 
 ### T14.7 — Android: back ladder (Android only; chrome assertions INVERTED 2026-08-16)
 - **Steps**: walk T14.1 and T14.4 on the Android build; with search armed and the switcher
@@ -2912,6 +2923,12 @@ on both platforms (b427712).
   STILL armed (grid state preserved for the next open); back at the terminal goes home as
   before — the search bar does not eat the press.
 - Android: [ ]
+  - NOT PROVABLE 2026-08-17: the look half needs the iOS shot and iOS was deferred for this walk,
+    so "exactly as they do on iOS" has no reference to compare against. Everything else passed:
+    `SEARCH_RADIUS` is one unbranched pair in `style.ts` (switcher 13 / terminal 12) with no
+    `Platform.OS` anywhere near it, both fields render opaque with Inter, and the back ladder is
+    right — back from the open switcher landed in the active pane with the bar still up holding
+    the query, and the next back backgrounded the app to the launcher (the bar did not eat it).
 
 ### T14.8 — Cost and cadence sanity
 - **Setup**: 4+ windows, one with a deliberately huge scrollback (`seq 1 50000`), Metro logs
@@ -2922,7 +2939,11 @@ on both platforms (b427712).
   grep answers within ~1s on Wi-Fi and its card carries only the context block (the 50k lines
   never crossed).
 - iOS: [ ]
-- Android: [ ]
+- Android: [x]
+  - Note 2026-08-17: the 60fps half is not judgeable here — debug client on a software GPU
+    (`no-dev-breaks-dom-components`). The cadence is: one burst of 6 characters → exactly one
+    `[search] grep settled` line; two bursts with a pause → exactly two. 695ms from keystroke to
+    the settled answer over 7 windows, one of them 50 000 lines (300ms of that is the debounce).
 
 ### T14.9 — Leaving the grid onto a search hit: square top, keys where they were (iOS)
 - **Setup**: iOS only — the fix is in `syncPad`/`finishClose` and the emulator cannot see it.

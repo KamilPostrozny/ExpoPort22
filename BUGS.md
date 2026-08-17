@@ -268,7 +268,7 @@ already releases things a frame early.
 
 ---
 
-## 6. Terminal search only sees the visible screen, not the session's scrollback
+## 6. Terminal search only sees the visible screen — FIXED, Android-verified 2026-08-17
 
 **Repro.** Flood a pane (`yes "…" | head -200000`), then search the terminal for a word from the
 flood. Expect thousands of hits; get about **20** (device, 2026-08-15).
@@ -1383,3 +1383,23 @@ window now *creates* a third window.
 
 **New, found while walking:** Setup's `Command` row label wraps as `Comman` / `d` beside a long start
 line, in both flavours.
+
+---
+
+## Walk hygiene learned the hard way (2026-08-17)
+
+- **A running app can serve a bundle older than the commit you think you are testing.** The T14 walk's
+  first pass produced no `[search]` line and a blank count — it was running a pre-rewrite bundle
+  because the process had been up since before the commit. `keyevent 82` does **not** open the dev
+  menu on this AVD; a `force-stop` plus a deep-link relaunch is what gets a fresh bundle. Counting
+  `Android Bundled` lines is necessary but not sufficient — check that the strings you are looking
+  for actually appear.
+- **fish's plain `clear` destroys tmux's history** (it emits E3), taking 50 012 hits to 0. Use
+  `clear -x` when a case wants "clear the screen, keep the scrollback".
+- **A pure connection-kill cannot produce the search's `failed` state** — the whole cycle is ~450ms
+  (keystroke → 300ms debounce → ~50ms exec), so the kill lands either after the answer or before the
+  debounce, and in the latter case the Disconnected overlay owns the screen anyway. Killing the
+  *searched window* is the reachable route to the same rejection.
+- Leaving the app's start mode on an `attach` to a session you then delete is a trap:
+  `startupLine`'s fallback is `tmux new-session -A -D -s port22`, which attaches **and detaches** the
+  user's live work. Park it on a custom command instead.
