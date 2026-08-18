@@ -56,5 +56,8 @@
     "web": "expo start --web",
     "lint": "expo lint"
   },
-  "private": true
+  "private": true,
+  "patchedDependencies": {
+    "react-native@0.86.2": "patches/react-native@0.86.2.patch"
+  }
 }

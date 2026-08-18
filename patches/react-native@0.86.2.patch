@@ -1,0 +1,67 @@
+diff --git a/scripts/cocoapods/spm.rb b/scripts/cocoapods/spm.rb
+index d500bb990bd53dd4d03e6520b5ddd61325a401b5..969d3df0e77545b284dfcb2cb0dffae7bfd469ad 100644
+--- a/scripts/cocoapods/spm.rb
++++ b/scripts/cocoapods/spm.rb
+@@ -1,3 +1,4 @@
++require 'securerandom'
+ # Copyright (c) Meta Platforms, Inc. and affiliates.
+ #
+ # This source code is licensed under the MIT license found in the
+@@ -68,6 +69,30 @@ class SPMManager
+     }
+   end
+ 
++  # Allocate an object with a collision-checked random UUID.
++  #
++  # `project.new(klass)` takes its UUID from xcodeproj's counter, which is seeded from
++  # SHA256("Pods.xcodeproj") and RESET between project generation and post_install. This runs in
++  # post_install, so its first allocation hands back 46EB2E00000000 — the UUID PBXProject already
++  # owns. The new object then overwrites the project block and Xcode refuses the whole file with
++  # "The project 'Pods' is damaged", surfacing as
++  # `-[XCSwiftPackageProductDependency _setSavedArchiveVersion:]: unrecognized selector`.
++  #
++  # Whether it collides depends on how many objects the counter has already issued, i.e. on the
++  # exact pod set — which is why adding one unrelated pod flipped this repo from building to not.
++  # Upstream fix for the same bug: maplibre-react-native#1500.
++  def new_object_with_unique_uuid(project, klass)
++    uuid = nil
++    loop do
++      uuid = SecureRandom.hex(12).upcase
++      break unless project.objects_by_uuid.key?(uuid)
++    end
++    object = klass.new(project, uuid)
++    object.initialize_defaults
++    project.objects_by_uuid[uuid] = object
++    object
++  end
++
+   def add_spm_to_target(project, target, url, requirement, products)
+     # Determine if this is a local path or remote URL
+     is_local_path = File.exist?(url)
+@@ -76,7 +101,7 @@ class SPMManager
+       pkg_class = Xcodeproj::Project::Object::XCLocalSwiftPackageReference
+       pkg = project.root_object.package_references.find { |p| p.class == pkg_class && p.relative_path == url }
+       if !pkg
+-        pkg = project.new(pkg_class)
++        pkg = new_object_with_unique_uuid(project, pkg_class)
+         pkg.relative_path = url
+         log(" Adding local package to workspace: #{pkg.inspect}")
+         project.root_object.package_references << pkg
+@@ -85,7 +110,7 @@ class SPMManager
+       pkg_class = Xcodeproj::Project::Object::XCRemoteSwiftPackageReference
+       pkg = project.root_object.package_references.find { |p| p.class == pkg_class && p.repositoryURL == url }
+       if !pkg
+-        pkg = project.new(pkg_class)
++        pkg = new_object_with_unique_uuid(project, pkg_class)
+         pkg.repositoryURL = url
+         pkg.requirement = requirement
+         log(" Adding remote package to workspace: #{pkg.inspect}")
+@@ -101,7 +126,7 @@ class SPMManager
+       next if ref
+ 
+       log(" Adding product dependency #{product_name} to #{target.name}")
+-      ref = project.new(ref_class)
++      ref = new_object_with_unique_uuid(project, ref_class)
+       ref.package = pkg
+       ref.product_name = product_name
+       target.package_product_dependencies << ref
