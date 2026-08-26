@@ -653,9 +653,26 @@ export default function SessionScreen() {
     setHitAt(0);
   };
 
-  /** The active window's position in `list` — tmux's fresher poll first, the list's flag second. */
+  /**
+   * The window a hop is waiting to hear about. `select-window` is asynchronous, so for a beat or
+   * two after a commit the poll still describes the window we LEFT — which revived the old
+   * window's process on the new tab (user, 2026-08-16: "the pill stayed"). An answer about any
+   * other window is stale until the one we hopped to shows up.
+   *
+   * It clears itself three ways: the expected window answers, three answers go by without it (the
+   * hop did not take, and reality wins), or the recipe is set by the hop itself. So unlike a
+   * standing filter this cannot strand the band on a window you are no longer looking at.
+   */
+  const awaiting = useRef<{ index: number; tries: number } | null>(null);
+
+  /** The active window's position in `list` — tmux's fresher poll first, the list's flag second.
+   *  Unless a hop is still awaiting confirmation: then the poll is the STALE one (it names the
+   *  window we left), and the window we hopped to is the answer. Reading the poll there put the
+   *  next swipe back at the pre-hop position — from the last tab, left-then-right hopped to the
+   *  phantom slot and birthed a window instead of returning (user, 2026-08-26). */
   const activePosIn = (list: Card[]) => {
-    const byIndex = list.findIndex((c) => c.win.index === tmux.windowIndex);
+    const wait = awaiting.current;
+    const byIndex = list.findIndex((c) => c.win.index === (wait === null ? tmux.windowIndex : wait.index));
     if (byIndex >= 0) return byIndex;
     const byFlag = list.findIndex((c) => c.win.active);
     return byFlag >= 0 ? byFlag : 0;
@@ -1883,17 +1900,6 @@ export default function SessionScreen() {
   rbOpenRef.current = rbOpen;
   const fgCommand = tmux.foreground?.command ?? null;
   const fgPid = tmux.foreground?.pid ?? null;
-  /**
-   * The window a hop is waiting to hear about. `select-window` is asynchronous, so for a beat or
-   * two after a commit the poll still describes the window we LEFT — which revived the old
-   * window's process on the new tab (user, 2026-08-16: "the pill stayed"). An answer about any
-   * other window is stale until the one we hopped to shows up.
-   *
-   * It clears itself three ways: the expected window answers, three answers go by without it (the
-   * hop did not take, and reality wins), or the recipe is set by the hop itself. So unlike a
-   * standing filter this cannot strand the band on a window you are no longer looking at.
-   */
-  const awaiting = useRef<{ index: number; tries: number } | null>(null);
   useEffect(() => {
     // Not while anything is sliding: after a committed hop the very next display-message answer
     // carries the NEW window's foreground, and this flipped the handle ~100ms into every slide.
