@@ -216,6 +216,11 @@ const plateEdge = (t: Theme) => rgba(t.foreground, 0.12);
 
 /** Every popover in this file rises and leaves the same way — one decision, not five copies of it.
  *  Out is quicker than in: a dismissal should be gone before the finger is. */
+/** The chord strip's height before it has ever been measured, so the first arm reserves roughly
+ *  the right space rather than flashing the plate over the keys for a frame. Five 48pt caps with
+ *  6pt of plate padding; `onLayout` replaces it with the real number on the first render. */
+const CHORD_H = 62;
+
 const POP_IN = FadeInDown.duration(180);
 const POP_OUT = FadeOutDown.duration(140);
 
@@ -473,6 +478,35 @@ function KeyBarInner(props: KeyBarProps) {
     }, CARET_SETTLE_MS);
   };
 
+  /**
+   * The chord strip's slot, held open until its fade has finished.
+   *
+   * Every other plate on this bar is absolutely positioned in the screen's popover layer, so its
+   * exit is purely the 140ms fade-down and it looks right. The strip is the one that lives IN THE
+   * FLOW of the bar stack — and the moment `ctrl` goes off it leaves that flow, the stack collapses
+   * by the strip's height plus its gap, and the fading plate is carried down with the collapse. The
+   * two motions add up: recorded on the emulator 2026-09-01, the caps were still legible BELOW the
+   * key pill on the way out, which is nothing like the others (user, 2026-09-01, iPhone: "all
+   * animations look fine except ctrl menu hiding").
+   *
+   * So the slot outlives the plate. `stripH` pins it at the height it was measured at — auto height
+   * is no good, because Reanimated lifts an exiting view out of its parent and the slot would
+   * collapse to nothing on the same frame it is supposed to be holding. When the timeout finally
+   * drops the slot, the plate has already faded to nothing, so the collapse is invisible.
+   *
+   * A re-arm inside the window cancels the teardown, so a fast double-tap of Ctrl never flickers.
+   */
+  const [stripH, setStripH] = useState(CHORD_H);
+  const [stripUp, setStripUp] = useState(false);
+  useEffect(() => {
+    if (ctrl !== 'off') {
+      setStripUp(true);
+      return;
+    }
+    const t = setTimeout(() => setStripUp(false), 200); // > POP_OUT's 140ms
+    return () => clearTimeout(t);
+  }, [ctrl]);
+
   const sendChord = (letter: string) => {
     track(controlByte(letter)!);
     setCtrl(afterChord(ctrl));
@@ -694,10 +728,20 @@ function KeyBarInner(props: KeyBarProps) {
 
   return (
     <View onLayout={(e) => props.onHeight(e.nativeEvent.layout.height)}>
+      {/* The SPACER, in flow, is the only thing the stack's height comes from — the strip itself is
+          absolute and contributes nothing. That is the whole fix: a plate that is not in the flow
+          has no flow to collapse, and the 61pt single-frame jump goes away with it (measured on the
+          emulator 2026-09-01: the strip's top went 2006 -> 2175 in one frame at unmount, its own
+          height exactly, and only then did the 140ms fade play out from there).
+          The spacer still reserves the space while `stripUp`, so the caps stay INSIDE the bar
+          View's bounds — Android will not hit-test a child drawn outside its parent, which is why
+          the strip cannot simply move to the screen's popover layer with the other four. */}
+      {stripUp && <View pointerEvents="none" style={{ height: stripH + SPACE.sm }} />}
       {ctrl !== 'off' && (
         <Animated.View
           entering={POP_IN}
           exiting={POP_OUT}
+          onLayout={(e) => setStripH(e.nativeEvent.layout.height)}
           style={styles.chordWrap}>
           <Plate theme={theme} radius={22} style={styles.chordPill}>
             {CHORD_STRIP.map(({ letter, caption }) => (
@@ -1271,7 +1315,9 @@ const styles = StyleSheet.create({
   },
 
   /* chord strip */
-  chordWrap: { alignItems: 'center', paddingTop: 2, paddingBottom: SPACE.sm },
+  /** Absolute, pinned to the top of the bar stack — which is exactly the region the spacer above
+   *  it reserves. Out of flow on purpose; see the spacer's comment. */
+  chordWrap: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', paddingTop: 2 },
   chordPill: { flexDirection: 'row', gap: SPACE.xs, padding: 6 },
   cap: {
     width: 48,
