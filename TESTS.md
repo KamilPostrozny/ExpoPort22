@@ -1384,8 +1384,9 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
 - **Steps**: run the quick-attach flow, pick a photo.
 - **Expect**: log shows `upload` into `/tmp/port22/<UTCstamp>.jpg` (mkdir 0700 on demand —
   `stat -c %a /tmp/port22` says 700) and `[upload] quick-attach typed …`; the prompt now holds
-  the absolute path plus **one trailing space**, unexecuted; the path also appears as an
-  "upload path" clipboard slot.
+  the absolute path plus **one trailing space**, unexecuted. The path does *not* become a
+  clipboard slot — it did until 2026-09-01, when the user overruled it: the popover is for things
+  to paste, and a path already typed into the terminal is not one of them.
 - iOS: [ ]
 - Android: [ ]
   - FAILED 2026-08-17: the cap fires and builds the right path, the send never lands. Drove it from
@@ -1399,6 +1400,30 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
     `'files'` (`src/upload.ts:128`, `src/app/terminal.tsx:1871`) — the SAF picker, the one that
     backgrounds the app and kills the connection. The case's own text says `quickAttach('photo')`,
     and the photo picker is exactly the one that would have survived.
+
+### T8.17 — Paste sends a photo or a file from the phone pasteboard
+- **Setup**: connected, cursor at a prompt, no yanks in the slots (a plain tap must reach the
+  pasteboard rather than a slot).
+- **Steps**: copy a photo on the phone, tap **Paste**. Then copy a PDF (Files → Copy) and tap
+  **Paste** again. Then long-press **Paste** and pick the row the popover offers.
+- **Expect**: nothing is typed as *text* in any of the three; each lands
+  `/tmp/port22/<UTCstamp>.<ext>` on the host, byte-intact, with the path plus one trailing space
+  at the prompt, unexecuted. The popover row reads `Photo` for an image and the filename for a
+  file, has no pin, and drawing it costs no iOS paste banner — only the tap does.
+- iOS: [x] — 2026-09-01. Photo: `…T081542.png` 5712x4284 and `…T081638.png` 3672x4896 off the
+  camera roll, both through the plain tap and the popover row. PDF: `[upload] pasteboard file:
+  Invoice-3BKKNUTM-0022.pdf` → `…T084931.pdf`, `file(1)` says "PDF document, version 1.4,
+  1 page(s)", 34,696 bytes with an intact trailer. `[clipboard] 0 slots` after each — no upload
+  slot, per T8.16.
+- Android: [x] for the photo — 2026-09-01, emulator, image copied in Chrome: the tap typed
+  `…T080836.png` and the popover row `…T080924.png`, both 240x160 PNGs intact on the host;
+  re-walked on the APK carrying the native module (`…T083834.png`).
+  - **The file half is UNVERIFIED on Android** and cannot be walked on this emulator image:
+    nothing on it puts a file on the clipboard. DocumentsUI offers only "Copy to…" (a destination
+    picker, not the clipboard) and the share sheet has no Copy. `ExpoPasteboard.read()` does run —
+    it returned `null` on an empty pasteboard rather than throwing, so the module autolinks and is
+    callable — but the `content://` read itself has never executed. Needs a real phone with a file
+    manager that copies to the clipboard.
 
 ## T10 — Tab switcher
 
