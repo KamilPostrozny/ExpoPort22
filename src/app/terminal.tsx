@@ -789,10 +789,11 @@ export default function SessionScreen() {
   const REVEAL_MS = 320;
 
   /** How long a zoom phase may stand before the watchdog below calls it stuck. The animations are
-   *  340 and 380ms, so this is comfortably past any real one and still inside a lost second. */
+   *  260 and 280ms, so this is comfortably past any real one and still inside a lost second. */
   const PHASE_WATCHDOG_MS = 1500;
-  const ZOOM_OUT = { duration: 340, easing: Easing.out(Easing.cubic) };
-  const ZOOM_IN = { duration: 380, easing: Easing.out(Easing.cubic) };
+  // 340/380 as built; cut ~25% because the flight read as heavy (user, 2026-09-01).
+  const ZOOM_OUT = { duration: 260, easing: Easing.out(Easing.cubic) };
+  const ZOOM_IN = { duration: 280, easing: Easing.out(Easing.cubic) };
   /** Every console.log serializes through Metro's socket ON the JS thread — the same cost that
    *  made the SSH tap the thing we were measuring. A hop emits ~10 of them between the harness,
    *  the trace and §7's own lines, which is JS-thread time inside the gesture being measured.
@@ -982,7 +983,22 @@ export default function SessionScreen() {
   };
 
   const openSwitcher = () => {
-    if (sw !== 'closed' || stage === null) return;
+    if (stage === null) return;
+    if (sw === 'closing') {
+      // The flight home is catchable from the tabs button too, not only the bar grab (see
+      // onZoomGrab): the last stretch of the out-cubic reads as a landed terminal, so a tap
+      // there was swallowed — which is what blocked hopping through tabs via the grid
+      // (user, 2026-09-01). Nothing to set up: the aim, the cards and the size hold are the
+      // ones this close was already flying under, so just reverse the flight.
+      console.log('[switcher] open (tabs tap caught the close)');
+      closeArmed.current = false;
+      cancelAnimation(prog);
+      cancelAnimation(alpha);
+      alpha.value = 1;
+      commitOpen();
+      return;
+    }
+    if (sw !== 'closed') return;
     console.log('[switcher] open (tabs tap)');
     setOpen('none');
     keysWereUp.current = keyboardPad > 0; // read before the dismiss moves it
@@ -1154,7 +1170,7 @@ export default function SessionScreen() {
     }
   };
 
-  const closeTo = (pos: number) => {
+  const closeTo = (pos: number, gate?: (done: () => void) => void) => {
     // The phase flip and the aim first, the motion two frames later — the same gap `openSwitcher`
     // takes for the same reason. `setZoomId` re-renders the grid and `setSw('closing')` flips the
     // size hold, the freeze and the wrapper's pointer events, and paying all of that on the frame
@@ -1186,9 +1202,23 @@ export default function SessionScreen() {
     // never started and `closing` stood — with the grid untouchable and the surface invisible,
     // which is an app that has frozen (user, 2026-08-11). Only a grab clears this.
     closeArmed.current = true;
+    // The motion waits for BOTH the two-frame gap and the caller's gate (the redraw wait, on a
+    // card tap) — armed in parallel, so the aim render is paid while the roundtrip is in the air
+    // instead of queued after it. That serial chain was the "initial delay" on a card tap
+    // (user, 2026-09-01).
+    let framesDone = false;
+    let gateDone = !gate;
+    const fire = () => {
+      if (framesDone && gateDone && closeArmed.current) springBack();
+    };
+    gate?.(() => {
+      gateDone = true;
+      fire();
+    });
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        if (closeArmed.current) springBack();
+        framesDone = true;
+        fire();
       }),
     );
   };
@@ -1259,9 +1289,7 @@ export default function SessionScreen() {
     // finger and the motion (~250ms, against the redraw's ~50). `springBack` goes solid on its
     // first frame instead, so there is no dissolve to match and nothing to wait for; the card is
     // one frame of cut behind the live pane rather than a tenth of a second of double exposure.
-    afterHostRedraw(dataSeq.current, () => {
-      if (swRef.current === 'open') closeTo(pos);
-    });
+    closeTo(pos, (done) => afterHostRedraw(dataSeq.current, done));
   };
 
   /**
