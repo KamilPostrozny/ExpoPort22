@@ -13,13 +13,13 @@
 /**
  * Bundled JetBrains Mono Nerd Font, loaded in `app/_layout.tsx`. The terminal grid, every
  * monospaced readout (public key, remote paths) and — since the SymbolView deletions in
- * `keybar.tsx`, `switcher.tsx`, `ribbon.tsx` and `settings-sheet.tsx` — every icon in the chrome
+ * `keybar.tsx`, `switcher.tsx` and `settings-sheet.tsx` — every icon in the chrome
  * render through these: the Nerd Font glyph ranges are the icon set, so `MONO` is no longer just
  * the terminal's font.
  *
  * Two separate one-face families, not one family with a weight axis, and it has to stay that way:
  * a numeric `fontWeight` against a custom one-face family resolves on neither platform the way it
- * reads, so the repo swaps the FAMILY for bold instead (`ribbon.tsx:512`, `switcher.tsx:1075`).
+ * reads, so the repo swaps the FAMILY for bold instead (`switcher.tsx:1075`).
  *
  * Two separate one-face families, not one family with a weight axis, and it has to stay that way:
  * a numeric `fontWeight` against a custom one-face family resolves on neither platform the way it

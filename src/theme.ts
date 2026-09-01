@@ -36,10 +36,6 @@ import { SCHEMES, type SchemeData } from '@/themes-generated';
  *  literals: the generated list is data, and a name is validated by looking it up in `THEMES`. */
 export type ThemeName = string;
 
-/** One colour per class of process, named after the Catppuccin step the prototype picked. Every
- *  other scheme approximates them out of its own ANSI set. */
-export type DotName = 'green' | 'grey' | 'mauve' | 'blue' | 'yellow' | 'peach';
-
 export type Theme = {
   name: ThemeName;
   /** What the picker shows. */
@@ -85,9 +81,6 @@ export type Theme = {
   /** The label on top of a filled `accent`. The background colour on purpose: contrast is
    *  symmetric, so background-on-accent inherits the guarantee that accent-on-background holds. */
   onAccent: string;
-  /** The ribbon handle's colour, one per class of process. */
-  dots: Record<DotName, string>;
-
   /** What the terminal pushes at the host on a mid-session theme switch. DECSET 2031 subscribers
    *  (fish 4) treat it as "re-query the background"; anyone else parses and drops it. */
   colorSchemeNotification: string;
@@ -153,15 +146,6 @@ function fromFlavour(name: FlavourName): Theme {
     border: isDark ? p.overlay0 : p.overlay1,
     placeholder: isDark ? p.overlay1 : p.overlay2,
     onAccent: p.base,
-    dots: {
-      green: p.green,
-      grey: p.overlay0,
-      mauve: p.mauve,
-      blue: p.blue,
-      yellow: p.yellow,
-      peach: p.peach,
-    },
-
     colorSchemeNotification: notify(isDark),
   };
 }
@@ -247,8 +231,6 @@ const FLOOR = {
   placeholder: 2.8,
   /** `overlay0` on `base`: 2.30 … 3.36. */
   border: 2.3,
-  /** A filled dot is a graphical object, not a hairline, so it gets the UI floor of its own. */
-  dot: 3.0,
   /** `blue` on `base`: 4.34 … 7.79. Carries `onAccent` on top of it, and contrast is symmetric. */
   accent: 4.3,
   /** `red` on `base`: 4.65 … 7.08. */
@@ -296,7 +278,7 @@ function fromScheme(s: SchemeData): Theme {
   // Where a scheme publishes the colour outright — gruvbox branches its whole accent tier on
   // dark-vs-light, Nord names nord8 "main color for primary UI elements", ayu's identity is its
   // gold — the generator carries it and it wins here. See `OVERRIDES` in scripts/gen-themes.ts.
-  const [, red, green, yellow, blue, magenta] = s.ansi;
+  const [, red, , yellow, blue, magenta] = s.ansi;
   return {
     name: s.name,
     label: s.label,
@@ -321,18 +303,6 @@ function fromScheme(s: SchemeData): Theme {
     border: s.border ?? step(bg, fg, 0.45, FLOOR.border),
     placeholder: s.placeholder ?? step(bg, fg, 0.55, FLOOR.placeholder),
     onAccent: bg,
-    dots: {
-      green,
-      // One step up from the hairline, and on its own floor: this one is filled, not drawn.
-      grey: step(bg, fg, 0.55, FLOOR.dot),
-      mauve: magenta,
-      blue,
-      yellow,
-      // No ANSI slot is orange. Nine of these palettes publish one anyway and the generator carries
-      // it; the rest split the difference, because falling back to red made this dot and `danger`
-      // the same hex on all twenty-two.
-      peach: s.orange ?? mix(red, yellow, 0.45),
-    },
 
     colorSchemeNotification: notify(dark),
   };

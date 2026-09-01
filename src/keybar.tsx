@@ -134,7 +134,7 @@ export type KeyBarProps = {
    *  circle at all — no tmux (or a toggled-off config) is silence, not a message (§7). */
   showTabs: boolean;
   /** §4.6: an upload in flight. The ⋯ circle tints accent and goes inert — the whole progress
-   *  UI. Both flows flip it (quick-attach included, via `useUploadBusy`). */
+   *  UI. Both flows flip it, via `useUploadBusy`. */
   sending?: boolean;
   /** T10: tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
@@ -245,7 +245,7 @@ const DISPLAY_NONE = { display: 'none' } as const;
  * on its own surface — quite possibly not capturable into that canvas at all. Two platforms, two
  * mechanisms, one of them unverifiable without hardware: that is a workaround, not a shared design.
  *
- * So the glass goes, and `src/ribbon.tsx` gets its precedent applied everywhere rather than only to
+ * So the glass goes, and the precedent is applied everywhere rather than only to
  * itself — it reached this conclusion first, for its own band, and the note there is still the
  * shortest statement of it. `theme.surface` is opaque on purpose: translucency without blur just
  * shows the terminal's own text through the bar, which is worse than either. Reduce Transparency is
@@ -289,7 +289,7 @@ export const BAR_PAD_TOP = BAR.padTop;
 /** Every pressable on the bar: dim + shrink while touched, light haptic on the completed tap —
  *  NOT on touch-down, where a bar swipe starting over a key buzzed on every hop and broke the
  *  slide's fluidity; Safari's has none (user, 2026-08-11). A pan that wins the race never
- *  completes the press, so swipes are silent. Exported for the ribbon's caps: they are the same
+ *  completes the press, so swipes are silent. Exported: every cap is the same
  *  kind of control and used to be a bare Pressable with neither the haptic nor the shrink. */
 export function Key({
   onPress,
@@ -1118,7 +1118,6 @@ export function BarMenu({
   theme,
   bottom,
   onUpload,
-  onOpenKeys,
   onOpenSettings,
 }: {
   theme: Theme;
@@ -1130,7 +1129,6 @@ export function BarMenu({
    *  authorized_keys") needs a session that is already up, and the only other door to that screen
    *  is Setup — which the terminal reaches through `leave()`, i.e. by disconnecting first. Through
    *  this row the session stays up underneath, exactly as it does for Settings. */
-  onOpenKeys: () => void;
   onOpenSettings: () => void;
 }) {
   return (
@@ -1154,15 +1152,6 @@ export function BarMenu({
           </Pressable>
         ))}
         <View style={[styles.menuBreak, { backgroundColor: theme.scrim }]} />
-        <Pressable
-          onPress={onOpenKeys}
-          style={({ pressed }) => [
-            styles.menuRow,
-            { borderTopColor: hairline(theme) },
-            pressed && { backgroundColor: keyTint(theme) },
-          ]}>
-          <Text style={[styles.menuLabel, { color: theme.foreground }]}>Key</Text>
-        </Pressable>
         <Pressable
           onPress={onOpenSettings}
           style={({ pressed }) => [
@@ -1255,7 +1244,7 @@ export function ClipboardPopover({
         ))}
         {pasteboard !== null && row(pasteboard, false, pinPasteboard, () => type(pasteboard.text))}
         {/* A photo or a file on the pasteboard: no pin (the bytes are the pasteboard's, not ours)
-            and no typing — picking it uploads and types the path, like quick-attach. */}
+            and no typing — picking it uploads and types the path. */}
         {pasteboardFile !== null && (
           <Pressable
             onPress={() => {

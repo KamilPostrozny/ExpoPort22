@@ -10,7 +10,6 @@
  * moment to boot and the login banner is already on its way while it does.
  */
 
-import * as LocalAuthentication from 'expo-local-authentication';
 import { AppState } from 'react-native';
 import { useSyncExternalStore } from 'react';
 
@@ -19,7 +18,7 @@ import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
 import { toBase64 } from '@/base64';
 import { forgetHostKey, hostKeyVerdict, pinHostKey, pinnedHostKey } from '@/host-keys';
 import { loadOrCreateKey } from '@/keys';
-import { endpoint, getHost, getSettings, startupLine, validate } from '@/settings';
+import { endpoint, getSettings, startupLine, validate } from '@/settings';
 import { startTmux, stopTmux } from '@/tmux';
 import { LIST_SESSIONS, parseSessions } from '@/tmux-model';
 
@@ -95,82 +94,17 @@ export function useSession(): Session {
   return useSyncExternalStore(subscribe, getSession, getSession);
 }
 
-/* --- the gate (T15) --- */
-
-/**
- * How long one authentication covers the connects that follow it. §4.9 reconnects on every
- * foreground, so an ungated grace of zero means a face scan every time the phone comes back to the
- * app — which is how a toggle stops being used by the end of the first day. Five minutes, and
- * deliberately NOT persisted: a cold launch has no `lastAuthAt` and therefore always asks.
- */
-const AUTH_GRACE_MS = 5 * 60 * 1000;
-
-/** Module state, read only inside async functions — never in a render body. The React Compiler
- *  memoises a `Date.now()` written in a component, and this repo has already paid for that three
- *  times over (see the repo memory). */
-let lastAuthAt: number | null = null;
-
-/** The whole decision, as a pure function so it can be tested without a clock. A negative `since`
- *  means the phone's clock moved backwards under us — a timestamp from the future is not a grace
- *  anyone granted, so it asks again rather than trusting it. */
-export function authNeeded(requireAuth: boolean, authedAt: number | null, now: number): boolean {
-  if (!requireAuth) return false;
-  if (authedAt === null) return true;
-  const since = now - authedAt;
-  return since < 0 || since >= AUTH_GRACE_MS;
-}
-
-/**
- * Face ID, a fingerprint, or the device passcode, before anything opens a socket. Throws to abort
- * the connect; `refusal` is what turns that into the plain sentence on §4.9's screen rather than
- * whatever the SSH stack would have said.
- *
- * `disableDeviceFallback: false` is the entire "PIN when there is no biometric" half: iOS asks
- * `LAPolicy.deviceOwnerAuthentication`, which goes straight to the passcode sheet on a phone with
- * nothing enrolled. Android cannot do it in one call — it raises a `BiometricPrompt` that fails
- * with `ERROR_NO_BIOMETRICS` and only then re-enters through `promptDeviceCredentialsFallback`, so
- * an Android user on a PIN-only phone sees a prompt-then-PIN flicker an iOS user does not. That is
- * inside Expo's module, there is no branch of ours that removes it, and it is recorded as a parity
- * finding rather than chased.
- *
- * What is NOT set, and each for a reason: `biometricsSecurityLevel` (the `'strong'` value throws
- * out of AndroidX's `PromptInfo.build()` on API 28–29, which `app.json` still ships to, and Expo
- * catches only `NullPointerException`); `promptSubtitle`, `promptDescription`, `requireConfirmation`
- * (Android-only, so setting them puts chrome on one platform's sheet and not the other's);
- * `fallbackLabel` (iOS-only, same reason). `promptMessage` is the one string both take.
- */
-async function gate(): Promise<void> {
-  if (!authNeeded(getSettings().requireAuth, lastAuthAt, Date.now())) return;
-  const result = await LocalAuthentication.authenticateAsync({
-    promptMessage: `Unlock Port22 to open a session on ${endpoint(getHost())}.`,
-    cancelLabel: 'Cancel',
-    disableDeviceFallback: false,
-  });
-  if (!result.success) {
-    console.log('[session] gate refused', result.error);
-    refusal = {
-      message:
-        'Port22 is locked. It asks for Face ID, a fingerprint or your passcode before it opens a ' +
-        'session — tap Reconnect to try again, or turn the lock off under Security on Setup.',
-      mismatch: false,
-    };
-    throw new Error(`gate refused: ${result.error}`);
-  }
-  lastAuthAt = Date.now();
-}
-
 /* --- the connection --- */
 
 export async function connect(): Promise<void> {
   if (state.status === 'connecting') return;
-  const host = getHost();
+  const host = getSettings();
   refusal = null;
   resetHistory();
-  // `connecting` is set BEFORE the prompt, not after it: the guard above is what stops the Setup
-  // button and the foreground listener raising two sheets over each other.
+  // `connecting` is set before anything is dialled: the guard above is what stops the Setup button
+  // and the foreground listener opening two connections over each other.
   set({ status: 'connecting', hostKey: null });
   try {
-    await gate();
     const key = await loadOrCreateKey();
     // Stays pending through the host-key round trip below.
     await ExpoSSH.connect(host.host, host.port, host.username, key.seedBase64);
@@ -211,7 +145,7 @@ export async function connect(): Promise<void> {
  * still works meanwhile; with no pick it attaches to the most recent session.
  */
 export async function listHostSessions(): Promise<string[]> {
-  const host = getHost();
+  const host = getSettings();
   if (validate(host) !== null) return [];
   if (state.status === 'connected') return parseSessions(await ExpoSSH.exec(LIST_SESSIONS, LIMIT));
   if (state.status !== 'idle' && state.status !== 'failed') return [];
@@ -249,7 +183,7 @@ export async function answerHostKey(trust: boolean): Promise<void> {
   if (state.status !== 'connecting' || state.hostKey === null) return;
   const { hostKey } = state;
   set({ status: 'connecting', hostKey: null });
-  if (trust) await pinHostKey(endpoint(getHost()), hostKey.key);
+  if (trust) await pinHostKey(endpoint(getSettings()), hostKey.key);
   else refusal = { message: 'You did not trust this host key.', mismatch: false };
   await ExpoSSH.verifyHostKey(trust);
 }
@@ -258,7 +192,7 @@ export async function answerHostKey(trust: boolean): Promise<void> {
  *  whoever calls this — there is no undo, and the pin is the only thing that would have caught a
  *  machine-in-the-middle. */
 export function forgetPinnedHostKey(): Promise<void> {
-  return forgetHostKey(endpoint(getHost()));
+  return forgetHostKey(endpoint(getSettings()));
 }
 
 /* --- the PTY --- */
@@ -387,7 +321,7 @@ listen('onShellClose', () => {
 });
 
 listen<HostKeyEvent>('onHostKey', async (hostKey) => {
-  const where = endpoint(getHost());
+  const where = endpoint(getSettings());
   const verdict = hostKeyVerdict(await pinnedHostKey(where), hostKey.key);
   console.log('[session] host key', verdict, hostKey.fingerprint);
   if (verdict === 'ask') {
@@ -431,7 +365,7 @@ function describe(error: unknown): string {
   console.log('[session] connect failed:', raw);
   if (/NIOConnectionError|refused|timed ?out|unreachable|reset|Network is down/i.test(raw)) {
     return (
-      `Could not reach ${endpoint(getHost())}. Check the address and port, that the machine is ` +
+      `Could not reach ${endpoint(getSettings())}. Check the address and port, that the machine is ` +
       `awake, and that the phone is on the same network.`
     );
   }

@@ -1,6 +1,6 @@
 /**
- * Uploads (§4.6), the glue: pickers in, SFTP out, and the two flows — quick-attach (T11's agent
- * ribbon cap calls `quickAttach`) and the destination browser (the sheet drives `sendFile`).
+ * Uploads (§4.6), the glue: pickers in, SFTP out, and the two flows — the pasted file's quick drop
+ * into `/tmp/port22` (`pasteFile`) and the destination browser (the sheet drives `sendFile`).
  * Decisions live in `src/upload-model.ts`, tested; failure wording is §4.6's: "Could not send the
  * file", nothing typed, nothing left behind (best-effort — no cleanup machinery).
  *
@@ -54,7 +54,7 @@ export function useUploadBusy(): boolean {
 
 /* --- pickers --- */
 
-/** One of the three ⋯ sources (or the ribbon cap's). Resolves `null` on cancel — which is not a
+/** One of the three ⋯ sources. Resolves `null` on cancel — which is not a
  *  failure and shows nothing. */
 export async function pick(kind: UploadKind): Promise<PickedFile | null> {
   try {
@@ -119,22 +119,9 @@ export async function sendFile(
 }
 
 /**
- * Quick attach (§4.6, agent ribbon cap only — T11 wires the cap): picker → `/tmp/port22/` under a
- * UTC-stamp name (mkdir 0700 on demand, same-second overwrite accepted) → the remote path plus one
- * trailing space typed into the session. Never a Return; never anything on failure or cancel.
- *
- * Resolves with the typed path, or `null` when the picker was cancelled or the send failed (the
- * failure alert has already been shown).
- */
-export async function quickAttach(kind: UploadKind = 'files'): Promise<string | null> {
-  const picked = await pick(kind);
-  return picked === null ? null : attach(picked);
-}
-
-/**
  * Anything on the phone pasteboard that is not text (user, 2026-09-01): Paste had nothing to
  * *type*, so it typed nothing at all and the key looked dead. A photo or a PDF is a file, so it
- * takes the file route — the same quick-attach drop and the same typed path.
+ * takes the file route — a drop into `/tmp/port22` and a typed path.
  *
  * Two readers, because a photo and a document sit on the pasteboard differently. `expo-clipboard`
  * hands an image back as bytes in a data URI and is asked first, so a copied photo keeps the name
@@ -160,11 +147,12 @@ export async function pasteFile(): Promise<string | null> {
   return file === null ? null : attach({ name: file.name, base64: file.base64 });
 }
 
-/** Quick-attach's tail, shared with the pasted image: send, then type the path. */
+/** The quick drop: send into `/tmp/port22` under a UTC-stamp name (mkdir 0700 on demand),
+ *  then type the remote path plus one trailing space. Never a Return, never a word on failure. */
 async function attach(picked: PickedFile): Promise<string | null> {
   const path = joinPath(QUICK_DIR, stampName(new Date(), picked.name));
   if (!(await sendFile(picked.base64, path, [QUICK_DIR]))) return null;
   send(`${path} `); // typed, never executed — the trailing space is the whole gesture
-  console.log('[upload] quick-attach typed', path);
+  console.log('[upload] typed', path);
   return path;
 }

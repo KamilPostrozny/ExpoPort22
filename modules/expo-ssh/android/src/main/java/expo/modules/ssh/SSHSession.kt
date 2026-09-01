@@ -1,6 +1,5 @@
 package expo.modules.ssh
 
-import com.hierynomus.sshj.userauth.keyprovider.OpenSSHKeyV1KeyFile
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.common.Buffer
@@ -10,9 +9,7 @@ import net.schmizz.sshj.sftp.FileAttributes
 import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.transport.verification.HostKeyVerifier
 import net.schmizz.sshj.userauth.keyprovider.KeyPairWrapper
-import net.schmizz.sshj.userauth.password.PasswordUtils
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
-import org.bouncycastle.crypto.util.PrivateKeyFactory
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -54,34 +51,6 @@ class SSHSession {
         Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME)
         Security.addProvider(BouncyCastleProvider())
       }
-    }
-
-    /**
-     * The 32-byte seed inside an OpenSSH v1 private key (T16) — the same shape [connect] takes, so
-     * an imported key and a generated one are one thing at rest and one auth path. In the companion
-     * because nothing here needs a connection, and because touching it runs the provider swap
-     * above, which sshj's Ed25519 key factory needs.
-     *
-     * `OpenSSHKeyV1KeyFile` directly rather than `KeyProviderUtil.detectKeyFileFormat` plus the
-     * four factories `DefaultConfig` registers: sshj would happily read PEM, PKCS#8 and PuTTY, and
-     * Citadel reads none of them (`ios/SSHSession.swift`). iOS is the spec, so Android accepts what
-     * iOS accepts — the extra three are refused in `src/keys-model.ts`, in JS, in the same words on
-     * both platforms, with the one-command conversion named. (The javadoc on `SSHClient.loadKeys`
-     * claiming only PKCS#8 is supported is wrong at v0.40.0 — the code beneath it says otherwise —
-     * but that is moot here, since this asks for one format by name.)
-     *
-     * `init(privateKey, publicKey, PasswordFinder)` reads the FIRST argument as key content, not a
-     * path; the second is skipped outright on a fresh instance (verified in the 0.40.0 bytecode:
-     * the null check is on the object's own `pubKey` field). A wrong passphrase fails the
-     * container's own check-int comparison and arrives as an IOException.
-     */
-    fun importSeed(text: String, passphrase: String?): ByteArray {
-      val keyFile = OpenSSHKeyV1KeyFile()
-      keyFile.init(text, null, passphrase?.let { PasswordUtils.createOneOff(it.toCharArray()) })
-      // sshj hands back a JCA PrivateKey whose `encoded` is PKCS#8; bcprov (an explicit dependency
-      // already, for the provider swap) unwraps that to the seed the container actually stored.
-      val parameters = PrivateKeyFactory.createKey(keyFile.private.encoded)
-      return (parameters as Ed25519PrivateKeyParameters).encoded
     }
   }
 

@@ -60,7 +60,7 @@ export const leading = (size: number) => Math.round(size * 1.4);
  * The group label over a list of rows. The prototype sets `font:600 12px system-ui;
  * letter-spacing:0.6px` on all three of the settings sheet's own.
  *
- * Note the key bar's menu header (11) and the ribbon's (9.5) are NOT this — the prototype gives
+ * Note the key bar's menu header (11) is NOT this — the prototype gives
  * those their own sizes, and they keep them.
  */
 export const SECTION_HEADER = {

@@ -23,7 +23,6 @@ import {
   SEP,
   capturePaneCommand,
   deriveConfigStatus,
-  foregroundFrom,
   generateConf,
   killWindowCommand,
   moveWindowCommand,
@@ -298,20 +297,10 @@ test('a session that stops answering takes the tabs, and so the grid, with it', 
 
 /* --- the poll --- */
 
-test('poll parse: attached flag, badge index, pid, the PANE alt flag, command-last rejoin', () => {
-  const poll = parsePoll(line(['1', '3', '4242', '1', 'vim']) + '\n');
-  expect(poll).toEqual({ attached: true, windowIndex: 3, pid: 4242, paneAlt: true, command: 'vim' });
-  expect(parsePoll(line(['0', '1', '99', '0', 'fish']))?.attached).toBe(false);
-  // The whole 2026-08-17 bug in one line: a pane running `sleep` inside tmux. The OUTER terminal
-  // is on the alternate screen (it is showing a tmux client), the PANE is not.
-  expect(parsePoll(line(['1', '3', '4242', '0', 'sleep']))?.paneAlt).toBe(false);
-  // A command name full of separators still rejoins from field 5, not 4.
-  expect(parsePoll(line(['1', '3', '4242', '0', 'we', 'ird']))?.command).toBe(`we${SEP}ird`);
-  // A tmux too old for `#{alternate_on}` renders it empty — false, not a rejected line: the badge
-  // and the tabs button must not go down with a field only the ribbon reads.
-  const old = parsePoll(line(['1', '3', '4242', '', 'sleep']));
-  expect(old?.paneAlt).toBe(false);
-  expect(old?.command).toBe('sleep');
+test('poll parse: the attached flag and the badge index', () => {
+  expect(parsePoll(line(['1', '3']) + '\n')).toEqual({ attached: true, windowIndex: 3 });
+  expect(parsePoll(line(['0', '1']))?.attached).toBe(false);
+  expect(parsePoll(line(['x', '1']))).toBeNull();
   expect(parsePoll('')).toBeNull(); // no server = nothing to say (§7: silence, not a message)
   expect(parsePoll('no current client\n')).toBeNull();
 });
@@ -325,21 +314,6 @@ test('the poll hurries for the attach, settles on it, and gives up hurrying eith
   expect(pollDelay(false, FAST_POLL_TICKS - 1)).toBe(FAST_POLL_MS);
   expect(pollDelay(false, FAST_POLL_TICKS)).toBe(POLL_MS);
   expect(pollDelay(false, 9999)).toBe(POLL_MS);
-});
-
-test('foreground: shells are idle, everything else is a process for the ribbon', () => {
-  const at = (command: string) => ({ attached: true, windowIndex: 1, pid: 7, paneAlt: false, command });
-  for (const shell of ['fish', 'bash', 'zsh', 'sh']) {
-    expect(foregroundFrom(at(shell))).toBeNull(); // §4.4: shell name = idle
-  }
-  expect(foregroundFrom(at('vim'))).toEqual({ command: 'vim', pid: 7 });
-  expect(foregroundFrom(at('claude'))).toEqual({ command: 'claude', pid: 7 });
-  expect(foregroundFrom(at('sleep'))).toEqual({ command: 'sleep', pid: 7 });
-  expect(foregroundFrom(null)).toBeNull();
-  // Detached: whatever runs there is not under the user's finger, so the ribbon shows nothing.
-  expect(
-    foregroundFrom({ attached: false, windowIndex: 1, pid: 7, paneAlt: false, command: 'vim' }),
-  ).toBeNull();
 });
 
 test('poll and list commands go quiet instead of erroring without a server', () => {
@@ -372,18 +346,13 @@ test('shell quoting survives quotes, spaces, and stays literal', () => {
 });
 
 test('the poll names its session, or asks untargeted when it cannot', () => {
-  // Untargeted is what made the ribbon show another window's process: tmux answers about whichever
-  // session it last considered current (BUGS.md).
+  // Untargeted is what made the badge flicker: tmux answers about whichever session it last
+  // considered current (BUGS.md).
   expect(model.pollCommand(null)).toBe(model.POLL);
   expect(model.POLL).not.toContain('-t');
 
   const aimed = model.pollCommand('port22');
-  expect(aimed).toContain(`-t '=port22:'`); // exact name, that session's current window, active pane
-  expect(aimed).toContain('#{pane_current_command}');
-  // The ribbon's TUI gate: per-pane, because the outer terminal's own buffer says only "tmux".
-  expect(aimed).toContain('#{alternate_on}');
-  // Command stays last — nothing after it to shift when a name contains the separator.
-  expect(aimed.indexOf('#{alternate_on}')).toBeLessThan(aimed.indexOf('#{pane_current_command}'));
+  expect(aimed).toContain(`-t '=port22:'`); // exact name, that session's current window
   // A session name is user-typed on the attach picker, so it goes through the same quoting.
   expect(model.pollCommand('$(reboot)')).toContain(`'=$(reboot):'`);
 });

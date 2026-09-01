@@ -31,10 +31,8 @@ const { DARK_THEMES, LIGHT_THEMES, THEMES, resolveTheme } = await import('@/them
 const { SCHEMES } = await import('@/themes-generated');
 const {
   DEFAULTS,
-  HOST_DEFAULTS,
   clampFontSize,
   decode,
-  decodeHost,
   endpoint,
   startupLine,
   themeNameFor,
@@ -45,9 +43,7 @@ const {
 const { isHttpLink, parseOsc52 } = await import('@/terminal-protocol');
 const { hostKeyVerdict } = await import('@/host-keys');
 
-/** The per-host half, with an id the tests can ignore — every function under test takes one of
- *  these and none of them reads the id. */
-const aHost = () => decodeHost({});
+const aHost = () => decode({});
 
 const cat = (flavour: 'mocha' | 'latte', colour: string) =>
   (flavors[flavour].colors as Record<string, { hex: string }>)[colour].hex;
@@ -73,14 +69,13 @@ test('every installed theme is a complete one', () => {
     // A missing role reaches the screen as a transparent view, which reads as "the terminal shows
     // through the sheet" rather than as an error — so the shape is checked, not eyeballed.
     for (const [role, value] of Object.entries(t)) {
-      if (role === 'ansi' || role === 'dots') continue;
+      if (role === 'ansi') continue;
       expect(typeof value).not.toBe('undefined');
     }
-    for (const dot of Object.values(t.dots)) expect(dot).toMatch(/^#[0-9a-f]{6}$/i);
     // Not a grey. This is what pins the chrome roles to the normal ANSI half: Solarized keeps its
     // base tones in the bright half, so reading `accent` out of slot 12 there gives #839496 and
     // `warning` out of slot 11 gives a blue-grey — a grey confirm button and a grey warning.
-    for (const role of [t.accent, t.accentAlternate, t.danger, t.warning, t.dots.green]) {
+    for (const role of [t.accent, t.accentAlternate, t.danger, t.warning]) {
       const [r, g, b] = [1, 3, 5].map((i) => parseInt(role.slice(i, i + 2), 16));
       expect((Math.max(r, g, b) - Math.min(r, g, b)) / Math.max(r, g, b)).toBeGreaterThan(0.14);
     }
@@ -139,16 +134,13 @@ test('no theme is quieter than the family it is matched to', () => {
     if (derived('border')) {
       expect(cr(t.border, t.background), why('border')).toBeGreaterThanOrEqual(2.25);
     }
-    expect(cr(t.dots.grey, t.background), why('grey dot')).toBeGreaterThanOrEqual(2.9);
-
     // A sheet has to read as a sheet on a near-black background too — a ratio of the remaining
     // distance to black moves ~1 L* on #0d1117, which is invisible.
     expect(Math.abs(L(t.panel) - L(t.background)), why('panel step')).toBeGreaterThan(2.5);
     expect(Math.abs(L(t.scrim) - L(t.panel)), why('scrim behind panel')).toBeGreaterThan(2.5);
 
-    // Two roles that mean different things may not be the same colour: the ribbon draws a peach
-    // handle next to a red failure, and an armed modifier next to a locked one.
-    expect(t.dots.peach, why('peach vs danger')).not.toBe(t.danger);
+    // Two roles that mean different things may not be the same colour — an armed modifier next
+    // to a locked one.
     expect(t.accent, why('accent vs alternate')).not.toBe(t.accentAlternate);
 
     // Bright white that *is* the background is not white at all: solarized-light shipped ansi[15] at
@@ -201,25 +193,13 @@ test('a theme flip notifies the host with the right DECSET 2031 code', () => {
   expect(THEMES.latte.colorSchemeNotification).toBe('\x1b[?997;2n');
 });
 
-/** A decoded blob minus the ids, which are freshly minted and not what these tests are about. */
-const shape = (raw: unknown) => {
-  const s = decode(raw);
-  return { ...s, hosts: s.hosts.map(({ id, ...rest }) => rest) };
-};
-const globals = { ...DEFAULTS, activeHostId: expect.any(String) };
-
 test('decode fills gaps, rejects wrong types, and drops unknown keys', () => {
-  const blank = { ...globals, hosts: [HOST_DEFAULTS] };
-  expect(shape({})).toEqual(blank);
-  expect(shape(null)).toEqual(blank);
-  expect(shape({ port: '2222', theme: 'chartreuse', configureTmux: 'yes' })).toEqual(blank);
-  expect(shape({ host: 'box', keyRow: ['gone'] })).toEqual({
-    ...globals,
-    hosts: [{ ...HOST_DEFAULTS, host: 'box' }],
-  });
-  expect(shape({ theme: 'frappe', fontSize: 99 })).toEqual({
-    ...globals,
-    hosts: [HOST_DEFAULTS],
+  expect(decode({})).toEqual(DEFAULTS);
+  expect(decode(null)).toEqual(DEFAULTS);
+  expect(decode({ port: '2222', theme: 'chartreuse', configureTmux: 'yes' })).toEqual(DEFAULTS);
+  expect(decode({ host: 'box', keyRow: ['gone'] })).toEqual({ ...DEFAULTS, host: 'box' });
+  expect(decode({ theme: 'frappe', fontSize: 99 })).toEqual({
+    ...DEFAULTS,
     followSystem: false, // a named theme in the old field is a user who had opted out of auto
     theme: 'frappe',
     fontSize: 32,
@@ -227,96 +207,42 @@ test('decode fills gaps, rejects wrong types, and drops unknown keys', () => {
 });
 
 test('a startup command written by an older build still runs, as the custom mode', () => {
-  const migrated = decode({ host: 'box', startupCommand: 'tmux attach' }).hosts[0];
+  const migrated = decode({ host: 'box', startupCommand: 'tmux attach' });
   expect(migrated.startMode).toBe('custom');
   expect(startupLine(migrated)).toBe('tmux attach');
   // A stored blob with no line at all takes the new default rather than a silent plain shell.
-  expect(decode({ host: 'box' }).hosts[0].startMode).toBe('session');
+  expect(decode({ host: 'box' }).startMode).toBe('session');
 });
 
-/**
- * T17's migration, and the one thing about it that can silently lose the user's setup: the storage
- * key did not change, so a blob written by any build before the split has its nine per-host fields
- * at the top level and must come back as one host with every one of them intact.
- */
-test('a pre-T17 blob becomes one host, whole, and that host is the active one', () => {
-  const old = {
-    host: 'box.lan',
-    port: 2222,
-    username: 'kamil',
-    startMode: 'attach',
-    attachSession: 'work',
-    knownSessions: ['work', 'port22'],
-    startupCommand: 'tmux attach -t work',
-    lastUploadDir: '/home/kamil/drop',
-    // The globals ride along in the same blob and must stay global rather than following the host.
-    fontSize: 17,
-    followSystem: false,
-    theme: 'nord',
-    themeDark: 'dracula',
-    themeLight: 'latte',
-    tmuxExtras: false,
-  };
-  const s = decode(old);
-  expect(s.hosts).toHaveLength(1);
-  const [host] = s.hosts;
-  expect(host).toEqual({
-    id: host.id,
-    host: 'box.lan',
-    port: 2222,
-    username: 'kamil',
-    startMode: 'attach',
-    attachSession: 'work',
-    knownSessions: ['work', 'port22'],
-    startupCommand: 'tmux attach -t work',
-    lastUploadDir: '/home/kamil/drop',
-  });
-  // A real id, and the one `getHost` will find — an install that upgrades and cannot point at its
-  // own host is the same failure as losing it.
-  expect(host.id).not.toBe('');
-  expect(s.activeHostId).toBe(host.id);
-  // The app's half stayed the app's.
-  expect(s).toMatchObject({
-    fontSize: 17,
-    followSystem: false,
-    theme: 'nord',
-    themeDark: 'dracula',
-    themeLight: 'latte',
-    tmuxExtras: false,
-  });
-  // Nothing of the host leaked back up into the globals.
-  expect(s).not.toHaveProperty('host');
-  expect(s).not.toHaveProperty('lastUploadDir');
-  // And the round trip is stable: re-decoding what we would write keeps the same id, so the pin
-  // and the upload directory stay attached to the same row across a restart.
-  const again = decode(JSON.parse(JSON.stringify(s)));
-  expect(again).toEqual(s);
-});
-
-test('a multi-host blob keeps its order, its ids and its pick', () => {
+/** The app kept a host list for a while and the storage key never changed, so a blob written then
+ *  still has to come back whole — as its first host, with the app's own fields untouched. */
+test('a blob written with a host list comes back as that first host', () => {
   const s = decode({
     hosts: [
-      { id: 'a', host: 'one.lan', startMode: 'shell' },
-      { id: 'b', host: 'two.lan', lastUploadDir: '/srv' },
+      { id: 'a', host: 'box.lan', port: 2222, username: 'kamil', startMode: 'attach',
+        attachSession: 'work', knownSessions: ['work'], startupCommand: 'tmux attach -t work',
+        lastUploadDir: '/home/kamil/drop' },
+      { id: 'b', host: 'other.lan' },
     ],
-    activeHostId: 'b',
+    fontSize: 17,
+    theme: 'nord',
   });
-  expect(s.hosts.map((h) => h.id)).toEqual(['a', 'b']);
-  expect(s.hosts[1].lastUploadDir).toBe('/srv');
-  expect(s.activeHostId).toBe('b');
-  // A pick at a host that is not there would leave Setup editing a row it never highlights.
-  expect(decode({ hosts: [{ id: 'a' }], activeHostId: 'gone' }).activeHostId).toBe('a');
-  // An empty list is not a state the app has: Setup would need an empty version of itself.
-  expect(decode({ hosts: [] }).hosts).toHaveLength(1);
-});
-
-/** T15. Off by default — an app that wants a face before it has ever reached a host is not the
- *  first run anyone wants — and global rather than per-host, so it does not ride in `hosts[0]`. */
-test('the auth gate is off until it is asked for, and it is the app’s answer, not a host’s', () => {
-  expect(decode({}).requireAuth).toBe(false);
-  expect(decode({ requireAuth: true }).requireAuth).toBe(true);
-  expect(decode({ requireAuth: 'yes' }).requireAuth).toBe(false); // junk takes the default
-  expect(decode({ requireAuth: true }).hosts[0]).not.toHaveProperty('requireAuth');
+  expect(s).toEqual({
+    ...DEFAULTS,
+    host: 'box.lan',
+    port: 2222,
+    username: 'kamil',
+    startMode: 'attach',
+    attachSession: 'work',
+    knownSessions: ['work'],
+    startupCommand: 'tmux attach -t work',
+    lastUploadDir: '/home/kamil/drop',
+    fontSize: 17,
+    followSystem: false, // a named theme in the old field is a user who had opted out of auto
+    theme: 'nord',
+  });
+  // And the round trip is stable: re-decoding what we would write changes nothing.
+  expect(decode(JSON.parse(JSON.stringify(s)))).toEqual(s);
 });
 
 test('each start mode is one line the host shells all parse the same way', () => {

@@ -1,7 +1,7 @@
 /**
  * The tmux side-channel (§4.5): probe on connect, conf push over SFTP with a read-back verify,
  * the window helpers T10's switcher drives, and the ~2s poll that feeds T7's badge and T11's
- * ribbon. A module singleton read through `useSyncExternalStore`, like `settings` and `session` —
+ * badge. A module singleton read through `useSyncExternalStore`, like `settings` and `session` —
  * the session drives its lifecycle (`startTmux`/`stopTmux` on its own state transitions) and any
  * screen reads it.
  *
@@ -24,7 +24,7 @@ import {
   type SearchHit,
   type WindowSearch,
 } from '@/search-model';
-import { getHost, getSettings, pollSession, SESSION_NAME, updateHost, usesTmux } from '@/settings';
+import { getSettings, pollSession, SESSION_NAME, updateSettings, usesTmux } from '@/settings';
 import {
   APPLY_AND_VERIFY,
   CONF_DIRECTORIES,
@@ -36,7 +36,6 @@ import {
   PROBE,
   capturePaneCommand,
   deriveConfigStatus,
-  foregroundFrom,
   generateConf,
   killWindowCommand,
   moveWindowCommand,
@@ -79,14 +78,6 @@ export type TmuxState = {
   session: string | null;
   /** The active window index while attached — T7's badge. `null` = not attached, badge default. */
   windowIndex: number | null;
-  /** The active pane's non-shell foreground process — what T11's ribbon keys on. `null` = idle
-   *  shell, not attached, or no tmux. */
-  foreground: { command: string; pid: number } | null;
-  /** The active PANE is on the alternate screen: a full-screen app in front of the user. This is
-   *  the ribbon's §4.4 "unknown TUI" gate, and it is NOT `modes.altScreen` from the outer xterm —
-   *  that one is permanently true inside tmux (see `pollCommand`). `false` without tmux, which is
-   *  moot: no tmux means no `foreground` either, so the ribbon has nothing to gate. */
-  paneAlt: boolean;
 };
 
 const DOWN: TmuxState = {
@@ -95,8 +86,6 @@ const DOWN: TmuxState = {
   attached: false,
   session: null,
   windowIndex: null,
-  foreground: null,
-  paneAlt: false,
 };
 
 let state: TmuxState = DOWN;
@@ -122,10 +111,7 @@ function set(patch: Partial<TmuxState>) {
     next.config === state.config &&
     next.attached === state.attached &&
     next.session === state.session &&
-    next.windowIndex === state.windowIndex &&
-    next.paneAlt === state.paneAlt &&
-    next.foreground?.command === state.foreground?.command &&
-    next.foreground?.pid === state.foreground?.pid;
+    next.windowIndex === state.windowIndex;
   if (same) return;
   state = next;
   console.log('[tmux]', JSON.stringify(next));
@@ -143,7 +129,7 @@ export function useTmux(): TmuxState {
 /** The §4.5 Settings row: off / applied / not-applied. Reactive callers pair it with
  *  `useSettings()` + `useTmux()` and derive — this form is for one-shot reads (T12 wires it). */
 export function configStatus(): ConfigStatus {
-  return deriveConfigStatus(usesTmux(getHost()), state.config);
+  return deriveConfigStatus(usesTmux(getSettings()), state.config);
 }
 
 /* --- the exec seam --- */
@@ -163,12 +149,6 @@ function run(command: string): Promise<string> {
  *  goes through here; that is what makes the class countable. */
 function run1(command: string): Promise<string> {
   return singlePool(() => retryRefused(() => run(command)));
-}
-
-/** T11's kill-force cap: one non-tmux command on the same short-lived-exec seam the session's
- *  connection already provides. A singleton like every other user action. */
-export function exec(command: string): Promise<string> {
-  return run1(command);
 }
 
 /*
@@ -249,7 +229,7 @@ export async function startTmux(): Promise<void> {
   // appears (user, 2026-08-12). Nothing in the poll depends on the conf.
   void tick();
   void cacheSessions();
-  if (usesTmux(getHost())) await configure();
+  if (usesTmux(getSettings())) await configure();
 }
 
 /** The session went away, whichever way. Everything resets: the next connect re-probes, and a
@@ -292,7 +272,7 @@ async function configure(): Promise<void> {
   }
 }
 
-/* --- the poll (T7 badge, T11 ribbon) --- */
+/* --- the poll (T7 badge) --- */
 
 /** Self-rescheduling rather than a fixed interval, so the beat can change with what it is waiting
  *  for (see `pollDelay`) and a slow link can never stack ticks behind a poll still in flight. */
@@ -311,7 +291,7 @@ async function poll(): Promise<void> {
   polling = true;
   try {
     // Ask about OUR session, not whichever one tmux last touched (see `pollCommand`).
-    const wanted = pollSession(getHost());
+    const wanted = pollSession(getSettings());
     if (wanted !== aimedAt) {
       aimedAt = wanted;
       console.log(`[tmux] poll aimed at ${wanted === null ? 'nothing (untargeted)' : `session ${wanted}`}`);
@@ -338,8 +318,6 @@ async function poll(): Promise<void> {
       // open. Nothing here can ever be a session tmux picked for us.
       session: attached ? session : null,
       windowIndex: answer?.attached ? answer.windowIndex : null,
-      foreground: foregroundFrom(answer),
-      paneAlt: answer?.attached === true && answer.paneAlt,
     });
   } catch {
     // One missed beat; the next tick asks again.
@@ -353,9 +331,9 @@ async function poll(): Promise<void> {
 async function cacheSessions(): Promise<void> {
   try {
     const names = parseSessions(await run1(LIST_SESSIONS));
-    const known = getHost().knownSessions;
+    const known = getSettings().knownSessions;
     if (names.length !== known.length || names.some((name, i) => name !== known[i])) {
-      updateHost({ knownSessions: names });
+      updateSettings({ knownSessions: names });
     }
   } catch {
     // One list nobody is looking at yet; the next connect asks again.

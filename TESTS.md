@@ -129,22 +129,20 @@ cases can be rooted in its upstream:
 
 - **T6 (scroll)** lives inside the T4 DOM component (`src/terminal.tsx`), where mouse
   protocol / alt-screen / DECCKM state is known. It **exposes those mode signals** over the
-  bridge; T11's ribbon consumes them. A T11 ribbon failure on alt-screen detection may be a
+  bridge; §4.3's scroll routing consumes them. A scroll-routing failure on alt-screen may be a
   T6 signal bug.
 - **T7 (key bar)** implements the **native `TextInput` decision from T4** — keyboard input
   leaves the webview. Dictation filter and held-delete (T12 polish) sit on this input. T7's
   bar is the mount point for T8 (Paste popover, ⋯ menu), T10 (tabs circle, swipe-up), and
-  T11 (bar swipe ↔; the ribbon's edge handle floats over the terminal, not in the bar).
+  T11 (bar swipe ↔).
 - **T9 (tmux side-channel)** provides exec-channel helpers (`list-windows`, `capture-pane`,
   `select/kill/new/move-window`), the window badge feed (T7's tabs circle reads it), and the
-  foreground-process poll (T11's ribbon reads it). T10 and T11 issue every tmux action
+  window-index poll. T10 and T11 issue every tmux action
   through T9's helpers — never the attached PTY.
 - **T8 (clipboard + uploads)** needs T7's Paste key and ⋯ menu, and T2's SFTP. The
-  quick-attach flow is triggered from T11's agent ribbon cap — T8 ships the helper, T11
-  wires the cap.
+  quick-drop flow is triggered by pasting a non-text pasteboard item.
 - **T10 (switcher)** needs T9's helpers and T7's tabs button + bar swipe-up hook.
-- **T11 (bar swipe + ribbon)** needs T9 (snapshots, poll), T7 (bar), T6 (mode signals),
-  T8 (quick-attach helper).
+- **T11 (bar swipe)** needs T9 (snapshots, poll), T7 (bar), T6 (mode signals).
 - **T12 (settings + polish)** touches all of the above; its cases re-walk earlier features
   through the Settings door (theme restyle live, tmux toggle hiding T10's tabs button,
   Forget host key moving off the mismatch screen).
@@ -1060,17 +1058,10 @@ T10 no-op; the ribbon (T11) and the Settings tmux row (T12) do not exist yet —
   (`[switcher] kill @156`); card tap → `@153` active (`[switcher] select @153`). The PTY's own pane
   shows none of those commands — the screenshot after the round is a clean prompt.
 
-### T9.8 — Poll: `sleep 100` is foreground, the prompt is idle
-- **Setup**: attached to tmux, at a fish prompt. **Dep: T11** for the on-screen ribbon; until
-  then the `[tmux]` log line is the assertion.
-- **Steps**: run `sleep 100`; wait ~3s; Ctrl-C it; wait ~3s.
-- **Expect**: log flips to `"foreground":{"command":"sleep","pid":…}` within a beat, then back
-  to `"foreground":null` (fish = idle) after the interrupt. vim and `claude` likewise register;
-  a bare prompt never does.
-- iOS: [x] — driven from the host side (`send-keys 'sleep 100' Enter`, then `C-c`): the feed went
-  `null` → `{"command":"sleep","pid":348866}` → `null`, one beat each way.
-- Android: [x] — driven from the host into the private session (`send-keys 'sleep 100' Enter`, then
-  `C-c`): `foreground:null` → `{"command":"sleep","pid":3989936}` → `null`, one beat each way.
+### T9.8 — REMOVED 2026-09-01
+The poll's `#{pane_current_command}` / `#{pane_pid}` / `#{alternate_on}` fields went with the
+context ribbon, which was their only reader. The poll now answers `#{session_attached}` and
+`#{window_index}` and nothing else.
 
 ### T9.9 — Version bump replaces an old conf
 - **Setup**: on the host: `printf '# port22-conf-v0\nset -g mouse on\n' > ~/.config/port22/port22.conf`.
@@ -1377,13 +1368,13 @@ pushed OSC 52 lines). Watch the Metro log: `[clipboard]` prints on every slot ch
   NOT in the log on Android — `LOG = false` in `modules/expo-ssh/src/ExpoSSHModule.ts` masks it
   behind the generic "has been rejected", where iOS quoted `SFTPMessage.Status error 1`.
 
-### T8.16 — Quick-attach: `/tmp/port22`, typed path, trailing space
-- **Setup**: connected, cursor at a prompt. **Dep: T11** — the agent ribbon 📎 cap is the only
-  UI caller; until it lands, drive `quickAttach('photo')` from a temporary dev call and assert
-  via the log.
-- **Steps**: run the quick-attach flow, pick a photo.
+### T8.16 — Quick drop: `/tmp/port22`, typed path, trailing space
+- **Setup**: connected, cursor at a prompt. Since 2026-09-01 the only UI caller is T8.17's
+  paste-a-file, the agent ribbon cap that used to drive it having been dropped — so walk this
+  through a pasted photo and read the log.
+- **Steps**: copy a photo on the phone and tap Paste.
 - **Expect**: log shows `upload` into `/tmp/port22/<UTCstamp>.jpg` (mkdir 0700 on demand —
-  `stat -c %a /tmp/port22` says 700) and `[upload] quick-attach typed …`; the prompt now holds
+  `stat -c %a /tmp/port22` says 700) and `[upload] typed …`; the prompt now holds
   the absolute path plus **one trailing space**, unexecuted. The path does *not* become a
   clipboard slot — it did until 2026-09-01, when the user overruled it: the popover is for things
   to paste, and a path already typed into the terminal is not one of them.
@@ -1847,21 +1838,16 @@ misbehaves.
     every window command to the session this PTY is attached to, and make the poll's
     `attached:false` tear the grid down into §4.9 instead of re-listing.
 
-## T11 — Bar-swipe window switching + context ribbon
+## T11 — Bar-swipe window switching
 
 All cases: a real host with configured tmux, session attached, three windows unless said
-otherwise. The swipe logs as `[barswipe] …`, the ribbon as `[ribbon] …`; T9's `[ssh] exec`
-lines show `capture-pane`, `select-window` and the kill-force command going out on exec
-channels, never through the PTY. Ribbon foreground reactions ride the ~2s poll — allow a beat
-wherever a process starts or stops; alt-screen reactions (`[session] modes`) are instant.
+otherwise. The swipe logs as `[barswipe] …`; T9's `[ssh] exec` lines show `capture-pane` and
+`select-window` going out on exec channels, never through the PTY.
 
-*(2026-08-16: T11.7–T11.17 rewritten for the Accessory redesign (docs/ribbon-redesign.md §7).
-The 5pt breathing tab and the vertical glass panel are both gone. The recipe now lives in ONE
-52pt opaque band pinned just above the bar: at rest a 44pt chip on the trailing edge — glyph,
-process name, live clock — which tap (iOS: or swipe-left) unrolls leftward into a horizontal row
-of 44pt caps. Worst case is best case: three caps and thirteen are the same 52pt. Two behaviours
-to check that are new rather than moved: `running` no longer appears at all until the process has
-been alive 3s, and the key bar stays LIVE while the band is open.)*
+*(2026-09-01: the context ribbon is dropped. T11.7–T11.18, T11.21 and T11.22 were its cases and
+are gone with it. T11.19 and T11.20 survive because the facts they check — the poll naming our
+session, and a hop's stale answers being ignored — still hold up the badge and the swipe's own
+sense of which window is active.)*
 
 ### T11.1 — Bar swipe hops a window: slide, pills, live redraw
 - **Setup**: attached, three windows, window 1 active, keyboard up.
@@ -1926,244 +1912,32 @@ been alive 3s, and the key bar stays LIVE while the band is open.)*
 - Android: [x]
   - NOTE 2026-08-17: up drags into the switcher zoom (mid-drag frame shows the single shrinking card, release landed in the grid, window unchanged); down on the bar hid the keyboard (mInputShown true→false) with no window change; horizontal starts the page slide. No gesture became the other mid-drag.
 
-### T11.7 — `sleep 100` → green chip with a ticking clock; ^C cap kills it
-- **Steps**: type `sleep 100⏎`; watch the trailing edge for ~5s; tap the chip; read the band;
-  tap the `^C stop` cap.
-- **Expect**: nothing for the first 3s (T11.16 owns that gate), then a 44pt opaque chip fades
-  up just above the bar, flush to the trailing edge: ▶ glyph in green, `sleep`, ` · 0:0x`
-  ticking once a second. It nudges sideways ~2.5pt three times and then holds perfectly still
-  — it must never oscillate indefinitely. The terminal does NOT resize or rewrap when it
-  arrives. The tap unrolls the band leftward over the bottom ~3 rows: an opaque plate carrying
-  `! kill force` (red, bold, with a ⚠) · `^Z bg background` · `^C stop`, right-aligned hard
-  against a divider and the chip. The `^C` tap rolls the band back up, prints `^C`, the prompt
-  returns, and the chip leaves on the next poll beat — again with no reflow. Log:
-  `[ribbon] open sleep`, `[ribbon] cap ^C`.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: chip is a 44pt opaque pill flush to the trailing edge, green ▶, `sleep`, ticking clock (0:09 → 0:14 over 5s). No `[terminal] size` on arrival or on the ^C. Band = `⚠ kill force` (red bold, red ring) · `^Z bg background` · `^C stop` · divider · chip. `[ribbon] open sleep`, `[ribbon] cap ^C`, `^C⏎` printed, prompt back, chip gone on the next beat. The 12s screen recording shows the chip settling to a fixed x within ~4 frames and holding it for the remaining 7s — it never oscillates; the three individual ~2.5pt nudges are below what the emulator's capture rate resolves.
-
-### T11.8 — ^Z from the chord strip → grey `· stopped` chip; fg resumes
-- **Steps**: `sleep 100⏎`; arm Ctrl, tap the chord strip's `Z`; wait a beat; tap the chip;
-  tap `fg resume`.
-- **Expect**: the shell shows `[1]+ Stopped`; within ~2s the chip swaps to a grey ⏸ glyph and
-  reads `sleep · stopped` (no clock — the job is not running), and it appears at ONCE, with no
-  3s wait: the gate is `running`'s alone. Caps: `! kill force` · `bg run behind` · `fg resume`.
-  The `fg` tap closes the band, types and runs `fg`, and the green running chip (fresh clock)
-  is back on the next beat. Identical for a Ctrl+Z typed on the keyboard.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: `^Z` from the chord strip stopped the job (`fish: Job 1, 'sleep 100' has stopped`) and the chip swapped **at once** to a grey ⏸ `sleep · stopped` with no clock and no 3s wait. Caps `⚠ kill force` · `bg run behind` · `fg resume`. The `fg` tap closed the band, typed and ran `fg` (`Send job 1 (sleep 300) to foreground`) and the green running chip came back on the next beat with a fresh clock (`[ribbon] run #8 sleep`, 0:03). NOT CHECKED: the "identical for a Ctrl+Z typed on the keyboard" half — Gboard has no Ctrl key to inject.
-
-### T11.9 — Open, close, and the key bar staying live; vim caps work from insert mode
-- **Steps**: `vim /tmp/t11.txt⏎`; press `i` and type a line (stay in insert mode). Open the
-  band by tapping the chip; **while it is open, tap `Esc` on the key bar**; open again and tap
-  the chip to close; open again and tap the terminal well above the band; on iOS open once
-  more by swiping the chip left; on Android open it and press hardware back. Then open and tap
-  `:w`; type more; open, tap `ZZ`. Re-open vim, dirty the buffer, tap the red `:q!`.
-- **Expect**: vim keeps its full screen — the band floats over the bottom rows and never
-  reflows it. **The `Esc` tap fires Esc**: the dismiss catcher stops at the band's top edge, so
-  the bar is live while the band is open (the old full-screen scrim ate that tap — this is the
-  fix, and combining a cap with Ctrl is now possible). All four closes work: chip tap, terminal
-  tap, back (Android), cap tap. Caps left→right: `! :q! discard` (red) · `:q quit` ·
-  `/ search` · `ZZ save+quit` · `:w save`, the last hard against the chip. On a 375pt phone the
-  row scrolls ~46pt and a `›` chevron shows at the leading edge; on a wider phone it does not
-  scroll at all. `:w` saves *from insert mode*; `ZZ` saves and quits; `:q!` discards.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: caps left→right exactly `⚠ :q! discard` (red) · `:q quit` · `/ search` · `ZZ save+quit` · `:w save`, then the divider and the chip; no scroll and no chevron on this 411pt screen. Esc on the key bar fired WHILE the band was open (`-- INSERT --` cleared) and the band stayed up. All four closes work: chip tap, terminal tap, hardware back, cap tap. `:w` saved from insert mode (`1L, 27B written`), `ZZ` saved and quit, `:q!` discarded. vim never reflowed. NOT PROVABLE here: the 375pt-phone scroll + `›` chevron (this AVD is 411pt).
-
-### T11.10 — less: q, / raises the keyboard and the band stays open, g/G jump
-- **Steps**: `man ls⏎`; open the band; tap `G`, reopen and tap `g`, then tap `/` (type
-  `SYNOPSIS⏎`), then — without reopening — tap `n`; finally tap `q`.
-- **Expect**: caps `q quit` · `G end` · `g top` · `n next hit` · `/ search`. `G` jumps to the
-  end, `g` back to the top. `/` puts less's search prompt up, **raises the keyboard, and the
-  band stays open and rides up with the bar in one step** — so `n` is one tap away on the
-  keyboard's top edge, with no independent animation and no gap or overlap against the bar.
-  `q` exits and the band leaves.
-- iOS: [ ]
-- Android: [ ]
-  - FAILED 2026-08-17: `/` cannot both raise the keyboard and leave less's search prompt up. From a clean launch the `/` cap logs `[ribbon] cap /`, raises the keyboard (mInputShown=true) and refits the terminal (`[terminal] size 50 × 45` → `50 × 26`) — and the SIGWINCH redraw cancels less's pending `/` prompt: `capture-pane` shows the ordinary status line, never `/`. When the keyboard does NOT rise (focus already lost), the same cap leaves `/` up. Two runs each way. `n` is therefore untestable — there is no search to repeat. The rest of the case passes: caps `q quit` · `G end` · `g top` · `n next hit` · `/ search`, `G` → line 270/313 (END), `g` → top, the band stays open and rides up with the bar in one step with no gap or overlap, `q` exits and the band leaves.
-
-### T11.11 — htop: q, / filter, F6 sort, F9 kill
-- **Steps**: `htop⏎`; open the band; tap `/`, type a name, Esc; tap `F9`; Esc; reopen, tap
-  `F6`; Esc; reopen, tap `q`.
-- **Expect**: `/` opens htop's filter with the keyboard raised and the band still up; the red
-  `! F9 kill` cap opens htop's SendSignal column and `F6` its sort column (`CSI 20~` /
-  `CSI 17~`); `q` exits. Four caps fit without scrolling on any phone.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: four caps `⚠ F9 kill` (red) · `q quit` · `F6 sort` · `/ filter` fit with no scrolling. `/` raised the keyboard AND left htop's `Search:` prompt up with the band still open (htop survives the SIGWINCH that loses less's prompt in T11.10); typed `fish` into it, Esc on the key bar cancelled it. `F9` opened the `Send signal:` column, `F6` the `Sort by` column, `q` exited. Logs `[ribbon] cap /`, `cap F9`, `cap F6`, `cap q`.
-
-### T11.12 — Agent band: the scroll tape, ⇧⇥, 📎, and the two-tap quit
-- **Setup**: `claude` (or any process whose `pane_current_command` is on the agent list)
-  running in the pane.
-- **Steps**: tap the peach ✳ chip (it carries a ticking clock — agents are live); read the
-  band; flick the row left and right; tap `/context`; reopen and tap `⇧⇥ plan mode`; reopen,
-  tap `📎 attach`, pick a photo, watch; reopen and tap the red `^C ^C quit` once, read it,
-  then tap `/clear` instead; reopen and arm it again, this time tapping it twice.
-- **Expect**: the band is still exactly 52pt tall — the same as `sleep`'s three caps. Ten caps in
-  ONE flat row, no section markers (2026-08-16: they cost 44pt of reach each to label groups the
-  caps already spell out). It rests at the leading end with `! ^C^C quit` · `/clear` · `/context`
-  visible and a `›` chevron in its own gutter saying there is more — the chevron must never sit on
-  top of a cap and slice its label. One flick reaches the rest of the slash commands, two reach
-  📎 / ⇧⇥ / ⎋. The row never scrolls vertically and a
-  near-vertical drag on it does nothing. `/context` types the command and presses Return and
-  the band closes. `⇧⇥` cycles plan mode. `📎` opens the picker; during the send that cap
-  alone tints accent and goes inert while the others stay live; then the remote path + one
-  trailing space is typed — no Return (T8.16). The first `^C ^C` tap sends one interrupt,
-  keeps the band open and re-labels the cap `tap again` (stronger red ring, disarms itself
-  after ~3s); **tapping `/clear` instead disarms it without sending the second interrupt** and
-  runs /clear. Two taps in a row quits claude and closes the band. Log:
-  `[ribbon] cap /context`, `[ribbon] cap ^C ^C`, `[ribbon] band 9xx/2xx scroll=true`.
-- iOS: [ ]
-- Android: [ ]
-  - FAILED 2026-08-17, three ways (driven with a real `aider`-named process so `pane_current_command` matches the agent list). (1) The row holds only THREE caps — `⚠ ^C ^C quit` · `/clear` · `/context` — not ten; `/model`, `/usage`, `/config`, `/plugins`, `📎`, `⇧⇥`, `⎋` are absent and unreachable. (2) It does not scroll: neither a 550px flick nor a slow 500px drag moved it, and the log says `[ribbon] band 259/252 scroll=true` — 259pt of content, i.e. three caps' worth, where the Expect predicts `9xx/2xx`. (3) The `›` chevron sits ON TOP of the `/context` cap and slices its label to `/conte›` — the exact thing the Expect forbids ("the chevron must never sit on top of a cap and slice its label"). What does pass: the band is the same 52pt as `sleep`'s, the chip is peach with a live ticking clock (U+F0D0 wand, not a sparkle — the Expect's ✳ is shorthand), `/context` types the command and presses Return and closes the band, the first `^C ^C` tap sends exactly one interrupt and re-labels the cap `tap again` with a stronger red ring, `/clear` disarms it without a second interrupt, the arm times itself out after ~4s, and two taps in a row send two interrupts and close the band.
-
-### T11.13 — The silences: idle shell, REPL, unknown TUI
-- **Steps**: sit at the prompt 5s; run `python3` and sit at `>>>` 5s; `exit()`; run an
-  alt-screen app not on any list (e.g. `nano` or `nethack`) 5s.
-- **Expect**: no chip in any of the three — shell is idle, a REPL at its prompt is not a job,
-  an unknown TUI gets no caps (§4.4). The `[tmux]` log shows the foreground changing, so the
-  silence is a decision, not a missed poll.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: no chip in any of the three — idle prompt, `python3` at `>>>`, and `nano` (alt-screen, unlisted) — checked against the accessibility tree (no `… actions` node) and a screenshot. `[tmux]` logged the foreground changing each time (`python3` → null → `nano` with `paneAlt:true`), so the silence is a decision, not a missed poll.
-
-### T11.14 — The band rides the chrome and never touches the terminal
-- **Steps**: `sleep 100⏎`; raise and dismiss the keyboard; arm Ctrl (chord strip up); disarm;
-  open the band with the keyboard up; open it and start a bar swipe-up into the switcher.
-- **Expect**: the band always sits 6pt above the bar stack — it rides up with the keyboard and
-  with the chord strip (bottom chrome then stacks to ~172pt, which is a lot but transient) and
-  back down, in the same step as the bar, never lagging on its own baseline. Grabbing the bar
-  for the switcher closes the band and fades it out with the bar; it is never left hanging
-  mid-zoom. Through all of it the terminal's rows never rewrap (`[terminal] size` stays quiet
-  except for the keyboard's own refit).
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: verified the chip riding up over the chord strip (T11.8's Ctrl arm), riding up with the keyboard and back down with it in the same step as the bar, and the band open with the keyboard up. Grabbing the bar for the switcher with the band OPEN closed it and faded it out with the bar — the mid-zoom frame has no band left hanging. No `[terminal] size` except the keyboard's own refits. Geometry: `popBase = barHeight + 6 + keyboardPad + insets.bottom` (src/app/terminal.tsx:2045); measured on screen the band's foot sits ~10.7pt above the bar row's drawn top edge, the extra being the bar container's own padding — the 6pt is off the measured bar-stack height, not off the drawn pill.
-
-### T11.15 — Kill force: pgrep + kill -9, observable in the log
-- **Steps**: `sleep 100⏎`; open the band; tap the red `! kill force` cap; read the log and
-  the terminal.
-- **Expect**: the log shows `[ribbon] kill-force: pgrep -P <pane_pid> | xargs kill -9 …` and
-  the `[ssh] exec` line for it — an exec channel, nothing typed into the PTY. The shell prints
-  `Killed`, the prompt returns, the band leaves on the next beat. Same cap from the suspended
-  chip (T11.8's setup) kills the stopped job.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: `[ribbon] kill-force: pgrep -P 4105405 | xargs kill -9 2>/dev/null; true` — exactly the expected command; nothing typed into the PTY. The same cap from the SUSPENDED chip killed the stopped job (`pgrep -P <pane_pid>` came back empty afterwards). The shell prints fish's wording, `terminated by signal SIGKILL (Forced quit)`, not bash's `Killed`. The `[ssh] exec` line cannot be seen — `LOG = false` in `modules/expo-ssh/src/ExpoSSHModule.ts`.
-
-### T11.16 — The lifetime gate: short commands never raise the band at all
-- **Steps**: at a prompt, run `ls`, `git status`, `git log --oneline -5`, `echo hi` — a dozen
-  quick commands in a row. Then run `sleep 10⏎` and watch a clock.
-- **Expect**: **not one chip appears** for any of the quick commands, however many you run:
-  `running` matches every non-shell foreground, and ungated it would flash in and out dozens
-  of times an hour, which is what makes an unrequested surface feel intrusive. `sleep 10`
-  raises the chip ~3s in — by which point kill / bg / stop are the caps you actually want —
-  and it fades out when the command ends. A named recipe (`vim`, `less`, `htop`, `claude`) is
-  never gated: it appears on the first poll beat.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: twelve quick commands (`ls`, `git status`, `git log --oneline -5`, `echo hi` ×3) recorded at 10fps — 100 frames, not one with a chip (detector validated against a recording that has one: 71/128 frames). `sleep 10` raised the chip 4.5s in (3s gate + a poll beat) and it was still up 4.3s after the command ended, i.e. it leaves about two poll beats late rather than one. `vim`, `man`/`less`, `htop` and the agent all raised their chip on the first beat, ungated.
-
-### T11.17 — Adversarial readability: the band over the worst content there is
-- **Steps**: on a many-core box run `htop` (full-width colour bars); open the band and
-  screenshot. Then `bat CLAUDE.md` (dense syntax colour) and repeat. Switch to Latte and
-  repeat both outdoors, or at full brightness.
-- **Expect**: the plate is fully opaque in every shot — no colour bar, no syntax highlight and
-  no bright background shows through it or changes any of its colours, and no cap is harder to
-  read in one shot than another. The band's edge stays visible against every one of them (a
-  dark stroke with a light one immediately inside it: at least one of the two always separates
-  it from what is behind). Danger caps read as red **bold** with a ⚠ — legible on Latte, where
-  red on the plate is the tightest ratio in the design. This is the case the old design never
-  had: it was measured only against an idle prompt, which is how it shipped at 1.69:1.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: 📸 four shots — htop's colour bars (dark), `bat AGENTS.md` (dark), `bat` on Latte, and the `⚠ kill force` danger cap on Latte. The plate is fully opaque in every one: no colour bar, no syntax colour and no pale ground shows through, and no cap is harder to read in one than another. The edge separates in both schemes — a dark stroke with a lighter one inside on dark, a strong dark stroke plus a foot shadow on Latte. Danger reads red **bold** with ⚠ on Latte and on Rosé Pine Dawn. htop specifically was not re-shot on Latte; `bat`'s syntax colour is the same test.
-
-*(T11.18–T11.22 cover the five fixes made after the redesign landed, none of which the cases above
-can catch: the clock was frozen at 0:00 by the React Compiler and restarted by every window hop,
-the poll answered about other people's windows, a hop's stale answers revived the old window's
-process on the new tab, and light schemes had a plate the eye could not find. See BUGS.md's
-"foreground poll" entry and docs/ribbon-redesign.md §8.)*
-
-### T11.18 — The chip's clock ticks, and a hop away and back does not restart it
-- **Setup**: two windows, window 1 at a prompt, window 2 idle.
-- **Steps**: in window 1 run `sleep 300⏎`; watch the chip for 30s without touching anything;
-  then bar-swipe to window 2, wait ~5s there, and swipe back. Watch the clock for 10s more.
-- **Expect**: the clock **advances once a second** — `0:04`, `0:05`, `0:06` — for the whole 30s.
-  (It used to sit at `0:00` for an entire session: `Date.now()` read in the render body is
-  memoised by the React Compiler against props that a tick does not change.) The digits do not
-  jitter as they change — the meta text is tabular. On window 2 the band leaves. Back on window
-  1 the chip returns reading roughly **where it left off** (`0:38`, not `0:00`): it may show
-  `0:00` for up to one poll beat while the pid catches up, and must then jump to the true
-  elapsed time and keep ticking from there. Log: `[ribbon] forWindow 2 … (bar swipe commit)`,
-  `[ribbon] forWindow 1 sleep …`, `[ribbon] run #…`.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: the clock advanced once a second continuously for over three minutes (0:09 → 0:14 → … → 3:30), digits tabular, no jitter. Hopped away to the idle window (band left entirely, confirmed by pixel check) and back after ~44s: the chip returned reading **4:14**, i.e. where it left off plus the time away, not 0:00. Log: `[ribbon] forWindow 1 fish (bar swipe commit)`, `[ribbon] forWindow 2 sleep (bar swipe commit)`, `[ribbon] run #9 sleep pid=- startedAt=…`.
-
 ### T11.19 — The poll names our session: no flicker while other windows work
 - **Setup**: on the host, before connecting — `tmux new -d -s other 'htop'`, and in the port22
   session put something long-running in window 3 (`sleep 999`). Connect and sit on window 1.
-- **Steps**: read the log line printed once at connect. Then run `sleep 300⏎` in window 1 and
-  sit perfectly still for 60s, watching the chip, the tabs badge, and the `[tmux]` lines.
-- **Expect**: `[tmux] poll aimed at session port22`. Over the 60s the chip stays `sleep` with a
-  monotonic clock — it never leaves and comes back, never swaps to another window's process,
-  never animates in twice — and `[tmux]` reports the **same** `windowIndex` on every beat with
-  the badge steady. (Untargeted, `display-message` answered about whichever window tmux last
-  considered current: measured 6 → 7 → 6 → 7 every ~2s with `claude` / null behind it, which
-  unmounted and remounted the band forever and made `sleep` unable to outlive the 3s gate.) In
+- **Steps**: read the log line printed once at connect. Then sit perfectly still for 60s,
+  watching the tabs badge and the `[tmux]` lines.
+- **Expect**: `[tmux] poll aimed at session port22`. Over the 60s `[tmux]` reports the **same**
+  `windowIndex` on every beat and the badge is steady. (Untargeted, `display-message` answered
+  about whichever window tmux last considered current: measured 6 → 7 → 6 → 7 every ~2s.) In
   `custom` or `shell` start mode the log instead says `poll aimed at nothing (untargeted)` and
   the flap is expected there — that is the documented ceiling, not a regression.
 - iOS: [ ]
 - Android: [x]
-  - NOTE 2026-08-17: setup as written — `other` session running htop, `sleep 999` in another port22 window, sitting on window 1. Connect logged `[tmux] poll aimed at session port22`. Then `sleep 300` and 60s of stillness sampled every 4s: the chip was present in all 12 samples with a monotonic clock (0:31 → 1:18) and the process never swapped, and **not one `[tmux]` line was emitted in the whole minute** — the poll's answer (windowIndex, foreground) never changed, so there is nothing to flicker.
+  - NOTE 2026-08-17: setup as written — `other` session running htop, `sleep 999` in another port22 window, sitting on window 1. Connect logged `[tmux] poll aimed at session port22`. 60s of stillness sampled every 4s: **not one `[tmux]` line was emitted in the whole minute** — the poll's answer never changed, so there is nothing to flicker. (Walked while the ribbon still existed; the fact under test is the poll's target, which is unchanged.)
 
-### T11.20 — A hop's stale answers are ignored: the band leaves with the slide
-- **Setup**: window 1 running `sleep 300` (chip up), window 2 idle at a prompt.
-- **Steps**: bar-swipe from window 1 to window 2 and watch the trailing edge closely for the
-  three seconds after the slide lands. Repeat the hop five or six times, both directions.
-- **Expect**: the band goes out **with the slide** and stays gone — it must not reappear a beat
-  later on the idle tab and then leave again ("the pill stayed"). `select-window` is
-  asynchronous, so for a beat or two the poll still describes the window you left; those answers
-  are ignored until the window you hopped to answers. Hopping back raises the chip with the
-  slide too (T11.18 owns its clock). No case where the band belongs to a window you are not
-  looking at.
+### T11.20 — A hop's stale answers are ignored: the next swipe starts from where you landed
+- **Setup**: three windows, sitting on the last one.
+- **Steps**: bar-swipe from the last window to its neighbour, and **within a second** of the
+  slide landing swipe again in the same direction. Repeat five or six times, both directions.
+- **Expect**: every second swipe hops from the window you just landed on, never from the one you
+  left. `select-window` is asynchronous, so for a beat or two the poll still describes the old
+  window; `awaiting` makes `activePosIn` read the hopped-to index until tmux agrees (or three
+  answers go by). Without it, a left-then-right from the last tab hopped to the phantom slot and
+  birthed a window instead of returning (user, 2026-08-26).
 - iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: six hops, three each way, each sampled at +1.2s, +2.8s and +4.4s after the landing. Hopping to the idle window: no chip in any of the nine samples — the band goes out with the slide and stays gone. Hopping back to the `sleep` window: the chip was up by +1.2s twice and by +2.8s once (the documented one-beat pid catch-up). No sample ever showed a band belonging to the window not being looked at.
-
-### T11.21 — Light schemes: the plate separates itself from the pane
-- **Setup**: Settings → a *light* scheme. Do Latte first, then a generated one — Rose Pine Dawn
-  is the worst case, and any light scheme from the generated set will do.
-- **Steps**: at a prompt with plenty of pale output on screen (`bat CLAUDE.md`, or just `ls`
-  a few times), raise the band with `sleep 100` and open it.
-- **Expect**: the band is **findable** — its foot casts a soft shadow onto the pane and the
-  plate reads a touch darker than the background behind it. (`theme.panel` is only
-  `mix(bg, black, 0.04)` on the 22 generated schemes — 4%, against 20% on the dark ones — so the
-  band was invisible against the pane it floated over, and Latte's mantle on base is 1.05:1. An
-  opaque plate cannot separate itself from a ground it matches: it now floats on a shadow on
-  both platforms, plus a 6% black ground on light schemes only.) The shadow must not read as a
-  dark bar or a border; the caps' own contrast is T11.17's business.
-- 📸 one shot per light scheme, band open.
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: 📸 both — Catppuccin Latte over a pale `ls -la` listing, and Rosé Pine Dawn over the same. In both the plate reads a touch darker than the pane, carries a dark stroke, and casts a soft shadow at its foot; it does not read as a dark bar or a border, and the band is easy to find. Danger cap legible in both.
-
-### T11.22 — Reduce Motion: nothing moves, and everything is visible
-- **Setup**: iOS Settings → Accessibility → Motion → Reduce Motion **on**. (Android:
-  Settings → Accessibility → Remove animations.)
-- **Steps**: run `sleep 100⏎` and watch the arrival; open and close the band twice.
-- **Expect**: the chip **fades** in rather than gliding up, plays **no** sideways nudge, and is
-  fully visible and perfectly still. Open and close are instant — the width jumps, the caps do
-  not fade in. Nothing is missing or invisible: the old design's failure mode was the opposite
-  (Reanimated resolves a neutered `withRepeat` to its end value, which made the shipped handle
-  *brighter* under Reduce Motion). Turn the setting back off and confirm the nudge returns: three
-  cycles on arrival, then still forever — it must never oscillate indefinitely (WCAG 2.2.2).
-- iOS: [ ]
-- Android: [x]
-  - NOTE 2026-08-17: Android's "Remove animations" set via `settings put global {window,transition,animator}_*_scale 0.0`, app relaunched. Recorded at 30fps: the chip goes from absent to fully present between two consecutive frames at its final x and never moves again for the remaining 8s — no glide, no nudge, nothing invisible (the fade is instant rather than gradual, which is what a zeroed animator scale gives). Open and close, twice: the plate's left edge jumps 726 → 31 → 727 in single-frame steps, so the width jumps and the caps do not fade in. Scales restored to 1.0 and the arrival regains transitional frames, then holds one x forever — it never oscillates (WCAG 2.2.2). The three individual ~2.5pt nudge cycles are below the emulator's usable capture rate and were not counted.
+- Android: [ ] — **rewritten 2026-09-01** when the ribbon was dropped; the 2026-08-17 walk checked
+  the band leaving with the slide, which is no longer a thing that exists.
 
 ## T12 — Settings sheet + polish pass
 
@@ -2991,219 +2765,3 @@ on both platforms (b427712).
   announced frame read instead of `Keyboard.metrics()`; record which one you saw.
 - 📸 the landing frame in both (a) and (b), plus one shot of the squared top corner.
 - iOS: [ ]
-
-## T15/T16/T17 — the lock, the keys, many hosts (walked on Android 2026-08-18)
-
-Preamble: same harness as every other Android section — `. ~/Android/env.sh`, the emulator, sshd
-on `10.0.2.2`. Three of these cases need a **second endpoint**; stand one up in the scratchpad
-(`/usr/sbin/sshd -f <own config> -E <own log>` on `:2222`, its own `HostKey`, its own
-`AuthorizedKeysFile`) rather than touching `/etc/ssh/sshd_config`. Giving that config
-`SetEnv TMUX_TMPDIR=/tmp/<dir>` is what makes the second endpoint a genuinely different *tmux*
-host, which T17.3 needs and nothing else provides on a one-box harness.
-
-Two harness facts learned the hard way, both worth knowing before the first tap:
-
-- **`while read … ; do adb shell … ; done < file` eats the file.** `adb shell` consumes stdin, so
-  only the first line is ever typed. Use `mapfile` (or `< /dev/null` on every `adb`) when typing a
-  multi-line key into the paste box.
-- **A LogBox toast swallows taps on the control underneath it.** T16's `[digest]` bug (below)
-  raises one on every visit to the key screen, and while it is up "Use this key" reports
-  `enabled=true` and does nothing at all. Dismiss the toast (its ✕) before every tap on that
-  screen, or you will file a working button as broken.
-- **`BiometricPrompt` and the PIN sheet are `FLAG_SECURE`** — `screencap` and `screenrecord` both
-  come back black. The accessibility tree (`uiautomator dump`) and `logcat` are the only evidence
-  available for T15.2–T15.5; do not ask for a screenshot of them.
-
-### T17.1 — An existing install keeps its host (migration, destructive-order-sensitive)
-- **Setup**: an install made by a **pre-T17 build**, with a host fully set up — hostname, port,
-  username, a non-default start mode, one connect done so the key is pinned and `knownSessions` is
-  cached, and an upload directory. Confirm the shape first:
-  `adb shell "sqlite3 /data/data/com.kamilpostrozny.port22/databases/RKStorage 'select value from
-  catalystLocalStorage where key=\"port22.settings.v1\"'"` must show the **flat** blob with no
-  `hosts` array. Back it up before doing anything else.
-- **Steps**: build the new APK and `adb install -r` it **over the top** — no uninstall, no
-  `pm clear`. A wipe tests nothing. Launch, then Connect without retyping anything.
-- **Expect**: Setup shows **one** host row, ticked, carrying the hostname and username; the three
-  fields below hold the same values; the same start mode is ticked with its command intact. Connect
-  goes straight through — the log says `[session] host key trust <fp>`, never `ask`. The stored blob
-  is now `hosts: [ … ]` + `activeHostId`, all nine per-host fields carried over, and the globals
-  (`fontSize`, themes, `tmuxExtras`) unchanged. **If the host is gone this is a P0 — stop.**
-- iOS: [ ]
-- Android: [x] 2026-08-18 — passed whole. Fingerprint on the trust line matched
-  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` exactly.
-
-### T17.2 — A second host pins its own key, and the first host's pin is untouched
-- **Setup**: T17.1's host, plus the scratch sshd on `:2222`. Check SecureStore for a **stale pin**
-  first — `adb shell "cat /data/data/…/shared_prefs/SecureStore.xml" | grep -o 'hostkey.v1.[A-Za-z0-9_-]*'`
-  — and remove it if the endpoint was used in an earlier run, or the missing TOFU will read as a
-  failure when it is really a leftover.
-- **Steps**: Add host → the new endpoint → Connect. Trust it. Disconnect, tap host 1, Connect.
-- **Expect**: the alert names the **new** `host:port` and the new host key's fingerprint; after
-  trusting, SecureStore holds **two** `hostkey.v1.*` entries. Switching back to host 1 connects with
-  `trust` and no prompt at all.
-- iOS: [ ]
-- Android: [x] 2026-08-18 — both halves passed; the two pins are independent.
-
-### T17.3 — Each host's attach picker lists its own sessions
-- **Setup**: two hosts whose tmux servers genuinely differ (the `TMUX_TMPDIR` trick above). Create a
-  session that exists only on the second.
-- **Steps**: put host 1 on `Existing tmux session` and read the picker; switch to host 2, same mode,
-  read it again. Then give the two hosts different start modes and upload directories, force-stop
-  the app, relaunch, and read both back.
-- **Expect**: each picker lists only its own host's sessions — this is the bug T17 fixes, where the
-  cache was global and showed the previous machine's list. After the restart each host still has its
-  own `startMode`, `attachSession`, `knownSessions` and `lastUploadDir`.
-- iOS: [ ]
-- Android: [x] 2026-08-18 — host 2's picker listed only its own session; the stored blob showed two
-  independent `knownSessions` arrays; all four per-host fields survived a force-stop.
-
-### T17.4 — Delete, forget, and the last host
-- **Steps**: long-press host 2 → **Delete and forget key**. Then re-add that same endpoint and
-  Connect. Then long-press the survivor and use plain **Delete**.
-- **Expect**: the row leaves, its pin leaves with it, `activeHostId` lands on the survivor and Setup
-  renders it ticked with its fields filled — never blank, never tickless. Re-adding the endpoint
-  prompts TOFU again. Deleting the **last** host leaves exactly one blank `New host` row, ticked,
-  with default fields — never an empty card. Plain Delete leaves the pin behind.
-- **Watch the button order**: the confirm's three buttons dump in the order
-  `DELETE AND FORGET KEY`, `DELETE`, `CANCEL`, so a `grep -F DELETE | head -1` tap hits the
-  *destructive-plus-forget* one. Tap by bounds.
-- iOS: [ ]
-- Android: [x] 2026-08-18 — all four parts passed.
-
-### T15.1 — Lock off is the default and changes nothing
-- **Expect**: `requireAuth` absent from a migrated blob defaults to `false`; Connect goes straight
-  through with no prompt.
-- iOS: [ ]
-- Android: [x] 2026-08-18.
-
-### T15.2 — Biometric gate on a cold launch
-- **Setup**: `adb shell locksettings set-pin 1234`, then enrol a fingerprint —
-  `adb shell am start -a android.settings.FINGERPRINT_ENROLL`, PIN, MORE, I AGREE, then
-  `adb -e emu finger touch 1` about eight times. Arm the switch under Security on Setup.
-  Force-stop (cold = no grace).
-- **Steps**: relaunch, Connect. Authenticate with `adb -e emu finger touch 1`.
-- **Expect**: the prompt carries `Unlock Port22 to open a session on <host:port>.` and appears
-  before **any** SSH traffic — the log may show `[session] {"status":"connecting"}` first (that is
-  the deliberate re-entrancy guard, `session.ts`), but there must be no `ExpoSSH` call, no
-  `host key` line and no connect until the prompt is answered. The session comes up after it.
-- iOS: [ ]
-- Android: [x] 2026-08-18.
-
-### T15.3 — Cancel refuses, and nothing reaches the wire
-- **Steps**: cold launch, Connect, dismiss the prompt with the **system back gesture**.
-- **Expect**: `[session] gate refused user_cancel`, `status: failed`, and §4.9's screen carrying
-  "Port22 is locked. It asks for Face ID, a fingerprint or your passcode…". The log holds **no**
-  `ExpoSSH` line, no `host key` line and no connect for the whole attempt.
-- **Note (parity)**: there is no "Cancel" button to tap. With `disableDeviceFallback: false`
-  AndroidX puts **"Use PIN"** in the negative-button slot, and the only cancel is back or the scrim;
-  iOS's sheet shows "Cancel". `cancelLabel` survives only as the scrim's content-desc.
-- iOS: [ ]
-- Android: [x] 2026-08-18.
-
-### T15.4 — The five-minute grace
-- **Steps**: with a live session, HOME, then resume with
-  `adb shell am start -n com.kamilpostrozny.port22/.MainActivity` — **not** the dev-client deep
-  link, which reloads the bundle and resets `lastAuthAt`, so a grace pass looks like a fail.
-- **Expect**: `[app] active` → `[session] connecting` → `host key trust` → `connected`, with no
-  `FingerprintAuthenticationClient` line anywhere. A cold launch instead prompts (T15.2).
-- iOS: [ ]
-- Android: [x] 2026-08-18 — 16s after the unlock, no second prompt.
-
-### T15.5 — PIN with no biometric enrolled
-- **Setup**: delete the fingerprint (Security & privacy → Device unlock → Pixel Imprint → Delete
-  Finger 1) and keep the PIN. Cold launch.
-- **Expect**: a credential sheet carrying the same `promptMessage`, and a successful connect after
-  the PIN.
-- **Note (PLAN.md's predicted flicker did not happen here)**: PLAN's T15 write-up expects a
-  `BiometricPrompt` failing `ERROR_NO_BIOMETRICS` and only then handing off to the PIN sheet. On
-  API 36 the framework resolves it *before* any dialog — `BiometricService/PreAuthInfo` marks the
-  fingerprint sensor `Ineligible … state: 4` and `AuthController` shows a single dialog with
-  `authenticators: 32768` (DEVICE_CREDENTIAL alone). One sheet, no flicker, which is what iOS does.
-  Re-check on API 28–30 before calling the divergence gone.
-- iOS: [ ]
-- Android: [x] 2026-08-18.
-
-### T15.6 — No lock on the phone at all
-- **Setup**: `adb shell locksettings clear --old 1234`.
-- **Expect**: with `requireAuth` **off** the row's label greys and the switch reports
-  `enabled="false"`, under the caption "Set a passcode on this phone first." With `requireAuth`
-  **on** the switch stays `enabled="true"` so it can be turned off — that is deliberate, never
-  strand the user behind a lock they cannot pass — and Connect refuses with
-  `[session] gate refused not_enrolled` and a message that names the way out.
-- iOS: [ ]
-- Android: [x] 2026-08-18 — both states walked.
-
-### T16.1 — Generate
-- **Steps**: note the public line on Setup. Manage → Generate a new key → **Cancel**, and check the
-  line. Then Generate → Replace. Connect. Then paste the new line into the host's
-  `authorized_keys` and connect again.
-- **Expect**: Cancel changes nothing. Replace produces a different line, Setup's card shows the new
-  one, and the connect fails with exactly "The host would not accept this key. Add the public key
-  from Setup to ~/.ssh/authorized_keys on the machine, then try again." Adding the line by hand
-  makes it connect.
-- iOS: [ ]
-- Android: [x] 2026-08-18 — all of the above passed, **but see T16.4**: the confirmation the screen
-  shows after a successful Replace is the *error* "Could not write the new key: …".
-
-### T16.2 — Paste
-- **Setup**: on the host, `ssh-keygen -t ed25519 -N ''`, the same with `-N 'hunter2'`, an RSA key,
-  and a PEM key (`ssh-keygen -m PEM`; note `-m PEM -t ed25519` is refused by ssh-keygen, so the PEM
-  case is necessarily RSA-in-PEM — it is the container that is under test, not the algorithm).
-- **Steps**: for the clipboard button, Copy on Setup then **From clipboard** on the key screen.
-  For typing, see the `mapfile` note in the preamble. Walk all six inputs.
-- **Expect**: the public line from Copy is refused with the OpenSSH-container sentence naming
-  `ssh-keygen -p -f <key>`. The plain ed25519 key imports and connects, and the line the app derives
-  is byte-identical to `ssh-keygen -y` on the host. The encrypted key with an empty passphrase says
-  "This key is protected by a passphrase…"; with `wrong` it says "That key could not be opened…" and
-  the stored key does not change; with `hunter2` it imports and connects. RSA is refused by name
-  ("Port22 uses ed25519 keys, and this one is ssh-rsa…"). PEM gets the `ssh-keygen -p -f` sentence.
-- **The note lives at the bottom of the ScrollView** — scroll to it, or every case reads as silent.
-- iOS: [ ]
-- Android: [x] 2026-08-18 — every refusal and both imports verified against `ssh-keygen -y`.
-  The one thing that never appears is the *success* message; see T16.4.
-
-### T16.3 — Upload
-- **Setup**: a host whose `authorized_keys` holds three keys **and none of them the app's** — which
-  on a one-box harness means authenticating through the scratch sshd's own `AuthorizedKeysFile`
-  while `~/.ssh/authorized_keys` holds the three. Set `~/.ssh` to 0755 and the file to 0644 first,
-  or the chmod half of the accept proves nothing.
-- **Reaching the screen with a session up**: Setup is the only route to `/keys`, and leaving the
-  terminal disconnects. The way in is to open `/keys` while disconnected and then HOME + resume —
-  §4.9's foreground listener reconnects under the screen. See T16.5.
-- **Steps**: with no session, read the row and tap it. Then with a session, tap; tap again;
-  `truncate` the file to end mid-line with no trailing newline and tap again; finally
-  `mv ~/.ssh ~/.ssh.bak` and tap once more.
-- **Expect**: with no session the Pressable is `enabled="false"`, the caption names Copy on Setup,
-  and the tap does nothing. With a session: "Added to ~/.ssh/authorized_keys on this host.",
-  `wc -l` 3→4, the first three lines byte-identical, `~/.ssh` 0700 and the file 0600. The second tap
-  says "This key is already in ~/.ssh/authorized_keys. Nothing was added." and the file is unchanged.
-  On the truncated file the key lands on its **own** line, leaving the half-line intact. With no
-  `~/.ssh` at all the directory is created 0700 with the file 0600 holding exactly the one key.
-- iOS: [ ]
-- Android: [x] 2026-08-18 — all five parts passed, byte-for-byte.
-
-### T16.4 — The key screen's fingerprint never renders on Android (open bug)
-- **Steps**: open Manage.
-- **Observed 2026-08-18**: the card reads `reading…` forever and the screen throws
-  `Error: [digest] Cannot convert '[object ArrayBuffer]' to a Kotlin type. no ArrayBuffer attached`,
-  which LogBox points at `keys.ts:70` (`fingerprint`). `src/keys.ts` calls
-  `Crypto.digest(SHA256, blob.buffer as ArrayBuffer)`; expo-crypto's Android
-  `CryptoModule.digest(algorithm, output: TypedArray, data: TypedArray)` only converts a
-  **TypedArray**, so the raw ArrayBuffer is rejected. iOS's Swift converter takes it, which is why
-  this is invisible there. The `.d.ts` says `BufferSource`, so TypeScript never complains.
-- **What it costs, beyond the missing fingerprint** — every path through `show()` throws after
-  `setLine`, so: Generate reports "Could not write the new key: …" on a replacement that
-  **succeeded** (an actively false message on an irreversible action); a successful Paste shows no
-  "Imported." at all and leaves the key body *and the typed passphrase* on screen; and in a dev
-  build the resulting LogBox toast sits over "Use this key" and eats taps on it.
-- iOS: [ ] — not reproducible there by construction.
-- Android: [ ] — open.
-
-### T16.5 — Upload cannot be reached the way a user would reach it (open)
-- **Observed 2026-08-18**: `/keys` is pushed from Setup only (`index.tsx`), and the terminal's back
-  runs `leave()` — `disconnect()` then `router.back()`. So arriving on the key screen from a live
-  session always kills the session first, and "Add to authorized_keys" is greyed with "Needs a
-  session that is already up". The only way to see it enabled is to sit on `/keys` and let §4.9's
-  foreground reconnect fire underneath. The feature works (T16.3); the route to it does not exist.
-- iOS: [ ] — same navigation on both platforms, so expect it there too.
-- Android: [ ] — open.

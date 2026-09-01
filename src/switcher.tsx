@@ -290,7 +290,7 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
   /**
    * The other half, and the bigger one: the session poll already knows.
    *
-   * `tmux.ts` runs its own ~2s poll for the badge and the ribbon, and on a `Ctrl-D` it sees the
+   * `tmux.ts` runs its own ~2s poll for the badge, and on a `Ctrl-D` it sees the
    * consequence immediately — the shell exits, tmux moves the client, and the poll reports a new
    * `windowIndex`. The grid, on a second timer that never agreed with the first, went on showing
    * the dead card until ITS period came round. Measured on the phone 2026-09-01: window gone at

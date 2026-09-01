@@ -50,18 +50,6 @@ import KeyBar, {
   TabsHintPopover,
   type BarPopover,
 } from '@/keybar';
-import { RibbonAccessory } from '@/ribbon';
-import {
-  RIBBON_HOLD_MS,
-  RIBBON_IDLE,
-  killCommand,
-  ribbonPoll,
-  ribbonResumed,
-  ribbonSent,
-  ribbonSwitchedToIdle,
-  selectRecipe,
-} from '@/ribbon-model';
-import { type Cap } from '@/ribbon-recipes';
 import type { ModeSignal } from '@/scroll-model';
 import {
   answerHostKey,
@@ -74,15 +62,7 @@ import {
   useSession,
   type Session,
 } from '@/session';
-import {
-  endpoint,
-  getHost,
-  pollSession,
-  updateHost,
-  useHost,
-  useSettings,
-  usesTmux,
-} from '@/settings';
+import { endpoint, getSettings, pollSession, updateSettings, useSettings, usesTmux } from '@/settings';
 import {
   SEARCH_DEBOUNCE_MS,
   normalizeQuery,
@@ -116,7 +96,6 @@ import SettingsSheet from '@/settings-sheet';
 import { CENTER, PRESSED, RADIUS, SEARCH_RADIUS, SPACE, TEXT, leading } from '@/style';
 import TerminalView, { type TerminalHandle } from '@/terminal';
 import {
-  exec,
   killWindow,
   moveWindow,
   newWindow,
@@ -124,14 +103,9 @@ import {
   selectWindow,
   useTmux,
 } from '@/tmux';
-import {
-  IDLE_SHELLS,
-  tabsAvailable,
-  tabsHint,
-  type TmuxWindow,
-} from '@/tmux-model';
+import { tabsAvailable, tabsHint, type TmuxWindow } from '@/tmux-model';
 import { MONO, rgba, SANS, SANS_BOLD, SANS_SEMIBOLD, type Theme } from '@/theme';
-import { pick, quickAttach, sendFile, useUploadBusy, type UploadKind } from '@/upload';
+import { pick, sendFile, useUploadBusy, type UploadKind } from '@/upload';
 import { joinPath, sanitizeFilename, stampName } from '@/upload-model';
 import UploadSheet from '@/upload-sheet';
 
@@ -148,9 +122,8 @@ import UploadSheet from '@/upload-sheet';
 export default function SessionScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { fontSize } = useSettings();
-  const activeHost = useHost();
-  const { host, lastUploadDir } = activeHost;
+  const settings = useSettings();
+  const { fontSize, host, lastUploadDir } = settings;
   const session = useSession();
   const tmux = useTmux();
   const sending = useUploadBusy();
@@ -336,7 +309,7 @@ export default function SessionScreen() {
     if (fingerprint === null) return;
     Alert.alert(
       'Unknown host',
-      `${endpoint(getHost())} has not been seen before.\n\ned25519 ${fingerprint}\n\n` +
+      `${endpoint(getSettings())} has not been seen before.\n\ned25519 ${fingerprint}\n\n` +
         'Check it against `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the machine itself. ' +
         'Trusting it pins it: a different key later is refused, not asked about.',
       [
@@ -370,22 +343,10 @@ export default function SessionScreen() {
     if (pendingUpload === null) return;
     const { base64 } = pendingUpload;
     setPendingUpload(null);
-    updateHost({ lastUploadDir: dir }); // §4.6: the sheet remembers where it was
+    updateSettings({ lastUploadDir: dir }); // §4.6: the sheet remembers where it was
     // Saves silently: on success nothing is typed and nothing is shown (§4.6). `sendFile` owns
     // the failure alert.
     await sendFile(base64, joinPath(dir, filename));
-  };
-
-  // T16: the key screen, through the ⋯ menu. A pushed route, not a sheet: the terminal stays
-  // mounted underneath and the session stays up, which is the whole point — "Add to
-  // authorized_keys" needs an authenticated session, and the only other door to that screen is
-  // Setup, which this screen reaches through `leave()`, i.e. by disconnecting on the way. The
-  // keyboard goes away as it does for Settings; unlike Settings there is no close callback to give
-  // it back, and a route that came back with the keys up would be raising them for no one.
-  const openKeys = () => {
-    setOpen('none');
-    Keyboard.dismiss();
-    router.push({ pathname: '/keys', params: { from: 'Terminal' } });
   };
 
   // T12: the Settings sheet (§4.8). Both doors — the ⋯ menu row and the two-finger tap on the
@@ -669,6 +630,9 @@ export default function SessionScreen() {
    * standing filter this cannot strand the band on a window you are no longer looking at.
    */
   const awaiting = useRef<{ index: number; tries: number } | null>(null);
+  const awaitWindow = (index: number) => {
+    awaiting.current = { index, tries: 0 };
+  };
 
   /** The active window's position in `list` — tmux's fresher poll first, the list's flag second.
    *  Unless a hop is still awaiting confirmation: then the poll is the STALE one (it names the
@@ -1080,7 +1044,6 @@ export default function SessionScreen() {
    *  dragX — runs in the bar's worklet against the shared values above. */
   const onZoomGrab = (dx: number, dy: number) => {
     if (stage === null) return;
-    setRbOpen(false); // the band fades out with the bar; it must not be open where the flight lands
     const at = swRef.current;
     {
       if (!dragging.current && at === 'closed') {
@@ -1277,7 +1240,7 @@ export default function SessionScreen() {
     console.log('[switcher] select', win.id);
     probeT0.current = Date.now();
     probe(`tap ${win.id} (${win.index === tmux.windowIndex ? 'same' : 'switch'})`);
-    ribbonForWindow(win, 'card tap'); // as with the bar swipe: under the zoom, not a beat after it
+    awaitWindow(win.index); // as with the bar swipe: under the zoom, not a beat after it
     void switchTo(win); // §7: no haptic on tab select
     // The accent outline is `win.active`, which only the ~2s list beat refreshes — flipped
     // optimistically here (as a kill removes its card), or the old tab stays haloed through
@@ -1394,7 +1357,7 @@ export default function SessionScreen() {
           setSw('open');
           return;
         }
-        ribbonForWindow(wins[pos], 'new window'); // as with a select: under the zoom, not a beat after it
+        awaitWindow(wins[pos].index); // as with a select: under the zoom, not a beat after it
         setZoomId(wins[pos].id);
         // The new card is the last row, possibly below the fold — reveal it on the frame after
         // its row has laid out, then give the eye a beat to see it exist before the flight.
@@ -1520,10 +1483,6 @@ export default function SessionScreen() {
   // leaving is the sheet's Disconnect / the overlay's Setup button's job (same reasoning as
   // the iOS `gestureEnabled: false` below). The sheets are Modals, whose dialog windows take
   // the back press natively (`onRequestClose`) before this handler can see it.
-  /** The band's open flag, read by the back ladder below — which is declared above the ribbon's
-   *  own state, and a `rbOpen` in this effect's dependency array would be a temporal-dead-zone
-   *  throw on the first render (the same reason the key bar's handlers ride a ref). */
-  const rbOpenRef = useRef(false);
   const navigation = useNavigation();
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -1538,8 +1497,6 @@ export default function SessionScreen() {
         if (sw === 'open') doneToActive(); // mid-transition: swallowed, the zoom owns the screen
       } else if (open !== 'none') {
         setOpen('none');
-      } else if (rbOpenRef.current) {
-        setRbOpen(false); // the band is a mode, and back closes a mode (the CAB contract)
       } else {
         BackHandler.exitApp();
       }
@@ -1683,18 +1640,15 @@ export default function SessionScreen() {
     // the halo all point at the wrong tab until something re-lists.
     // `refresh(false)` is list-only: no capture burst on the JS thread, and the fresh shell
     // has nothing to snapshot yet. Rare by nature — this is a window being created, not a hop.
-    // The ribbon is told about the born window here, the way `birthCard` tells it about the ✚'s:
-    // the commit above could only clear the band (it has no index to await on yet), and a clear is
-    // not the same as knowing where we are. Without this the birth never armed `awaiting`, so the
-    // first poll answer that still described the window we LEFT put its run back on the new tab —
-    // and, the foreground having settled at null, no further answer ever came to take it off again
-    // (`claude · 1:10` on an empty `fish`, BUGS.md).
+    // `awaiting` is armed on the born window here: the commit above had no index to await on
+    // yet, so without this the first poll answer — which still describes the window we LEFT —
+    // would stand as the position the next swipe hops from.
     else
       newWindow()
         .then(() => refresh(false))
         .then((wins) => {
           const born = wins?.find((w) => w.active);
-          if (born) ribbonForWindow(born, 'bar swipe birth');
+          if (born) awaitWindow(born.index);
         })
         .catch((error) => console.log('[barswipe] new window failed:', error));
     // `pos` deliberately stays where the swipe started: it is what `anchor` renders the row
@@ -1839,8 +1793,10 @@ export default function SessionScreen() {
           console.log('[barswipe] commit →', win ? `window ${win.index} (${win.name})` : 'new window');
         // The handle changes with the slide, not a poll beat after it — and it costs no height,
         // so nothing refits. A window we are about to create runs an idle shell: no handle.
-        if (win) ribbonForWindow(win, 'bar swipe commit');
-        else ribbonForBirth();
+        // A birth gets the placeholder: tmux picks the new window's number and has not told us
+        // yet, so no answer can match and the few that describe the window we left are ignored —
+        // `settleBarSwipe`'s re-list replaces this with the real index within a roundtrip.
+        awaitWindow(win ? win.index : -1);
         // Optimistic `active` flip, here and not with the switch below: the pills, the anchor and
         // the next grid open all read it, and none of them may wait for a roundtrip.
         if (win)
@@ -1894,115 +1850,17 @@ export default function SessionScreen() {
     opacity: Math.min(Math.abs(swipeX.value) / roundR, 1) * roundSV.value,
   }));
 
-  /* --- T11: the edge handle (§4.4) ---
-   *
-   * State crosses in ribbon-model's reducer (tested): T9's foreground poll, T6's altScreen, and
-   * the ^Z watch on the key bar's send path. The screen only feeds events in and executes caps. */
-  const [ribbonCore, setRibbonCore] = useState(RIBBON_IDLE);
-  /** The band: unrolled by the chip's tap (iOS: or its leftward swipe), rolled back up by a cap,
-   *  the chip, a tap on the terminal above it, or Android's back. */
-  const [rbOpen, setRbOpen] = useState(false);
-  rbOpenRef.current = rbOpen;
-  const fgCommand = tmux.foreground?.command ?? null;
-  const fgPid = tmux.foreground?.pid ?? null;
+  /** A hop's confirmation, given up on after three answers that describe some other window: the
+   *  `select-window` did not take, and reality wins. Without a give-up `activePosIn` would keep
+   *  reading a window we never reached. */
   useEffect(() => {
-    // Not while anything is sliding: after a committed hop the very next display-message answer
-    // carries the NEW window's foreground, and this flipped the handle ~100ms into every slide.
-    // `ribbonForWindow` already set the right recipe at the commit; when the freeze lifts this
-    // re-applies the latest poll, a no-op whenever the two agree.
     if (frozen) return;
     const wait = awaiting.current;
-    if (wait !== null) {
-      if (tmux.windowIndex === wait.index) awaiting.current = null;
-      else if (++wait.tries <= 3) return;
-      else awaiting.current = null;
-    }
-    setRibbonCore((c) =>
-      ribbonPoll(c, fgCommand === null || fgPid === null ? null : { command: fgCommand, pid: fgPid }, Date.now()),
-    );
-  }, [fgCommand, fgPid, frozen, tmux.windowIndex]);
-  /**
-   * The beat `RIBBON_HOLD_MS` expires on. The hold needs a SECOND null to be believed, and nothing
-   * guarantees one arrives: `set` in src/tmux.ts drops an answer identical to the last, so once the
-   * foreground has settled at null the effect above never re-runs and the hold never runs out. The
-   * chip then keeps the finished run's name and its ticking clock until something unrelated changes
-   * — which is what left `claude · 1:10` on a freshly born `fish` window (BUGS.md), and is equally
-   * true of any command that simply exits while the user watches.
-   *
-   * One timer per hold, cancelled the moment the process comes back into view (`goneAt` returns to
-   * null on any answer that names a command) — so a blinking poll still costs nothing, which is the
-   * whole point of the hold.
-   */
-  useEffect(() => {
-    if (ribbonCore.goneAt === null) return;
-    const timer = setTimeout(
-      () => setRibbonCore((c) => ribbonPoll(c, null, Date.now())),
-      RIBBON_HOLD_MS + 50, // never a millisecond short of the gate, as with the MIN_RUN beat below
-    );
-    return () => clearTimeout(timer);
-  }, [ribbonCore.goneAt]);
-  /** There is deliberately NO re-render armed here for `RIBBON_MIN_RUN_MS`. One used to be, and it
-   *  could not work: this call site is `selectRecipe(…, Date.now())` in a component body, and the
-   *  React Compiler caches it on `[connected, modes, ribbonCore]` — none of which a running job
-   *  changes — so the timer re-rendered straight back into the stale cache and `running` was
-   *  unreachable for every command at every duration (2026-08-17). The delay is the band's own now
-   *  (`ribbonAppearDelay` + a timer inside `RibbonAccessory`), where nothing memoises it. */
-  useEffect(() => {
-    console.log(
-      `[ribbon] run #${ribbonCore.instance} ${ribbonCore.command ?? 'idle'} pid=${ribbonCore.pid ?? '-'} startedAt=${ribbonCore.startedAt}`,
-    );
-  }, [ribbonCore.instance]);
+    if (wait === null) return;
+    if (tmux.windowIndex === wait.index || ++wait.tries > 3) awaiting.current = null;
+  }, [frozen, tmux]);
 
-  /** The recipe for a window we are switching to, named from the list rather than waited for,
-   *  so the handle changes with the transition instead of a poll beat after it. Every switch
-   *  goes through here — a committed bar swipe, a card tap, a new window. */
-  const ribbonForWindow = (win: TmuxWindow, why: string) => {
-    console.log(`[ribbon] forWindow ${win.index} ${win.command} (${why})`);
-    awaiting.current = { index: win.index, tries: 0 }; // until tmux agrees we are there
-
-    const idle = IDLE_SHELLS.has(win.command);
-    setRibbonCore((c) =>
-      idle ? ribbonSwitchedToIdle(c) : ribbonPoll(c, { command: win.command, pid: null }, Date.now()),
-    );
-  };
-
-  /**
-   * The same thing for a window that does not exist yet — the bar swipe committed onto the slot
-   * past the last tab. A birth is a hop to a window that CANNOT be running anything, so the clear
-   * is authoritative and goes through `ribbonSwitchedToIdle`: the band leaves with the slide.
-   *
-   * This used to be `ribbonPoll(c, null)`, a poll-shaped null, which is exactly what
-   * `RIBBON_HOLD_MS` exists to disbelieve — it only armed `goneAt`, and the second beat that would
-   * have expired the hold never came (tmux's store dedupes identical answers, so once the
-   * foreground settles at null the poll effect stops firing). The previous window's run therefore
-   * stayed on the chip with its clock running, forever.
-   *
-   * `awaiting` gets a placeholder rather than an index because tmux picks the new window's number
-   * and has not told us yet: no answer can match, so the next few — which describe the window we
-   * left — are ignored, and `settleBarSwipe`'s re-list replaces this with the real index within a
-   * roundtrip. The three-answer give-up is still the backstop if that re-list never lands.
-   */
-  const ribbonForBirth = () => {
-    console.log('[ribbon] forBirth (bar swipe): a new window runs nothing');
-    awaiting.current = { index: -1, tries: 0 };
-    setRibbonCore(ribbonSwitchedToIdle);
-  };
-
-  // `tmux`, not `modes` — the gate wants the PANE's `#{alternate_on}`, and `modes.altScreen` is the
-  // outer xterm's buffer type, which a tmux client pins true for the whole session. Both are
-  // booleans, which is how the wrong one went unnoticed; `selectRecipe` now takes the shape.
-  const recipe = connected ? selectRecipe(ribbonCore, tmux) : null;
-  // A DIFFERENT recipe means the caps under the finger changed, so the band collapses. A new
-  // instance of the same one (a second `npm run build`) leaves it open and just restarts the
-  // clock — closing chrome the user did not close is worse than a stale timer.
-  useEffect(() => setRbOpen(false), [recipe?.id]);
-
-  /** Every key on its way to the PTY, with the ribbon's ^Z watch on the side. `ribbonSent`
-   *  returns the same object for bytes that are not its business, so this re-renders nothing. */
-  const sendKeys = (bytes: string) => {
-    setRibbonCore((c) => ribbonSent(c, bytes, Date.now()));
-    send(bytes);
-  };
+  const sendKeys = send;
 
   /** The key bar's handlers, same trampoline and same reason — `KeyBar` is memoised now, and its
    *  props were nine fresh closures a render. `open`/`onOpenChange` are already stable (a state
@@ -2032,39 +1890,6 @@ export default function SessionScreen() {
   const kb_onZoomArm = useCallback((...a: any[]) => kbH.current.onZoomArm(...a), []);
   const kb_onZoomEnd = useCallback((...a: any[]) => kbH.current.onZoomEnd(...a), []);
   const kb_onBarSwipe = useCallback((...a: any[]) => kbH.current.onBarSwipe(...a), []);
-
-  const onRibbonCap = (cap: Cap) => {
-    console.log('[ribbon] cap', cap.label);
-    if (cap.action === 'attach') {
-      void quickAttach(); // §4.6: /tmp/port22 + typed path; the busy flag tints the cap inert
-      return;
-    }
-    if (cap.action === 'kill') {
-      if (ribbonCore.pid !== null) {
-        const command = killCommand(ribbonCore.pid);
-        console.log('[ribbon] kill-force:', command);
-        void exec(command).catch((error) => console.log('[ribbon] kill-force failed:', error));
-      }
-      setRibbonCore(ribbonResumed); // a killed stopped job is resolved; running clears on the next poll
-      return;
-    }
-    if (cap.action === 'bg') {
-      // ^Z then `bg` in one tap. Deliberately NOT through sendKeys: this ^Z ends backgrounded,
-      // not stopped, so it must not become a suspension candidate.
-      send('\x1a');
-      send('bg\r');
-      return;
-    }
-    if (cap.action === 'fg' || cap.action === 'bg2') {
-      send(cap.action === 'fg' ? 'fg\r' : 'bg\r');
-      setRibbonCore(ribbonResumed);
-      return;
-    }
-    if (cap.bytes !== undefined) {
-      send(cap.bytes);
-      if (cap.focus) setFocusSignal((n) => n + 1); // pager/htop search needs typing (§4.4)
-    }
-  };
 
   /* --- the name pills' inputs --- */
 
@@ -2771,38 +2596,6 @@ export default function SessionScreen() {
       />
       </Animated.View>
 
-      {/* The context band (§4.4, "Accessory"): a 52pt opaque band at `popBase`, resting as a
-          44pt identity chip on the terminal's trailing edge and unrolling leftward into a row of
-          caps. Absolute, so it costs no vertical space however many caps a recipe has — the
-          agent's thirteen and the running recipe's three are the same 52pt. It fades with the
-          bar during the switcher's flight. */}
-      {/* The layer stays mounted whatever the recipe is: the band's own exit animation needs a
-          parent that outlives it, or a finished process takes the band off screen in one frame
-          instead of the 180ms glide down. */}
-      <Animated.View
-          // `box-none` while the terminal is up, dead while the grid is: the band rests at
-          // `popBase`, over the grid's bar, and fades with the key bar (see `chromeLive`).
-          pointerEvents={chromeLive ? 'box-none' : 'none'}
-          style={[StyleSheet.absoluteFill, barFadeStyle]}>
-        {recipe !== null && (
-          <RibbonAccessory
-            theme={theme}
-            recipe={recipe}
-            startedAt={ribbonCore.startedAt}
-            busy={sending}
-            bottom={popBase}
-            width={stage?.w ?? 0}
-            padH={padH}
-            open={rbOpen}
-            onOpenChange={(next) => {
-              if (next) console.log('[ribbon] open', recipe.proc);
-              setRbOpen(next);
-            }}
-            onCap={onRibbonCap}
-          />
-        )}
-      </Animated.View>
-
       {/* The popover layer: outside-tap scrim over everything (bar included, as in the
           prototype), popovers anchored `popBase` up. That base carries the keyboard itself:
           Yoga positions an absolute child off the *border* box, not the padding box (see
@@ -2824,7 +2617,7 @@ export default function SessionScreen() {
             <TabsHintPopover
               theme={theme}
               bottom={popBase}
-              text={tabsHint(tmux.present, usesTmux(activeHost), pollSession(activeHost) !== null)}
+              text={tabsHint(tmux.present, usesTmux(settings), pollSession(settings) !== null)}
             />
           ) : open === 'clipboard' ? (
             <ClipboardPopover
@@ -2839,7 +2632,6 @@ export default function SessionScreen() {
               theme={theme}
               bottom={popBase}
               onUpload={startUpload}
-              onOpenKeys={openKeys}
               onOpenSettings={openSettings}
             />
           )}
@@ -3054,7 +2846,7 @@ function Status({
   // Nerd Font glyphs: the font is bundled and already loaded, so this is an icon without an icon
   // set. \uf1e6 is a plug, \uf071 a warning triangle — written as escapes so a copy of this file
   // through a tool that does not carry the private-use plane still says what it meant.
-  const where = endpoint(getHost());
+  const where = endpoint(getSettings());
   const face =
     session.status === 'disconnected'
       ? {

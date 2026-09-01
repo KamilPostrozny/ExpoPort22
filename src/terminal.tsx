@@ -106,8 +106,8 @@ export type TerminalProps = {
   onClipboard: (text: string) => Promise<void>;
   /** An OSC 8 link the user tapped, always `http(s)`. */
   onLink: (url: string) => Promise<void>;
-  /** The emulator-internal mode flags (§4.4 ribbon signals), fired on change and once per boot as
-   *  the baseline. T11's context ribbon is the consumer; §4.3's scroll routing reads the same flags
+  /** The emulator-internal mode flags, fired on change and once per boot as
+   *  the baseline. §4.3's scroll routing reads them
    *  but inside the webview, where they are fresh rather than a bridge hop old. */
   onModes: (modes: ModeSignal) => Promise<void>;
   /** A two-finger tap on the grid — §4.8's second door to Settings. Detected here because the
@@ -612,7 +612,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     term.onBinary((data) => latest.current.onData(data));
 
     // The mode flags: read on demand for scroll routing, pushed over the bridge when they change
-    // (T11's ribbon). xterm exposes them read-only (`modes`, `buffer`) with no change event, so the
+    // (§4.3's scroll routing). xterm exposes them read-only (`modes`, `buffer`) with no change event, so the
     // watch is the buffer-switch event plus a peek after every DECSET/DECRST — the handlers return
     // false so xterm still applies them, and the microtask runs after the write chunk has been
     // fully parsed, when `term.modes` is up to date.

@@ -9,7 +9,8 @@
  * pixels become notches, which arrow bytes DECCKM wants, and how a flick decays.
  */
 
-/** The emulator-internal mode flags T11's ribbon consumes, reported over the bridge on change. */
+/** The emulator-internal mode flags §4.3's scroll routing consumes, reported over the bridge on
+ *  change. */
 export type ModeSignal = {
   /** The alternate buffer is active (vim, less, htop — full-screen apps). */
   altScreen: boolean;

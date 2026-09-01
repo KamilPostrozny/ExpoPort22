@@ -52,12 +52,6 @@
         }
       ],
       [
-        "expo-local-authentication",
-        {
-          "faceIDPermission": "Port22 uses Face ID to unlock the app before it opens a session on your machine."
-        }
-      ],
-      [
         "expo-build-properties",
         {
           "ios": {

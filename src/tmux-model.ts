@@ -414,7 +414,7 @@ export function moveWindowCommand(session: string, from: number, to: number): st
   return `tmux move-window -d ${to < from ? '-b' : '-a'} -s ${slot(from)} -t ${slot(to)}`;
 }
 
-/* --- the poll (badge for T7, foreground process for T11's ribbon) --- */
+/* --- the poll (T7's badge) --- */
 
 export const POLL_MS = 2000;
 
@@ -436,12 +436,10 @@ export function pollDelay(attached: boolean, ticks: number): number {
 }
 
 /**
- * One exec every ~2s answers everything at once: is a client attached, which window is active
- * (the badge), and what runs in the active pane (the ribbon). This is why the badge rides the
- * poll rather than the pushed set-titles string: a title change would need an xterm
- * `onTitleChange` bridge out of the webview that T4 never built, works only while our PTY is the
- * attached client, and would still leave the ribbon needing this exact poll — one mechanism, one
- * parse. Command is LAST for the same reason window name is: nothing after it to shift.
+ * One exec every ~2s answers both halves at once: is a client attached, and which window is
+ * active (the badge). This is why the badge rides the poll rather than the pushed set-titles
+ * string: a title change would need an xterm `onTitleChange` bridge out of the webview that T4
+ * never built, and works only while our PTY is the attached client.
  *
  * ponytail: "attached" is `#{session_attached} > 0` — some client on the session tmux resolves
  * for an outside command, which for this app's one user is the phone's own PTY. A desktop client
@@ -452,39 +450,25 @@ export function pollDelay(attached: boolean, ticks: number): number {
  * Untargeted, `display-message` answers about whatever session and window tmux last considered
  * current — which on a host running other tmux sessions alternates beat to beat. Measured on
  * device 2026-08-16, the user sitting still in one window: `windowIndex` walked 6 → 7 → 8 → 7 → 6
- * with a different `pane_current_command` behind each, so the ribbon showed another window's
- * process, the badge flickered, and the app's own `activePosIn` (which reads this) kept changing
- * its mind about which card was active.
+ * so the badge flickered and the app's own `activePosIn` (which reads this) kept changing its mind
+ * about which card was active.
  *
  * `=name:` names the session we attached to, its current window, its active pane — which is what
  * our client is looking at. `=` means "exact name, no prefix match", so a session called `port22x`
  * cannot answer for `port22`.
  */
-/**
- * `#{alternate_on}` rides along because the ribbon's §4.4 "unknown TUI" gate has no other honest
- * source. It used to read the OUTER xterm's buffer type (`modes.altScreen`, src/scroll-model.ts),
- * and under tmux that is permanently 1 — a tmux CLIENT is itself a full-screen app — so the gate
- * swallowed `running` for every command in every tmux session, which is this app's default start
- * mode (emulator, 2026-08-17: `sleep 30` detected, chip region empty at all 15 samples).
- * `alternate_on` is per PANE, i.e. it answers the question the gate actually asks: is the thing in
- * front of the user a full-screen app. The conf's wheel binding above already switches on it.
- *
- * NOT a replacement for `modes.altScreen`: the scroll router wants the outer reading (under tmux
- * you do want arrows), so the two facts stay separate — see `selectRecipe` and `scrollRoute`.
- */
 export function pollCommand(session: string | null): string {
   const target = session === null ? '' : ` -t ${sessionScope(session)}`;
   return (
     `tmux display-message${target} -p '` +
-    ['#{session_attached}', '#{window_index}', '#{pane_pid}', '#{alternate_on}', '#{pane_current_command}'].join(SEP) +
+    ['#{session_attached}', '#{window_index}'].join(SEP) +
     `' 2>/dev/null; true`
   );
 }
 
 /**
  * The untargeted form, and the ONLY command still allowed to be one: the modes that cannot name a
- * session (`custom`, `shell`, `attach` on "most recent") still want a badge and a ribbon, and the
- * worst a wrong answer does there is describe another window — the flap BUGS.md already records.
+ * session (`custom`, `shell`, `attach` on "most recent") still want a badge, and the worst a wrong answer does there is describe another window — the flap BUGS.md already records.
  *
  * It is no longer a *fallback* for a targeted poll that answered nothing. That fallback is what let
  * the app keep believing it was attached after its own session ended: the targeted ask went quiet,
@@ -497,41 +481,14 @@ export const POLL = pollCommand(null);
 export type TmuxPoll = {
   attached: boolean;
   windowIndex: number;
-  pid: number;
-  /** The ACTIVE PANE's alternate screen — a full-screen app in front of the user. Nothing to do
-   *  with the outer terminal's own buffer, which under tmux is always the alternate one. */
-  paneAlt: boolean;
-  command: string;
 };
 
-/** `null` = no server, or garbage — either way there is nothing to say.
- *
- *  `paneAlt` is deliberately NOT part of the reject test: a tmux too old to know
- *  `#{alternate_on}` renders it empty, and rejecting the line for that would take the badge, the
- *  tabs button and the ribbon down with it. Anything but `1` reads as false, which is the same
- *  answer the gate had before this field existed. */
+/** `null` = no server, or garbage — either way there is nothing to say. */
 export function parsePoll(stdout: string): TmuxPoll | null {
   const line = stdout.trim().split('\n')[0] ?? '';
-  const fields = line.split(SEP);
-  if (fields.length < 5) return null;
-  const [attached, windowIndex, pid, paneAlt] = fields;
-  if (!/^\d+$/.test(attached) || !/^\d+$/.test(windowIndex) || !/^\d+$/.test(pid)) return null;
-  return {
-    attached: Number(attached) > 0,
-    windowIndex: Number(windowIndex),
-    pid: Number(pid),
-    paneAlt: paneAlt === '1',
-    command: fields.slice(4).join(SEP),
-  };
-}
-
-/** A shell at rest is not a foreground process (§4.4: shell name = idle). */
-export const IDLE_SHELLS = new Set(['fish', 'bash', 'zsh', 'sh']);
-
-/** What T11's ribbon keys on: the active pane's non-shell foreground, or nothing. */
-export function foregroundFrom(poll: TmuxPoll | null): { command: string; pid: number } | null {
-  if (poll === null || !poll.attached || IDLE_SHELLS.has(poll.command)) return null;
-  return { command: poll.command, pid: poll.pid };
+  const [attached, windowIndex] = line.split(SEP);
+  if (!/^\d+$/.test(attached ?? '') || !/^\d+$/.test(windowIndex ?? '')) return null;
+  return { attached: Number(attached) > 0, windowIndex: Number(windowIndex) };
 }
 
 /* --- derived state the screens read --- */

@@ -53,28 +53,6 @@ actor SSHSession {
     )
   }
 
-  // MARK: - Import
-
-  /// The 32-byte seed inside an OpenSSH v1 private key (T16). Static: nothing here needs a
-  /// connection, and the key screen imports before there is one.
-  ///
-  /// `Curve25519.Signing.PrivateKey(sshEd25519:decryptionKey:)` is Citadel's public door onto its
-  /// own OpenSSH reader — `OpenSSH.PrivateKey<…>`, which PLAN.md names, is internal to the Citadel
-  /// module and cannot be spelled from here (checked at 0.12.1: `SSHCert.swift` is what exports
-  /// it). It brings its own `BCrypt.swift` and aes128/256-ctr, so an encrypted key needs nothing
-  /// added on this side.
-  ///
-  /// The wording of every failure belongs to JS: `src/keys-model.ts` has already established that
-  /// this is an OpenSSH v1 ed25519 container before the crossing, precisely so that Android — whose
-  /// sshj reads four formats where Citadel reads one — refuses the other three in the same words.
-  static func importSeed(_ text: String, passphrase: String?) throws -> Data {
-    let key = try Curve25519.Signing.PrivateKey(
-      sshEd25519: text,
-      decryptionKey: passphrase.flatMap { $0.data(using: .utf8) }
-    )
-    return key.rawRepresentation
-  }
-
   // MARK: - Host key answer
 
   /// The answer can beat the question: a pinned key is matched in JS the moment `onHostKey` lands,

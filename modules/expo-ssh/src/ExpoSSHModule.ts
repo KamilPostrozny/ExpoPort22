@@ -13,17 +13,6 @@ declare class ExpoSSHModule extends NativeModule<ExpoSSHModuleEvents> {
   /** Answers the pending `onHostKey`. */
   verifyHostKey(accept: boolean): Promise<void>;
 
-  /**
-   * Reads an OpenSSH v1 private key and hands back the raw 32-byte ed25519 seed inside it, base64
-   * — the same shape `connect` takes, so there is one thing at rest and one auth path (T16).
-   * Connectionless: the key screen runs before there is a session.
-   *
-   * `passphrase` is null for an unencrypted key and is never stored anywhere on either side. The
-   * container is already known to be OpenSSH v1 and ed25519 by the time this is called (see
-   * `src/keys-model.ts`, which decides that in JS so both platforms refuse in the same words), so a
-   * rejection here means the passphrase was wrong or the body does not decode — one sentence.
-   */
-  importPrivateKey(text: string, passphrase: string | null): Promise<string>;
   disconnect(): Promise<void>;
   /** A round trip, not a socket flag — the only test a half-open TCP cannot fake. */
   isAlive(timeoutMs: number): Promise<boolean>;
