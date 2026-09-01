@@ -885,7 +885,16 @@ export default function SessionScreen() {
 
   const commitOpen = () => {
     setSw('opening');
-    dragX.value = withTiming(0, { duration: 250 });
+    // Matched SPEED, not duration (user, 2026-09-01): a swipe release partway to the grid has
+    // less distance left, and giving that remainder the button's full ZOOM_OUT made its settle
+    // crawl next to the button's flight. Time scales with the travel left; the floor keeps a
+    // deep pull's slot-slide from reading as a snap. Every value in the release rides this one
+    // curve so the aim, the progress and the sideways settle all arrive together.
+    const out = {
+      duration: Math.max(120, ZOOM_OUT.duration * Math.max(0, 1 - prog.value)),
+      easing: ZOOM_OUT.easing,
+    };
+    dragX.value = withTiming(0, out);
     // The release is what sends the card to its slot: until now it has been aimed at the hold pose
     // under the finger (`aimFrame`). On every other route in this is already 1 and the timing is a
     // no-op. It rides ZOOM_OUT so the aim and the progress arrive together — a shorter curve here
@@ -897,7 +906,7 @@ export default function SessionScreen() {
     // fly-to-grid animation visibly skipped (user, 2026-08-13). On a tap-open it is the mirror:
     // flight is already 1 and prog travels.
     const flightTravels = flight.value < 0.999;
-    flight.value = withTiming(1, ZOOM_OUT, (done) => {
+    flight.value = withTiming(1, out, (done) => {
       if (done && flightTravels) {
         alpha.value = 0;
         runOnJS(setSw)('open');
@@ -919,7 +928,7 @@ export default function SessionScreen() {
     // So the hand-over waits for the arrival: the surface goes at the animation's own callback, at
     // t=1 exactly, where the two pictures are the same picture — which is the whole point of the
     // geometry. A cut, not a fade, for the reason `springBack` snaps its own (see there).
-    prog.value = withTiming(1, ZOOM_OUT, (done) => {
+    prog.value = withTiming(1, out, (done) => {
       if (done && !flightTravels) {
         alpha.value = 0;
         runOnJS(setSw)('open');
