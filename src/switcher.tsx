@@ -419,10 +419,10 @@ export type SwitcherProps = {
   onClearSearch: () => void;
   /** Gestures live only while the grid is fully open — not during the zoom transitions. */
   interactive: boolean;
-  /** The bar's ✓ lives a phase earlier than the gestures: `open` OR `opening`, so a Done during
-   *  the fly-out turns the flight around instead of being swallowed until it formally lands
-   *  (user, 2026-09-01). Buttons only — the card gestures keep `interactive`, whose changes
-   *  must not land while a gesture can be live (see the rebuild note on the card's gestures). */
+  /** Taps live a phase earlier than the motion gestures: `open` OR `opening`, so a Done or a
+   *  card tap during the fly-out turns the flight around instead of being swallowed until it
+   *  formally lands (user, 2026-09-01). The bar's buttons and the card's tap only — swipe and
+   *  drag keep `interactive`: a flick or a lift needs a grid that is actually standing still. */
   tappable: boolean;
   /** Is anything scaling? The grid is mounted from the moment tabs are reachable so its cards are
    *  built before a gesture wants them, which leaves the search strip's blur ramp — twelve stacked
@@ -591,6 +591,7 @@ function SwitcherInner(props: SwitcherProps) {
                 closable={props.total > 1}
                 reorderable={!filtered}
                 interactive={interactive}
+                tappable={tappable}
                 flying={card.win.id === props.zoomId}
                 fade={props.fade}
                 onTap={() => props.onSelect(pos, card.win)}
@@ -755,6 +756,7 @@ function WindowCard({
   closable,
   reorderable,
   interactive,
+  tappable,
   flying,
   fade,
   onTap,
@@ -783,6 +785,8 @@ function WindowCard({
   /** False while the grid is filtered — a narrowed grid isn't the real order (§T14). */
   reorderable: boolean;
   interactive: boolean;
+  /** Tap only: also true during the fly-out, so a card is selectable before the zoom lands. */
+  tappable: boolean;
   /** This is the card the zoom is flying into or out of — it wears the surface's complement
    *  (see `zoomId` on SwitcherProps), so its slot stands empty for the whole flight. */
   flying: boolean;
@@ -914,7 +918,7 @@ function WindowCard({
     // One tap gesture decides select vs ✕ by where it landed: a Pressable under an RNGH Tap can
     // double-fire, and a second kill-window against a renumbered index is not a no-op.
     const tap = Gesture.Tap()
-      .enabled(interactive)
+      .enabled(tappable)
       .maxDuration(300)
       .runOnJS(true)
       .onEnd((e, success) => {
@@ -928,7 +932,7 @@ function WindowCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values and refs are stable;
     // interactive/stageW/reorderable only change while no gesture can be active (zoom
     // transitions, rotation, typing in the search field).
-  }, [interactive, stageW, reorderable]);
+  }, [interactive, tappable, stageW, reorderable]);
 
   // zIndex is deliberately NOT animated: a UI-thread zIndex flip (the lift spring settling
   // ~400ms after a drop) can re-sort the native siblings, and iOS cancels the in-flight touches

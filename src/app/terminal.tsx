@@ -1283,7 +1283,9 @@ export default function SessionScreen() {
     });
 
   const selectCard = (pos: number, win: TmuxWindow) => {
-    if (sw !== 'open') return;
+    // `opening` too: a tap during the fly-out turns the flight around (`tappable`), same as the
+    // bar's ✓ — the grid's cards were dead until the zoom formally landed (user, 2026-09-01).
+    if (sw !== 'open' && sw !== 'opening') return;
     console.log('[switcher] select', win.id);
     probeT0.current = Date.now();
     probe(`tap ${win.id} (${win.index === tmux.windowIndex ? 'same' : 'switch'})`);
