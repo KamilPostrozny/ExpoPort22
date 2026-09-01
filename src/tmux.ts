@@ -35,7 +35,6 @@ import {
   pollCommand,
   PROBE,
   capturePaneCommand,
-  deriveConfigStatus,
   generateConf,
   killWindowCommand,
   moveWindowCommand,
@@ -63,11 +62,11 @@ export type TmuxState = {
    *  affordance stays invisible, and nothing says so (§7). */
   present: boolean | null;
   /** What the last push attempt proved with its read-back. 'off' is not a value here — it belongs
-   *  to the start mode and is derived (see `configStatus`), because a mode change is a Setup-screen
-   *  change and takes effect on the next connect, not on the live server. */
+   *  to the start mode and is derived (see `deriveConfigStatus`), because a mode change is a
+   *  Setup-screen change and takes effect on the next connect, not on the live server. */
   config: 'applied' | 'not-applied';
   /** A client is attached to the session our exec commands resolve to — for this app's one user,
-   *  the phone's own PTY (the ceiling is in tmux-model's POLL comment). */
+   *  the phone's own PTY (the ceiling is in tmux-model's `pollCommand` comment). */
   attached: boolean;
   /** The session the last poll answered for BY NAME, or `null` — not attached, or a start mode
    *  with no name to give (`custom`, `shell`, `attach` on "most recent").
@@ -118,18 +117,12 @@ function set(patch: Partial<TmuxState>) {
   for (const listener of listeners) listener();
 }
 
-export function getTmux(): TmuxState {
+function getTmux(): TmuxState {
   return state;
 }
 
 export function useTmux(): TmuxState {
   return useSyncExternalStore(subscribe, getTmux, getTmux);
-}
-
-/** The §4.5 Settings row: off / applied / not-applied. Reactive callers pair it with
- *  `useSettings()` + `useTmux()` and derive — this form is for one-shot reads (T12 wires it). */
-export function configStatus(): ConfigStatus {
-  return deriveConfigStatus(usesTmux(getSettings()), state.config);
 }
 
 /* --- the exec seam --- */

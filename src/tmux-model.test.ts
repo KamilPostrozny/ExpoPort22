@@ -16,7 +16,6 @@ import {
   LIST_SESSIONS,
   listWindowsCommand,
   newWindowCommand,
-  POLL,
   POLL_MS,
   sameWindows,
   PROBE,
@@ -32,6 +31,7 @@ import {
   parseSessions,
   parseVerify,
   parseWindows,
+  pollCommand,
   pollDelay,
   readFileCommand,
   selectWindowCommand,
@@ -317,7 +317,7 @@ test('the poll hurries for the attach, settles on it, and gives up hurrying eith
 });
 
 test('poll and list commands go quiet instead of erroring without a server', () => {
-  for (const command of [POLL, listWindowsCommand('port22')]) {
+  for (const command of [pollCommand(null), listWindowsCommand('port22')]) {
     expect(command.endsWith(`2>/dev/null; true`)).toBe(true);
   }
 });
@@ -348,8 +348,7 @@ test('shell quoting survives quotes, spaces, and stays literal', () => {
 test('the poll names its session, or asks untargeted when it cannot', () => {
   // Untargeted is what made the badge flicker: tmux answers about whichever session it last
   // considered current (BUGS.md).
-  expect(model.pollCommand(null)).toBe(model.POLL);
-  expect(model.POLL).not.toContain('-t');
+  expect(model.pollCommand(null)).not.toContain('-t');
 
   const aimed = model.pollCommand('port22');
   expect(aimed).toContain(`-t '=port22:'`); // exact name, that session's current window

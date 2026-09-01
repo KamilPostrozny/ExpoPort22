@@ -20,10 +20,6 @@
  * Two separate one-face families, not one family with a weight axis, and it has to stay that way:
  * a numeric `fontWeight` against a custom one-face family resolves on neither platform the way it
  * reads, so the repo swaps the FAMILY for bold instead (`switcher.tsx:1075`).
- *
- * Two separate one-face families, not one family with a weight axis, and it has to stay that way:
- * a numeric `fontWeight` against a custom one-face family resolves on neither platform the way it
- * reads, so the repo swaps the FAMILY for bold instead.
  */
 export const MONO = 'JetBrainsMono';
 export const MONO_BOLD = 'JetBrainsMono-Bold';

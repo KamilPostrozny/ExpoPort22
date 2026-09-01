@@ -289,9 +289,9 @@ export const BAR_PAD_TOP = BAR.padTop;
 /** Every pressable on the bar: dim + shrink while touched, light haptic on the completed tap —
  *  NOT on touch-down, where a bar swipe starting over a key buzzed on every hop and broke the
  *  slide's fluidity; Safari's has none (user, 2026-08-11). A pan that wins the race never
- *  completes the press, so swipes are silent. Exported: every cap is the same
- *  kind of control and used to be a bare Pressable with neither the haptic nor the shrink. */
-export function Key({
+ *  completes the press, so swipes are silent. Every cap in this file routes through here, and
+ *  used to be a bare Pressable with neither the haptic nor the shrink. */
+function Key({
   onPress,
   onLongPress,
   delayLongPress,
@@ -583,18 +583,8 @@ function KeyBarInner(props: KeyBarProps) {
    *  whose identity never changes — the latest props are read through a ref at call time. An
    *  un-memoized gesture re-serialized its worklets and re-attached the recognizer on every
    *  render, mid-gesture (user: "hitching even worse" after the UI-thread move). */
-  const cbRef = useRef({
-    onZoomGrab: props.onZoomGrab,
-    onZoomArm: props.onZoomArm,
-    onZoomEnd: props.onZoomEnd,
-    onBarSwipe: props.onBarSwipe,
-  });
-  cbRef.current = {
-    onZoomGrab: props.onZoomGrab,
-    onZoomArm: props.onZoomArm,
-    onZoomEnd: props.onZoomEnd,
-    onBarSwipe: props.onBarSwipe,
-  };
+  const cbRef = useRef(props);
+  cbRef.current = props;
   const jsZoomGrab = useCallback((dx: number, dy: number) => cbRef.current.onZoomGrab?.(dx, dy), []);
   const jsZoomEnd = useCallback(
     (dx: number, dy: number, vx: number, vy: number) => cbRef.current.onZoomEnd?.(dx, dy, vx, vy),

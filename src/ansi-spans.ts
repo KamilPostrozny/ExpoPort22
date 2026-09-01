@@ -35,15 +35,9 @@ export type Span = {
 };
 export type SpanLine = Span[];
 
-type Style = {
-  fg: number | string | null;
-  bg: number | string | null;
-  bold: boolean;
-  underline: boolean;
-  italic: boolean;
-  inverse: boolean;
-  dim: boolean;
-};
+/** The SGR state `applySgr` accumulates between spans — every `Span` field except the text it
+ *  ends up attached to and the search-hit flag, which is the renderer's concern, not SGR's. */
+type Style = Omit<Span, 'text' | 'hl'>;
 
 /** Apply one SGR parameter list (the `Ps ; Ps …` of `CSI Ps m`) to a style. Handles 0, 1/22,
  *  2/3/4/7 and their 22/23/24/27 undos, 30–37/90–97/39 (and the bg forms), 38/48 with `5;n` and `2;r;g;b`; skips

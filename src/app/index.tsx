@@ -186,20 +186,18 @@ export default function Setup() {
           <Text selectable style={[styles.key, { color: theme.foreground }]}>
             {key?.publicKeyLine ?? 'generating…'}
           </Text>
-          <View style={styles.keyButtons}>
-            <Pressable
-              onPress={copyKey}
-              disabled={key === null}
-              style={({ pressed }) => [
-                styles.copy,
-                { backgroundColor: theme.surface },
-                pressed && PRESSED,
-              ]}>
-              <Text style={[styles.copyLabel, { color: theme.foreground }]}>
-                {copied ? 'Copied' : 'Copy'}
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={copyKey}
+            disabled={key === null}
+            style={({ pressed }) => [
+              styles.copy,
+              { backgroundColor: theme.surface },
+              pressed && PRESSED,
+            ]}>
+            <Text style={[styles.copyLabel, { color: theme.foreground }]}>
+              {copied ? 'Copied' : 'Copy'}
+            </Text>
+          </Pressable>
         </View>
 
         {/* The same card the settings sheet shows (§4.8), so the terminal can be dressed before
@@ -250,8 +248,12 @@ const styles = StyleSheet.create({
   connect: { borderRadius: RADIUS.button, height: 48, ...CENTER },
   connectLabel: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: TEXT.button },
   key: { fontFamily: MONO, includeFontPadding: false, fontSize: 11, lineHeight: 16, padding: SPACE.gutter },
-  keyButtons: { flexDirection: 'row', gap: SPACE.md, marginHorizontal: SPACE.gutter, marginBottom: 14 },
+  // Shrink-wrapped and left-aligned like its old `keyButtons` row wrapper: `card` is a column, so
+  // without `alignSelf` the Pressable would stretch to the card's full width.
   copy: {
+    alignSelf: 'flex-start',
+    marginHorizontal: SPACE.gutter,
+    marginBottom: 14,
     paddingHorizontal: SPACE.gutter,
     paddingVertical: SPACE.sm,
     borderRadius: RADIUS.button,

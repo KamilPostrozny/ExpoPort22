@@ -465,9 +465,9 @@ const SPRING = { damping: 16, stiffness: 220, mass: 1 };
  */
 function SwitcherInner(props: SwitcherProps) {
   const { theme, stageW, cards, interactive, tappable } = props;
-  /** A filtered grid isn't the real order — reorder is off while a query is armed (§T14). */
-  const filtered = normalizeQuery(props.query) !== '';
   const nq = normalizeQuery(props.query);
+  /** A filtered grid isn't the real order — reorder is off while a query is armed (§T14). */
+  const filtered = nq !== '';
 
   /** Local order during (and just after) a drag: `null` = props order is the truth. */
   const [dragOrder, setDragOrder] = useState<Card[] | null>(null);

@@ -38,9 +38,9 @@ export const CONF_DIRECTORIES = ['.config', CONF_DIRECTORY];
  *   being read on — truecolor through tmux, no status bar, no ESC delay, deep scrollback. All of
  *   it global, none of it load-bearing: see `EXTRAS` for the line-by-line and where it came from.
  *
- * v1's `set-titles` + format string is in neither half: the badge reads the *poll* (see POLL) and
- * never a title, so the file was rewriting the title of every terminal on the server for a feature
- * that does not read it. A dead option is a deletion, not a preference.
+ * v1's `set-titles` + format string is in neither half: the badge reads the *poll* (see
+ * `pollCommand`) and never a title, so the file was rewriting the title of every terminal on the
+ * server for a feature that does not read it. A dead option is a deletion, not a preference.
  *
  * `@port22` is the verify handle: a user option, because a real option like `mouse` can be masked
  * by the user's own conf setting the same value — which is exactly how a failed push once hid from
@@ -456,6 +456,17 @@ export function pollDelay(attached: boolean, ticks: number): number {
  * `=name:` names the session we attached to, its current window, its active pane — which is what
  * our client is looking at. `=` means "exact name, no prefix match", so a session called `port22x`
  * cannot answer for `port22`.
+ *
+ * `pollCommand(null)` — the untargeted form — is the ONLY command still allowed to be one: the
+ * modes that cannot name a session (`custom`, `shell`, `attach` on "most recent") still want a
+ * badge, and the worst a wrong answer does there is describe another window — the flap BUGS.md
+ * already records.
+ *
+ * It is no longer a *fallback* for a targeted poll that answered nothing. That fallback is what let
+ * the app keep believing it was attached after its own session ended: the targeted ask went quiet,
+ * the untargeted one was answered by the user's session, `attached` stayed true, and the grid
+ * re-listed onto their windows instead of tearing down (T10A.8). A named ask that goes quiet now
+ * means what it says — that session is gone.
  */
 export function pollCommand(session: string | null): string {
   const target = session === null ? '' : ` -t ${sessionScope(session)}`;
@@ -465,18 +476,6 @@ export function pollCommand(session: string | null): string {
     `' 2>/dev/null; true`
   );
 }
-
-/**
- * The untargeted form, and the ONLY command still allowed to be one: the modes that cannot name a
- * session (`custom`, `shell`, `attach` on "most recent") still want a badge, and the worst a wrong answer does there is describe another window — the flap BUGS.md already records.
- *
- * It is no longer a *fallback* for a targeted poll that answered nothing. That fallback is what let
- * the app keep believing it was attached after its own session ended: the targeted ask went quiet,
- * the untargeted one was answered by the user's session, `attached` stayed true, and the grid
- * re-listed onto their windows instead of tearing down (T10A.8). A named ask that goes quiet now
- * means what it says — that session is gone.
- */
-export const POLL = pollCommand(null);
 
 export type TmuxPoll = {
   attached: boolean;

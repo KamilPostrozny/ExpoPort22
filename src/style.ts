@@ -135,16 +135,10 @@ export const PRESSED_KEY = { opacity: 0.6, transform: [{ scale: 0.94 }] } as con
  */
 const GREY = (a: number) => `rgba(127,132,156,${a})`;
 export const TINT = {
-  /** A shape that is barely there: the switcher's drop placeholder. */
-  ghost: GREY(0.08),
-  /** A filled control on a plate — a d-pad key. */
-  fill: GREY(0.16),
   /** The stepper's track. */
   track: GREY(0.25),
   /** A hairline between rows, and the press wash on a popover row. */
   line: GREY(0.3),
-  /** A divider that has to survive being drawn on top of `track`. */
-  edge: GREY(0.4),
 } as const;
 
 /* --- pinned: the design's fixed geometry, named so it stops being magic --- */
