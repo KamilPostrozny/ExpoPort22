@@ -67,7 +67,7 @@ import {
   targetSlot,
   type Frame,
 } from '@/switcher-model';
-import { capturePane, execPool, listWindows, searchPane, shotPool } from '@/tmux';
+import { capturePane, execPool, listWindows, searchPane, shotPool, useTmux } from '@/tmux';
 import { POLL_MS, sameWindows, type TmuxWindow } from '@/tmux-model';
 import { MONO, MONO_BOLD, rgba, SANS, type Theme } from '@/theme';
 
@@ -273,13 +273,49 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
 
   useEffect(() => {
     if (!live) return;
-    // `live` flips on the flight's first frame, where a capture burst is a visible stutter — and
+    // `live` flips on the flight's first frame, where a capture BURST is a visible stutter — and
     // its snapshots would land in `pending` only to be dropped at the lift. The first interval
     // tick is the grid's first update, clear of any motion (device, 2026-08-11).
-    if (!frozenRef.current) void refresh(true);
+    //
+    // The LIST still goes out, though, and that is the difference between this and the version
+    // that sent nothing at all while frozen. A list is one exec and no snapshots, so it costs the
+    // flight nothing that the stutter argument was ever about — and a grid opened in the beat
+    // after a window died would otherwise open showing that window's card and hold it until the
+    // first tick, 2s later, which is most of what "it stays for a few seconds" was.
+    void refresh(!frozenRef.current);
     const timer = setInterval(() => void refresh(true), POLL_MS);
     return () => clearInterval(timer);
   }, [live, refresh]);
+
+  /**
+   * The other half, and the bigger one: the session poll already knows.
+   *
+   * `tmux.ts` runs its own ~2s poll for the badge and the ribbon, and on a `Ctrl-D` it sees the
+   * consequence immediately — the shell exits, tmux moves the client, and the poll reports a new
+   * `windowIndex`. The grid, on a second timer that never agreed with the first, went on showing
+   * the dead card until ITS period came round. Measured on the phone 2026-09-01: window gone at
+   * 09:09:16.551, card gone at 09:09:18.557 — 2006ms, which is `POLL_MS` to the millisecond, with
+   * the app having known for all of it.
+   *
+   * A LIST-only refresh on that signal: one exec, no capture burst, so it is cheap enough to fire
+   * off-beat and the snapshots stay on the grid's own budgeted beat. Keyed on `windowIndex` rather
+   * than the whole poll answer because `foreground` changes on every command the user runs, and a
+   * list per command is not what this is for. A window dying that is NOT the active one still
+   * waits for the next tick — `Ctrl-D` cannot be that case, and the grid's own ✕ already re-lists
+   * for itself.
+   *
+   * The ref guard is what keeps it to actual CHANGES: without it this fires on the live flip too,
+   * duplicating the exec the effect above just sent (the `seq` supersession would drop one of the
+   * two, so it is waste rather than a bug — but `execPool` exists because this repo has already
+   * saturated the host's `MaxSessions` once).
+   */
+  const { windowIndex } = useTmux();
+  const lastIndex = useRef(windowIndex);
+  useEffect(() => {
+    if (lastIndex.current === windowIndex) return;
+    lastIndex.current = windowIndex;
+    if (live) void refresh(false);
+  }, [windowIndex, live, refresh]);
 
   return { cards, setCards, refresh, refreshCard, listFailed };
 }
