@@ -7,7 +7,7 @@
  * a pinned slot may well be a token or a password, which is exactly why AsyncStorage is out.
  */
 
-export type SlotSource = 'yank' | 'upload' | 'pasteboard';
+export type SlotSource = 'yank' | 'pasteboard';
 
 export type Slot = {
   text: string;
@@ -19,6 +19,15 @@ export type Slot = {
 
 /** The "last 3 yanks" of §4.7. Pinned slots do not count against it. */
 export const MAX_UNPINNED = 3;
+
+/**
+ * A pasteboard entry that is a file rather than words. Android coerces a copied file's ClipData to
+ * text, so it arrives as its `content://` URI; iOS keeps a `file:` URL in the pasteboard's URL item.
+ * Typing either into a shell is never what the person meant — `pasteFile` sends the bytes instead.
+ */
+export function isFileUri(text: string): boolean {
+  return /^(content|file):\/\//.test(text);
+}
 
 /** Newest first, pins survive, unpinned beyond the newest three drop. */
 export function trim(slots: Slot[]): Slot[] {
@@ -39,7 +48,6 @@ export function togglePin(slots: Slot[], index: number): Slot[] {
 
 const SOURCE_LABEL: Record<SlotSource, string> = {
   yank: 'tmux yank',
-  upload: 'upload path',
   pasteboard: 'phone pasteboard',
 };
 
@@ -76,7 +84,7 @@ export function decodePins(raw: string | null): Slot[] {
       return [
         {
           text: o.text,
-          source: o.source === 'upload' || o.source === 'pasteboard' ? o.source : 'yank',
+          source: o.source === 'pasteboard' ? o.source : 'yank',
           at: typeof o.at === 'number' && Number.isFinite(o.at) ? o.at : 0,
           pinned: true,
         },

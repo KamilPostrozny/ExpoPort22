@@ -92,6 +92,8 @@ import {
 } from '@/style';
 import { zoomProgress } from '@/switcher-model';
 import { MONO, rgba, SANS, SANS_SEMIBOLD, type Theme } from '@/theme';
+import { pasteFile } from '@/upload';
+import { QUICK_DIR } from '@/upload-model';
 
 export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
 
@@ -531,7 +533,11 @@ function KeyBarInner(props: KeyBarProps) {
     const text = await topSlotText();
     // Typed, never executed: no trailing newline of ours, and the bracketed-paste markers so the
     // newlines *inside* a multi-line yank are content rather than Return presses.
-    if (text) track(pasteBytes(text, props.bracketedPaste));
+    if (text) return track(pasteBytes(text, props.bracketedPaste));
+    // Nothing to type does not mean nothing to paste: a copied photo or file is on the pasteboard
+    // as bytes, not text, and used to make the key look dead (user, 2026-09-01). It goes the file
+    // way — uploaded to /tmp/port22 and its path typed. Still silent when there is neither.
+    void pasteFile();
   };
 
   const toggle = (which: Exclude<BarPopover, 'none'>) => {
@@ -1191,7 +1197,7 @@ export function ClipboardPopover({
   sendBytes: (bytes: string) => void;
   onClose: () => void;
 }) {
-  const { slots, pasteboard } = useClipboard();
+  const { slots, pasteboard, pasteboardFile } = useClipboard();
 
   useEffect(() => {
     void refreshPasteboard();
@@ -1248,7 +1254,30 @@ export function ClipboardPopover({
           <View key={`${slot.at}-${i}`}>{row(slot, i === 0, () => togglePin(i), () => type(slot.text))}</View>
         ))}
         {pasteboard !== null && row(pasteboard, false, pinPasteboard, () => type(pasteboard.text))}
-        {slots.length === 0 && pasteboard === null && (
+        {/* A photo or a file on the pasteboard: no pin (the bytes are the pasteboard's, not ours)
+            and no typing — picking it uploads and types the path, like quick-attach. */}
+        {pasteboardFile !== null && (
+          <Pressable
+            onPress={() => {
+              onClose();
+              void pasteFile();
+            }}
+            style={({ pressed }) => [
+              styles.clipRow,
+              { borderTopColor: hairline(theme) },
+              pressed && { backgroundColor: keyTint(theme) },
+            ]}>
+            <View style={styles.clipBody}>
+              <Text numberOfLines={1} style={[styles.clipText, { color: theme.foreground }]}>
+                {pasteboardFile}
+              </Text>
+              <Text style={[styles.clipMeta, { color: theme.border }]}>
+                phone pasteboard · sends to {QUICK_DIR}
+              </Text>
+            </View>
+          </Pressable>
+        )}
+        {slots.length === 0 && pasteboard === null && pasteboardFile === null && (
           <Text style={[styles.clipEmpty, { color: theme.muted, borderTopColor: hairline(theme) }]}>Nothing yanked or copied yet.</Text>
         )}
       </Plate>

@@ -15,6 +15,7 @@ import {
   sanitizeFilename,
   sortEntries,
   stampName,
+  stripDataUri,
   utcStamp,
 } from '@/upload-model';
 
@@ -111,4 +112,9 @@ test('sizes read like the design', () => {
   expect(formatSize(820)).toBe('820 B');
   expect(formatSize(3 * 1024)).toBe('3 KB');
   expect(formatSize(14 * 1024 * 1024)).toBe('14 MB');
+});
+
+test('a pasted image arrives as a data URI and uploads as bare base64', () => {
+  expect(stripDataUri('data:image/png;base64,iVBORw0K')).toBe('iVBORw0K');
+  expect(stripDataUri('iVBORw0K')).toBe('iVBORw0K');
 });

@@ -30,6 +30,12 @@ export function extensionOf(name: string): string {
   return match ? match[1].toLowerCase() : '';
 }
 
+/** The payload out of a `data:image/png;base64,…` URI — `expo-clipboard` hands the image back as
+ *  one, the SFTP write wants the base64 alone. A bare base64 string passes through unchanged. */
+export function stripDataUri(data: string): string {
+  return data.replace(/^data:[^,]*,/, '');
+}
+
 /** `20260808T135802` — UTC to the second. Two captures in the same second overwrite, which §4.6
  *  accepts by name. */
 export function utcStamp(date: Date): string {

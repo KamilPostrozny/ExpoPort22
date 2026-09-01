@@ -5,8 +5,9 @@
 import { expect, test } from 'bun:test';
 
 import {
-  MAX_UNPINNED,
   decodePins,
+  isFileUri,
+  MAX_UNPINNED,
   provenance,
   push,
   relativeTime,
@@ -74,9 +75,6 @@ test('relative time buckets', () => {
 
 test('provenance reads like the design', () => {
   expect(provenance(yank('x', 0), 2 * 60_000)).toBe('tmux yank · 2 min ago');
-  expect(provenance({ text: 'p', source: 'upload', at: 0, pinned: false }, 14 * 60_000)).toBe(
-    'upload path · 14 min ago',
-  );
   expect(provenance({ text: 't', source: 'pasteboard', at: 0, pinned: true }, 999)).toBe(
     'phone pasteboard · pinned',
   );
@@ -97,4 +95,11 @@ test('a bad pin blob is an empty list, not a crash', () => {
   expect(decodePins('[{"text":""},{"text":"ok","source":"nonsense","at":"x"}]')).toEqual([
     { text: 'ok', source: 'yank', at: 0, pinned: true },
   ]);
+});
+
+test('a copied file is a file, not a line to type', () => {
+  expect(isFileUri('content://com.android.providers/document/1234')).toBe(true);
+  expect(isFileUri('file:///private/var/mobile/spec.pdf')).toBe(true);
+  expect(isFileUri('https://example.com/spec.pdf')).toBe(false);
+  expect(isFileUri('ls -la /tmp')).toBe(false);
 });

@@ -11,16 +11,17 @@
  * file in memory, size unguarded, per §7.
  */
 
+import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { Alert } from 'react-native';
 import { useSyncExternalStore } from 'react';
 
+import ExpoPasteboard from '../modules/expo-pasteboard/src/ExpoPasteboardModule';
 import ExpoSSH from '../modules/expo-ssh/src/ExpoSSHModule';
-import { pushUploadPath } from '@/clipboard';
 import { send } from '@/session';
-import { QUICK_DIR, joinPath, stampName } from '@/upload-model';
+import { QUICK_DIR, joinPath, stampName, stripDataUri } from '@/upload-model';
 
 export type UploadKind = 'files' | 'photo' | 'camera';
 
@@ -127,11 +128,43 @@ export async function sendFile(
  */
 export async function quickAttach(kind: UploadKind = 'files'): Promise<string | null> {
   const picked = await pick(kind);
-  if (picked === null) return null;
+  return picked === null ? null : attach(picked);
+}
+
+/**
+ * Anything on the phone pasteboard that is not text (user, 2026-09-01): Paste had nothing to
+ * *type*, so it typed nothing at all and the key looked dead. A photo or a PDF is a file, so it
+ * takes the file route — the same quick-attach drop and the same typed path.
+ *
+ * Two readers, because a photo and a document sit on the pasteboard differently. `expo-clipboard`
+ * hands an image back as bytes in a data URI and is asked first, so a copied photo keeps the name
+ * and the PNG encoding it always had. Everything else — the PDF that started this — goes through
+ * `expo-pasteboard`, our own module, for the reason written at the top of its Swift file: no
+ * published package reads an arbitrary pasteboard item, and on iOS the file carries no URL to
+ * chase either (`getUrlAsync()` measured `null` on device).
+ *
+ * Resolves `null` when the pasteboard holds neither — the same silence a cancelled picker gets.
+ */
+export async function pasteFile(): Promise<string | null> {
+  const image = await Clipboard.getImageAsync({ format: 'png' }).catch(() => null);
+  if (image !== null) return attach({ name: 'pasted.png', base64: stripDataUri(image.data) });
+
+  const file = await ExpoPasteboard.read().catch((error: unknown) => {
+    // A clip we cannot open: a `content://` whose grant died with the copying app, an item whose
+    // provider has gone away. One alert, like any other unreadable pick.
+    console.log('[upload] pasteboard file unreadable:', error);
+    Alert.alert('Could not read the file');
+    return null;
+  });
+  console.log('[upload] pasteboard file:', file?.name ?? null);
+  return file === null ? null : attach({ name: file.name, base64: file.base64 });
+}
+
+/** Quick-attach's tail, shared with the pasted image: send, then type the path. */
+async function attach(picked: PickedFile): Promise<string | null> {
   const path = joinPath(QUICK_DIR, stampName(new Date(), picked.name));
   if (!(await sendFile(picked.base64, path, [QUICK_DIR]))) return null;
   send(`${path} `); // typed, never executed — the trailing space is the whole gesture
-  pushUploadPath(path);
   console.log('[upload] quick-attach typed', path);
   return path;
 }

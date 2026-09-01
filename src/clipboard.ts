@@ -12,8 +12,10 @@ import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 
+import ExpoPasteboard from '../modules/expo-pasteboard/src/ExpoPasteboardModule';
 import {
   decodePins,
+  isFileUri,
   push,
   serializePins,
   togglePin as togglePinModel,
@@ -33,9 +35,13 @@ export type ClipboardState = {
   slots: Slot[];
   /** What the phone pasteboard held when the popover last opened; `null` until then or if empty. */
   pasteboard: Slot | null;
+  /** What the pasteboard holds when it is not text — 'Photo' for a copied image, a filename for a
+   *  copied file — or `null`. Not a slot: the bytes stay on the pasteboard, nothing here can type
+   *  them, and a pin would keep nothing. `pasteFile` in `src/upload.ts` sends it, §4.6's route. */
+  pasteboardFile: string | null;
 };
 
-let state: ClipboardState = { slots: [], pasteboard: null };
+let state: ClipboardState = { slots: [], pasteboard: null, pasteboardFile: null };
 
 const listeners = new Set<() => void>();
 
@@ -79,11 +85,6 @@ export function pushYank(text: string): void {
   set({ ...state, slots: push(state.slots, { text, source: 'yank', at: Date.now(), pinned: false }) });
 }
 
-/** Quick-attach pushes the path it typed, so it can be pasted again later (design's slot 2). */
-export function pushUploadPath(path: string): void {
-  set({ ...state, slots: push(state.slots, { text: path, source: 'upload', at: Date.now(), pinned: false }) });
-}
-
 export function togglePin(index: number): void {
   set({ ...state, slots: togglePinModel(state.slots, index) });
   persistPins();
@@ -99,11 +100,23 @@ export function pinPasteboard(): void {
 
 /** Called when the popover opens — the one accepted moment the iOS paste banner may fire (§4.4). */
 export async function refreshPasteboard(): Promise<void> {
-  const text = await Clipboard.getStringAsync().catch(() => '');
+  const raw = await Clipboard.getStringAsync().catch(() => '');
+  // A copied file reaches `getStringAsync` as its URI on Android and as nothing at all on iOS; it
+  // is a file either way, never a line to type.
+  const text = raw === '' || isFileUri(raw) ? '' : raw;
   set({
     ...state,
     pasteboard: text === '' ? null : { text, source: 'pasteboard', at: Date.now(), pinned: false },
+    pasteboardFile: text === '' ? await pasteboardFileLabel() : null,
   });
+}
+
+/** What the popover calls the non-text pasteboard: 'Photo' for an image, the filename for a file,
+ *  `null` for neither. Both probes are metadata — `hasImages` and `peek` read what the pasteboard
+ *  *has*, not what it holds, so drawing the row costs no iOS paste banner. Only the tap does. */
+async function pasteboardFileLabel(): Promise<string | null> {
+  if (await Clipboard.hasImageAsync().catch(() => false)) return 'Photo';
+  return await ExpoPasteboard.peek().catch(() => null);
 }
 
 /** What the Paste key types on a plain tap: the top slot, or the phone pasteboard when there are
@@ -111,5 +124,7 @@ export async function refreshPasteboard(): Promise<void> {
 export async function topSlotText(): Promise<string | null> {
   if (state.slots.length > 0) return state.slots[0].text;
   const text = await Clipboard.getStringAsync().catch(() => '');
-  return text === '' ? null : text;
+  // A file URI is bytes wearing a string; `pasteFile` takes it from here. A yank that happens to
+  // hold one is left alone — the rule is about the pasteboard, not about slots.
+  return text === '' || isFileUri(text) ? null : text;
 }
