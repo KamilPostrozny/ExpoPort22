@@ -18,6 +18,7 @@ import {
   newWindowCommand,
   POLL,
   POLL_MS,
+  sameWindows,
   PROBE,
   SEP,
   capturePaneCommand,
@@ -39,6 +40,7 @@ import {
   tabsAvailable,
   tabsHint,
 } from '@/tmux-model';
+import type { TmuxWindow } from '@/tmux-model';
 import * as model from '@/tmux-model';
 
 /* --- the conf file --- */
@@ -384,4 +386,40 @@ test('the poll names its session, or asks untargeted when it cannot', () => {
   expect(aimed.indexOf('#{alternate_on}')).toBeLessThan(aimed.indexOf('#{pane_current_command}'));
   // A session name is user-typed on the attach picker, so it goes through the same quoting.
   expect(model.pollCommand('$(reboot)')).toContain(`'=$(reboot):'`);
+});
+
+// The guard on the switcher's early list commit. It only earns its place by being STRICT: a field
+// it forgets is a field that changes on the host and never reaches the grid, because the commit
+// that would have carried it was skipped as "nothing moved".
+test('sameWindows sees every field a card draws', () => {
+  const win = (over: Partial<TmuxWindow> = {}): TmuxWindow => ({
+    id: '@1',
+    index: 0,
+    name: 'shell',
+    active: true,
+    path: '/home/kamil',
+    width: 80,
+    command: 'fish',
+    ...over,
+  });
+  expect(sameWindows([], [])).toBe(true);
+  expect(sameWindows([win()], [win()])).toBe(true);
+  // A window closed with Ctrl-D — the case this exists for.
+  expect(sameWindows([win(), win({ id: '@2', active: false })], [win()])).toBe(false);
+  expect(sameWindows([win()], [win(), win({ id: '@2', active: false })])).toBe(false);
+  // Same windows, different order: the grid draws them in list order, so this is a change.
+  const a = win();
+  const b = win({ id: '@2', index: 1, active: false });
+  expect(sameWindows([a, b], [b, a])).toBe(false);
+  for (const over of [
+    { id: '@9' },
+    { index: 3 },
+    { name: 'renamed' },
+    { active: false },
+    { path: '/tmp' },
+    { width: 120 },
+    { command: 'vim' },
+  ] as Partial<TmuxWindow>[]) {
+    expect(sameWindows([win()], [win(over)])).toBe(false);
+  }
 });

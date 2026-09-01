@@ -55,10 +55,10 @@ ADVANCE = 600  # 0.6em at 1000upm — a substitute on any other advance would br
 #: codepoint here in the same commit that draws it. FILL above is for what the *host* writes into
 #: the pane, and is not the lever for these.
 CHROME = {
+    0xEB22: 'move — the arrows key (fa-arrows F047 was too heavy beside the letter keys)',
     0xF002: 'magnifyingglass — switcher search field',
     0xF00C: 'check — the settings theme tick and the switcher Done circle',
     0xF040: 'pencil — the vim recipe chip',
-    0xF047: 'arrows — the arrows key',
     0xF04B: 'play — the running recipe chip',
     0xF04C: 'pause — the suspended recipe chip',
     0xF067: 'plus — the switcher new-tab circle',

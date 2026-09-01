@@ -167,6 +167,11 @@ export default function SessionScreen() {
   });
   /** The bar stack's measured height — the `popBase` the popovers anchor on. */
   const [barHeight, setBarHeight] = useState(60);
+  /** The key row's height alone — what the pane insets by. The chord strip is deliberately not in
+   *  it: it overlays the terminal like a popover rather than costing it rows (see
+   *  `KeyBarProps.onRowHeight`). Equal to `barHeight` whenever Ctrl is off, which is most of the
+   *  time; the two only part while the strip is up. */
+  const [rowHeight, setRowHeight] = useState(60);
   /** A picked file waiting on a destination (§4.6): the sheet is up exactly while this is set. */
   const [pendingUpload, setPendingUpload] = useState<{ base64: string; suggestedName: string } | null>(
     null,
@@ -2012,6 +2017,7 @@ export default function SessionScreen() {
       if (h !== barHeight) probe(`barHeight ${barHeight.toFixed(0)} → ${h.toFixed(0)}`);
       setBarHeight(h);
     },
+    onRowHeight: setRowHeight,
     onTabsTap: openSwitcher,
     onZoomGrab,
     onZoomArm,
@@ -2020,6 +2026,7 @@ export default function SessionScreen() {
   };
   const kb_sendBytes = useCallback((...a: any[]) => kbH.current.sendBytes(...a), []);
   const kb_onHeight = useCallback((...a: any[]) => kbH.current.onHeight(...a), []);
+  const kb_onRowHeight = useCallback((...a: any[]) => kbH.current.onRowHeight(...a), []);
   const kb_onTabsTap = useCallback((...a: any[]) => kbH.current.onTabsTap(...a), []);
   const kb_onZoomGrab = useCallback((...a: any[]) => kbH.current.onZoomGrab(...a), []);
   const kb_onZoomArm = useCallback((...a: any[]) => kbH.current.onZoomArm(...a), []);
@@ -2144,8 +2151,9 @@ export default function SessionScreen() {
    *  under an armed search, whose row (padded past the notch on its own) already pushed the
    *  terminal area below it. */
   const notchPad = search.on ? 0 : insets.top;
-  /** The floating bar's ground: home strip + the bar stack itself, all inside the card face. */
-  const barPad = barHeight + insets.bottom;
+  /** The floating bar's ground: home strip + the key ROW, all inside the card face. The chord
+   *  strip is not in it — it overlays the pane, see `rowHeight`. */
+  const barPad = rowHeight + insets.bottom;
   /** The row remainder, absorbed into the BOTTOM padding so the first row is pinned to the top
    *  of the box: the webview used to carry it above the rows (`box % cell`), and any chrome
    *  change — ribbon, keyboard — re-rolled it, shifting the whole pane by up to a row at the
@@ -2740,6 +2748,7 @@ export default function SessionScreen() {
         open={open}
         onOpenChange={setOpen}
         onHeight={kb_onHeight}
+        onRowHeight={kb_onRowHeight}
         focusSignal={focusSignal}
         sending={sending}
         // §4.5: tabs are reachable only with tmux present AND the config applied AND a client

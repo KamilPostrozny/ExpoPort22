@@ -252,6 +252,33 @@ export type TmuxWindow = {
   command: string;
 };
 
+/**
+ * Two window lists describe the same grid: same windows, same order, and nothing the cards draw
+ * has moved. Every field is compared because every field is on screen — the name and the path's
+ * leaf are the card's two lines, `active` is its ring, `width` is the column count the snapshot
+ * renders at, and `command` feeds T14's metadata match.
+ *
+ * It exists so the switcher can commit a list the instant it lands without paying for a render of
+ * the whole grid every 2s when nothing changed — see `useSwitcherCards`'s `refresh`.
+ */
+export function sameWindows(a: TmuxWindow[], b: TmuxWindow[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((w, i) => {
+      const o = b[i];
+      return (
+        w.id === o.id &&
+        w.index === o.index &&
+        w.name === o.name &&
+        w.active === o.active &&
+        w.path === o.path &&
+        w.width === o.width &&
+        w.command === o.command
+      );
+    })
+  );
+}
+
 /** The windows of ONE session — the one the phone is attached to (see `sessionScope`). Every id the
  *  grid ever addresses comes from here, so this is the command that makes the rest trustworthy. */
 export function listWindowsCommand(session: string): string {

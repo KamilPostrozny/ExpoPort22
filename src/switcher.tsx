@@ -53,6 +53,7 @@ import {
   DESIGN_W,
   gridHeight,
   gridTop,
+  liftShadow,
   reorder,
   reorderArgs,
   SEARCH_BAR_H,
@@ -67,7 +68,7 @@ import {
   type Frame,
 } from '@/switcher-model';
 import { capturePane, execPool, listWindows, searchPane, shotPool } from '@/tmux';
-import { POLL_MS, type TmuxWindow } from '@/tmux-model';
+import { POLL_MS, sameWindows, type TmuxWindow } from '@/tmux-model';
 import { MONO, MONO_BOLD, rgba, SANS, type Theme } from '@/theme';
 
 /** One captured pane, with the column count it was captured at — the two travel together because
@@ -107,6 +108,10 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
    *  whatever that window last showed. */
   const shown = useRef(new Map<string, Snap>());
   const pending = useRef(new Map<string, Snap>());
+  /** The window list the cards were last built from — what `sameWindows` is asked about. A ref and
+   *  not `cards`: `refreshCard` rewrites `cards` without touching the list, and `refresh` is a
+   *  `useCallback` with no dependencies on purpose (the interval holds one identity for its life). */
+  const listed = useRef<TmuxWindow[]>([]);
   const frozenRef = useRef(frozen);
   frozenRef.current = frozen;
   /** Read at the moment a freeze lifts: `live` still true there means the grid is what the
@@ -125,6 +130,29 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
       const wins = await listWindows();
       if (seq.current !== mine) return;
       setListFailed(false);
+      // A window that is gone takes its snapshot with it — tmux ids never come back, so anything
+      // still keyed by one is memory a long session would only accumulate.
+      const alive = new Set(wins.map((win) => win.id));
+      for (const id of shown.current.keys()) if (!alive.has(id)) shown.current.delete(id);
+      const commit = () => {
+        listed.current = wins;
+        setCards(wins.map((win) => ({ win, snap: shown.current.get(win.id) ?? null })));
+      };
+      /**
+       * The LIST commits the moment it lands, ahead of the captures — it used to wait behind them,
+       * and that is a card outliving its window by the length of a whole capture burst. The list
+       * comes back in one exec; the burst is one channel per window through a two-deep pool, so on
+       * a grid of any size it is seconds. A tab closed with `Ctrl-D` sat there for all of them
+       * (user, 2026-09-01, "stays long on tabs view until it disappears"). Nothing about that is
+       * interaction-driven, which is what it looked like: a tap on the grid runs `refreshCard`,
+       * whose own `setCards` rebuilds the card array off `cards` — and by then the poll's list
+       * had long since landed.
+       *
+       * Only when something actually moved, because this doubles the grid's renders on the polls
+       * where it fires and the steady state is a list that is identical 2s later. `sameWindows`
+       * compares every field a card draws.
+       */
+      if (!sameWindows(listed.current, wins)) commit();
       if (withSnapshots) {
         // A few at a time, not one channel per window all at once: every capture is its own exec
         // channel, sshd's MaxSessions is 10 per connection by default, and this session already
@@ -179,12 +207,9 @@ export function useSwitcherCards(enabled: boolean, live: boolean, frozen: boolea
           const held = frozenRef.current && !wins[i].active && shown.current.has(wins[i].id);
           (held ? pending.current : shown.current).set(wins[i].id, snap);
         });
+        // …and the snapshots commit again on top of it, once they are back.
+        commit();
       }
-      // A window that is gone takes its snapshot with it — tmux ids never come back, so anything
-      // still keyed by one is memory a long session would only accumulate.
-      const alive = new Set(wins.map((win) => win.id));
-      for (const id of shown.current.keys()) if (!alive.has(id)) shown.current.delete(id);
-      setCards(wins.map((win) => ({ win, snap: shown.current.get(win.id) ?? null })));
       return wins;
     } catch (error) {
       console.log('[switcher] refresh failed:', error);
@@ -897,11 +922,26 @@ function WindowCard({
     // The card is the same picture, so it can be solid the moment the surface starts fading: the
     // surface still covers its slot there, which is the whole reason the fade waits 180ms.
     opacity: swipeOpacity(swipeX.value, stageW) * (flying && fade.value >= 1 ? 0 : 1),
-    // `boxShadow` is the shadow both platforms render. The iOS-only `shadow*` set this replaces is
-    // why the lift threw no shadow at all off iOS — Android implements none of those props (bar
-    // `shadowColor`, and only as the tint of an `elevation`), so the drag simply had no lift there.
-    boxShadow: `0 18px 30px rgba(0,0,0,${0.55 * lift.value})`,
   }));
+
+  /** The lift's drop shadow, on a wrapper of its own for a reason of shape.
+   *
+   *  `boxShadow` is the shadow both platforms render. The iOS-only `shadow*` set it replaces is
+   *  why the lift threw no shadow at all off iOS — Android implements none of those props (bar
+   *  `shadowColor`, and only as the tint of an `elevation`), so the drag simply had no lift there.
+   *
+   *  It used to ride on `style`, one view up. That view is the whole card — the snapshot AND the
+   *  name and path under it — and it carries no radius, so the shadow was cast from a square box
+   *  some 60pt taller than the card it was meant to lift. On screen that put a hard-edged
+   *  semi-transparent rectangle BELOW the label, a band of page showing between it and the card,
+   *  and it showed only while a card was held, because the alpha is `0.55 * lift` (user,
+   *  2026-08-31). Here it wraps the snapshot alone and repeats its corner, so the shadow is the
+   *  card's own shape.
+   *
+   *  Not on `styles.shot` itself: that view is `overflow: 'hidden'`, which iOS maps to
+   *  `clipsToBounds`, and a layer that masks to its bounds clips the shadow it casts.
+   */
+  const shadowStyle = useAnimatedStyle(() => ({ boxShadow: liftShadow(lift.value) }));
 
   // `CARD_RING` and not a literal: the flying surface draws this same ring on its way here, and
   // the two only agree at the landing if they read one number (user, 2026-08-17).
@@ -980,34 +1020,36 @@ function WindowCard({
           posStyle,
         ]}>
       <Animated.View style={style}>
-        <View
-          style={[
-            styles.shot,
-            {
-              height: slot.h,
-              borderRadius: CARD_RADIUS * u,
-              backgroundColor: theme.background,
-              paddingHorizontal: shotPad,
-              paddingTop: shotPadTop,
-              paddingBottom: shotPad,
-            },
-          ]}>
-          <Snapshot lines={shownLines} theme={theme} {...type} />
-          {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
-          {closable && (
-            <View style={[styles.close, { backgroundColor: theme.foreground }]}>
-              <Text style={[styles.closeGlyph, { color: theme.background }]}>✕</Text>
-            </View>
-          )}
-          {/* The ring, drawn over the card exactly as the flying surface draws its own — an
-              absoluteFill, so it costs the content no layout and the two agree by construction
-              rather than by three subtractions that have to stay in step. Last child: on top,
-              like the flight's. */}
+        <Animated.View style={[shadowStyle, { borderRadius: CARD_RADIUS * u }]}>
           <View
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFill, ring, { borderRadius: CARD_RADIUS * u }]}
-          />
-        </View>
+            style={[
+              styles.shot,
+              {
+                height: slot.h,
+                borderRadius: CARD_RADIUS * u,
+                backgroundColor: theme.background,
+                paddingHorizontal: shotPad,
+                paddingTop: shotPadTop,
+                paddingBottom: shotPad,
+              },
+            ]}>
+            <Snapshot lines={shownLines} theme={theme} {...type} />
+            {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
+            {closable && (
+              <View style={[styles.close, { backgroundColor: theme.foreground }]}>
+                <Text style={[styles.closeGlyph, { color: theme.background }]}>✕</Text>
+              </View>
+            )}
+            {/* The ring, drawn over the card exactly as the flying surface draws its own — an
+                absoluteFill, so it costs the content no layout and the two agree by construction
+                rather than by three subtractions that have to stay in step. Last child: on top,
+                like the flight's. */}
+            <View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, ring, { borderRadius: CARD_RADIUS * u }]}
+            />
+          </View>
+        </Animated.View>
         <HlText
           text={card.win.name}
           query={query}
@@ -1246,12 +1288,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    // 34 pushes the two circles in to where the prototype's are; the 5/10 split hangs the row a
-    // touch above the home-bar inset the call site adds. `barH` is measured by `onLayout`, so the
-    // grid's content height follows whatever these come to.
-    paddingHorizontal: 34,
-    paddingTop: 5,
-    paddingBottom: 10,
+    // These push the two circles in to where the prototype's are, and the 5/10 split hangs the row
+    // a touch above the home-bar inset the call site adds. `barH` is measured by `onLayout`, so the
+    // grid's content height follows whatever these come to. They are `BAR`'s rather than literals
+    // because the terminal's key bar has to land on exactly the same spot — see `BAR` in style.ts.
+    paddingHorizontal: BAR.sideMargin,
+    paddingTop: BAR.padTop,
+    paddingBottom: BAR.padBottom,
   },
   // §3's 49pt bar circle; its 25 was exactly half of that, which is `RADIUS.pill` said properly.
   circle: { width: BAR.circle, height: BAR.circle, borderRadius: RADIUS.pill, ...CENTER },

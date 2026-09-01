@@ -201,6 +201,25 @@ export function swipeOpacity(offset: number, width: number): number {
   return 1 - Math.min(Math.max(-offset, 0) / (CARD_W * width), 1);
 }
 
+/** The drag lift's drop shadow, as the `boxShadow` string both platforms render.
+ *
+ *  `toFixed` is load-bearing rather than tidiness. A spring settles asymptotically, so the alpha
+ *  spends its last frames at magnitudes below 1e-6 — where JS stringifies to exponent notation,
+ *  and `rgba(0,0,0,2.2e-7)` is a colour Reanimated's parser cannot read. It rejects the whole
+ *  declaration, so the shadow froze at its last drawn frame instead of fading out with the card
+ *  (device log, 2026-08-31). The clamp is belt-and-braces: the lift spring is underdamped and
+ *  undershoots to about -0.13 on the drop, and `(-0).toFixed(3)` is the string "-0.000".
+ *
+ *  The scale and the rotate the same `lift` drives take these values as raw numbers and never
+ *  care — only a colour goes through a parser, which is why this was invisible everywhere but
+ *  the device log. The top end needs no clamp: the overshoot peaks near 1.13, so 0.55x it stays
+ *  well under 1.
+ */
+export function liftShadow(lift: number): string {
+  'worklet';
+  return `0 18px 30px rgba(0,0,0,${Math.max(0, 0.55 * lift).toFixed(3)})`;
+}
+
 /* --- the zoom (prototype zoomFollow / zoomSty) --- */
 
 /** Upward travel the zoom ignores before it starts — an ORIGIN OFFSET, not a gate: past it the

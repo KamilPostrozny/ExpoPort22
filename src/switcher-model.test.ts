@@ -29,6 +29,7 @@ import {
   zoomBox,
   zoomFrame,
   zoomProgress,
+  liftShadow,
 } from '@/switcher-model';
 import type { TmuxWindow } from '@/tmux-model';
 
@@ -316,4 +317,26 @@ test('with no cell measured yet a snapshot still fits its columns', () => {
   const type = snapshotType({ w: 0, h: 0 }, 0.43, 48, 168);
   expect(type.fontSize).toBeCloseTo(snapshotFontSize(168, 48));
   expect(type.lineHeight).toBeGreaterThan(type.fontSize);
+});
+
+// The bug this guards was invisible in every test that checked a NUMBER: the alpha was in range
+// the whole time. It only bit once the number became a string (device log, 2026-08-31).
+test('the lift shadow never formats its alpha in exponent notation', () => {
+  // Walk the spring's whole travel, including the underdamped tails past both ends.
+  for (let lift = -0.2; lift <= 1.2; lift += 0.0005) {
+    expect(liftShadow(lift)).not.toContain('e');
+  }
+  // The asymptotic settle itself: the magnitudes a raw template literal stringifies as `2.2e-7`.
+  for (const tiny of [1e-7, 2.258614332007739e-7, -4.1028264514955913e-7, 1e-12, -0]) {
+    expect(liftShadow(tiny)).toBe('0 18px 30px rgba(0,0,0,0.000)');
+  }
+});
+
+test('the lift shadow keeps the alpha in range across the spring, ends included', () => {
+  for (const lift of [-0.2, 0, 0.5, 1, 1.13, 1.2]) {
+    const alpha = Number(liftShadow(lift).match(/rgba\(0,0,0,([-\d.]+)\)/)![1]);
+    expect(alpha).toBeGreaterThanOrEqual(0);
+    expect(alpha).toBeLessThanOrEqual(1);
+  }
+  expect(liftShadow(1)).toBe('0 18px 30px rgba(0,0,0,0.550)'); // the resting lift, unchanged
 });

@@ -1403,3 +1403,124 @@ line, in both flavours.
 - Leaving the app's start mode on an `attach` to a session you then delete is a trap:
   `startupLine`'s fallback is `tmux new-session -A -D -s port22`, which attaches **and detaches** the
   user's live work. Park it on a custom command instead.
+
+---
+
+## Reported by the user, 2026-09-01 — key bar
+
+Five items from a phone session. Two are bugs, three are changes the user asked for. All live in
+`src/keybar.tsx`.
+
+> **Session of 2026-09-01, unattended.** Four of the five are written and green in `tsc`/`bun test`
+> and **not one of them has been seen on a screen** — neither Android nor iOS. The emulator booted,
+> the bundle served and the app launched, but its key
+> (`ssh-ed25519 AAAA…ILDulPdXfD/EtD5s6Uy7XSZpfJ4DqmP3K9ne73U+ZwyS`) is not in this box's
+> `~/.ssh/authorized_keys`, and the harness could not write that file. Without a host the app stops
+> at the full-screen "Cannot connect" overlay and the key bar never renders at all, so none of these
+> could be walked. Per AGENTS.md that is a finding, not a footnote: **everything below is
+> UNVERIFIED on both platforms.** To unblock the next run, add the key line above to
+> `~/.ssh/authorized_keys` and set the host's Port back to 22 (it is on 2222 in the app's saved host
+> and nothing on this box listens there).
+>
+> What still has to be walked, per item: the glyph at native-resolution crop against the letter keys
+> beside it; the arrows popover's plate shape with Enter in it (it was laid out to keep the plate's
+> old height, which only a screenshot can settle); the Ctrl strip overlaying the pane with the row
+> count UNCHANGED across arm/disarm (read `[terminal]` rows in the log, not just the picture); and
+> Paste with 0, 1 and 2+ yanks in the slots.
+
+### Paste pastes when it should open the window — FIXED 2026-09-01, UNWALKED
+
+`onPaste` sent the top slot straight to the host and only the long press opened the clipboard
+popover. Now: more than one yank slot and the tap opens the popover; one slot (or none, with the
+phone pasteboard behind it) still types straight through, because there is nothing to choose
+between.
+
+The count is the yank slots ONLY, and that is deliberate rather than an oversight: folding the
+phone pasteboard into it means reading the pasteboard on every tap of Paste, and that read is what
+fires the iOS paste banner. §4.4 spends that banner when the popover opens, or when there is no
+slot to type at all, and nowhere else.
+
+### Paste cannot take media off the phone clipboard — OPEN
+
+The clipboard path is text-only (`pasteBytes`, the `clipboard` popover's pasteboard row). Wanted:
+an image or file copied on the phone is pasteable too — which means it goes up the upload path
+(§4.6), not the paste path, so this needs a decision on where it lands before it needs code.
+
+### The arrows button's icon — CHANGED 2026-09-01, UNWALKED
+
+Was U+F047 (nf-fa-arrows_up_down_left_right), now **U+EB22 (nf-cod-move)**: the same four-way
+arrow drawn open and hairline instead of as a solid slab, which is what made it read heavier than
+the Ctrl/Esc/Tab/Paste letters beside it. Registered in `scripts/patch-font.py`'s `CHROME` guard,
+which passes — the codepoint is in both bundled faces, so there is no tofu and no Noto fallthrough.
+
+The rejected alternates, all present in the face, in case the user wants a different one — it is a
+one-character change plus the `CHROME` line:
+
+| codepoint | name | why not |
+|---|---|---|
+| `U+F047` | fa-arrows_up_down_left_right | the incumbent; solid and heavy |
+| `U+F0041` | md-arrow_all | same solid shape as F047, and astral (SPUA-A) — every other chrome glyph is BMP |
+| `U+F01BE` | md-cursor_move | again the same solid shape |
+| `U+F0616` | md-arrow_expand | two diagonal arrows; reads as "full screen", not "arrow keys" |
+| `U+F004C` | md-arrow_expand_all | four diagonal arrows; same wrong verb |
+
+**Still unseen on a screen at 18pt.** It was picked by rendering the candidates out of the TTF with
+PIL, which settles the shape and says nothing about the optical weight next to Inter and JetBrains
+Mono at device scale.
+
+### The arrows popover has no Enter — ADDED 2026-09-01, UNWALKED
+
+`ArrowsPopover` now has the d-pad plus Home/End/Enter. Not a third row: Home and End sit side by
+side with Enter spanning underneath them, so the cluster is exactly two 34pt rows tall — the
+d-pad's height — and the plate keeps its shape. A column of three would have grown the plate 40pt
+and left the d-pad floating in dead space. The plate goes from roughly 223 to 283pt wide, which
+still clears a 393pt screen at a 34pt margin, but that arithmetic is the thing a screenshot has to
+confirm.
+
+Enter is not an `arrow()`: Return is a plain CR, not a CSI/SS3 sequence, so it has no `NavKey` and
+DECCKM has nothing to say about it. It goes out through the popover's `sendBytes`, which is the
+screen's raw `send` — so, like the d-pad's own keys, it bypasses the bar's `trackLine`. Harmless
+for Home/End (they move a caret, they do not change the line's length) but Enter DOES end a line,
+so `lineLen` is left stale until the next real keystroke. The only consumer is T12's iOS dictation
+filter, which drops a leading space at an empty line; the cost is one dictation space surviving
+after an Enter pressed from this popover. Noted rather than fixed: threading a tracked sender into
+a popover the screen renders is a bigger change than the fault.
+
+### The Ctrl chord strip shoves the terminal up — FIXED 2026-09-01, UNWALKED
+
+The lettered caps that appear on arming Ctrl (`CHORD_STRIP`). They pushed the terminal up because
+the strip is rendered *inside* the View whose `onLayout` reports the key bar's height, so arming
+Ctrl grew the bar and the pane gave up the rows.
+
+The strip could not simply be moved out, the way the popovers were: RN cannot hit-test a child
+drawn outside its parent's bounds, which is the whole reason the popovers had to leave the bar for
+the screen's own layer, and a strip lifted the same way would need its `ctrl` machine lifted with
+it. So the strip stays in flow and the **pane stops measuring it**: the bar now reports two
+numbers, `onHeight` (the whole stack, unchanged) and `onRowHeight` (the key row alone). `popBase`
+keeps the stack, so a popover opened over an armed Ctrl still clears the strip rather than landing
+on it; `barPad` — the pane's bottom inset — takes the row. The two are equal whenever Ctrl is off,
+which is nearly always.
+
+### A tab closed with Ctrl-D lingers in the grid — FIXED 2026-09-01, UNWALKED
+
+Reported by the user the same day: `Ctrl-D` ends the shell, the window dies host-side, and the
+switcher's card stays on screen for a long beat. The user's guess was that it only leaves once the
+grid is touched.
+
+It is not interaction-driven and the poll was not slow. `useSwitcherCards`'s `refresh` awaited the
+window list AND the whole snapshot burst before it called `setCards` once. The list comes back in a
+single exec, in milliseconds; the burst is one `capture-pane` channel per window through a two-deep
+shared pool (`execPool`, itself bounded because a 20-tab grid saturated sshd's `MaxSessions`), so on
+a grid of any size it is seconds. The dead card sat there for all of them. What made it look like a
+tap was the cure is that a tap runs `refreshCard`, which does its own `setCards` — by which time the
+poll's list had long since landed and been sitting in a local variable.
+
+Fixed by committing the list the moment it lands and again when the snapshots are back. Guarded by
+`sameWindows` (`src/tmux-model.ts`, tested), so the early commit only fires when something actually
+moved: without it every 2s poll would render the whole grid twice for a list identical to the last
+one.
+
+Unwalked for the same reason as everything above — no host, so no tmux, so no grid. The walk is:
+open the grid with two or more tabs, `Ctrl-D` one of them from the terminal, and time the card's
+disappearance against `[switcher]` in the log. It should go on the first poll after the exit, not
+after the capture burst.

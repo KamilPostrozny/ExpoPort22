@@ -151,8 +151,17 @@ export const TINT = {
 
 /**
  * The key bar, PLAN.md §3. 49pt circles and pill, 35pt keys with an 18pt corner, a 7pt gap, a 24.5
- * capsule on every plate (half of 49, so the bar's pill is a true capsule) and a 24pt
+ * capsule on every plate (half of 49, so the bar's pill is a true capsule) and a 34pt
  * inset from each screen edge. One set of numbers for both platforms.
+ *
+ * `sideMargin` and `padBottom` are read by BOTH floating bars — the terminal's key bar and the
+ * switcher's `+ | N Tabs | ✓` — and that is the whole point of them living here. The two bars sit
+ * at the same place on screen and the user switches between them with one tap, so a circle that
+ * moves between the two views reads as the bar jumping. They had drifted apart: the key bar was
+ * inset 24 and hung 6 off the home strip, the switcher 34 and 10, which put the ⋯ and the + 10pt
+ * apart horizontally and 4pt vertically (user, 2026-08-31, screenshot pair). The switcher's pair
+ * won because the tabs view is the one the user named as correct. Change these and both bars move
+ * together; hardcode either number at a call site again and they drift again.
  */
 export const BAR = {
   circle: 49,
@@ -161,7 +170,12 @@ export const BAR = {
   keyPad: 5,
   gap: 7,
   keyRadius: 18,
-  sideMargin: 24,
+  sideMargin: 34,
+  /** The row's own top gap. `keybar` re-exports it as `BAR_PAD_TOP`, which the terminal's pane
+   *  arithmetic reads; this is the one definition. */
+  padTop: 5,
+  /** The gap under the row, INSIDE the safe-area inset both bars already sit on. */
+  padBottom: 10,
   radius: 24.5,
 } as const;
 

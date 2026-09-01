@@ -50,6 +50,7 @@ import {
   rubber,
 } from '@/barswipe-model';
 import {
+  getClipboard,
   pinPasteboard,
   refreshPasteboard,
   togglePin,
@@ -112,6 +113,17 @@ export type KeyBarProps = {
   /** The bar stack's height (chord strip included), remeasured on every change — the `popBase`
    *  the screen anchors popovers (and the edge handle) on. One number, one place. */
   onHeight: (height: number) => void;
+  /** The KEY ROW's height alone, chord strip excluded — what the terminal insets its pane by.
+   *
+   *  Two numbers rather than one because the strip is a popover in everything but where it is
+   *  mounted: it has to *overlay* the terminal like the arrows and clipboard ones do, not take
+   *  rows off it. Anchoring the pane on the stack height meant arming Ctrl cost the shell three
+   *  rows and disarming gave them back (user, 2026-09-01). The strip still has to be a real child
+   *  of this View — RN cannot hit-test a child drawn outside its parent's bounds, which is the
+   *  same reason the popovers had to leave the bar altogether — so it stays in flow here and the
+   *  pane simply stops measuring it. `popBase` keeps the full stack, so a popover opened over an
+   *  armed Ctrl still clears the strip instead of landing on it. */
+  onRowHeight: (height: number) => void;
   /** Bump to raise the keyboard — a tap on the terminal (§4.4's door to it), or the switcher
    *  closing back onto a terminal whose keys were up when it left (T10), the
    *  prototype's `kbShown: true` on return. A counter, not a boolean: every close counts. */
@@ -265,7 +277,7 @@ export function Plate({
 /** The bar's own top padding (§3). Exported because the terminal above it subtracts this from its
  *  bottom inset: what the eye reads as the gap under the last line is the two of them added up,
  *  and it has to come to the same number as the gap at the sides (user, 2026-08-10). */
-export const BAR_PAD_TOP = 5;
+export const BAR_PAD_TOP = BAR.padTop;
 
 /** Every pressable on the bar: dim + shrink while touched, light haptic on the completed tap —
  *  NOT on touch-down, where a bar swipe starting over a key buzzed on every hop and broke the
@@ -473,6 +485,14 @@ function KeyBarInner(props: KeyBarProps) {
   };
 
   const onPaste = async () => {
+    // With more than one thing to choose between, a tap must not choose: it opens the popover,
+    // which is the only place the choice exists (user, 2026-09-01). One slot still types straight
+    // through — there is nothing to pick — and so does the phone pasteboard behind an empty list.
+    //
+    // The count is the YANK SLOTS only, deliberately. Folding the pasteboard in would mean reading
+    // it on every tap of Paste, and that read is what fires the iOS paste banner; §4.4 spends that
+    // banner when the popover opens, or when there is no slot to type at all, and nowhere else.
+    if (getClipboard().slots.length > 1) return onOpenChange('clipboard');
     // The top clipboard slot (§4.4) — OSC 52 yanks and pins first, phone pasteboard as fallback.
     const text = await topSlotText();
     // Typed, never executed: no trailing newline of ours, and the bracketed-paste markers so the
@@ -659,8 +679,15 @@ function KeyBarInner(props: KeyBarProps) {
       : ctrl === 'locked'
         ? {
             backgroundColor: rgba(theme.accentAlternate, 0.5),
+            // Border and halo are ONE ring, and the colour is why. They used to disagree — a 1pt
+            // mauve border with the foreground halo spread 2pt immediately outside it — and two
+            // concentric rings in two colours read as the key being double-outlined rather than
+            // haloed (user, 2026-09-01, screenshot). Same colour, so the eye reads 3pt of one
+            // ring. The border stays 1pt rather than folding into the halo because `armed` has one
+            // too, and `borderWidth` is laid out INSIDE the box: dropping it here would nudge the
+            // label a point on the second tap.
             borderWidth: 1,
-            borderColor: rgba(theme.accentAlternate, 0.9),
+            borderColor: theme.foreground,
             boxShadow: `0 0 0 2px ${theme.foreground}`, // the lock's halo
           }
         : null;
@@ -687,7 +714,8 @@ function KeyBarInner(props: KeyBarProps) {
       )}
 
       <GestureDetector gesture={pan}>
-        <View style={styles.row}>
+        {/* The row measures itself, separately from the stack above — see `onRowHeight`. */}
+        <View style={styles.row} onLayout={(e) => props.onRowHeight(e.nativeEvent.layout.height)}>
           {/* §4.6: during an upload the circle tints accent and goes inert — the whole progress
               UI. The Pressable disables, so a tap during a send does nothing at all. */}
           <Key onPress={props.sending ? undefined : () => toggle('menu')} style={styles.circleSlot}>
@@ -770,10 +798,13 @@ function KeyBarInner(props: KeyBarProps) {
                     borderColor: rgba(theme.accent, 0.9),
                   },
                 ]}>
-                {/* U+F047 (nf-fa-arrows) is the four-way on both platforms now: it is in the
-                    bundled face, where ✛ is in none at all and fell through to Noto at another
-                    weight — see `MONO` in fonts.ts. */}
-                <Text style={[keyLabel, { fontSize: 18 }]}>{'\uF047'}</Text>
+                {/* U+EB22 (nf-cod-move): the four-way arrow drawn OPEN and hairline, which is the
+                    one that sits right next to Ctrl/Esc/Tab/Paste. U+F047 (nf-fa-arrows) is the
+                    same shape as a solid slab and read as a much heavier mark than the letters
+                    beside it (user, 2026-09-01). Both are in the bundled face; ✛ was in
+                    neither and fell through to Noto — see `MONO` in fonts.ts and the CHROME
+                    guard in scripts/patch-font.py, which is where a swap like this is registered. */}
+                <Text style={[keyLabel, { fontSize: 18 }]}>{'\uEB22'}</Text>
               </Key>
             </View>
             </Plate>
@@ -982,9 +1013,20 @@ export function ArrowsPopover({
           </View>
         </View>
         <View style={[styles.popDivider, { backgroundColor: theme.border }]} />
+        {/* Home/End side by side with Enter spanning under them, rather than a column of three:
+            the cluster then stands exactly two 34pt rows tall, which is the d-pad's height, and the
+            plate keeps its shape. A third row would have left the d-pad floating in dead space. */}
         <View style={styles.homeEnd}>
-          {arrow('home', 'Home', styles.homeEndKey, styles.homeEndGlyph)}
-          {arrow('end', 'End', styles.homeEndKey, styles.homeEndGlyph)}
+          <View style={styles.homeEndRow}>
+            {arrow('home', 'Home', styles.homeEndKey, styles.homeEndGlyph)}
+            {arrow('end', 'End', styles.homeEndKey, styles.homeEndGlyph)}
+          </View>
+          {/* Not an `arrow()`: Return is a plain CR, not a CSI/SS3 sequence, so it has no `NavKey`
+              and DECCKM has nothing to say about it (user asked for it here, 2026-09-01). Same
+              byte the field's own Return sends. */}
+          <Key onPress={() => sendBytes('\r')} style={styles.enterKey}>
+            <Text style={[styles.homeEndGlyph, { color: theme.foreground }]}>Enter</Text>
+          </Key>
         </View>
       </Plate>
     </Animated.View>
@@ -1178,7 +1220,8 @@ const styles = StyleSheet.create({
     gap: BAR.gap,
     paddingHorizontal: BAR.sideMargin,
     paddingTop: BAR_PAD_TOP,
-    paddingBottom: 6,
+    // Shared with the switcher's bar, deliberately — see `BAR` in style.ts.
+    paddingBottom: BAR.padBottom,
   },
   circleSlot: { width: BAR.circle, height: BAR.circle },
   circle: { width: BAR.circle, height: BAR.circle, ...CENTER },
@@ -1194,7 +1237,17 @@ const styles = StyleSheet.create({
     gap: SPACE.xs,
     paddingHorizontal: BAR.gap,
   },
-  keysGroup: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 3 },
+  // `space-between`, not the 3pt gap alone: the group takes all the pill's slack (`flex: 1`), so
+  // packed left it left a void between Paste and the divider the width of a key and a half (user,
+  // 2026-08-31, screenshot). Spread, Paste's right edge meets the divider and the gap becomes the
+  // group's minimum rather than its spacing.
+  keysGroup: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 3,
+  },
   key: {
     height: BAR.key,
     paddingHorizontal: BAR.keyPad,
@@ -1244,7 +1297,11 @@ const styles = StyleSheet.create({
   homeEndGlyph: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.note },
   popDivider: { width: 1, opacity: 0.5, marginVertical: 3 },
   homeEnd: { gap: SPACE.xs },
+  homeEndRow: { flexDirection: 'row', gap: SPACE.xs },
   homeEndKey: { width: 56, height: 34, borderRadius: 13, ...CENTER },
+  /** No width: it stretches to the two keys above it, which is what makes it read as one cluster
+   *  rather than a third loose key. */
+  enterKey: { height: 34, borderRadius: 13, ...CENTER },
   hintPop: { position: 'absolute', right: BAR.sideMargin, maxWidth: 240 },
   hintPlate: { paddingHorizontal: 14, paddingVertical: 10 },
   hintText: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
