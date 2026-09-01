@@ -1411,24 +1411,22 @@ line, in both flavours.
 Five items from a phone session. Two are bugs, three are changes the user asked for. All live in
 `src/keybar.tsx`.
 
-> **Session of 2026-09-01, unattended.** Four of the five are written and green in `tsc`/`bun test`
-> and **not one of them has been seen on a screen** — neither Android nor iOS. The emulator booted,
-> the bundle served and the app launched, but its key
-> (`ssh-ed25519 AAAA…ILDulPdXfD/EtD5s6Uy7XSZpfJ4DqmP3K9ne73U+ZwyS`) is not in this box's
-> `~/.ssh/authorized_keys`, and the harness could not write that file. Without a host the app stops
-> at the full-screen "Cannot connect" overlay and the key bar never renders at all, so none of these
-> could be walked. Per AGENTS.md that is a finding, not a footnote: **everything below is
-> UNVERIFIED on both platforms.** To unblock the next run, add the key line above to
-> `~/.ssh/authorized_keys` and set the host's Port back to 22 (it is on 2222 in the app's saved host
-> and nothing on this box listens there).
+> **Session of 2026-09-01. Android-verified on the emulator; NOTHING here has been on the iPhone.**
+> All four key-bar items plus the Ctrl-D one were walked against a live host — the evidence is under
+> each. Per AGENTS.md the iOS half is a finding, not a footnote: **every fix below is unverified
+> there.**
 >
-> What still has to be walked, per item: the glyph at native-resolution crop against the letter keys
-> beside it; the arrows popover's plate shape with Enter in it (it was laid out to keep the plate's
-> old height, which only a screenshot can settle); the Ctrl strip overlaying the pane with the row
-> count UNCHANGED across arm/disarm (read `[terminal]` rows in the log, not just the picture); and
-> Paste with 0, 1 and 2+ yanks in the slots.
+> Two things the walk needed that were not obvious. The emulator's key had to be added to this box's
+> `~/.ssh/authorized_keys` by hand (the harness is not allowed to write that file), and the saved
+> host's Port was **2222**, where nothing on this box listens — the app sat on "Cannot connect",
+> which is a full-screen overlay, so the key bar does not render at all and not one of these can be
+> seen. Both are the first things to check next run.
+>
+> The tmux side was walked in a session of its own (`p22test`), created for the walk and killed
+> after it. The saved `port22` session is the user's live work — two windows both running Claude
+> Code — and the default start mode attaches straight to it. Nothing was typed there.
 
-### Paste pastes when it should open the window — FIXED 2026-09-01, UNWALKED
+### Paste pastes when it should open the window — FIXED, Android-verified 2026-09-01
 
 `onPaste` sent the top slot straight to the host and only the long press opened the clipboard
 popover. Now: more than one yank slot and the tap opens the popover; one slot (or none, with the
@@ -1440,13 +1438,18 @@ phone pasteboard into it means reading the pasteboard on every tap of Paste, and
 fires the iOS paste banner. §4.4 spends that banner when the popover opens, or when there is no
 slot to type at all, and nowhere else.
 
+Walked both branches on the emulator against four OSC 52 yanks and then against exactly one. With
+four slots a single tap opened the CLIPBOARD popover and typed nothing into the pane; with one it
+typed `ONLY-ONE-SLOT` straight to the prompt and opened nothing (`tmux capture-pane` confirms the
+text, the screenshot confirms no popover).
+
 ### Paste cannot take media off the phone clipboard — OPEN
 
 The clipboard path is text-only (`pasteBytes`, the `clipboard` popover's pasteboard row). Wanted:
 an image or file copied on the phone is pasteable too — which means it goes up the upload path
 (§4.6), not the paste path, so this needs a decision on where it lands before it needs code.
 
-### The arrows button's icon — CHANGED 2026-09-01, UNWALKED
+### The arrows button's icon — CHANGED, Android-verified 2026-09-01
 
 Was U+F047 (nf-fa-arrows_up_down_left_right), now **U+EB22 (nf-cod-move)**: the same four-way
 arrow drawn open and hairline instead of as a solid slab, which is what made it read heavier than
@@ -1464,18 +1467,23 @@ one-character change plus the `CHROME` line:
 | `U+F0616` | md-arrow_expand | two diagonal arrows; reads as "full screen", not "arrow keys" |
 | `U+F004C` | md-arrow_expand_all | four diagonal arrows; same wrong verb |
 
-**Still unseen on a screen at 18pt.** It was picked by rendering the candidates out of the TTF with
-PIL, which settles the shape and says nothing about the optical weight next to Inter and JetBrains
-Mono at device scale.
+Seen at 18pt on the emulator, cropped at native resolution against the letters beside it: the open
+four-way draws at the same stroke weight as Ctrl/Esc/Tab/Paste, where the old solid one did not.
+No tofu and no Noto fallthrough — the terminals and arrowheads are the bundled face's own.
 
-### The arrows popover has no Enter — ADDED 2026-09-01, UNWALKED
+### The arrows popover has no Enter — ADDED, Android-verified 2026-09-01
 
 `ArrowsPopover` now has the d-pad plus Home/End/Enter. Not a third row: Home and End sit side by
 side with Enter spanning underneath them, so the cluster is exactly two 34pt rows tall — the
 d-pad's height — and the plate keeps its shape. A column of three would have grown the plate 40pt
 and left the d-pad floating in dead space. The plate goes from roughly 223 to 283pt wide, which
-still clears a 393pt screen at a 34pt margin, but that arithmetic is the thing a screenshot has to
-confirm.
+still clears a 393pt screen at a 34pt margin — confirmed on the emulator, nothing clipped at either
+edge, and the plate is the d-pad's two rows tall as intended. Tapping it put a fresh prompt in the
+pane, so the CR reaches the PTY.
+
+One thing the walk turned up that is NOT from this change: Home, End and Enter draw with no key
+tint at all, where the four d-pad keys are filled (`homeEndKey` sets no `backgroundColor`,
+`dpadKey` does). Pre-existing, and it needs an iOS screenshot to say which side is right.
 
 Enter is not an `arrow()`: Return is a plain CR, not a CSI/SS3 sequence, so it has no `NavKey` and
 DECCKM has nothing to say about it. It goes out through the popover's `sendBytes`, which is the
@@ -1486,7 +1494,7 @@ filter, which drops a leading space at an empty line; the cost is one dictation 
 after an Enter pressed from this popover. Noted rather than fixed: threading a tracked sender into
 a popover the screen renders is a bigger change than the fault.
 
-### The Ctrl chord strip shoves the terminal up — FIXED 2026-09-01, UNWALKED
+### The Ctrl chord strip shoves the terminal up — FIXED, Android-verified 2026-09-01
 
 The lettered caps that appear on arming Ctrl (`CHORD_STRIP`). They pushed the terminal up because
 the strip is rendered *inside* the View whose `onLayout` reports the key bar's height, so arming
@@ -1501,7 +1509,13 @@ keeps the stack, so a popover opened over an armed Ctrl still clears the strip r
 on it; `barPad` — the pane's bottom inset — takes the row. The two are equal whenever Ctrl is off,
 which is nearly always.
 
-### A tab closed with Ctrl-D lingers in the grid — FIXED 2026-09-01, UNWALKED
+Measured from the HOST rather than off the picture, which is the only way this one can be settled:
+`tmux display -p '#{pane_height}x#{pane_width}'` read **44x50 before arming Ctrl and 44x50 after**.
+Opening the arrows popover on top of an armed Ctrl left it at 44 as well, and the screenshot has
+all three stacked in the right order — popover above strip above bar — with none of them costing
+the pane a row.
+
+### A tab closed with Ctrl-D lingers in the grid — FIXED, Android-verified 2026-09-01
 
 Reported by the user the same day: `Ctrl-D` ends the shell, the window dies host-side, and the
 switcher's card stays on screen for a long beat. The user's guess was that it only leaves once the
@@ -1520,7 +1534,15 @@ Fixed by committing the list the moment it lands and again when the snapshots ar
 moved: without it every 2s poll would render the whole grid twice for a list identical to the last
 one.
 
-Unwalked for the same reason as everything above — no host, so no tmux, so no grid. The walk is:
-open the grid with two or more tabs, `Ctrl-D` one of them from the terminal, and time the card's
-disappearance against `[switcher]` in the log. It should go on the first poll after the exit, not
-after the capture burst.
+**A/B'd on the emulator**, old code against new, same tmux session and the same 16-20 windows, the
+window killed under an open grid and the `N Tabs` label watched at ~155ms per frame:
+
+| | trials, ms from the window dying to the card going | min |
+|---|---|---|
+| before | 2206, 2243, 2519, 3289 | **2206** |
+| after | 156, 460, 1741, 2036 | **156** |
+
+The 2s poll contributes a uniform 0-2000ms of phase to both columns, so it is the MINIMA that
+compare: the pipeline behind the poll went from ~2.2s to ~0.16s. The spread inside each column is
+the phase, not noise. `[switcher] 1 of 16 captures failed` appears in the log across these runs —
+the list still commits while the burst is failing, which is the point.
