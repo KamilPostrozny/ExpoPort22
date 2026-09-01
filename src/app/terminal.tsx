@@ -1177,6 +1177,14 @@ export default function SessionScreen() {
     // the surface starts moving is a long frame right at the start of the flight (probe: FRAME
     // 33ms at prog 0.92). Progress does not move in the gap, so nothing on screen is waiting.
     probe('aim');
+    if (swRef.current === 'opening') {
+      // A Done can land mid-fly-out now (`tappable`, user 2026-09-01: the ✓ was dead until the
+      // flight formally ended). Kill the open's cut callbacks — its timings would fire alpha=0
+      // and `sw: 'open'` into the middle of this close — and send the aim home without one.
+      cancelAnimation(prog);
+      cancelAnimation(flight);
+      if (flight.value < 1) flight.value = withTiming(1, ZOOM_OUT);
+    }
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
     setSw('closing');
@@ -1522,7 +1530,9 @@ export default function SessionScreen() {
       // navigation. `false` passes the press down to React Navigation's own handler.
       if (!navigation.isFocused()) return false;
       if (sw !== 'closed') {
-        if (sw === 'open') doneToActive(); // mid-transition: swallowed, the zoom owns the screen
+        // `opening` turns the flight around, same as the bar's ✓ (`tappable`); the other
+        // transitions stay swallowed — the zoom owns the screen.
+        if (sw === 'open' || sw === 'opening') doneToActive();
       } else if (open !== 'none') {
         setOpen('none');
       } else {
@@ -2311,6 +2321,7 @@ export default function SessionScreen() {
           onQuery={sw_onQuery}
           onClearSearch={sw_onClearSearch}
           interactive={sw === 'open'}
+          tappable={sw === 'open' || sw === 'opening'}
           zoomActive={zoomActive}
           onSelect={sw_onSelect}
           onKill={sw_onKill}

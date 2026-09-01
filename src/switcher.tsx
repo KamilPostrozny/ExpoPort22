@@ -419,6 +419,11 @@ export type SwitcherProps = {
   onClearSearch: () => void;
   /** Gestures live only while the grid is fully open — not during the zoom transitions. */
   interactive: boolean;
+  /** The bar's ✓ lives a phase earlier than the gestures: `open` OR `opening`, so a Done during
+   *  the fly-out turns the flight around instead of being swallowed until it formally lands
+   *  (user, 2026-09-01). Buttons only — the card gestures keep `interactive`, whose changes
+   *  must not land while a gesture can be live (see the rebuild note on the card's gestures). */
+  tappable: boolean;
   /** Is anything scaling? The grid is mounted from the moment tabs are reachable so its cards are
    *  built before a gesture wants them, which leaves the search strip's blur ramp — twelve stacked
    *  UIVisualEffectViews — sampling and compositing behind an opacity-0 parent at rest. The screen
@@ -459,7 +464,7 @@ const SPRING = { damping: 16, stiffness: 220, mass: 1 };
  * (perf, 2026-08-13). Its props only change when the grid's own content does.
  */
 function SwitcherInner(props: SwitcherProps) {
-  const { theme, stageW, cards, interactive } = props;
+  const { theme, stageW, cards, interactive, tappable } = props;
   /** A filtered grid isn't the real order — reorder is off while a query is armed (§T14). */
   const filtered = normalizeQuery(props.query) !== '';
   const nq = normalizeQuery(props.query);
@@ -612,7 +617,7 @@ function SwitcherInner(props: SwitcherProps) {
           style={styles.noHits}
           // Gated like the bar's own buttons: `interactive` is `sw === 'open'`, which is exactly
           // the state the system back button recovered from, so this reaches the same door.
-          onPress={interactive ? props.onDone : undefined}
+          onPress={tappable ? props.onDone : undefined}
           accessibilityRole="button"
           accessibilityLabel="Could not reach the host — back to the terminal">
           <Text style={[styles.noHitsLead, { color: theme.warning }]}>Could not reach the host</Text>
@@ -644,7 +649,7 @@ function SwitcherInner(props: SwitcherProps) {
             : `${display.length} ${display.length === 1 ? 'Tab' : 'Tabs'}`}
         </Text>
         <Pressable
-          onPress={interactive ? props.onDone : undefined}
+          onPress={tappable ? props.onDone : undefined}
           style={({ pressed }) => [
             styles.circle,
             { backgroundColor: theme.accent },
