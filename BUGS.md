@@ -1546,3 +1546,44 @@ The 2s poll contributes a uniform 0-2000ms of phase to both columns, so it is th
 compare: the pipeline behind the poll went from ~2.2s to ~0.16s. The spread inside each column is
 the phase, not noise. `[switcher] 1 of 16 captures failed` appears in the log across these runs —
 the list still commits while the burst is failing, which is the point.
+
+## Reported by the user, 2026-09-02
+
+### The terminal comes back the size of a tab card — FIXED, Android-verified 2026-09-02
+
+"Sometimes after leaving and reopening the app it looks like that": the pane cut off two thirds down
+the screen with its last row clipped, bare scrim below it, the key bar still in its place at the
+bottom edge, and — on the emulator's repro, not visible in the user's own shot — the flight's accent
+ring drawn round the whole thing.
+
+The screenshot settles it on its own. The face is 1747px at 3x = **582.3pt** of a 912pt screen, and
+`zoomFrame`'s crop at t=1 is `slot.h / S` = (240/390 × 420) ÷ (173/390) = **582.7pt**. The terminal
+was wearing the height of a grid card.
+
+`cardClipStyle` writes that height and was attached only while `zoomActive` (85b36ab, to keep layout
+and raster props out of a flat hop). The teardown that snaps the grid away when the session it
+belongs to ends — which is exactly what a backgrounded app comes back to, the socket having died
+with it — writes `prog.value = 0` and calls `finishClose()` in the same tick. The state write
+detaches the mapper on the next commit; if that beats the mapper's re-run on the UI thread, the t=1
+height it wrote last is never written over. The static `height: stage.h` underneath cannot displace
+it either: that prop did not change from React's side, so RN sends nothing. `cardRadiiStyle` is
+unconditional for precisely this reason and says so in its own comment — this is the same fault one
+step worse, a stuck crop rather than a stuck corner, and 85b36ab's `ponytail:` note had already
+named unconditional attachment as the honest fix.
+
+The ring is the same fault a third time, and it needed its own answer: `ringStyle` reads shared
+values alone, so its mapper never re-registers on a render, and the teardown's `prog.value = 0` did
+not reach it (`cardClipStyle` gets there by closing over `kbSquare`, a plain JS boolean, which
+restarts it every render). It is mounted with the zoom now — at rest it draws opacity 0 and width 0,
+so there is nothing on screen to lose, and a view that does not exist cannot carry the last flight's
+props.
+
+**Walked on the emulator both ways**, grid open → HOME → 30s → back:
+
+| | face height, of a 914dp screen | ring |
+|---|---|---|
+| before (fix stashed) | **561dp** | 4.5pt accent, `CARD_RING / scale` at t=1 (12px at density 420) |
+| after | full height, pane down to the bar's band | none |
+
+A normal grid open and close still flies and lands correctly after the change. iOS: not walked in
+that session — the phone was in the user's hands.
