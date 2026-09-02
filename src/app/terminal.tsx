@@ -2033,11 +2033,9 @@ export default function SessionScreen() {
    * and `zoomActive` flipping true is neither, so the newly attached view kept the radius from the
    * last gesture, rounded, under a raised keyboard where `kbSquare` wants it square.
    *
-   * ponytail: the churn is a real per-render cost and this is a real fix for the wrong problem.
-   * The honest version is to stop conditioning the attachment on `zoomActive` (or to drive
-   * `kbSquare` through a shared value so the mapper re-runs on its own), but both change what
-   * 85b36ab measured — no layout or raster props written during a flat hop — so they want their
-   * own change and their own device walk, not a rider on this one.
+   * That debt is paid: `cardClipStyle` is unconditional too now (2026-09-02), for the stronger
+   * version of the same fault — a stuck crop, not a stuck corner. Nothing left here is attached
+   * conditionally, so the hoist stands on its own cost alone.
    */
   /** The shared values `aimAt` reads, as one stable object — see `aimAt` at module scope. */
   // eslint-disable-next-line react-hooks/exhaustive-deps -- every member is a stable shared value
@@ -2106,15 +2104,29 @@ export default function SessionScreen() {
   const nextCardStyle = usePageCardStyle(1, anchor >= cards.length - 1);
 
   /**
-   * The card's crop and corner, SEPARATED from the per-frame transform above and applied only
-   * while the zoom is actually live (`zoomActive`).
+   * The card's crop and corner, SEPARATED from the per-frame transform above.
    *
    * `height` is a layout prop — writing it per frame runs Yoga over the card's subtree, a
    * snapshot tree of Text runs — and `borderRadius` re-rasterizes the layer. Neither value even
    * changes during a flat hop, but Reanimated writes what the worklet returns every frame, so
    * both costs were being paid on every swipe by six views at once. That is the lag inside the
    * frames, which a frame-gap counter cannot see (user, 2026-08-13: "the animation itself is
-   * laggy"). At rest the static styles below stand in, and the gesture animates transforms only.
+   * laggy").
+   *
+   * ALWAYS attached, like `cardRadiiStyle` and for its reason — 85b36ab gated it on `zoomActive`
+   * and the gate is what left a terminal two thirds of a screen tall after the app came back
+   * (user, 2026-09-02, screenshot: the face 582.3pt of 912, which is `slot.h / S` — the crop at
+   * t=1, to the point). The grid teardown below writes `prog.value = 0` and calls `finishClose()`
+   * in the same tick: the state write detaches this mapper on the next commit, and if that beats
+   * the mapper's re-run on the UI thread the t=1 height it wrote last is simply never written
+   * over. A React commit carrying the static `height: stage.h` does not displace it either —
+   * that prop did not change from React's side, so nothing is sent.
+   *
+   * It costs nothing to keep, by the same arithmetic `cardRadiiStyle` states: a mapper runs when
+   * a value it READS changes, and this one reads `prog`, `dragX`, the aim's values and `stageSV`,
+   * none of which move during a flat hop. So 85b36ab's measurement — no layout or raster props
+   * written during a hop — still holds; what comes back is the write at the end of a flight, and
+   * that write is the fix.
    */
   const cardClipStyle = useAnimatedStyle(() => {
     const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
@@ -2342,9 +2354,8 @@ export default function SessionScreen() {
                 styles.stageWrapper,
                 { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
               ],
-          // The live card's crop and corner — the same layout-and-raster props as `cardClipStyle`
-          // below, and applied on the same condition, for the same reason.
-          stage !== null && zoomActive && cardClipStyle,
+          // The live card's crop and corner — never conditional, see `cardClipStyle`.
+          stage !== null && cardClipStyle,
         ]}>
       {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
           screen, so it clips and flies with the zoom — but it fills the border box, padding and
@@ -2468,11 +2479,22 @@ export default function SessionScreen() {
       {/* The transition's accent ring — absoluteFill of the CARD, deliberately outside the crop
           view. Inside it the ring rode the crop's upward translate: its top line left through the
           wrapper's clip and its bottom line hovered above the card's true edge, with the page's
-          square keyboard-cut corners poking out beneath (movement 3, screenshot). */}
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
-      />
+          square keyboard-cut corners poking out beneath (movement 3, screenshot).
+
+          MOUNTED only while the zoom is (`zoomActive`), which is what `ringStyle` already draws:
+          at rest the worklet returns opacity 0 and width 0, so there is nothing on screen to lose.
+          Unmounting is what makes the rest state true rather than merely computed — `ringStyle`
+          reads shared values alone, so its mapper never re-registers, and the grid teardown's
+          `prog.value = 0` did not reach it: the ring stayed on the terminal at the flight's own
+          4.5pt (emulator, 2026-09-02, measured 12px at density 420 = `CARD_RING / scale` at t=1),
+          a blue outline round the whole screen until the next flight repainted it. A fresh view
+          per zoom cannot carry the last one's props. */}
+      {zoomActive && (
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
+        />
+      )}
       </Animated.View>
 
       {/* The neighbouring windows, a page-pitch to either side. They JOIN when the swipe does, not
@@ -2507,7 +2529,7 @@ export default function SessionScreen() {
                 styles.stageWrapper,
                 { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
                 prevCardStyle,
-                zoomActive && cardClipStyle,
+                cardClipStyle,
               ]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
@@ -2533,7 +2555,7 @@ export default function SessionScreen() {
                 styles.stageWrapper,
                 { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
                 nextCardStyle,
-                zoomActive && cardClipStyle,
+                cardClipStyle,
               ]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
                 <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
