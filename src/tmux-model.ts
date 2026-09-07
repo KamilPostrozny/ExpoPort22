@@ -13,17 +13,20 @@
  * `printf`, `>>`. All of it was run through `fish -c` verbatim before landing here.
  */
 
-/** v4: the root-table wheel bindings' pager case is matched by name as well as by alternate screen,
- *  so `git log` scrolls too — v3 caught only the pagers that switch buffers. */
-export const CONF_VERSION = 4;
+/** v6: wheel-down can no longer leave copy mode behind — `scroll-down-and-cancel` in the copy-mode
+ * tables and no `copy-mode -e` fallback in the root table, see the binding comments below. v5:
+ * enable tmux's extended key protocol so modified Enter reaches terminal applications. v4's
+ * root-table wheel bindings' pager case is matched by name as well as by alternate screen, so
+ * `git log` scrolls too — v3 caught only the pagers that switch buffers. */
+export const CONF_VERSION = 6;
 export const CONF_MARKER = `# port22-conf-v${CONF_VERSION}`;
 
 /** Relative on purpose: SFTP resolves paths against `$HOME`, absolute would leave it. */
-export const CONF_DIRECTORY = '.config/port22';
+export const CONF_DIRECTORY = ".config/port22";
 export const CONF_PATH = `${CONF_DIRECTORY}/port22.conf`;
 /** The mkdir chain for `CONF_PATH`, shallowest first — SFTP mkdir has no `-p` (0700 is applied by
  *  the native module, which is the mode §4.6 wants for its own `/tmp/port22` too). */
-export const CONF_DIRECTORIES = ['.config', CONF_DIRECTORY];
+export const CONF_DIRECTORIES = [".config", CONF_DIRECTORY];
 
 /**
  * Only what a feature of this app stops working without. The conf is not asked about any more —
@@ -48,19 +51,28 @@ export const CONF_DIRECTORIES = ['.config', CONF_DIRECTORY];
  * the host is settled by content equality (see `needsPush`), not by the marker.
  */
 export function generateConf(extras: boolean): string {
-  return `${CONF_MARKER}
+ return `${CONF_MARKER}
 # Written by Port22 (the phone). Do not edit — a version bump replaces this file without asking.
 # Your own tmux conf is never rewritten; it only ever gains one source-file line.
 
 # The read-back proof the push verifies (show -gv @port22).
 set -g @port22 ${CONF_VERSION}
 
+# Without this, tmux drops modifier information from Enter, so modified Enter keys from the phone
+# cannot reach terminal applications.
+set -g extended-keys on
+
 # One line per wheel notch (§4.3), both copy-mode flavours. tmux's default sends five, so content
 # would move five times the finger and then wait a round trip for the repaint, which reads as lag.
+# Down is \`scroll-down-and-cancel\`, not \`scroll-down\`: a flick leaves momentum notches arriving
+# after the last line, and the plain command clamps at the bottom but stays in the mode — a screen
+# that looks live but is still the frozen buffer, and the wheel has no key that means \`q\`. Reaching
+# the bottom is the one moment tmux itself knows the user wanted the pane back, so that is where it
+# exits (window-copy.c: oy == 0 → cancel, tmux 3.2 and later).
 bind -T copy-mode    WheelUpPane   send -N1 -X scroll-up
-bind -T copy-mode    WheelDownPane send -N1 -X scroll-down
+bind -T copy-mode    WheelDownPane send -N1 -X scroll-down-and-cancel
 bind -T copy-mode-vi WheelUpPane   send -N1 -X scroll-up
-bind -T copy-mode-vi WheelDownPane send -N1 -X scroll-down
+bind -T copy-mode-vi WheelDownPane send -N1 -X scroll-down-and-cancel
 
 # Wheel events reach tmux at all only with mouse reporting on.
 set -g mouse on
@@ -71,9 +83,14 @@ set -g mouse on
 # \`git log\` take the wheel and sit still (user, device). The pager case has to become the keys the
 # pager actually reads.
 #
-# Three cases, in the order tmux tests them: the app asked for the mouse (vim, htop, and this
+# The cases, in the order tmux tests them: the app asked for the mouse (vim, htop, and this
 # app's own host) — hand it the report untouched; a pager — one arrow per notch, matching the
-# copy-mode bindings above; anything else — copy mode, tmux's own default.
+# copy-mode bindings above; anything else — UP opens copy mode, tmux's own default and the
+# designed way into the scrollback. DOWN has no last case, and that is the point: the notches
+# that arrive here are momentum left over after \`scroll-down-and-cancel\` already brought copy
+# mode back to the bottom, and re-answering them with \`copy-mode -e\` would re-enter the mode on
+# every one of them — the trap above, again, with no wheel key to escape it. Rolling down in a
+# live pane does nothing, which is all a wheel at the bottom of a live pane can mean.
 #
 # "A pager" is two tests because the alternate screen alone misses git's. git runs less with
 # \`LESS=FRX\` and \`-X\` suppresses the termcap init, so that less never switches buffers. Measured
@@ -87,14 +104,14 @@ set -g mouse on
 # into the shell and nothing scrolls away — the same "sit still" the wheel already did, and it ends
 # when the command does.
 bind -n WheelUpPane   if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{||:#{alternate_on},#{m/r:^(git|less)$,#{pane_current_command}}}' 'send -N1 Up' 'copy-mode -e'"
-bind -n WheelDownPane if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{||:#{alternate_on},#{m/r:^(git|less)$,#{pane_current_command}}}' 'send -N1 Down' 'copy-mode -e'"
+bind -n WheelDownPane if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' 'send -M' "if -F '#{||:#{alternate_on},#{m/r:^(git|less)$,#{pane_current_command}}}' 'send -N1 Down'"
 
 # A copy-mode yank lands on the phone's pasteboard over OSC 52 (§4.7). set-clipboard alone is not
 # enough: tmux only emits OSC 52 when the outer terminal advertises the Ms capability, and
 # xterm-256color's terminfo does not.
 set -g set-clipboard on
 set -as terminal-overrides ',*:Ms=\\E]52;%p1%s;%p2%s\\007'
-${extras ? EXTRAS : ''}`;
+${extras ? EXTRAS : ""}`;
 }
 
 /**
@@ -136,7 +153,7 @@ set -g history-limit 50000
  * file without changing the version — and equality still gives "a version bump replaces v0" free.
  */
 export function needsPush(remote: string | null, extras: boolean): boolean {
-  return remote !== generateConf(extras);
+ return remote !== generateConf(extras);
 }
 
 /* --- why nothing of the user's is edited --- */
@@ -161,10 +178,10 @@ export function needsPush(remote: string | null, extras: boolean): boolean {
 
 /** Empty output = no tmux, and then the whole feature is silence (§7). A shell builtin rather
  *  than `which`, which is a binary that may not be installed. */
-export const PROBE = 'command -v tmux';
+export const PROBE = "command -v tmux";
 
 export function parseProbe(stdout: string): boolean {
-  return stdout.trim() !== '';
+ return stdout.trim() !== "";
 }
 
 /**
@@ -177,13 +194,13 @@ export function parseProbe(stdout: string): boolean {
 export const APPLY_AND_VERIFY = `tmux start-server \\; source-file ~/${CONF_PATH} \\; show -gv @port22 2>/dev/null; true`;
 
 export function parseVerify(stdout: string): boolean {
-  return stdout.trim() === String(CONF_VERSION);
+ return stdout.trim() === String(CONF_VERSION);
 }
 
 /** `cat` that answers with empty rather than an error for a missing file — used on files we then
  *  decide about locally (the pushed conf, the user's tmux conf). */
 export function readFileCommand(path: string): string {
-  return `cat ${path} 2>/dev/null; true`;
+ return `cat ${path} 2>/dev/null; true`;
 }
 
 /* --- sessions (§4.1's attach mode picks one; §4.8 lists them) --- */
@@ -192,7 +209,7 @@ export function readFileCommand(path: string): string {
  *  byte is what crosses the wire (fish would pass a literal `\x1f` through untouched, measured;
  *  the raw byte it passes clean inside single quotes). Nothing a shell, a path or a tmux
  *  diagnostic contains, which is what makes it worth a byte. */
-export const SEP = '\u001f';
+export const SEP = "\u001f";
 
 /** Names only, in tmux's own order — which is what "the most recent" in §4.1 means. Each line is
  *  prefixed with the US byte, the same marker `LIST_WINDOWS` separates fields with: a session name
@@ -201,10 +218,10 @@ export const SEP = '\u001f';
 export const LIST_SESSIONS = `tmux list-sessions -F '${SEP}#{session_name}' 2>/dev/null; true`;
 
 export function parseSessions(stdout: string): string[] {
-  return stdout
-    .split('\n')
-    .filter((line) => line.startsWith(SEP))
-    .map((line) => line.slice(1).trimEnd());
+ return stdout
+  .split("\n")
+  .filter((line) => line.startsWith(SEP))
+  .map((line) => line.slice(1).trimEnd());
 }
 
 /* --- windows (§4.5: always exec channels, never the attached PTY) --- */
@@ -227,11 +244,12 @@ export function parseSessions(stdout: string): string[] {
  * (`custom`, `shell`, `attach` on "most recent") gets no window commands at all rather than a
  * silent degrade to the untargeted form — see `tabsAvailable`.
  */
-export function sessionScope(session: string, slot: string = ''): string {
-  // Runtime, not just the type: the whole failure mode is a name that isn't there, and a `null`
-  // that arrives through an `any` would otherwise become the literal target `=null:`.
-  if (typeof session !== 'string' || session === '') throw new Error(`not a session name: ${session}`);
-  return shellQuote(`=${session}:${slot}`);
+export function sessionScope(session: string, slot: string = ""): string {
+ // Runtime, not just the type: the whole failure mode is a name that isn't there, and a `null`
+ // that arrives through an `any` would otherwise become the literal target `=null:`.
+ if (typeof session !== "string" || session === "")
+  throw new Error(`not a session name: ${session}`);
+ return shellQuote(`=${session}:${slot}`);
 }
 
 /** The same marker byte separates the window fields. Unlikely in a path; a window NAME may contain
@@ -239,17 +257,17 @@ export function sessionScope(session: string, slot: string = ''): string {
  *  full of separators (or tabs, or colons) shifts nothing. */
 
 export type TmuxWindow = {
-  /** tmux's own `@N` — stable across renumbering, which the index is not. T10's reorder wants it. */
-  id: string;
-  index: number;
-  name: string;
-  active: boolean;
-  /** The active pane's working directory, full path — T10's card subtitle takes the leaf. */
-  path: string;
-  /** Columns in the active pane: the snapshot card must render this wide or every line folds. */
-  width: number;
-  /** The active pane's foreground process — the "process" half of T14's metadata match. */
-  command: string;
+ /** tmux's own `@N` — stable across renumbering, which the index is not. T10's reorder wants it. */
+ id: string;
+ index: number;
+ name: string;
+ active: boolean;
+ /** The active pane's working directory, full path — T10's card subtitle takes the leaf. */
+ path: string;
+ /** Columns in the active pane: the snapshot card must render this wide or every line folds. */
+ width: number;
+ /** The active pane's foreground process — the "process" half of T14's metadata match. */
+ command: string;
 };
 
 /**
@@ -262,54 +280,63 @@ export type TmuxWindow = {
  * the whole grid every 2s when nothing changed — see `useSwitcherCards`'s `refresh`.
  */
 export function sameWindows(a: TmuxWindow[], b: TmuxWindow[]): boolean {
-  return (
-    a.length === b.length &&
-    a.every((w, i) => {
-      const o = b[i];
-      return (
-        w.id === o.id &&
-        w.index === o.index &&
-        w.name === o.name &&
-        w.active === o.active &&
-        w.path === o.path &&
-        w.width === o.width &&
-        w.command === o.command
-      );
-    })
-  );
+ return (
+  a.length === b.length &&
+  a.every((w, i) => {
+   const o = b[i];
+   return (
+    w.id === o.id &&
+    w.index === o.index &&
+    w.name === o.name &&
+    w.active === o.active &&
+    w.path === o.path &&
+    w.width === o.width &&
+    w.command === o.command
+   );
+  })
+ );
 }
 
 /** The windows of ONE session — the one the phone is attached to (see `sessionScope`). Every id the
  *  grid ever addresses comes from here, so this is the command that makes the rest trustworthy. */
 export function listWindowsCommand(session: string): string {
-  return (
-    `tmux list-windows -t ${sessionScope(session)} -F '` +
-    ['#{window_id}', '#{window_index}', '#{window_active}', '#{pane_current_path}', '#{pane_width}', '#{pane_current_command}', '#{window_name}'].join(SEP) +
-    `' 2>/dev/null; true`
-  );
+ return (
+  `tmux list-windows -t ${sessionScope(session)} -F '` +
+  [
+   "#{window_id}",
+   "#{window_index}",
+   "#{window_active}",
+   "#{pane_current_path}",
+   "#{pane_width}",
+   "#{pane_current_command}",
+   "#{window_name}",
+  ].join(SEP) +
+  `' 2>/dev/null; true`
+ );
 }
 
 /** A line that is not seven-plus fields with an `@N` id and numeric index/width is not a window —
  *  tmux writes its own diagnostics into this stream, and one of those must not become a card. */
 export function parseWindows(stdout: string): TmuxWindow[] {
-  const windows: TmuxWindow[] = [];
-  for (const line of stdout.split('\n')) {
-    if (line === '') continue;
-    const fields = line.split(SEP);
-    if (fields.length < 7) continue;
-    const [id, index, active, path, width, command] = fields;
-    if (!/^@\d+$/.test(id) || !/^\d+$/.test(index) || !/^\d+$/.test(width)) continue;
-    windows.push({
-      id,
-      index: Number(index),
-      active: active === '1',
-      path,
-      width: Number(width),
-      command,
-      name: fields.slice(6).join(SEP),
-    });
-  }
-  return windows;
+ const windows: TmuxWindow[] = [];
+ for (const line of stdout.split("\n")) {
+  if (line === "") continue;
+  const fields = line.split(SEP);
+  if (fields.length < 7) continue;
+  const [id, index, active, path, width, command] = fields;
+  if (!/^@\d+$/.test(id) || !/^\d+$/.test(index) || !/^\d+$/.test(width))
+   continue;
+  windows.push({
+   id,
+   index: Number(index),
+   active: active === "1",
+   path,
+   width: Number(width),
+   command,
+   name: fields.slice(6).join(SEP),
+  });
+ }
+ return windows;
 }
 
 /**
@@ -341,8 +368,8 @@ export function parseWindows(stdout: string): TmuxWindow[] {
  * switcher's per-window catch made that look like "no hit".
  */
 export function target(id: string): string {
-  if (!/^@\d+$/.test(id)) throw new Error(`not a window id: ${id}`);
-  return `-t ${id}`;
+ if (!/^@\d+$/.test(id)) throw new Error(`not a window id: ${id}`);
+ return `-t ${id}`;
 }
 
 /** `-e` keeps colours as escapes: the card is drawn by a terminal of its own (T10), so what comes
@@ -355,11 +382,11 @@ export function target(id: string): string {
  *  card and runs to its true width in the pane, which is a band that changes length at the swipe's
  *  hand-over (user, 2026-08-11). Needs tmux 3.1, where the flag arrived. */
 export function capturePaneCommand(id: string): string {
-  return `tmux capture-pane -p -e -N ${target(id)}`;
+ return `tmux capture-pane -p -e -N ${target(id)}`;
 }
 
 export function selectWindowCommand(id: string): string {
-  return `tmux select-window ${target(id)}`;
+ return `tmux select-window ${target(id)}`;
 }
 
 /** Exit 1 here means one thing only, and it is not "maybe": a `@N` is never reused, so tmux
@@ -367,7 +394,7 @@ export function selectWindowCommand(id: string): string {
  *  3.7b, a kill against a dead id exits 1 and touches nothing. Nothing else can be killed by
  *  mistake, which is exactly what `:index` could not promise. */
 export function killWindowCommand(id: string): string {
-  return `tmux kill-window ${target(id)}`;
+ return `tmux kill-window ${target(id)}`;
 }
 
 /**
@@ -384,7 +411,7 @@ export function killWindowCommand(id: string): string {
  * `LIST_WINDOWS`, i.e. the + could plant a window in the user's own session.
  */
 export function newWindowCommand(session: string): string {
-  return `tmux new-window -a -t ${sessionScope(session, '{end}')}`;
+ return `tmux new-window -a -t ${sessionScope(session, "{end}")}`;
 }
 
 /**
@@ -406,12 +433,17 @@ export function newWindowCommand(session: string): string {
  * drag's start and re-listed the moment the move lands. The window a stale index can address by
  * mistake is a neighbour it was about to shuffle anyway. Give `reorderArgs` a direction and this
  * can take ids too. */
-export function moveWindowCommand(session: string, from: number, to: number): string {
-  const slot = (index: number) => {
-    if (!Number.isInteger(index) || index < 0) throw new Error(`not a window index: ${index}`);
-    return sessionScope(session, String(index));
-  };
-  return `tmux move-window -d ${to < from ? '-b' : '-a'} -s ${slot(from)} -t ${slot(to)}`;
+export function moveWindowCommand(
+ session: string,
+ from: number,
+ to: number,
+): string {
+ const slot = (index: number) => {
+  if (!Number.isInteger(index) || index < 0)
+   throw new Error(`not a window index: ${index}`);
+  return sessionScope(session, String(index));
+ };
+ return `tmux move-window -d ${to < from ? "-b" : "-a"} -s ${slot(from)} -t ${slot(to)}`;
 }
 
 /* --- the poll (T7's badge) --- */
@@ -432,7 +464,7 @@ export const FAST_POLL_MS = 250;
 export const FAST_POLL_TICKS = 20;
 
 export function pollDelay(attached: boolean, ticks: number): number {
-  return !attached && ticks < FAST_POLL_TICKS ? FAST_POLL_MS : POLL_MS;
+ return !attached && ticks < FAST_POLL_TICKS ? FAST_POLL_MS : POLL_MS;
 }
 
 /**
@@ -469,38 +501,39 @@ export function pollDelay(attached: boolean, ticks: number): number {
  * means what it says — that session is gone.
  */
 export function pollCommand(session: string | null): string {
-  const target = session === null ? '' : ` -t ${sessionScope(session)}`;
-  return (
-    `tmux display-message${target} -p '` +
-    ['#{session_attached}', '#{window_index}'].join(SEP) +
-    `' 2>/dev/null; true`
-  );
+ const target = session === null ? "" : ` -t ${sessionScope(session)}`;
+ return (
+  `tmux display-message${target} -p '` +
+  ["#{session_attached}", "#{window_index}"].join(SEP) +
+  `' 2>/dev/null; true`
+ );
 }
 
 export type TmuxPoll = {
-  attached: boolean;
-  windowIndex: number;
+ attached: boolean;
+ windowIndex: number;
 };
 
 /** `null` = no server, or garbage — either way there is nothing to say. */
 export function parsePoll(stdout: string): TmuxPoll | null {
-  const line = stdout.trim().split('\n')[0] ?? '';
-  const [attached, windowIndex] = line.split(SEP);
-  if (!/^\d+$/.test(attached ?? '') || !/^\d+$/.test(windowIndex ?? '')) return null;
-  return { attached: Number(attached) > 0, windowIndex: Number(windowIndex) };
+ const line = stdout.trim().split("\n")[0] ?? "";
+ const [attached, windowIndex] = line.split(SEP);
+ if (!/^\d+$/.test(attached ?? "") || !/^\d+$/.test(windowIndex ?? ""))
+  return null;
+ return { attached: Number(attached) > 0, windowIndex: Number(windowIndex) };
 }
 
 /* --- derived state the screens read --- */
 
-export type ConfigStatus = 'off' | 'applied' | 'not-applied';
+export type ConfigStatus = "off" | "applied" | "not-applied";
 
 /** The three states §4.5 puts in Settings. 'off' is the start mode's — a session that is not a
  *  tmux one is never configured — and the other two are the push's. */
 export function deriveConfigStatus(
-  usesTmux: boolean,
-  pushed: 'applied' | 'not-applied',
+ usesTmux: boolean,
+ pushed: "applied" | "not-applied",
 ): ConfigStatus {
-  return usesTmux ? pushed : 'off';
+ return usesTmux ? pushed : "off";
 }
 
 /**
@@ -533,8 +566,11 @@ export function deriveConfigStatus(
  * attached to OUR named session while the phone is not still reads as attached. Same ponytail note
  * as in `probe` — but it is now bounded to one session we chose, not to any session on the host.
  */
-export function tabsAvailable(present: boolean | null, session: string | null): boolean {
-  return present === true && session !== null;
+export function tabsAvailable(
+ present: boolean | null,
+ session: string | null,
+): boolean {
+ return present === true && session !== null;
 }
 
 /**
@@ -546,18 +582,19 @@ export function tabsAvailable(present: boolean | null, session: string | null): 
  * session that merely chose not to use it need opposite advice.
  */
 export function tabsHint(
-  present: boolean | null,
-  usesTmuxMode: boolean,
-  /** Does the start mode name a session? (`pollSession` !== null.) The MODE's own fact, not the
-   *  live one — "not attached yet" must still read as "Waiting for tmux…", not as bad Settings. */
-  nameable: boolean,
+ present: boolean | null,
+ usesTmuxMode: boolean,
+ /** Does the start mode name a session? (`pollSession` !== null.) The MODE's own fact, not the
+  *  live one — "not attached yet" must still read as "Waiting for tmux…", not as bad Settings. */
+ nameable: boolean,
 ): string {
-  if (present === false) return 'Tabs need tmux, and this host has not got it.';
-  if (!usesTmuxMode) return 'Tabs need a tmux session — choose a tmux start mode in Settings.';
-  if (!nameable) {
-    return 'Tabs need a session Port22 can name — pick one in Settings, not “most recent” or a custom line.';
-  }
-  return 'Waiting for tmux…';
+ if (present === false) return "Tabs need tmux, and this host has not got it.";
+ if (!usesTmuxMode)
+  return "Tabs need a tmux session — choose a tmux start mode in Settings.";
+ if (!nameable) {
+  return "Tabs need a session Port22 can name — pick one in Settings, not “most recent” or a custom line.";
+ }
+ return "Waiting for tmux…";
 }
 
 /**
@@ -567,5 +604,5 @@ export function tabsHint(
  * user-typed that later tasks put on a remote command line (upload paths, T8).
  */
 export function shellQuote(text: string): string {
-  return `'${text.replace(/'/g, `'\\''`)}'`;
+ return `'${text.replace(/'/g, `'\\''`)}'`;
 }
