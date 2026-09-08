@@ -73,7 +73,6 @@ const listeners = new Set<() => void>();
 
 function set(next: Session) {
   state = next;
-  console.log('[session]', JSON.stringify(next));
   // T9 rides these transitions: the tmux side-channel exists exactly while a shell does. Both
   // calls are idempotent, so every state change may say so unconditionally.
   if (next.status === 'connected') void startTmux();

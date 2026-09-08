@@ -121,7 +121,7 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-/** The poll re-reports every ~2s; only actual change reaches the log and the screens. */
+/** The poll re-reports every ~2s; only actual change reaches the screens. */
 function set(patch: Partial<TmuxState>) {
   const next = { ...state, ...patch };
   const same =
@@ -136,7 +136,6 @@ function set(patch: Partial<TmuxState>) {
     next.paneChildren.every((child, i) => child === state.paneChildren[i]);
   if (same) return;
   state = next;
-  console.log('[tmux]', JSON.stringify(next));
   for (const listener of listeners) listener();
 }
 
