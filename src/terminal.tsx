@@ -623,11 +623,10 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       return true;
     });
 
-    // One *report* per settled gesture: rotation and the keyboard both animate, and tmux redraws
-    // the whole session for every size it is told about (§4.2). The fit itself is not debounced —
-    // it is local and cheap, and holding it back is what made the keyboard look like it beat the
-    // terminal up the screen: the box shrank with the layout while xterm kept drawing the old row
-    // count, so the bottom lines sat under the keyboard for the length of the delay (T14, device).
+    // Fit and report together. Fitting eagerly but throttling only the SSH resize paints xterm's
+    // locally reflowed editor first, then the host's redraw up to 150ms later. The native stage
+    // now takes the keyboard's destination once (only the bar animates), so its ordinary edge
+    // can fit AND notify the host immediately without walking through intermediate row counts.
     let settle: ReturnType<typeof setTimeout>;
     let reported = { cols: 0, rows: 0 };
     // Only a size the host has not been told about is worth a round trip. Without this the same
@@ -691,6 +690,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // the screen's own guard) — so what the host last heard is not knowable from here.
     const resize = (force?: boolean) => {
       if (force) forced = true;
+      if (latest.current.holdSize) return;
       fitRows();
       report();
     };
@@ -703,7 +703,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // the observer clears this timer, and its own flush is the one report.
     releaseFit.current = () => {
       clearTimeout(settle);
-      settle = setTimeout(() => resize(true), 150);
+      forced = true;
+      settle = setTimeout(flush, 150);
     };
     // Throttled, not debounced. A keyboard edge is one discrete step and so produces exactly one
     // tick: a trailing debounce held the host off for 150ms for nothing, and until tmux repaints,
@@ -715,11 +716,10 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     const flush = () => {
       if (latest.current.holdSize) return; // a timer that matured after the hold began
       lastReport = Date.now();
-      report();
+      resize();
     };
     const observer = new ResizeObserver(() => {
       if (latest.current.holdSize) return; // the zoom's own height animation — see `holdSize`
-      fitRows();
       clearTimeout(settle);
       const since = Date.now() - lastReport;
       if (since >= 150) flush();

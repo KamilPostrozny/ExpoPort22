@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  Dimensions,
   Keyboard,
   Platform,
   Pressable,
@@ -42,6 +41,7 @@ import {
 } from '@/barswipe-model';
 import { pushYank } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
+import { useTerminalKeyboard } from '@/hooks/use-terminal-keyboard';
 import KeyBar, {
   ArrowsPopover,
   BAR_PAD_TOP,
@@ -119,9 +119,8 @@ import UploadSheet from '@/upload-sheet';
  * comes back to the same scrollback in a webview that is already booted.
  *
  * Below the terminal sits T7's key bar, and inside the bar the native `TextInput` that owns the
- * keyboard (T4's decision — the webview never takes focus). `keyboardPad` is what docks the bar
- * above the keyboard and shrinks the terminal with it, which is also what triggers §4.2's
- * debounced resize.
+ * keyboard (T4's decision — the webview never takes focus). Native keyboard progress docks the
+ * bar; `keyboardPad` gives the terminal the final destination in one layout/resize.
  */
 export default function SessionScreen() {
   const theme = useTheme();
@@ -205,17 +204,9 @@ export default function SessionScreen() {
   const [pendingUpload, setPendingUpload] = useState<{ base64: string; suggestedName: string } | null>(
     null,
   );
-  /**
-   * The keyboard's overlap, as bottom padding for the stage — what `KeyboardAvoidingView` used to
-   * do here, minus its timing. KAV animates the padding on the keyboard's own curve, so the two
-   * move together and the keyboard is over the bar for the first frames of the slide. Here the
-   * shrink is a plain state write on `keyboardWillChangeFrame`, which iOS fires *before* the
-   * animation starts: the terminal is out of the way by the time the keyboard leaves the bottom
-   * edge. Both edges hang off that one event. `keyboardWillHide` says the same thing and is the
-   * obvious listener for the way back down, but it arrives ~27ms later, which is a quarter of the
-   * budget between the keyboard starting to move and the webview repainting (measured on device:
-   * event to ResizeObserver is ~25-35ms, plus a frame to paint).
-   */
+  /** The terminal's FINAL keyboard overlap. Its box changes once per destination; only the
+   * bar follows the per-frame position. Animating this padding would refit xterm through every
+   * intermediate row count and make full-screen editors redraw repeatedly. */
   const [keyboardPad, setKeyboardPad] = useState(0);
   /** The pad the last keyboard event ANNOUNCED, whether or not it was rendered. The listeners below
    *  freeze while a zoom owns the stage's box, but the freeze only needs to skip the render — the
@@ -263,80 +254,15 @@ export default function SessionScreen() {
    *  departing keyboard's overlap back and the bar sat raised over dead space until the backstop
    *  below corrected it (286 → 0, device probe 2026-08-15). Platform-free: both listeners record. */
   const syncPad = () => setKeyboardPad(announcedPad.current);
-  // Category (1), an API that exists on one platform only: Android has no
-  // `keyboardWillChangeFrame`, so the pad is driven off `keyboardDidShow`/`Hide` instead — the same
-  // pad, the same subtraction, the same freeze while a zoom owns the box. What is NOT true any more
-  // is the reason this used to be an iOS-only effect: "Android's activity window resizes itself for
-  // the IME" holds under `adjustResize`, and this app is edge-to-edge, where it does not. Measured
-  // on the emulator 2026-08-16 with Gboard up: the IME inset starts at y=1517 and the activity's
-  // own frame is still [0,0][1080,2400] — so nothing shrank, the key bar sat under the keyboard,
-  // and the shell was never told it had lost the rows. `did` rather than `will` costs the head
-  // start iOS gets; there is no earlier event to take.
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const pad = (height: number) => {
-      announcedPad.current = height; // recorded even while frozen — `syncPad` thaws off this
-      if (swRef.current !== 'closed') return;
-      // No `- insets.bottom` here, and that is not a slip: the bar is placed at
-      // `keyboardPad + insets.bottom`, and Android's reported height already stops at the top of
-      // the gesture strip. Measured on the emulator (density 420): RN says 312.4dp while the
-      // system's own IME inset is 883px = 336.4dp — the 24dp between them IS `insets.bottom`, so
-      // subtracting it again parked the bar a gesture-strip's worth under the keyboard. iOS
-      // subtracts because it reports a screen-space frame that runs to the very bottom edge; same
-      // pad, two conventions.
-      setKeyboardPad(height);
-      setKbSettle(false);
-    };
-    const subs = [
-      Keyboard.addListener('keyboardDidShow', (e) => pad(e.endCoordinates.height)),
-      Keyboard.addListener('keyboardDidHide', () => pad(0)),
-    ];
-    return () => subs.forEach((sub) => sub.remove());
-  }, [insets.bottom]);
-  useEffect(() => {
-    // Category (1): `keyboardWillChangeFrame` has no Android twin — the effect above is that
-    // platform's answer. Note the asymmetry with `src/upload-sheet.tsx`, which pads on Android for
-    // its own reason: a `statusBarTranslucent` Modal window does not adjustResize either.
-    if (Platform.OS !== 'ios') return;
-    const subs = [
-      Keyboard.addListener('keyboardWillChangeFrame', (e) => {
-        // The stage's bottom is the window's bottom less the safe-area strip SafeAreaView already
-        // pads; only what the keyboard covers beyond that is padding of ours.
-        // A `screenY` of 0 is not a keyboard covering the whole window, it is a frame reported
-        // with no position — the sheets' Modals raise one on the way in and out. Taking it at face
-        // value padded the entire stage away for a frame or two (seen on device).
-        if (e.endCoordinates.screenY <= 0) return;
-        const overlap = Dimensions.get('window').height - e.endCoordinates.screenY;
-        // Both edges off this one event: a keyboard parked at or below the window's bottom edge
-        // overlaps nothing, which is the hide. `keyboardWillHide` says the same thing later.
-        const next = overlap > 0 ? Math.max(0, overlap - insets.bottom) : 0;
-        announcedPad.current = next; // recorded even while frozen — `syncPad` thaws off this
-        // The zoom owns the stage's box while it runs. The tabs-tap dismisses the keyboard in
-        // the same tick the flight starts, and this event lands (often more than once) before
-        // `holdSize` has marshaled into the webview — each pad change resized the webview and
-        // the observer refit xterm mid-flight, which is the hitching (device, 2026-08-11).
-        // Frozen here, the box never moves; `finishClose` reconciles the pad on the way out.
-        if (swRef.current !== 'closed') return;
-        setKeyboardPad(next);
-        setKbSettle(false); // the keyboard we were waiting for: this is the final geometry
-      }),
-      // This used to be the backstop that CORRECTED a pad `syncPad` had misread mid-hide (the
-      // probe walk saw 286 → 0 on every exit from the grid — the bar sitting raised for the rest
-      // of the hide). `syncPad` reads the announced record now and never writes the 286, so what
-      // is left here is the one hole that record has: `keyboardWillChangeFrame` above drops any
-      // frame reported with `screenY <= 0`, which the sheets' Modals raise on the way in and out.
-      // The end of a hide is unambiguous — no keyboard, no pad — so it closes that hole for both
-      // the render and the record.
-      Keyboard.addListener('keyboardDidHide', () => {
-        announcedPad.current = 0;
-        // Same freeze as above — the zoom owns the stage's box while it runs, and `finishClose`
-        // thaws on the way out.
-        if (swRef.current !== 'closed') return;
-        setKeyboardPad(0);
-      }),
-    ];
-    return () => subs.forEach((sub) => sub.remove());
-  }, [insets.bottom]);
+  const keyboardTarget = useCallback((next: number) => {
+    announcedPad.current = next; // even while frozen: syncPad must thaw to the latest destination
+    // A zoom owns the stage until it lands. Let the native animation run without resizing the
+    // flying card; finishClose reconciles the destination as before.
+    if (swRef.current !== 'closed') return;
+    setKeyboardPad(next); // React bails out on the identical onEnd destination
+    setKbSettle(false);
+  }, []);
+  const keyboardPosition = useTerminalKeyboard(insets.bottom, keyboardTarget);
 
   // The terminal attaches itself on every boot (see `onBoot`), so all this has to do is let go when
   // the screen goes away.
@@ -2211,6 +2137,12 @@ export default function SessionScreen() {
    *  whole way into the card and then blink out with the stage's fade at the landing, which is a
    *  bar sitting on a tab card for a beat and then not (user, 2026-08-11). Gone by a quarter of
    *  the way in — and back only in the last quarter of the return, on the same curve. */
+  const keyboardBarStyle = useAnimatedStyle(() => ({
+    bottom: insets.bottom + (sw === 'closed' ? keyboardPosition.value : keyboardPad),
+  }));
+  const keyboardPopoverStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: sw === 'closed' ? keyboardPad - keyboardPosition.value : 0 }],
+  }));
   const barFadeStyle = useAnimatedStyle(() => ({
     opacity: 1 - Math.min(prog.value / 0.25, 1),
   }));
@@ -2633,7 +2565,8 @@ export default function SessionScreen() {
         // bottom bar that it covers, and the fade alone does not stop a hit (see `chromeLive`).
         pointerEvents={chromeLive ? 'auto' : 'none'}
         style={[
-          { position: 'absolute', left: 0, right: 0, bottom: keyboardPad + insets.bottom },
+          { position: 'absolute', left: 0, right: 0 },
+          keyboardBarStyle,
           barFadeStyle,
         ]}>
       <KeyBar
@@ -2678,6 +2611,7 @@ export default function SessionScreen() {
       {open !== 'none' && (
         <View style={StyleSheet.absoluteFill}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen('none')} />
+          <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, keyboardPopoverStyle]}>
           {open === 'arrows' ? (
             <ArrowsPopover
               theme={theme}
@@ -2709,6 +2643,7 @@ export default function SessionScreen() {
               onOpenSettings={openSettings}
             />
           )}
+          </Animated.View>
         </View>
       )}
       </View>

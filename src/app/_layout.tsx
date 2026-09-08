@@ -11,6 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { hydratePins } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
@@ -64,13 +65,15 @@ function Root() {
   // exactly one of these above every GestureDetector.
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <StatusBar style={theme.isDark ? 'light' : 'dark'} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.background },
-        }}
-      />
+      <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
+        <StatusBar style={theme.isDark ? 'light' : 'dark'} />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: theme.background },
+          }}
+        />
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }
