@@ -47,6 +47,7 @@ import KeyBar, {
   BAR_PAD_TOP,
   BarMenu,
   ClipboardPopover,
+  Plate,
   TabsHintPopover,
   type BarPopover,
 } from '@/keybar';
@@ -93,16 +94,19 @@ import {
   type Frame,
 } from '@/switcher-model';
 import SettingsSheet from '@/settings-sheet';
-import { CENTER, PRESSED, RADIUS, SEARCH_RADIUS, SPACE, TEXT, leading } from '@/style';
+import { BAR, CENTER, PRESSED, PRESSED_KEY, RADIUS, SEARCH_RADIUS, SPACE, TEXT, leading } from '@/style';
 import TerminalView, { type TerminalHandle } from '@/terminal';
 import {
   killWindow,
   moveWindow,
   newWindow,
+  nudgePoll,
+  scrollBottom,
   searchWindow,
   selectWindow,
   useTmux,
 } from '@/tmux';
+import { proseFor } from '@/prose-model';
 import { tabsAvailable, tabsHint, type TmuxWindow } from '@/tmux-model';
 import { MONO, rgba, SANS, SANS_BOLD, SANS_SEMIBOLD, type Theme } from '@/theme';
 import { pick, sendFile, useUploadBusy, type UploadKind } from '@/upload';
@@ -130,6 +134,23 @@ export default function SessionScreen() {
   const terminal = useRef<TerminalHandle>(null);
   const detach = useRef<(() => void) | null>(null);
   const [open, setOpen] = useState<BarPopover>('none');
+  /** Prose mode (see `KeyBarProps.textMode`). Deliberately NOT persisted: a mode that survived a
+   *  reconnect would greet a fresh bare prompt with a spellchecker — the exact surprise the off
+   *  default exists to prevent — and two taps of the ⋯ menu is cheap enough to pay per session.
+   *
+   *  Since T7.15 this is also AUTO: while attached to a named session the poll tells us what the
+   *  pane is running, and `proseFor` decides the default from that. The value below is what the
+   *  keyboard actually gets — whatever of the auto decision and the user's override (below) won
+   *  the last word. */
+  const [textMode, setTextMode] = useState(false);
+  /** The user's manual choice, scoped to the foreground program it was made under (T7.15).
+   *  `null` = the auto decision (`proseFor`) has the last word. The `context` it carries is the
+   *  very key the auto effect watches, so a program CHANGE is what clears an override and hands
+   *  the keyboard back to the table — flipping the ⋯ row while vim is up does not make the next
+   *  `mutt` inherit the choice, and it does not make the table re-argue with the user every 2s. */
+  const [proseOverride, setProseOverride] = useState<{ context: string; value: boolean } | null>(
+    null,
+  );
   /** T6's emulator-internal signal, whole: DECCKM for the arrows, altScreen for the ribbon,
    *  bracketed paste for the Paste key. */
   const [modes, setModes] = useState<ModeSignal>({
@@ -138,6 +159,41 @@ export default function SessionScreen() {
     decckm: false,
     bracketedPaste: false,
   });
+  /**
+   * T7.15's auto half. The context is the pane's foreground as the poll last saw it — the
+   * basename plus, while that basename is an interpreter, the children's argvs that disambiguate
+   * it. It is `null` in every state where the poll's pane answer is NOT guaranteed to be the pane
+   * on screen (not attached, or a start mode that cannot name its session — see the fields' docs
+   * in tmux.ts), and in those states the effect does nothing: the keyboard is the user's to set,
+   * exactly as before T7.15.
+   *
+   * One `setTextMode` per context, on purpose. `textMode` changes repad the keyboard (keybar's
+   * `textModeWas` effect), and a repad mid-word throws away the correction context — so the
+   * decision runs on the (paneCommand, paneChildren) pair as answered in ONE poll beat, never on
+   * the two halves separately. `tmux.ts` fetches the children before its single `set` for exactly
+   * this reason, and this effect's dependencies are the derived `proseContext` plus the override,
+   * not the two fields — a beat that changes neither key re-runs the body to a no-op, and a real
+   * change changes the key once.
+   */
+  const proseContext =
+    tmux.session !== null && tmux.paneCommand !== null
+      ? tmux.paneCommand + '\u0001' + tmux.paneChildren.join('\u0001')
+      : null;
+  useEffect(() => {
+    if (proseContext === null) return;
+    // The user has spoken for THIS program; the table waits until the program changes.
+    if (proseOverride !== null && proseOverride.context === proseContext) return;
+    const decision = proseFor(tmux.paneCommand ?? '', tmux.paneChildren);
+    setTextMode(decision === true);
+    setProseOverride(null);
+  }, [proseContext, proseOverride, tmux.paneCommand, tmux.paneChildren]);
+  /** The ⋯ menu's row: sets the value AND claims it, so the poll does not talk over the user
+   *  until the foreground program changes. In a state with no `proseContext` (no named session)
+   *  there is no auto decision to lock out — the tap just sets the value, as before. */
+  const onTextModeTap = (value: boolean) => {
+    setTextMode(value);
+    if (proseContext !== null) setProseOverride({ context: proseContext, value });
+  };
   /** The bar stack's measured height — the `popBase` the popovers anchor on. */
   const [barHeight, setBarHeight] = useState(60);
   /** The key row's height alone — what the pane insets by. The chord strip is deliberately not in
@@ -285,13 +341,6 @@ export default function SessionScreen() {
     return () => subs.forEach((sub) => sub.remove());
   }, [insets.bottom]);
 
-  // Which screen is in front decides what a screenshot taken from the laptop contains, and the
-  // person tapping is holding the same phone.
-  useEffect(() => {
-    console.log('[terminal] screen open');
-    return () => console.log('[terminal] screen closed');
-  }, []);
-
   // The terminal attaches itself on every boot (see `onBoot`), so all this has to do is let go when
   // the screen goes away.
   useEffect(
@@ -435,6 +484,11 @@ export default function SessionScreen() {
   const termH = useRef<Record<string, (...args: any[]) => any>>({});
   termH.current = {
     onData: async (data) => send(data),
+    // A scroll routed to the session (tmux copy mode) — the "scrolled up" arrow reads copy-mode
+    // state on its ~2s poll, so nudge that poll on the frame the scroll lands, not a beat after.
+    onScroll: () => {
+      nudgePoll();
+    },
     onResize: async (cols, rows, cellW, cellH, topInset) => {
           // What MOVED, not what was measured: the pane shifting up a touch a beat after the
           // landing is either this report changing the top inset (or the row count, which re-rolls
@@ -520,6 +574,7 @@ export default function SessionScreen() {
   const tv = useMemo(
     () => ({
       onData: async (...a: any[]) => termH.current.onData?.(...a),
+      onScroll: async (...a: any[]) => termH.current.onScroll?.(...a),
       onResize: async (...a: any[]) => termH.current.onResize?.(...a),
       onBoot: async (...a: any[]) => termH.current.onBoot?.(...a),
       onBell: async (...a: any[]) => termH.current.onBell?.(...a),
@@ -540,6 +595,7 @@ export default function SessionScreen() {
         fontSize={fontSize}
         holdSize={termHold}
         onData={tv.onData}
+        onScroll={tv.onScroll}
         onResize={tv.onResize}
         onBoot={tv.onBoot}
         onBell={tv.onBell}
@@ -2244,6 +2300,34 @@ export default function SessionScreen() {
     };
   });
 
+  /**
+   * The "scrolled up" arrow, bottom-right. Shown only while the pane on screen is in copy mode —
+   * scrolled up into its scrollback — and only at rest: mid-flight or in the switcher it would
+   * describe a view that is moving, or not the one on screen. `tmux.scrolled` is the poll's
+   * `pane_in_mode` (see `pollCommand`), so the button can lag the swipe by up to one ~2s beat;
+   * that is the same latency the badge and the tabs accept.
+   *
+   * Tapping ends copy mode (`scrollBottom` → `send-keys -X cancel`) and the pane snaps back to its
+   * live bottom; the poll clears `scrolled` and the button goes away on the same beat.
+   */
+  const scrollToBottom = () => {
+    if (activeWinId === null) return;
+    // Stop the touch layer's running fling before the `cancel`: a fling left to coast keeps
+    // dispatching a wheel every frame, so it would re-open copy mode a beat after the pane has
+    // been sent to its live bottom and scroll up a notch past where it was meant to land. (The
+    // coast is the only scroll still in flight here — the finger is on the button, not the grid,
+    // so no pan is active.)
+    terminal.current?.stopScroll?.();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    void scrollBottom(activeWinId).catch((error) => {
+      // The pane is still in copy mode, so `scrolled` stays true and the button stays — the next
+      // tap retries. A rejection here is transport-level (host unreachable), not a wrong target.
+      console.log(`[terminal] scroll to bottom failed: ${activeWinId}`, error);
+    });
+  };
+  const showScrollArrow =
+    stage !== null && connected && tmux.scrolled && activeWinId !== null && sw === 'closed';
+
   return (
     // Full-bleed root: the safe-area strips are INSIDE the stage now, so the notch and home-bar
     // bands are part of the flying surface and of every page card — they used to sit outside
@@ -2470,6 +2554,30 @@ export default function SessionScreen() {
           pageEdgeStyle,
         ]}
       />
+      {/* The "scrolled up" arrow — bottom-right of the pane, a few points above the last line and
+          clear of the floating key bar's band (the card's own `paddingBottom` reserves it). Part of
+          the card, so it flies with the zoom; only drawn at rest, so it never scales on screen. */}
+      {showScrollArrow && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Scroll to bottom"
+          accessibilityHint="Return the terminal to its live output"
+          onPress={scrollToBottom}
+          style={({ pressed }) => [
+            styles.scrollArrow,
+            { right: BAR.sideMargin, bottom: padBottom + barPad + rowRemainder + 4 },
+            pressed && PRESSED_KEY,
+          ]}>
+          {/* The key bar's own tabs circle, stacked above it: the same `Plate` and size, aligned to
+              that circle's column by the same `right`, so the two read as one vertical stack. */}
+          <Plate theme={theme} radius={BAR.radius} style={styles.scrollArrowPlate}>
+            <Text
+              style={[styles.scrollArrowGlyph, { color: theme.foreground, fontFamily: MONO }]}>
+              {'\u2193'}
+            </Text>
+          </Plate>
+        </Pressable>
+      )}
       </Animated.View>
 
 
@@ -2595,6 +2703,7 @@ export default function SessionScreen() {
         theme={theme}
         decckm={modes.decckm}
         bracketedPaste={modes.bracketedPaste}
+        textMode={textMode}
         sendBytes={kb.sendBytes}
         open={open}
         onOpenChange={setOpen}
@@ -2657,6 +2766,8 @@ export default function SessionScreen() {
             <BarMenu
               theme={theme}
               bottom={popBase}
+              textMode={textMode}
+              onTextMode={onTextModeTap}
               onUpload={startUpload}
               onOpenSettings={openSettings}
             />
@@ -2986,4 +3097,10 @@ const styles = StyleSheet.create({
    *  drifted to 12, which is what a field is. */
   action: { paddingHorizontal: SPACE.wide, paddingVertical: SPACE.md, borderRadius: RADIUS.button },
   actionLabel: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: TEXT.button },
+  /** The "scrolled up" arrow. The `Pressable` is only the position (the caller's `right`/`bottom`
+   *  align it to the tabs circle's column and clear the bar); the `Plate` inside is the actual
+   *  button, so it is the same surface and size as that circle rather than a second look. */
+  scrollArrow: { position: 'absolute' },
+  scrollArrowPlate: { width: BAR.circle, height: BAR.circle, ...CENTER },
+  scrollArrowGlyph: { fontSize: 20, includeFontPadding: false },
 });

@@ -389,6 +389,20 @@ export function selectWindowCommand(id: string): string {
  return `tmux select-window ${target(id)}`;
 }
 
+/**
+ * The "scrolled up" arrow's tap: end copy mode, the frozen scrollback the pane sits in while it
+ * is scrolled, and the pane snaps back to its live bottom.
+ *
+ * `cancel` rather than `q`: both are bound to the same action in the copy-mode tables, but `q`
+ * did not cancel when driven from an outside exec channel (measured on 3.7c) while `cancel` did.
+ * And `send-keys -X cancel` on a pane that is NOT in copy mode exits 1 ("not in a mode") and
+ * touches nothing — measured — so a tap that races the scroll settling, or the 2s poll reporting a
+ * scroll that is already gone, is a harmless no-op, not an error to surface.
+ */
+export function scrollBottomCommand(id: string): string {
+ return `tmux send-keys ${target(id)} -X cancel`;
+}
+
 /** Exit 1 here means one thing only, and it is not "maybe": a `@N` is never reused, so tmux
  *  answering `can't find window: @N` is tmux saying that window is already gone — verified on
  *  3.7b, a kill against a dead id exits 1 and touches nothing. Nothing else can be killed by
@@ -500,27 +514,94 @@ export function pollDelay(attached: boolean, ticks: number): number {
  * re-listed onto their windows instead of tearing down (T10A.8). A named ask that goes quiet now
  * means what it says — that session is gone.
  */
+/**
+ * The poll answers one more question since T7.15: WHAT IS THE PANE RUNNING. `#{pane_current_command}`
+ * is tmux's name for the foreground JOB of the pane's active pane — the basename that changes when
+ * the user launches or quits a program (verified 2026-09-07 on tmux 3.7c: `fish` → `sleep` → `fish`
+ * as the job came and went). There is no tmux hook for the transition, so it rides the poll the
+ * badge already rides: same channel, two more format fields, ~20 bytes a beat. The feed for the
+ * prose-mode auto-decision (`src/prose-model.ts`); the screen acts on it only while attached to a
+ * session it can NAME (`session !== null`), where this poll's pane is guaranteed to be the pane on
+ * screen.
+ *
+ * `#{pane_pid}` is the pane's SHELL. It is not for the parser — it is the argument `poll()` hands
+ * to `childrenCommand` when the foreground is an interpreter, and it stays in the answer because
+ * the pid and the command it belongs to must come from ONE read of the pane, not two beats apart.
+ */
 export function pollCommand(session: string | null): string {
  const target = session === null ? "" : ` -t ${sessionScope(session)}`;
  return (
   `tmux display-message${target} -p '` +
-  ["#{session_attached}", "#{window_index}"].join(SEP) +
+  [
+   "#{session_attached}",
+   "#{window_index}",
+   "#{pane_in_mode}",
+   "#{pane_current_command}",
+   "#{pane_pid}",
+  ].join(SEP) +
   `' 2>/dev/null; true`
+ );
+}
+
+/**
+ * The argvs of the pane shell's DIRECT children — the disambiguator for an interpreter foreground
+ * (`node` running `…/claude-code/cli.js` vs a REPL; see prose-model). One line per child, the
+ * ppid column stripped.
+ *
+ * No tmux in it at all: the pid arrives already in hand from the poll, inlined by the caller. And
+ * no shell logic — an assignment, a `case` or a `${…}` in this line would be a parse error on a
+ * fish login shell (T60's lesson, this file's header): this is two commands and a pipe, which
+ * fish and POSIX sh read identically. `ps -U` scopes the table to OUR uid (a whole-host `ps -e`
+ * every 2s would hand another user's process table to the phone), `-ww` keeps a long argv from
+ * wrapping into a second line, and a host whose `ps` cannot do `-o` (busybox) answers empty — the
+ * classifier then sees no children and takes the OFF default. One exec per beat, through `run1`,
+ * and only while the foreground is an interpreter: at a bare prompt or a TUI the cost is zero.
+ *
+ * The awk drops the ppid column so the classifier sees argvs, not `"48082 node …"`. `ps -o` pads
+ * the ppid column with leading spaces, so the strip regex must allow for them (`^[ \\t]*`) — a
+ * `^`-anchored match that forgets the padding silently keeps the ppid as a stray leading token.
+ */
+export function childrenCommand(panePid: number): string {
+ return (
+  `ps -ww -U $(id -u) -o ppid=,command= 2>/dev/null | ` +
+  `awk -v r=${panePid} '$1==r { sub(/^[ \\t]*[^ \\t]+[ \\t]+/, ""); print }'`
  );
 }
 
 export type TmuxPoll = {
  attached: boolean;
  windowIndex: number;
+ /** 1 while the window's active pane is in copy mode — the frozen scrollback the pane sits in
+ *  while it is "scrolled up". 0 = live. */
+ paneInMode: number;
+ /** The pane's foreground job, by basename (`#{pane_current_command}`) — `''` while the pane has
+ *  none tmux can name. The prose-mode decision's input (see prose-model). */
+ paneCommand: string;
+ /** The pane's SHELL pid (`#{pane_pid}`) — the argument `childrenCommand` is built with. 0 when
+ *  the field came back unparseable, in which case the children ask is simply not made. */
+ panePid: number;
 };
 
 /** `null` = no server, or garbage — either way there is nothing to say. */
 export function parsePoll(stdout: string): TmuxPoll | null {
  const line = stdout.trim().split("\n")[0] ?? "";
- const [attached, windowIndex] = line.split(SEP);
- if (!/^\d+$/.test(attached ?? "") || !/^\d+$/.test(windowIndex ?? ""))
+ const [attached, windowIndex, paneInMode, paneCommand, panePid] = line.split(SEP);
+ if (
+  !/^\d+$/.test(attached ?? "") ||
+  !/^\d+$/.test(windowIndex ?? "") ||
+  !/^\d+$/.test(paneInMode ?? "")
+ )
   return null;
- return { attached: Number(attached) > 0, windowIndex: Number(windowIndex) };
+ return {
+  attached: Number(attached) > 0,
+  windowIndex: Number(windowIndex),
+  paneInMode: Number(paneInMode),
+  // Tolerated, not required: a field tmux cannot fill comes back empty, and an empty foreground
+  // is a real state (a fresh pane), not garbage. The first three are the poll's contract — those
+  // still have to be whole numbers.
+  paneCommand: (paneCommand ?? "").trim(),
+  panePid: /^\d+$/.test(panePid ?? "") ? Number(panePid) : 0,
+ };
 }
 
 /* --- derived state the screens read --- */

@@ -71,6 +71,9 @@ export type TerminalHandle = {
   showHits(rows: number[], cols: number[], len: number, active: number): void;
   /** Disarm: take the marks off. */
   searchOff(): void;
+  /** Stop a running fling (the touch layer's coast): the host's "scroll to bottom" tap calls it so
+   *  a fling does not keep spending wheels after the pane has been sent to its live bottom. */
+  stopScroll(): void;
 };
 
 export type TerminalProps = {
@@ -113,6 +116,11 @@ export type TerminalProps = {
   /** A two-finger tap on the grid — §4.8's second door to Settings. Detected here because the
    *  touch layer below already owns the two-finger *pan*, and only it can tell the two apart. */
   onTwoFingerTap: () => Promise<void>;
+  /** A finger scroll was routed to the session as a wheel (tmux's copy-mode scrollback), so the
+   *  copy-mode state the host's "scrolled up" arrow reads may have changed this frame rather than
+   *  on the next ~2s beat. Fired from the touch layer's `spend`, throttled, on the wheel route
+   *  only — arrows and local scroll do not touch tmux copy mode. */
+  onScroll?: () => void;
   /** A plain one-finger tap on the terminal — §4.4's door to the keyboard, now that the bar's
    *  swipe ↑ always goes to the switcher. Detected here for the same reason as the two-finger
    *  tap: only this layer knows the touch was neither a scroll nor a long-press selection. */
@@ -260,13 +268,6 @@ const CSS = `
   .xterm .xterm-scrollable-element > .scrollbar { display: none; }
 `;
 
-/**
- * One line saying whether the bundled font actually arrived. A webview that fell back to the system
- * monospace looks perfectly fine until a Nerd Font glyph turns up as a box, and by then the cell
- * width is wrong too — so measure it rather than trust it. In a monospaced font every glyph is one
- * cell wide, including the private-use ones; a fallback gives a different width for the glyph it
- * does not have. Logging is deliberate here (PLAN.md §7): this file has no other way to speak.
- */
 /** Five tries then boot regardless: a terminal on the wrong font still runs a shell, and one that
  *  never opens does not. The waits between them add up to 1.5s in the worst case. */
 const FONT_TRIES = 5;
@@ -280,26 +281,6 @@ function monoArrived(fontSize: number): boolean {
   if (context === null) return true; // no way to tell; do not spin on it
   context.font = `${fontSize}px ${MONO}`;
   return Math.abs(context.measureText('M').width - fontSize * MONO_ADVANCE) < 0.1;
-}
-
-function fontReport(fontSize: number): string {
-  const loaded = document.fonts.check(`${fontSize}px ${MONO}`);
-  const bold = document.fonts.check(`bold ${fontSize}px ${MONO}`);
-  const context = document.createElement('canvas').getContext('2d');
-  if (!context) return `font ${MONO} loaded=${loaded} (no canvas to measure with)`;
-  /** `font` is a full CSS font shorthand, so a weight can sit in front of the size. */
-  const width = (font: string, text: string) => {
-    context.font = font;
-    return (context.measureText(text).width / text.length).toFixed(4);
-  };
-  const regular = `${fontSize}px ${MONO}`;
-  return (
-    `font ${MONO} loaded=${loaded} bold=${bold} size=${fontSize.toFixed(4)} ` +
-    `dpr=${window.devicePixelRatio} cell=${width(regular, 'M')} ` +
-    `cell100=${width(regular, 'M'.repeat(100))} ` +
-    `bold-cell=${width(`bold ${regular}`, 'M')} ` +
-    `nerd-glyph=${width(regular, '')} system-mono-cell=${width(`${fontSize}px monospace`, 'M')}`
-  );
 }
 
 /*
@@ -321,6 +302,10 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
   const fit = useRef<FitAddon | null>(null);
   const resizer = useRef<(() => void) | null>(null);
   const releaseFit = useRef<(() => void) | null>(null);
+  /** The touch layer's running coast (fling momentum), held here so the host's "scroll to bottom"
+   *  tap can stop it: a fling left to coast keeps dispatching wheels after the pane has been
+   *  cancelled back to its live bottom, so it scrolls up a notch past where it was meant to land. */
+  const stopCoastRef = useRef<() => void>(() => {});
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
   const latest = useRef({ theme, holdSize, ...handlers });
@@ -478,6 +463,9 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     searchOff: () => {
       clearHitMark();
     },
+    stopScroll: () => {
+      stopCoastRef.current();
+    },
   };
   useDOMImperativeHandle(
     (ref ?? null) as Ref<DOMImperativeFactory>,
@@ -516,7 +504,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         // goes wrong — a fallback answers this question with somebody else's number.
         if (monoArrived(fontSize) || attempt >= FONT_TRIES) {
           if (disposed) return;
-          console.log('[terminal]', fontReport(fontSize));
           cleanup = boot();
           return;
         }
@@ -571,19 +558,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // measured long-press selection to need.
     if (term.textarea) term.textarea.disabled = true;
 
-    // A long-press selection is the system's, not xterm's, so it fires no xterm event and leaves no
-    // other trace: without this line there is no way to tell "the gesture never started" from "it
-    // selected and the menu did not draw".
-    // `selectionchange` also fires for every collapsed caret move, and `toString()` serializes the
-    // whole range to build a string this only ever slices to 40 characters. The collapsed case is
-    // the common one and carries no information, so it never pays for the serialization.
-    const onSelectionChange = () => {
-      const sel = document.getSelection();
-      if (sel === null || sel.isCollapsed) return;
-      console.log('[terminal] selection', JSON.stringify(sel.toString().slice(0, 40)));
-    };
-    document.addEventListener('selectionchange', onSelectionChange);
-
     // iOS synthesises a mouse pair when a touch gesture ends. xterm answers those by focusing its
     // textarea and clearing the document selection — which is the selection the finger just made,
     // so the edit menu is dismissed in the same frame it would have appeared. Touch is ours (§4.3
@@ -627,7 +601,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const next = currentModes();
       if (reportedModes !== null && modesEqual(reportedModes, next)) return;
       reportedModes = next;
-      console.log('[terminal] modes', JSON.stringify(next));
       latest.current.onModes(next);
     };
     term.buffer.onBufferChange(() => reportModes());
@@ -737,18 +710,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       // The mark is placed on this, and this is the only place it is measured — every event that
       // can move the cell (fit, keyboard edge, rotation, hold release) comes through here.
       cellSize.current = { w, h };
-      console.log(
-        '[terminal] size', term.cols, '×', term.rows,
-        // Four places on the advance, not two: the thing that goes wrong with it is thousandths of
-        // a point multiplied by fifty columns, and two places cannot show it.
-        'cell', w.toFixed(4), '×', h.toFixed(2),
-        'padTop', padTop.toFixed(2),
-        // Says which kind of line this is, because a run of identical ones reads as a bug and is
-        // not: every switcher open ends a hold and re-reports, and unlabelled that cost an evening
-        // (2026-08-16). The re-report is still sent — the host is the one that knows whether it
-        // changes anything, and `setSize` drops it when it does not.
-        same ? '(re-report, nothing moved)' : '',
-      );
       latest.current.onResize(term.cols, term.rows, w, h, padTop);
     };
     // `force` re-reports even a size the host was already told about: the only caller is the
@@ -849,6 +810,9 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     /** For the two-finger tap (§4.8): how many fingers this touch ever had, and when it began. */
     let fingers = 0;
     let downAt = 0;
+    /** Wall clock of the last `onScroll` nudge — a coast spends wheels every frame, so the host's
+     *  poll nudge is throttled, not one per notch. */
+    let lastScrollNudge = 0;
 
     // Measured, not asked for: the screen element is exactly `rows` cells tall, and xterm's cell
     // metrics live on internal services.
@@ -866,7 +830,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const modes = currentModes();
       const route = scrollRoute(modes);
       const up = taken.notches > 0; // finger down the glass = toward earlier content
-      console.log('[terminal] scroll', route, taken.notches);
       if (route === 'local') {
         term.scrollLines(-taken.notches);
         return;
@@ -890,19 +853,27 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
           }),
         );
       }
+      // The wheel just changed tmux's copy-mode state, and the host's "scrolled up" arrow reads it
+      // on its ~2s poll — nudge that poll so the arrow appears within a frame, not a beat, of the
+      // scroll. Throttled: a coast fires this every animation frame.
+      const now = performance.now();
+      if (now - lastScrollNudge > 300) {
+        lastScrollNudge = now;
+        latest.current.onScroll?.();
+      }
     };
 
     const stopCoast = () => {
       if (coast !== null) cancelAnimationFrame(coast);
       coast = null;
     };
+    stopCoastRef.current = stopCoast;
 
     /** Momentum: spend `distance(now) − distance(already spent)` per frame off the analytic decay
      *  curve, so 60Hz and 120Hz walk the same offsets (proved in scroll-model.test.ts). The wheels
      *  keep landing where the finger last was. */
     const startCoast = (v0: number, x: number, y: number) => {
       if (Math.abs(v0) < FLICK_MIN_VELOCITY) return;
-      console.log('[terminal] coast start', v0.toFixed(3), 'px/ms');
       const t0 = performance.now();
       coastV0 = v0;
       coastT0 = t0;
@@ -928,7 +899,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const caught = coast !== null;
       if (caught) {
         carried = coastVelocity(coastV0, performance.now() - coastT0);
-        console.log('[terminal] coast caught', carried.toFixed(3), 'px/ms carried');
         stopCoast();
         ev.preventDefault();
       } else {
@@ -997,13 +967,11 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       // Otherwise a quick one-finger tap asks for the keyboard (§4.4). A tap that dismissed a
       // selection is that dismissal and nothing more; a slow press is WebKit's long-press.
       else if (pan === 'pending' && fingers === 1 && ev.timeStamp - downAt < TAP_MS) {
-        console.log('[terminal] tap');
         latest.current.onTap();
       }
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
       // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.
       if (pan === 'pending' && isTwoFingerTap(fingers, false, ev.timeStamp - downAt)) {
-        console.log('[terminal] two-finger tap');
         latest.current.onTwoFingerTap();
       }
       pan = 'idle';
@@ -1021,6 +989,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     el.addEventListener('touchcancel', touchCancel);
     return () => {
       stopCoast();
+      stopCoastRef.current = () => {};
       el.removeEventListener('touchstart', touchStart);
       el.removeEventListener('touchmove', touchMove);
       el.removeEventListener('touchend', touchEnd);

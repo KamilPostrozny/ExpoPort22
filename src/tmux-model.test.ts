@@ -8,6 +8,7 @@ import { expect, test } from "bun:test";
 
 import {
   APPLY_AND_VERIFY,
+  childrenCommand,
   FAST_POLL_MS,
   FAST_POLL_TICKS,
   CONF_MARKER,
@@ -355,15 +356,83 @@ test("a session that stops answering takes the tabs, and so the grid, with it", 
 
 /* --- the poll --- */
 
-test("poll parse: the attached flag and the badge index", () => {
-  expect(parsePoll(line(["1", "3"]) + "\n")).toEqual({
+test("poll parse: the attached flag, the badge index, and the scroll state", () => {
+  // The first three fields are the poll's contract; the two that followed (T7.15) are tolerated,
+  // not required — a field tmux cannot fill comes back empty and an empty foreground is a real
+  // state, so a 3-field answer is still a valid poll.
+  expect(parsePoll(line(["1", "3", "0"]) + "\n")).toEqual({
     attached: true,
     windowIndex: 3,
+    paneInMode: 0,
+    paneCommand: "",
+    panePid: 0,
   });
-  expect(parsePoll(line(["0", "1"]))?.attached).toBe(false);
-  expect(parsePoll(line(["x", "1"]))).toBeNull();
+  expect(parsePoll(line(["1", "3", "1"]))?.paneInMode).toBe(1); // scrolled up = in copy mode
+  expect(parsePoll(line(["0", "1", "0"]))?.attached).toBe(false);
+  expect(parsePoll(line(["x", "1", "0"]))).toBeNull();
+  expect(parsePoll(line(["1", "3"]))).toBeNull(); // the third field is required, not optional
   expect(parsePoll("")).toBeNull(); // no server = nothing to say (§7: silence, not a message)
   expect(parsePoll("no current client\n")).toBeNull();
+});
+
+test("poll parse: the foreground job and the pane's shell pid (T7.15)", () => {
+  // The five-field answer the command now asks for: the prose decision's input and the pid the
+  // children ask is built with, from ONE read of the pane.
+  expect(parsePoll(line(["1", "3", "0", "node", "30831"]))).toEqual({
+    attached: true,
+    windowIndex: 3,
+    paneInMode: 0,
+    paneCommand: "node",
+    panePid: 30831,
+  });
+  // An empty foreground is real (a fresh pane), not garbage: it parses, and the pid still rides.
+  expect(parsePoll(line(["1", "2", "0", "", "1234"]))?.paneCommand).toBe("");
+  expect(parsePoll(line(["1", "2", "0", "fish", "1234"]))?.paneCommand).toBe("fish");
+  // A pid tmux will not give (or that arrives non-numeric) is 0 — and 0 is what makes the
+  // children ask simply not happen (see `poll` in tmux.ts).
+  expect(parsePoll(line(["1", "2", "0", "node", ""]))?.panePid).toBe(0);
+  expect(parsePoll(line(["1", "2", "0", "node", "not-a-pid"]))?.panePid).toBe(0);
+});
+
+test("the poll command asks for the job and the pid on top of the old three (T7.15)", () => {
+  const aimed = pollCommand("port22");
+  for (const field of [
+    "#{session_attached}",
+    "#{window_index}",
+    "#{pane_in_mode}",
+    "#{pane_current_command}",
+    "#{pane_pid}",
+  ])
+    expect(aimed).toContain(field);
+  // Still one `display-message`, still quiet, still `; true` — the badge's channel budget is
+  // unchanged; the two new fields are format strings, not exec.
+  expect(aimed.match(/display-message/g)).toHaveLength(1);
+  expect(aimed.endsWith(`2>/dev/null; true`)).toBe(true);
+});
+
+test("childrenCommand is one pipe fish and POSIX sh parse identically (T7.15)", () => {
+  // The pid arrives inlined — the caller already has it from the poll — so the line has nothing to
+  // assign, branch or expand: two commands and a pipe, which fish and POSIX sh read identically.
+  // An assignment, a `case` or a `${…}` in this line would be a parse error on a fish login
+  // shell (T60), so the shape is the test as much as the bytes are.
+  const command = childrenCommand(30831);
+  const [left, right] = command.split(" | ");
+  // The only `$` OUTSIDE single quotes is `$(id -u)` — a command substitution both shells parse,
+  // and the only expansion in the whole line. Everything on the right of the pipe lives inside
+  // one single-quoted awk program, where `$1` is a literal awk variable, not a shell one.
+  expect(left).toBe(`ps -ww -U $(id -u) -o ppid=,command= 2>/dev/null`);
+  expect(right).toBe(`awk -v r=30831 '$1==r { sub(/^[ \\t]*[^ \\t]+[ \\t]+/, ""); print }'`);
+  expect(command.split(" |").length).toBe(2); // exactly two commands
+});
+
+test("childrenCommand's pid is inlined numerically and cannot carry a command", () => {
+  // The pid comes from `parsePoll`, which only returns a Number it regex-validated as all-digits,
+  // so the inlined value is digits or the command is never built. The template takes a number,
+  // which is what keeps it that way: a string cannot reach the `awk -v r=…` slot.
+  expect(childrenCommand(0)).toBe(
+    `ps -ww -U $(id -u) -o ppid=,command= 2>/dev/null | ` +
+      `awk -v r=0 '$1==r { sub(/^[ \\t]*[^ \\t]+[ \\t]+/, ""); print }'`,
+  );
 });
 
 test("the poll hurries for the attach, settles on it, and gives up hurrying either way", () => {

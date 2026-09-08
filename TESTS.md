@@ -704,6 +704,97 @@ switcher drag are T10 no-ops, horizontal bar swipe only logs into T11's hook.
     selection, the moves are its drag handles, not a pan") leaving the touch stream claimed. This is
     what made T7A.4/T7A.5 look broken mid-run until they were re-walked from a fresh launch.
 
+### T7.14 — Prose mode: autocorrect + sentence caps for prose, raw for shell
+- **Setup**: connected, keyboard up. The toggle is the ⋯ menu row `Prose mode … off|on` (it is NOT a
+  key in the bar row — the 4-key row already overflows the 393 pt iPhone at JetBrains Mono 14 pt, and
+  a fifth key would not fit). Default is OFF at every launch; nothing is persisted, and it resets on
+  disconnect. Each toggle in both directions calls `repad()` so one mode's text never becomes the
+  other's correction context.
+- **Steps**: type a deliberately misspelled sentence through the *physical IME keys* (an `adb input
+  text` or hardware-injected path bypasses the IME and proves nothing), then submit. Repeat the
+  identical sequence with the mode toggled the other way. A/B on the same line, same taps.
+- **Expect**: **on** — the IME corrects as you go: tapping `t-h-s-i ␣ s-h-o-u-d-l ␣ w-o-k` commits
+  `this should work` (Gboard rewrites each word at commit); the suggestion strip is live. **off** —
+  the identical taps commit `thsi shoudl wok` verbatim; fish answers `Unknown command: thsi`. The
+  flag reaches the IME live, mid-focus, with no refocus. Mechanism: the hidden pad `TextInput`
+  flips `autoCorrect` and `autoCapitalize={textMode ? 'sentences' : 'none'}`; in prose mode the
+  re-fit tail limit is `PAD.length + 3000` (vs `+ 500`) so a long prompt does not trip a mid-sentence
+  re-pad that would reset the correction context.
+- iOS: [ ]
+- Android: [x] **PASS 2026-08-17 (emulator, Gboard on the `google_apis` AVD).** A/B, same key taps,
+  same line: prose ON → the submitted command reads `this should work` (all three misspellings
+  corrected by Gboard at commit; the strip showed live word predictions, including a capitalised
+  candidate); toggled OFF (the menu stayed open — a synthetic `input tap` does not fire the scrim's
+  `onPointerDown`, so the row tap toggles but does not close; a real finger closes it) and the
+  identical sequence submitted `thsi shoudl wok` uncorrected (`fish: Unknown command: thsi`).
+  Note, honest: `autoCapitalize='sentences'` was *offered* by Gboard (the strip carried a
+  capitalised candidate) but the leading letter landed lowercase — with the 512-space pad behind the
+  caret, Gboard reads the position as mid-sentence and declines to auto-cap. The autocorrect half is
+  the load-bearing one and it works; capitalisation is IME policy, not something this app can force.
+  The `keyboardType` stays `ascii-capable` in both modes — switching it mid-focus is a
+  keyboard-glitch risk for a one-word layout gain the user did not ask for.
+
+### T7.15 — Prose mode is auto: it follows the foreground program, and the toggle is an override
+- **Setup**: connected to a NAMED tmux session (the poll has to name it — see `session`'s docs in
+  `tmux.ts`), keyboard up, a shell at a bare prompt. The decision is `proseFor` in
+  `prose-model.ts`, fed by `#{pane_current_command}` (+ the pane's children, via `childrenCommand`,
+  while the job is an interpreter) from the same ~2 s poll that drives the attach badge. Default at
+  every launch is still OFF and nothing is persisted — auto is a DECISION, not a memory.
+- **Steps** (the A/B of T7.14 now runs itself): with a bare prompt up, type a misspelled word and
+  submit; then run `mutt` (prose) and repeat the identical taps in its compose prompt; then run
+  `vim` (keystroke) and repeat at its `:` line; then run a node CLI (`claude` / `pi`) and repeat in
+  its prompt. Between each, read the ⋯ row: it must have moved on its own, with no tap.
+- **Expect**: prompt → row `off`, taps land verbatim. `mutt` → row `on` within ~2 s of the job
+  starting, taps autocorrect. `vim` → row `off` (an autocorrect landing in insert mode would
+  rewrite code — the row stays off ALL of vim, not just normal mode; tmux cannot see the inner
+  mode, and the app deliberately declines to guess it). node CLI → row `on`, by either of TWO
+  install shapes (both measured, not assumed): (a) the CLI sets its own process title, so the poll
+  sees the CLI's NAME (`pi`, `claude`) — that name is allowlisted in `ON` and no children are
+  asked for; this is the common shape. (b) the CLI reports `node` (a bare `node script.js`, or an
+  install that does not set its title) — then the children ask sees `/…/claude-code/cli.js` (or
+  `.bin/pi`) and the path-segment signature matches. A job
+  the table does not know (`null`) leaves the row where the previous decision put it — the screen
+  applies its OFF default only; it never invents an ON.
+- **Override lock** (the second half of the case): while `vim` is up (auto `off`), tap the row to
+  `on` and type at the `:` line — the correction must apply (the user's word wins). Then quit vim
+  to the prompt: the row goes `off` AGAIN without a tap, because the context (program) changed and
+  the override travelled with its context — it did not leak into the shell. Conversely, tapping the
+  row while at the prompt and then launching `mutt` must NOT carry the choice over: `mutt` decides
+  for itself. The lock's contract is "until the foreground changes", not "until the next tap".
+- **No named session**: in a start mode the poll cannot name (bare shell, `tmux new -A`), the auto
+  effect is inert by construction — `session` is `null`, the row is the manual T7.14 switch again,
+  and no `childrenCommand` exec is spent (the ask is gated on a named, attached session).
+- **Findings from the Android device pass (2026-09-07)** — two real divergences the unit tests
+  could not see, both caught on screen and fixed:
+  1. *Process-title gap.* The unit tests only exercised shape (b) (`pane_current_command` = `node`).
+     On the host, `pi` and `claude` set their process title, so the poll answers `pi`/`claude`, not
+     `node` — shape (a), which the table did not cover, so the row stayed `off` while pi ran. Fix:
+     the coding agents (`claude`, `pi`, `codex`, `aider`) are allowlisted in `ON` by name. The
+     interpreter half stays for shape (b).
+  2. *ppid leak in `childrenCommand`.* `ps -o ppid=,command=` pads the ppid column with leading
+     spaces, and the awk strip regex was `^`-anchored without allowing them — so the ppid survived
+     as a stray leading token (the poll returned `"48082 node …"`, not the argv). Harmless to the
+     classifier (a ppid is a number, no signature is), but wrong. Fix: the strip regex allows the
+     padding, `^[ \t]*`.
+- **Verified on the Android emulator (2026-09-07), connected to a named `port22` session:**
+  bare `fish` → row `off`; run `pi` → row `on` within one ~2 s beat, no tap; kill pi → row `off`.
+  Override: at `fish` (auto `off`), tap the row → `on`, held across two poll beats; then run `vim`
+  → the context change drops the override and the row goes `off` again (the lock travelled with its
+  context). Interpreter shape (b): `node /tmp/…/pi/app.js` (a title-unset script) → poll shows
+  `paneChildren` as the CLEAN argv (no ppid) and the row `on` via the path signature.
+- **Re-pad budget**: the decision runs on the (command, children) pair as ONE poll beat — `tmux.ts`
+  fetches the children before its single `set`, so the screen never sees an intermediate
+  `(node, [])` half-state — and the effect re-runs only when the derived context string changes, so
+  a poll beat that changed nothing does not re-pad the keyboard. Walk the transition list with the
+  keyboard up and check there is no flicker of the IME's correction context on beats where the
+  program did not change.
+- iOS: [ ] — pending a device pass (see the findings above; the code is platform-agnostic, no
+  `Platform.OS` branch, but per the two-platforms rule it is unverified on iPhone until walked there).
+- Android: [x] — 2026-09-07, emulator, named `port22` session. A/B auto (fish `off` → pi `on` →
+  quit `off`), the override lock (hold across beats, drop on context change), and interpreter shape
+  (b) all confirmed on screen. Two divergences found and fixed on this pass: the process-title gap
+  (shape a) and the `childrenCommand` ppid leak — both in the findings above.
+
 ## T7A — Key bar on Android (emulator)
 
 All cases on the Android **emulator** (gated on T3.0's build), connected to the host machine's

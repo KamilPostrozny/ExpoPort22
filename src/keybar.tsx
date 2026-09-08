@@ -5,10 +5,13 @@
  * and pill, 35pt keys at 18pt radius, 24pt side margins, 48pt chord caps with 8.5pt captions,
  * arrows popover at 22pt corners, menu at 26pt.
  *
- * The native `TextInput` here owns the keyboard (T4's device-proven decision): the webview never
- * takes focus, typing reaches the PTY through `sendBytes`, and touching the terminal blurs the
- * input natively — which is what lets a long-press selection proceed with the keyboard up. A plain
- * tap on the terminal asks for it back through `focusSignal`; the bar itself never raises it.
+ * The native `TextInput`s here own the keyboard (T4's device-proven decision): ONE FIELD PER PROSE
+ * MODE, and the keyboard attaches to whichever matches `textMode` — because iOS reads a field's
+ * brain (autocorrect, capitalization) only when the keyboard ATTACHES to it, and never re-reads
+ * it off the attached field (see the fields' comment). The webview never takes focus, typing
+ * reaches the PTY through `sendBytes`, and touching the terminal blurs the input natively — which
+ * is what lets a long-press selection proceed with the keyboard up. A plain tap on the terminal
+ * asks for it back through `focusSignal`; the bar itself never raises it.
  *
  * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
  * lives in `src/keybar-model.ts`, tested; this file renders and executes.
@@ -105,6 +108,25 @@ export type KeyBarProps = {
   /** Bracketed paste as last reported over the same bridge — decides whether pasted text is
    *  wrapped in `ESC[200~ … ESC[201~` (see `pasteBytes`). */
   bracketedPaste: boolean;
+  /** Prose mode — the keyboard's autocorrect and sentence capitalization: ON where the line is
+   *  plain English (a claude code prompt, a mail draft), OFF at a bare prompt or a keystroke TUI,
+   *  where a correction is a mangled command. Screen-owned; this TextInput is the only field it
+   *  rides.
+   *
+   *  Since T7.15 it is also AUTO while a named tmux session is on screen: the poll carries the
+   *  pane's foreground program (see `proseFor`), and the screen decides the default from it. The
+   *  ⋯ menu's row is now the OVERRIDE — it claims the value for the current program, and the auto
+   *  decision resumes when the program changes. What it still cannot see is the mode INSIDE a
+   *  program (vim's insert vs normal, a TUI's swapped prompt): tmux reports the job, not its
+   *  state, so that is what the override is for. vim's insert is deliberately NOT prose — an
+   *  autocorrect landing in insert mode rewrites the code.
+   *
+   *  The flip is a FOCUS MOVE between the bar's two fields, one born per value: a live change of
+   *  `autoCorrect` on the field the keyboard is attached to is not re-read until the keyboard
+   *  closes and opens again (device, 2026-09-08: autocorrect stayed off through the toggle,
+   *  healed by a manual close/open). Moving first responder to the other field re-configures the
+   *  keyboard in place, no drop. */
+  textMode: boolean;
   /** Everything a key emits, on its way to the PTY. */
   sendBytes: (bytes: string) => void;
   /** Which popover is up. Lifted to the screen, which renders the popovers and the outside-tap
@@ -349,7 +371,20 @@ const PAD = ' '.repeat(512);
 
 function KeyBarInner(props: KeyBarProps) {
   const { theme, open, onOpenChange } = props;
-  const input = useRef<TextInput>(null);
+  /** The keyboard's owners — one field per prose mode, each BORN with its own brain. iOS reads a
+   *  field's autocorrect/capitalization when the keyboard attaches to it, and NOT when the
+   *  attached field's props change afterwards (device, 2026-09-08: a live flip of `autoCorrect` on
+   *  the focused field left the old brain in place — typing fine, no corrections — until the
+   *  keyboard was closed and re-opened). UIKit's own signal for "the brain changed" is a change
+   *  of text-input context: move first responder to a field born with the other value and the
+   *  keyboard re-configures in place, never dropping (the two fields share one absolute slot, so
+   *  there is no slide either). That is why this is two fields rather than one mutable prop. */
+  const inputOff = useRef<TextInput>(null);
+  const inputOn = useRef<TextInput>(null);
+  /** Which field is first responder right now — `null` when the keyboard is down. Decides whether
+   *  a prose flip is a focus move (keyboard up) or a silent re-aim (keyboard down: the next raise
+   *  lands on the right field and presents with the new brain from the first frame). */
+  const focusedIn = useRef<'off' | 'on' | null>(null);
   /** What the (uncontrolled) TextInput last held — the other half of `diffInput`. */
   const typed = useRef(PAD);
   /** The field's text, set *only* to top the pad back up (see `PAD`); `undefined` the rest of the
@@ -376,10 +411,10 @@ function KeyBarInner(props: KeyBarProps) {
       setPadWrite(undefined);
     }
   }, [padWrite]);
-  const repad = () => {
+  const repad = useCallback(() => {
     typed.current = PAD; // ref first: a change event fired by the write diffs against it to nothing
     setPadWrite(PAD);
-  };
+  }, []);
   const [ctrl, setCtrl] = useState<CtrlMode>('off');
   const lastCtrlTap = useRef(0);
   /** The pill's measured width — the name-pill pitch (prototype: item + gap exactly fill it). */
@@ -388,10 +423,29 @@ function KeyBarInner(props: KeyBarProps) {
   // Something asked for the keyboard — a tap on the terminal, the switcher closing back onto keys
   // that were up (0 = never signalled, skip mount). Connecting is NOT one of them: the session
   // arrives with the terminal in full view, and the keys come up when they are asked for
-  // (user, 2026-08-11).
+  // (user, 2026-08-11). The raise lands on the field matching the CURRENT prose mode, so the
+  // keyboard presents with the right brain from the first frame.
   useEffect(() => {
-    if (props.focusSignal) input.current?.focus();
+    if (props.focusSignal) (props.textMode ? inputOn : inputOff).current?.focus();
   }, [props.focusSignal]);
+
+  // Prose mode flips the keyboard's own brain, so its context has to start clean in BOTH
+  // directions: a shell line already in the pad must not become the correction context for a
+  // sentence, and half a sentence must not ride into a command. `repad` is the reset. Mount is
+  // skipped — the mode starts off and the pad starts topped, so nothing owes a reset yet.
+  //
+  // The flip itself is the focus move (see `inputOff`/`inputOn`): with the keyboard up it moves
+  // first responder to the field born with the new value — the keyboard stays, the brain follows.
+  // With the keyboard down it is a silent re-aim; the bar still never RAISES it here.
+  const textModeWas = useRef(false);
+  useEffect(() => {
+    if (props.textMode === textModeWas.current) return;
+    textModeWas.current = props.textMode;
+    repad();
+    if (focusedIn.current !== null) {
+      (props.textMode ? inputOn : inputOff).current?.focus();
+    }
+  }, [props.textMode, repad]);
 
   /** T12's dictation filter needs to know whether the line is empty, so everything the bar itself
    *  sends passes through this tracked seam. (The arrows popover bypasses it — escape sequences
@@ -428,7 +482,11 @@ function KeyBarInner(props: KeyBarProps) {
     for (const key of bytes) emitKey(key); // string iteration = one code point per key
     // Top the pad up before a held delete runs it dry, and trim the typed tail before iOS starts
     // caring about the length — nothing reads the field back, so both are the same write.
-    if (next.length < PAD.length / 2 || next.length > PAD.length + 500) repad();
+    // In prose mode the tail may run long — a prompt in the making, not a stray paste — and a
+    // repad mid-sentence would reset the keyboard's correction context, so the top-up bar moves
+    // with the mode.
+    const tailLimit = props.textMode ? PAD.length + 3000 : PAD.length + 500;
+    if (next.length < PAD.length / 2 || next.length > tailLimit) repad();
   };
 
   /**
@@ -473,9 +531,6 @@ function KeyBarInner(props: KeyBarProps) {
       caret.current = wanted.current;
       const keys = caretKeys(delta, props.decckm);
       if (!keys) return; // the bounce cancelled itself, which is the point
-      // §7: the drag is invisible in every other log — no text changes, and the PTY's answer is
-      // a cursor move buried in a screen repaint. This line is the only place it can be seen.
-      console.log('[caret]', delta > 0 ? 'right' : 'left', Math.abs(delta), '→', wanted.current);
       props.sendBytes(keys);
     }, CARET_SETTLE_MS);
   };
@@ -889,10 +944,12 @@ function KeyBarInner(props: KeyBarProps) {
         </View>
       </GestureDetector>
 
-      {/* The keyboard's owner. Invisible but real: iOS focuses it, every keystroke lands in
-          `onChangeText`, and the diff against what it held last is what goes to the PTY. */}
+      {/* The keyboard's owners (see `inputOff`/`inputOn`). Invisible but real: the focused one
+          takes every keystroke into `onChangeText`, and the diff against what it held last is
+          what goes to the PTY. `onFocus`/`onBlur` feed `focusedIn` so a prose flip knows whether
+          it is a focus move or a silent re-aim; blur repads, as before. */}
       <TextInput
-        ref={input}
+        ref={inputOff}
         style={styles.input}
         onChangeText={onChangeText}
         onSelectionChange={onSelectionChange}
@@ -903,8 +960,17 @@ function KeyBarInner(props: KeyBarProps) {
         defaultValue={PAD}
         value={padWrite}
         submitBehavior="submit" // Return sends without blurring
-        onBlur={repad}
-        // A terminal wants nothing from the keyboard but keys.
+        onFocus={() => {
+          focusedIn.current = 'off';
+        }}
+        onBlur={() => {
+          focusedIn.current = null;
+          repad();
+        }}
+        // Prose mode (see `KeyBarProps.textMode`): this field is the OFF brain — no corrections,
+        // no capitalization. Its twin below is the ON brain; the flip moves focus between them
+        // rather than mutating these. `spellCheck` stays off in both — the squiggle is noise on a
+        // 1×1 field nobody can see.
         autoCorrect={false}
         autoCapitalize="none"
         spellCheck={false}
@@ -914,6 +980,32 @@ function KeyBarInner(props: KeyBarProps) {
         multiline={false}
         // Category (1), iOS-only API: `ascii-capable` is an iOS `keyboardType` value with no
         // Android equivalent; Android takes its default layout. Nothing visual crosses this branch.
+        keyboardType={Platform.OS === 'ios' ? 'ascii-capable' : 'default'}
+        keyboardAppearance={theme.isDark ? 'dark' : 'light'} // iOS-only prop, ignored elsewhere
+      />
+      <TextInput
+        ref={inputOn}
+        style={styles.input}
+        onChangeText={onChangeText}
+        onSelectionChange={onSelectionChange}
+        onSubmitEditing={() => emitKey('\r')}
+        defaultValue={PAD}
+        value={padWrite}
+        submitBehavior="submit" // Return sends without blurring
+        onFocus={() => {
+          focusedIn.current = 'on';
+        }}
+        onBlur={() => {
+          focusedIn.current = null;
+          repad();
+        }}
+        autoCorrect
+        autoCapitalize="sentences"
+        spellCheck={false}
+        autoComplete="off"
+        caretHidden
+        contextMenuHidden
+        multiline={false}
         keyboardType={Platform.OS === 'ios' ? 'ascii-capable' : 'default'}
         keyboardAppearance={theme.isDark ? 'dark' : 'light'} // iOS-only prop, ignored elsewhere
       />
@@ -1107,13 +1199,18 @@ const UPLOAD_ROWS = [
 export function BarMenu({
   theme,
   bottom,
+  textMode,
+  onTextMode,
   onUpload,
   onOpenSettings,
 }: {
   theme: Theme;
   /** The measured `popBase`, as on ArrowsPopover. */
   bottom: number;
-  /** §4.6's destination flow: the screen runs picker → destination sheet → silent SFTP save. */
+  /** Prose mode, mirrored onto its row — see `KeyBarProps.textMode` for the whole of it. */
+  textMode: boolean;
+  onTextMode: (on: boolean) => void;
+  /** §4.6’s destination flow: the screen runs picker → destination sheet → silent SFTP save. */
   onUpload: (kind: 'files' | 'photo' | 'camera') => void;
   /** T16's key screen. It is here rather than only on Setup because Upload ("Add to
    *  authorized_keys") needs a session that is already up, and the only other door to that screen
@@ -1141,6 +1238,23 @@ export function BarMenu({
             <Text style={[styles.menuLabel, { color: theme.foreground }]}>{label}</Text>
           </Pressable>
         ))}
+        <View style={[styles.menuBreak, { backgroundColor: theme.scrim }]} />
+        <Pressable
+          onPress={() => onTextMode(!textMode)}
+          style={({ pressed }) => [
+            styles.menuRow,
+            { borderTopColor: hairline(theme), flexDirection: 'row', alignItems: 'center' },
+            pressed && { backgroundColor: keyTint(theme) },
+          ]}>
+          <Text style={[styles.menuLabel, { color: theme.foreground, flex: 1 }]}>Prose mode</Text>
+          <Text
+            style={[
+              styles.menuState,
+              { color: textMode ? theme.accent : theme.placeholder },
+            ]}>
+            {textMode ? 'on' : 'off'}
+          </Text>
+        </Pressable>
         <View style={[styles.menuBreak, { backgroundColor: theme.scrim }]} />
         <Pressable
           onPress={onOpenSettings}
@@ -1380,6 +1494,8 @@ const styles = StyleSheet.create({
   /** The first row sits under the header, where the prototype draws no rule. */
   menuRowFirst: { borderTopWidth: 0 },
   menuLabel: { fontFamily: SANS, fontSize: TEXT.label, includeFontPadding: false },
+  /** The prose mode row's state: one word, muted off, accent on. */
+  menuState: { fontFamily: SANS_SEMIBOLD, fontSize: TEXT.note, includeFontPadding: false },
   menuBreak: { height: 6 },
 
   /* clipboard popover — centered, 300pt, 20pt corners per the prototype */

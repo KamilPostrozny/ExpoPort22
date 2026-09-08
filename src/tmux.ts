@@ -25,8 +25,10 @@ import {
   type WindowSearch,
 } from '@/search-model';
 import { getSettings, pollSession, SESSION_NAME, updateSettings, usesTmux } from '@/settings';
+import { INTERPRETERS } from '@/prose-model';
 import {
   APPLY_AND_VERIFY,
+  childrenCommand,
   CONF_DIRECTORIES,
   CONF_PATH,
   LIST_SESSIONS,
@@ -46,6 +48,7 @@ import {
   parseWindows,
   pollDelay,
   readFileCommand,
+  scrollBottomCommand,
   selectWindowCommand,
   type ConfigStatus,
   type TmuxWindow,
@@ -77,6 +80,19 @@ export type TmuxState = {
   session: string | null;
   /** The active window index while attached — T7's badge. `null` = not attached, badge default. */
   windowIndex: number | null;
+  /** The window on screen is in copy mode — the pane is scrolled up into its scrollback, the
+   *  frozen state the "go to bottom" arrow reacts to. `false` when not attached. */
+  scrolled: boolean;
+  /** The pane on screen's foreground job, by basename — the prose-mode auto-decision's input
+   *  (T7.15, `src/prose-model.ts`). `null` when not attached. MEANINGFUL only while `session` is
+   *  non-null too: an untargeted poll (the start modes that cannot name a session) answers about
+   *  whatever pane tmux last touched, which may not be the pane on screen. */
+  paneCommand: string | null;
+  /** The pane shell's direct children's argvs, filled only while the foreground is an interpreter
+   *  (the `node` vs `…/claude-code/cli.js` disambiguation, see `childrenCommand` in tmux-model).
+   *  `[]` in every other state — including while `paneCommand` is `null`. Same named-session
+   *  caveat as `paneCommand`. */
+  paneChildren: string[];
 };
 
 const DOWN: TmuxState = {
@@ -85,6 +101,9 @@ const DOWN: TmuxState = {
   attached: false,
   session: null,
   windowIndex: null,
+  scrolled: false,
+  paneCommand: null,
+  paneChildren: [],
 };
 
 let state: TmuxState = DOWN;
@@ -110,7 +129,11 @@ function set(patch: Partial<TmuxState>) {
     next.config === state.config &&
     next.attached === state.attached &&
     next.session === state.session &&
-    next.windowIndex === state.windowIndex;
+    next.windowIndex === state.windowIndex &&
+    next.scrolled === state.scrolled &&
+    next.paneCommand === state.paneCommand &&
+    next.paneChildren.length === state.paneChildren.length &&
+    next.paneChildren.every((child, i) => child === state.paneChildren[i]);
   if (same) return;
   state = next;
   console.log('[tmux]', JSON.stringify(next));
@@ -153,9 +176,11 @@ function run1(command: string): Promise<string> {
  *
  *   1  the shell's PTY, held for the whole session
  *   3  `execPool`  — the grid's per-window fan-outs (T10's captures, T14's greps), shared
- *   2  `singlePool` — every command that is not fanned out, via `run1`: the ~2s poll, `listWindows`,
- *                     select/kill/new/move, the probe, `cacheSessions`, `configure`'s two reads,
- *                     and the terminal view's own search (`searchWindow` — one window, not N)
+ *   2  `singlePool` — every command that is not fanned out, via `run1`: the ~2s poll, its ~2s
+ *                     children ask (only while the foreground is an interpreter — T7.15),
+ *                     `listWindows`, select/kill/new/move, the probe, `cacheSessions`,
+ *                     `configure`'s two reads, and the terminal view's own search
+ *                     (`searchWindow` — one window, not N)
  *   2  `shotPool`  — the un-fanned single captures (the zoom's `refreshCard`, the bar swipe's two
  *                     neighbour warms — which is three in flight if the two overlap)
  *   = 8, and the two spare cover `configure`'s SFTP upload plus whatever sshd counts that we do not.
@@ -305,18 +330,54 @@ async function poll(): Promise<void> {
     }
     if (!up) return;
     const attached = answer?.attached ?? false;
+    // T7.15's second half, fetched BEFORE the one `set` below on purpose: the screen's effect keys
+    // on (paneCommand, paneChildren) together, and an interpreter beat answered in two sets —
+    // `(node, [])` then `(node, [claude])` — would repad the keyboard twice in a row, the second
+    // time mid-word, where a repad throws away the correction context the user was in.
+    let paneChildren: string[] = [];
+    if (
+      attached &&
+      answer !== null &&
+      answer.panePid > 0 &&
+      INTERPRETERS.has(answer.paneCommand)
+    ) {
+      try {
+        paneChildren = (await run1(childrenCommand(answer.panePid)))
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line !== "");
+      } catch {
+        // One beat without the disambiguation: the interpreter default is OFF — the terminal's own
+        // default. Nothing to say, like a missed poll; the next beat asks again.
+      }
+    }
     set({
       attached,
       // Only a session we NAMED and that answered gets to scope a window command or hold a grid
       // open. Nothing here can ever be a session tmux picked for us.
       session: attached ? session : null,
       windowIndex: answer?.attached ? answer.windowIndex : null,
+      scrolled: answer?.attached ? answer.paneInMode > 0 : false,
+      paneCommand: attached ? answer?.paneCommand ?? null : null,
+      paneChildren: attached ? paneChildren : [],
     });
   } catch {
     // One missed beat; the next tick asks again.
   } finally {
     polling = false;
   }
+}
+
+/**
+ * Ask the poll for one immediate beat, off the ~2s rhythm — for when something the poll reads has
+ * changed this frame and the next scheduled beat would leave the UI a beat stale (the "scrolled up"
+ * arrow: a wheel changed tmux's copy-mode state, so the arrow should not wait a beat to appear).
+ * `poll` is guarded, so a nudge that overlaps the scheduled beat — or another nudge — is a no-op,
+ * never a stacked channel, and this leaves the beat's timer alone: the next scheduled poll still
+ * lands where it would have.
+ */
+export function nudgePoll(): void {
+ void poll();
 }
 
 /** What the host is running, remembered for Setup's attach picker (§4.1) — that screen has no
@@ -412,6 +473,19 @@ export async function selectWindow(windowId: string): Promise<void> {
 export async function killWindow(windowId: string): Promise<void> {
   await run1(killWindowCommand(windowId));
   void poll();
+}
+
+/**
+ * The "scrolled up" arrow: send the window's pane the key that ends copy mode, so it snaps back
+ * to its live bottom (see `scrollBottomCommand` for why `cancel` and why the no-op is safe).
+ *
+ * The nudge is immediate, not the switch's 400ms: there is no page slide to hide, and the button
+ * disappearing IS the feedback the tap is for — so the poll that clears `scrolled` is asked at
+ * once, five times sooner than the 2s beat would carry it.
+ */
+export async function scrollBottom(windowId: string): Promise<void> {
+ await run1(scrollBottomCommand(windowId));
+ void poll();
 }
 
 // Deferred like `selectWindow`: committing a swipe past the last tab births a window, and that
