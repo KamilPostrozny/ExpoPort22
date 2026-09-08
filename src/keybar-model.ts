@@ -96,25 +96,44 @@ export const DEL = '\x7f';
  * then whatever was typed. Deletes are counted in code points — one DEL per character the user
  * saw vanish — and both ends back off a split surrogate pair so an emoji is never half kept.
  *
- * Prefix first, then the tail the two still share, because the caret is no longer always at the
- * end: hold-space moves it (see `caretKeys`), and a character typed mid-line must come out as
- * that one character rather than "delete the rest of the line and retype it" — the PTY's cursor
- * was moved to the same place by the arrows, so a prefix-only diff would eat the line from
- * there. Prefix wins ties, so every edit at the end still diffs exactly as it did before.
+ * Only preserve shared text AFTER the old caret. An autocorrection can change text BEFORE it:
+ * `lets|` → `let’s|` must send DEL + `’s`, not just `’` (which would produce `lets’`). A moved
+ * caret still preserves its untouched suffix, so `ls | -la` never deletes the rest of the line.
+ * Bound the prefix by the caret too: repeated letters/spaces must be edited at the actual cursor.
+ *
+ * `ahead` is a code-point move to the old replacement end, normally zero; it handles a native
+ * replacement extending past the caret. `caret` is the resulting UTF-16 field position. Keep
+ * navigation separate from keys so it bypasses Ctrl and the line-length/dictation heuristics.
  */
-export function diffInput(prev: string, next: string): string {
+export function diffInput(prev: string, next: string, caret = prev.length): {
+  ahead: number;
+  keys: string;
+  caret: number;
+} {
+  caret = Math.max(0, Math.min(caret, prev.length));
+  if (prev === next) return { ahead: 0, keys: '', caret };
   const max = Math.min(prev.length, next.length);
   let common = 0;
-  while (common < max && prev[common] === next[common]) common++;
+  // A shrinking edit is backspace, not forward-delete, when repeated characters make both
+  // readings possible. Reserve the removed width BEFORE the caret before matching the prefix.
+  const prefixLimit = Math.max(0, Math.min(max, caret, caret + next.length - prev.length));
+  while (common < prefixLimit && prev[common] === next[common]) common++;
   const code = prev.charCodeAt(common - 1);
   if (common > 0 && code >= 0xd800 && code <= 0xdbff) common--;
   let tail = 0;
-  while (tail < max - common && prev[prev.length - 1 - tail] === next[next.length - 1 - tail])
+  while (
+    tail < Math.min(max - common, prev.length - caret) &&
+    prev[prev.length - 1 - tail] === next[next.length - 1 - tail]
+  )
     tail++;
   const low = next.charCodeAt(next.length - tail);
   if (tail > 0 && low >= 0xdc00 && low <= 0xdfff) tail--;
   const deletes = [...prev.slice(common, prev.length - tail)].length;
-  return DEL.repeat(deletes) + next.slice(common, next.length - tail);
+  return {
+    ahead: [...prev.slice(caret, prev.length - tail)].length,
+    keys: DEL.repeat(deletes) + next.slice(common, next.length - tail),
+    caret: next.length - tail,
+  };
 }
 
 /**

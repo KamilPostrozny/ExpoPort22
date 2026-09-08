@@ -19,7 +19,7 @@ import {
   ROW_AIR_PROG,
   controlByte,
   ctrlTap,
-  diffInput,
+  diffInput as planInputEdit,
   navKey,
   pasteBytes,
 } from '@/keybar-model';
@@ -117,6 +117,9 @@ test('DECCKM switches all six to SS3', () => {
 
 /* --- the typed-input diff (native TextInput → PTY bytes) --- */
 
+const diffInput = (prev: string, next: string, caret = prev.length) =>
+  planInputEdit(prev, next, caret).keys;
+
 test('typing appends', () => {
   expect(diffInput('', 'a')).toBe('a');
   expect(diffInput('a', 'ab')).toBe('b');
@@ -135,9 +138,9 @@ test('a replacement is deletes then the new tail', () => {
 test('an edit at a moved caret is that edit alone, not the tail retyped', () => {
   // Hold-space put the caret after `ls `; the PTY's cursor went with it, so the line past the
   // caret is the shell's business and must not come back as deletes.
-  expect(diffInput('ls -la', 'ls x-la')).toBe('x');
-  expect(diffInput('ls -la', 'ls-la')).toBe(DEL); // backspace at the same spot
-  expect(diffInput('ls -la', 'x' + 'ls -la')).toBe('x'); // at the very start
+  expect(diffInput('ls -la', 'ls x-la', 3)).toBe('x');
+  expect(diffInput('ls -la', 'ls-la', 3)).toBe(DEL); // backspace at the same spot
+  expect(diffInput('ls -la', 'x' + 'ls -la', 0)).toBe('x'); // at the very start
 });
 
 test('a tail edit still wins the tie — the prefix is matched first', () => {
@@ -157,8 +160,54 @@ test('an astral character is one key both ways', () => {
   // A shared high surrogate must not be counted as common prefix.
   expect(diffInput('😀', '😁')).toBe(DEL + '😁');
   // Nor a shared low surrogate as common tail: 'x😀' → '😀' is one delete, not half a pair kept.
-  expect(diffInput('x😀', '😀')).toBe(DEL);
-  expect(diffInput('a😀', 'b😀')).toBe(DEL + 'b');
+  expect(diffInput('x😀', '😀', 1)).toBe(DEL);
+  expect(diffInput('a😀', 'b😀', 1)).toBe(DEL + 'b');
+});
+
+test('autocorrect rewrites the shared suffix behind the cursor, including the apostrophe in let’s', () => {
+  for (const apostrophe of ["'", '’']) {
+    expect(diffInput('lets', `let${apostrophe}s`)).toBe(DEL + apostrophe + 's');
+    expect(diffInput('lets ', `let${apostrophe}s `)).toBe(DEL.repeat(2) + apostrophe + 's ');
+    expect(diffInput('dont', `don${apostrophe}t`)).toBe(DEL + apostrophe + 't');
+  }
+  expect(diffInput('teh ', 'the ')).toBe(DEL.repeat(3) + 'he ');
+  expect(diffInput('helo world ', 'hello world ')).toBe(DEL.repeat(8) + 'lo world ');
+});
+
+test('correction at a moved caret rewrites only up to that caret', () => {
+  expect(planInputEdit('lets go', 'let’s go', 4)).toEqual({
+    ahead: 0, keys: DEL + '’s', caret: 5,
+  });
+  expect(planInputEdit('aaa', 'aaaa', 1)).toEqual({ ahead: 0, keys: 'a', caret: 2 });
+  expect(planInputEdit('aaa', 'aa', 1)).toEqual({ ahead: 0, keys: DEL, caret: 0 });
+});
+
+test('a replacement extending beyond the caret moves to its old end first', () => {
+  expect(planInputEdit('teh next', 'the next', 1)).toEqual({
+    ahead: 2, keys: DEL.repeat(2) + 'he', caret: 3,
+  });
+});
+
+test('terminal replay agrees with native text and cursor across correction/edit sequences', () => {
+  const cases: [string, string, number][] = [
+    ['lets', 'let’s', 4], ['lets ', "let's ", 5], ['let’s ', 'lets ', 6],
+    ['teh ', 'the ', 4], ['helo world ', 'hello world ', 11],
+    ['lets go', 'let’s go', 4], ['ls -la', 'ls x-la', 3], ['ls -la', 'ls-la', 3],
+    ['aaa', 'aaaa', 1], ['aaa', 'aa', 1], ['teh next', 'the next', 1],
+    ['😀lets', '😀let’s', 6], ['a😀', 'b😀', 3], ['😀😀', '😀x😀', 2],
+    [' '.repeat(512) + 'lets', ' '.repeat(512) + 'let’s', 516],
+  ];
+  for (const [prev, next, caret] of cases) {
+    const edit = planInputEdit(prev, next, caret);
+    const screen = [...prev];
+    let cursor = [...prev.slice(0, caret)].length + edit.ahead;
+    for (const key of edit.keys) {
+      if (key === DEL) screen.splice(--cursor, 1);
+      else screen.splice(cursor++, 0, key);
+    }
+    expect(screen.join('')).toBe(next);
+    expect(screen.slice(0, cursor).join('').length).toBe(edit.caret);
+  }
 });
 
 /* --- hold-space: the caret's move, as arrows --- */

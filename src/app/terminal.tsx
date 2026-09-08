@@ -246,9 +246,6 @@ export default function SessionScreen() {
    *  is a preview of a pane this client is about to size to itself, so this is the width to draw
    *  them all at; anything longer clips, exactly as it will when tmux reflows it. */
   const [liveCols, setLiveCols] = useState(0);
-  /** The inset the terminal took above its first row — the row remainder, which it works out
-   *  itself (see TerminalProps.onResize). The cards need it to aim the zoom's crossfade. */
-  const [padTop, setPadTop] = useState(0);
   /** A keyboard we asked for and have not seen yet — the terminal's size stays held until it
    *  lands, so the host hears the geometry once. Self-clearing: a focus that never raises one
    *  (hardware keyboard, a refusal) must not hold the size for the rest of the session. */
@@ -489,11 +486,7 @@ export default function SessionScreen() {
     onScroll: () => {
       nudgePoll();
     },
-    onResize: async (cols, rows, cellW, cellH, topInset) => {
-          // What MOVED, not what was measured: the pane shifting up a touch a beat after the
-          // landing is either this report changing the top inset (or the row count, which re-rolls
-          // the remainder) or the flushed bytes scrolling a line. The two are a row apart and look
-          // alike; only the trace tells them apart (user, 2026-08-11).
+    onResize: async (cols, rows, cellW, cellH) => {
           const was = lastFit.current;
           // A resize re-rolls the search: the host reflows the pane for the new size, so every
           // on-screen hit position the last capture reported is about to be wrong (a keyboard open
@@ -502,47 +495,17 @@ export default function SessionScreen() {
           // fires as a re-report that changes nothing.
           if (searchRef.current.on && (was === null || was.cols !== cols || was.rows !== rows))
             setSearchFit((n) => n + 1);
-          // The box this side computed, checked against the box the webview actually got. The two
-          // are worked out on opposite sides of a bridge that rounds — fractional points here,
-          // integer `clientHeight` there — so `rowRemainder` leaves a point of slack and this inset
-          // is what is left of it. More than that means the sides disagree, and the disagreement is
-          // paid in whole rows: 17pt of an 18pt cell was a lost row and the pane sitting one row
-          // low, on every keyboard close, for a day (2026-08-12). Any chrome change can re-open it,
-          // and the webview is the only witness — so it says so rather than being read off a probe
-          // that has to be there at the time. The first report is the boot fit, whose cell is not
-          // measured yet.
-          // On the LAST report of a settling, not on every one of them. `rowRemainder` is rolled
-          // from `cell.h`, and `cell.h` arrives in this very callback — so the fit that first
-          // measures a cell is computed against the remainder of the old one and reports the whole
-          // leftover, and the fit after it is still ahead of the layout that carries the new
-          // remainder across. That is the boot handshake (8.1 → 8.8 → 0.8 on the emulator,
-          // 2026-08-16) and a font-size change is the same three steps. Warning on the middle of it
-          // is what taught the reader to skip the line — it cried once per connect and the day it
-          // meant something nobody would have looked.
-          //
-          // The bug it exists for does not settle: 17pt of an 18pt cell, fit after fit, on every
-          // keyboard close. So the report arms it and the next report disarms it; only a box still
-          // off with nothing following says anything.
-          clearTimeout(offBoxTimer.current);
-          if (__DEV__ && was !== null && topInset >= 2 && cellH > 0)
-            offBoxTimer.current = setTimeout(() => {
-              console.warn(
-                `[terminal] box off by ${topInset.toFixed(1)}pt of a ${cellH.toFixed(1)}pt cell — ` +
-                  'the stage and the webview disagree; see `rowRemainder`',
-              );
-            }, 600); // 4× the 150ms report throttle, so a settling never outruns it
-          lastFit.current = { cols, rows, top: topInset };
+          lastFit.current = { cols, rows };
           if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
             return;
           }
           // Same object back when nothing moved, so React bails out instead of re-rendering: a
           // re-report carries the cell it already carried, and a fresh `{w,h}` is a new identity
-          // every time — which re-ran this screen, and `rowRemainder` and the insets with it, once
-          // per switcher open for a cell that had not changed.
+          // every time — which re-ran this screen once per switcher open for a cell that had
+          // not changed.
           if (cellW > 0 && cellH > 0)
             setCell((c) => (c.w === cellW && c.h === cellH ? c : { w: cellW, h: cellH }));
           if (cols > 0) setLiveCols(cols);
-          setPadTop(topInset);
           setSize(cols, rows);
         },
     onBoot: async () => {
@@ -897,13 +860,8 @@ export default function SessionScreen() {
     finishClose();
   }, [showTabs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** The last size the webview reported, so `onResize` can tell what actually moved (a resize that
-   *  re-rolls the search hits, a box still off after the report that should have squared it) from a
-   *  re-report that changed nothing. */
-  const lastFit = useRef<{ cols: number; rows: number; top: number } | null>(null);
-  /** Armed by a report whose box is off by a row's worth, disarmed by the next one — see `onResize`. */
-  const offBoxTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(offBoxTimer.current), []);
+  /** The last size the webview reported, so only a real resize re-rolls the search hits. */
+  const lastFit = useRef<{ cols: number; rows: number } | null>(null);
 
   /* The frame-drop probe used to live here: a useFrameCallback that logged any frame over 12ms.
    * It went the way of the rest of the harness (07430ef), which missed it — it was never gated,
@@ -2037,37 +1995,21 @@ export default function SessionScreen() {
   // another — the rows walked 38 → 33 in the log before the floor went in.
   // Below the last line the eye adds the terminal's inset to the key bar's own 5pt, so the
   // terminal's share is the gap minus that, and the two together come to the gap at the sides.
-  // Above there is no inset of ours at all: the row remainder goes there, and the terminal
-  // applies it itself, inside its own layout pass (see TerminalProps.onResize). Worked out here
-  // it needed a measured height, which only arrives after a layout — so every keyboard open laid
-  // out once wrong and once right, which is the bounce (user, 2026-08-10).
+  // The grid is top-aligned inside the webview; any fractional row stays below its last row.
   const padBottom = Math.max(0, padH - BAR_PAD_TOP);
   /** The card face runs the full window now, so its content clears the notch itself — except
    *  under an armed search, whose row (padded past the notch on its own) already pushed the
    *  terminal area below it. */
   const notchPad = search.on ? 0 : insets.top;
+  const searchRowH = search.on ? insets.top + 46 : 0;
   /** The floating bar's ground: home strip + the key ROW, all inside the card face. The chord
    *  strip is not in it — it overlays the pane, see `rowHeight`. */
   const barPad = rowHeight + insets.bottom;
-  /** The row remainder, absorbed into the BOTTOM padding so the first row is pinned to the top
-   *  of the box: the webview used to carry it above the rows (`box % cell`), and any chrome
-   *  change — ribbon, keyboard — re-rolled it, shifting the whole pane by up to a row at the
-   *  hop's reveal (user, 2026-08-11, screenshot pairs: ~13pt, down on bare, up on ribboned).
-   *  Down here it merges into the gap the bar already keeps, where a varying gap is at home. */
-  const searchRowH = search.on ? insets.top + 46 : 0;
-  const innerH =
-    stage === null ? 0 : stage.h - keyboardPad - searchRowH - notchPad - padBottom - barPad;
-  // A point of slack, because an exact multiple is the one number this must not aim at. The box is
-  // handed over through three fractional paddings, each rounded to a device pixel on the way, so
-  // what the webview measures is up to a point SHORT of what is computed here — and a box a hair
-  // under a whole row costs the row: xterm drops it and parks the leftover as a top inset, which is
-  // the whole pane stepping down 17pt of an 18pt cell every time the keyboard leaves (device,
-  // 2026-08-12: box 738.00 out, `clientHeight` 737 in, 41 rows → 40 and padTop 0 → 17). A point over
-  // is free — it lands as a padTop of a few tenths, under a device pixel.
-  const rowRemainder = cell.h > 0 && innerH > 0 ? Math.max(0, (innerH % cell.h) - 1) : 0;
+  // Do not round this box to cell.h here. FitAddon owns whole-row fitting in the webview;
+  // native compensation needs a second layout and cannot agree with its rounding exactly.
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
    *  the same three numbers, or their text does not line up with the live terminal's. */
-  const paneInsets = { top: notchPad + padTop, side: padH, bottom: padBottom + barPad + rowRemainder };
+  const paneInsets = { top: notchPad, side: padH, bottom: padBottom + barPad };
   /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, plus the
    *  home strip and the keyboard's overlap, because that layer's bottom is the window's. */
   const popBase = barHeight + 6 + keyboardPad + insets.bottom;
@@ -2369,9 +2311,6 @@ export default function SessionScreen() {
           liveCols={liveCols}
           insetTop={insets.top}
           insetBottom={insets.bottom}
-          // The flight crops its top chrome away (`cropTop`), so what is left above the first row
-          // — on both sides of the crossfade — is the webview's own inset and nothing else.
-          padTop={padTop}
           cards={gridCards.current}
           total={cards.length}
           unreachable={listFailed}
@@ -2526,9 +2465,7 @@ export default function SessionScreen() {
             backgroundColor: theme.background,
             paddingTop: notchPad,
             paddingHorizontal: padH,
-            // The remainder makes the box an exact multiple of the cell, so the webview's own
-            // top inset stays ~0 and the first row never moves — see rowRemainder.
-            paddingBottom: padBottom + barPad + rowRemainder,
+            paddingBottom: padBottom + barPad,
             // The resting corner, stated rather than left to the absence of one — what the view
             // wears before the first frame, and what the code says the page's corner IS. It is
             // not the mechanism that keeps it right (see `cardRadiiStyle`'s note on why the style
@@ -2565,7 +2502,7 @@ export default function SessionScreen() {
           onPress={scrollToBottom}
           style={({ pressed }) => [
             styles.scrollArrow,
-            { right: BAR.sideMargin, bottom: padBottom + barPad + rowRemainder + 4 },
+            { right: BAR.sideMargin, bottom: padBottom + barPad + 4 },
             pressed && PRESSED_KEY,
           ]}>
           {/* The key bar's own tabs circle, stacked above it: the same `Plate` and size, aligned to

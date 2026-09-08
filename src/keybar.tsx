@@ -469,15 +469,23 @@ function KeyBarInner(props: KeyBarProps) {
   };
 
   const onChangeText = (next: string) => {
+    // Finish any trackpad move before applying an edit at its new position. Otherwise typing
+    // inside the 40ms settle window edits at the old PTY cursor and cancels the queued move.
+    if (settle.current) {
+      clearTimeout(settle.current);
+      settle.current = undefined;
+      const move = caretKeys(wanted.current - caret.current, props.decckm);
+      if (move) props.sendBytes(move);
+      caret.current = wanted.current;
+    }
+    const edit = diffInput(typed.current, next, caret.current);
+    if (edit.ahead) props.sendBytes(caretKeys(edit.ahead, props.decckm));
     // §4.2: drop iOS dictation's prepended space at an empty line; a real spacebar (a single-char
     // insert) always passes. Decided on the whole diff, before it is split into keys.
-    const bytes = filterDictation(lineLen.current, diffInput(typed.current, next));
-    // The edit happened at the caret, so it moved by what the edit added or took away. iOS fires
-    // `onChange` before `onSelectionChange` on a single-line field (RN leans on that ordering too:
-    // RCTTextInputComponentView.mm:54), so keeping the anchor level here is what leaves that
-    // handler seeing a zero delta for ordinary typing and a real one only for a hold-space drag.
-    caret.current += next.length - typed.current.length;
-    wanted.current = caret.current;
+    const bytes = filterDictation(lineLen.current, edit.keys);
+    // RN sends text before selection (RCTTextInputComponentView.mm:54). Anchor at the actual
+    // replacement end so its following selection event is not mistaken for a trackpad move.
+    caret.current = wanted.current = edit.caret;
     typed.current = next;
     for (const key of bytes) emitKey(key); // string iteration = one code point per key
     // Top the pad up before a held delete runs it dry, and trim the typed tail before iOS starts
@@ -506,10 +514,9 @@ function KeyBarInner(props: KeyBarProps) {
   const onSelectionChange = (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
     const { start, end } = e.nativeEvent.selection;
     // A range is a selection, not a caret: the system's, and nothing for the PTY to follow.
-    if (start !== end) {
-      caret.current = wanted.current = start;
-      return;
-    }
+    // Autocorrect may temporarily select the word being replaced. The PTY did NOT move to the
+    // range start, so changing its anchor here would make the replacement delete the wrong text.
+    if (start !== end) return;
     const step = start - wanted.current;
     wanted.current = start;
     if (Math.abs(step) > CARET_STEP_MAX) {

@@ -397,11 +397,6 @@ export type SwitcherProps = {
   cell: { w: number; h: number };
   /** The live pane's column count. Every card is capped to it — see `liveCols` on the screen. */
   liveCols: number;
-  /** The terminal's own top inset, in stage points. Sideways a card's inset is a constant share
-   *  of the stage (`SHOT_PAD`), but vertically the terminal's inset absorbs half the row
-   *  remainder and so moves with the layout — and the card's has to move with it, or the text
-   *  steps down at the crossfade by whatever the difference is. */
-  padTop: number;
   /** Already narrowed by the screen while the search is armed. */
   cards: Card[];
   /** The unfiltered count — the "N of M Tabs" label's M. */
@@ -580,7 +575,6 @@ function SwitcherInner(props: SwitcherProps) {
                 card={card}
                 cell={props.cell}
                 liveCols={props.liveCols}
-                padTop={props.padTop}
                 hit={props.hits[card.win.id]}
                 query={nq}
                 slot={slotFrame(pos, stageW)}
@@ -747,7 +741,6 @@ function WindowCard({
   card,
   cell,
   liveCols,
-  padTop,
   hit,
   query,
   slot,
@@ -769,8 +762,6 @@ function WindowCard({
   card: Card;
   cell: { w: number; h: number };
   liveCols: number;
-  /** The terminal's top inset in stage points; through the zoom it is this card's. */
-  padTop: number;
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
    *  armed, so the card shows the first occurrence instead of the pane's bottom. `'failed'` = the
    *  grep never answered; the card stays put and says so under its name. */
@@ -996,18 +987,9 @@ function WindowCard({
       ? { borderWidth: CARD_RING, borderColor: theme.accent }
       : { borderWidth: CARD_RING_IDLE, borderColor: theme.border };
 
-  // Plain insets, because the ring is drawn OVER the card rather than laid out inside it (see the
-  // overlay at the end of the shot). It used to be a real border, which RN lays content out inside,
-  // so both of these subtracted it back off and the bottom edge carried a negative margin to match
-  // — three compensations for one structural choice, and the top one could not hold: `padTop` is
-  // 0.00 on nearly every fit, so `max(0, 0 * ratio - 2)` clamped to 0 and left the content sitting
-  // at the border's 2pt instead of at 0. That is the content stepping DOWN a couple of points on
-  // the landing frame (user, 2026-08-17). A clamp cannot express an inset smaller than the border;
-  // not spending the border on layout can.
+  // The ring is drawn OVER the card, not spent on layout. Like the live grid, snapshot rows
+  // start at the top with no fractional-row inset, so the zoom's crossfade cannot move them.
   const shotPad = SHOT_PAD * u;
-  // Vertically the terminal's inset is not a constant (it swallows half the row remainder), so
-  // the card's is that one seen through the zoom rather than a number of its own.
-  const shotPadTop = padTop * (slot.w / stageW);
 
   // The emulator's cell, shrunk by exactly what the zoom shrinks the stage by — so the card draws
   // the pane the size the flying surface hands over at.
@@ -1074,7 +1056,6 @@ function WindowCard({
                 borderRadius: CARD_RADIUS * u,
                 backgroundColor: theme.background,
                 paddingHorizontal: shotPad,
-                paddingTop: shotPadTop,
                 paddingBottom: shotPad,
               },
             ]}>

@@ -92,7 +92,6 @@ export type TerminalProps = {
     rows: number,
     cellW: number,
     cellH: number,
-    padTop: number,
   ) => Promise<void>;
   /** Hold the size where it is: no fit, no report, until it goes false again (then one of each).
    *  §4.5's zoom animates the stage's *height*, and the keyboard leaves on the way in — so an
@@ -630,7 +629,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // terminal up the screen: the box shrank with the layout while xterm kept drawing the old row
     // count, so the bottom lines sat under the keyboard for the length of the delay (T14, device).
     let settle: ReturnType<typeof setTimeout>;
-    let reported = { cols: 0, rows: 0, padTop: -1 };
+    let reported = { cols: 0, rows: 0 };
     // Only a size the host has not been told about is worth a round trip. Without this the same
     // `cols × rows` goes back on every fit, and since the answer re-renders the native side — which
     // re-marshals the props, which re-runs the effect below — it never stops.
@@ -660,11 +659,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     };
     // The row pitch stays the screen's own: xterm lays rows out as boxes at that height, so unlike
     // the advance it is what is drawn.
-    // Split from `cell` because `advance()` is not free: it appends a 1000-glyph span to the live
-    // rows container and reads `getBoundingClientRect()`, which forces a synchronous layout of the
-    // terminal subtree, then invalidates it again on removal. Only `report` wants the width;
-    // `fitRows` wants the pitch alone and used to pay for a probe it threw away — on every
-    // keyboard edge, rotation and hold release, twice per resize.
     const rowPitch = () => {
       const screen = host.current?.querySelector('.xterm-screen') as HTMLElement | null;
       if (screen === null || term.cols === 0 || term.rows === 0) return 0;
@@ -674,43 +668,23 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const h = rowPitch();
       return h === 0 ? { w: 0, h: 0 } : { w: advance(), h };
     };
-    // Whole rows, and the remainder above the first one rather than below the last — the gap
-    // under the last line is the key bar's to fill, and it already has one (user, 2026-08-10).
-    // It is done here, inside the document, because the box is known here: worked out on the
-    // React side it took a second layout pass to settle, which is a visible bounce every time
-    // the keyboard opens. Nothing is lost to it — the rows are counted before the inset is
-    // applied, so the inset is exactly what they could not fill.
-    //
-    // ONE fit, and the padding is never taken off to take a measurement. This used to zero the
-    // inset, fit at the taller box, work the remainder out and fit again — and that first pass is
-    // a real reflow at a size the pane never keeps. The host's height comes from the layout above
-    // it, not from its content, so its `clientHeight` does not move with its own padding: the
-    // measurement the first pass went to get is the same number the second one already has.
-    // Nothing was buying the churn, and it was on every fit — including the one 150ms after a
-    // zoom lands, which is the pane visibly stepping up a beat after the tab does (user,
-    // 2026-08-11). With the rows unchanged xterm's own resize is a no-op, so a fit that changes
-    // nothing now costs nothing.
-    let padTop = 0;
-    const fitRows = () => {
-      const el = host.current;
-      if (el === null) return fitAddon.fit();
-      const h = rowPitch();
-      padTop = h > 0 ? el.clientHeight % h : 0;
-      el.style.paddingTop = `${padTop}px`;
-      fitAddon.fit();
-    };
+    // Top-anchor the grid. FitAddon already floors the available height to whole rows; leave
+    // the fractional row BELOW them. Putting `height % pitch` above them shifts even a short
+    // prompt on every keyboard edge. Native-side remainder compensation could only reduce that
+    // shift, not remove it: the bridge and the two layouts round differently (2026-09-08).
+    // One fit, no padding mutation and no second layout/fit to cancel the first one.
+    const fitRows = () => fitAddon.fit();
     let forced = false;
     const report = () => {
-      const same =
-        term.cols === reported.cols && term.rows === reported.rows && padTop === reported.padTop;
+      const same = term.cols === reported.cols && term.rows === reported.rows;
       if (same && !forced) return;
       forced = false;
-      reported = { cols: term.cols, rows: term.rows, padTop };
+      reported = { cols: term.cols, rows: term.rows };
       const { w, h } = cell();
       // The mark is placed on this, and this is the only place it is measured — every event that
       // can move the cell (fit, keyboard edge, rotation, hold release) comes through here.
       cellSize.current = { w, h };
-      latest.current.onResize(term.cols, term.rows, w, h, padTop);
+      latest.current.onResize(term.cols, term.rows, w, h);
     };
     // `force` re-reports even a size the host was already told about: the only caller is the
     // release from a hold, and during that hold a report may have been dropped in flight (see
@@ -751,17 +725,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       if (since >= 150) flush();
       else settle = setTimeout(flush, 150 - since);
     });
-    // `border-box`, not the default `content-box`: the callback's own `fitRows` writes
-    // `paddingTop` onto this very element, and padding comes out of the content box — so a
-    // content-box observation sees its own inset as a resize, fires a second round, and Chromium
-    // reports the deferred first round as "ResizeObserver loop completed with undelivered
-    // notifications". That arrives as a window error whose `.error` is null, and null is all the
-    // dev-server log gets to print — a bare `DOM  ERROR  null` on every connect and every keyboard
-    // edge, which is a red line that says nothing and hides the ones that do.
-    // The border box is fixed by the layout above and does not move with the padding, so the real
-    // edges — keyboard, rotation, zoom — still fire and the feedback does not. Verified on the
-    // emulator 2026-08-16: same connect, `ResizeObserver loop` gone from the webview console and
-    // no new `DOM ERROR`. The `rowRemainder` warning is NOT this and still fires — separate bug.
+    // Observe the box assigned by native layout, not the terminal content inside it.
     observer.observe(host.current!, { box: 'border-box' });
     resize();
     latest.current.onBoot();
