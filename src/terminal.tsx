@@ -147,6 +147,16 @@ const GUTTER = 14;
 /** tmux's appearance query (`CSI ? 996 n`), which every other `CSI ? … n` has to fall through. */
 const COLOR_SCHEME_QUERY = 996;
 
+/** How long a deferred fit (see `resize`) may stand for the host's repaint. The resize redraw is
+ *  a ~50ms roundtrip, so this is six times that — a wedge guard for a repaint that never comes
+ *  (dead pane), not a wait that shapes how anything feels. */
+const DEFER_HARD_MS = 300;
+/** The repaint is a burst; it is over when this long passes without a chunk. The trace behind the
+ *  native `afterHostRedraw` has the whole burst inside a millisecond, so this is slack, not a
+ *  delay the user can see — by the first chunk the visible rows are already being repainted in
+ *  place, and the fit only trims what the box has already clipped. */
+const DEFER_QUIET_MS = 60;
+
 const ANSI_SLOTS = [
   'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
   'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
@@ -301,6 +311,9 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
   const fit = useRef<FitAddon | null>(null);
   const resizer = useRef<(() => void) | null>(null);
   const releaseFit = useRef<(() => void) | null>(null);
+  /** Host bytes are landing (see the deferred fit in `boot`): installed by `boot`, called from
+   *  `handle.write` so the burst-quiet watch sits where the data actually arrives. */
+  const hostData = useRef<(() => void) | null>(null);
   /** The touch layer's running coast (fling momentum), held here so the host's "scroll to bottom"
    *  tap can stop it: a fling left to coast keeps dispatching wheels after the pane has been
    *  cancelled back to its live bottom, so it scrolls up a notch past where it was meant to land. */
@@ -457,6 +470,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const term = terminal.current;
       if (term === null) return;
       for (const chunk of chunks) term.write(fromBase64(chunk));
+      hostData.current?.();
     },
     showHits,
     searchOff: () => {
@@ -673,6 +687,61 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // shift, not remove it: the bridge and the two layouts round differently (2026-09-08).
     // One fit, no padding mutation and no second layout/fit to cancel the first one.
     const fitRows = () => fitAddon.fit();
+    // A shrink of an alt-screen box is a HOST-side event, and the local refit of it is a
+    // transient wrong state: the app always runs in tmux, which repaints the whole pane on
+    // SIGWINCH, so whatever xterm draws in the meantime is about to be overwritten. The order
+    // of the two redraws decides whether the resize reads as one move or two, and xterm's
+    // trim direction decides which one:
+    //
+    // `Buffer.resize` trims from the side the cursor is on (src/common/buffer/Buffer.ts,
+    // height-decrease branch: cursor in the buffer's last row → `ybase++`, top rows drop;
+    // cursor above it → `lines.pop()`, bottom rows go). With the keyboard up, a TUI's cursor
+    // sits at the bottom of the old, TALLER screen, so a local fit drops the TOP of the pane —
+    // the first jump — and the host's repaint is the second (2026-09-09, measured: one box
+    // change, one setSize, both jumps accounted for by the two redraws, none by duplication).
+    //
+    // Deferring the fit until the host's repaint has landed flips the trim: the repaint has
+    // seated the cursor inside the new, smaller grid, so the same code pops the STALE rows
+    // below it, off the bottom of the clipped box — invisible. The host hears the size at once
+    // (that is what starts the repaint); only the local fit waits, released by the burst going
+    // quiet — the same signal the switcher's `afterHostRedraw` uses, mirrored here because the
+    // data lands in this document — or by the hard cap when no repaint comes at all. Growing
+    // (keyboard down) stays on the ordinary path: the trim appends at the bottom and the host
+    // only fills the new rows, so there is one move either way and nothing to defer.
+    let pendingFit: { hard: ReturnType<typeof setTimeout>; quiet: ReturnType<typeof setTimeout> | null } | null =
+      null;
+    const dropPendingFit = () => {
+      if (pendingFit === null) return;
+      clearTimeout(pendingFit.hard);
+      if (pendingFit.quiet !== null) clearTimeout(pendingFit.quiet);
+      pendingFit = null;
+    };
+    const settleFit = () => {
+      if (pendingFit === null) return;
+      if (latest.current.holdSize) {
+        // A hold owns the size now; the release's forced flush fits through the ordinary path.
+        pendingFit = { hard: setTimeout(settleFit, DEFER_HARD_MS), quiet: null };
+        return;
+      }
+      dropPendingFit();
+      fitRows();
+      // The size itself already went out with the deferred report; this refreshes the cell the
+      // fitted grid actually sits on (the host dedupes the size and takes the new pitch).
+      const { w, h } = cell();
+      cellSize.current = { w, h };
+      latest.current.onResize(term.cols, term.rows, w, h);
+    };
+    const deferFit = () => {
+      dropPendingFit();
+      pendingFit = { hard: setTimeout(settleFit, DEFER_HARD_MS), quiet: null };
+    };
+    hostData.current = () => {
+      if (pendingFit === null) return;
+      // The host's repaint is in flight: refit when the burst goes quiet rather than now —
+      // by then the cursor is inside the new grid and the trim pops below it (see above).
+      if (pendingFit.quiet !== null) clearTimeout(pendingFit.quiet);
+      pendingFit.quiet = setTimeout(settleFit, DEFER_QUIET_MS);
+    };
     let forced = false;
     const report = () => {
       const same = term.cols === reported.cols && term.rows === reported.rows;
@@ -691,6 +760,24 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     const resize = (force?: boolean) => {
       if (force) forced = true;
       if (latest.current.holdSize) return;
+      const dims = fitAddon.proposeDimensions();
+      // Nothing moved (or the font has not measured yet): a metrics-only re-report.
+      if (dims !== undefined && dims.cols === term.cols && dims.rows === term.rows) {
+        report();
+        return;
+      }
+      if (dims !== undefined && currentModes().altScreen && dims.rows < term.rows) {
+        // Tell the host at once and hold the local fit (see the deferred-fit note above).
+        // The cell goes out pre-fit: the pitch is font-derived and the fit does not move it,
+        // and `settleFit` re-reports the measured one when it lands.
+        reported = { cols: dims.cols, rows: dims.rows };
+        forced = false; // it was answered, not deferred
+        const { w, h } = cell();
+        cellSize.current = { w, h };
+        latest.current.onResize(dims.cols, dims.rows, w, h);
+        deferFit();
+        return;
+      }
       fitRows();
       report();
     };
@@ -718,7 +805,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       lastReport = Date.now();
       resize();
     };
-    const observer = new ResizeObserver(() => {
+    const observer = new ResizeObserver((entries) => {
+      const e = entries[0];
       if (latest.current.holdSize) return; // the zoom's own height animation — see `holdSize`
       clearTimeout(settle);
       const since = Date.now() - lastReport;
@@ -736,6 +824,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       observer.disconnect();
       teardownTouch();
       hitMark.current = []; // the elements go with the terminal; the refs must not outlive it
+      dropPendingFit();
+      hostData.current = null;
       term.dispose();
     };
   }
