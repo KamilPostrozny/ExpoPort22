@@ -1932,9 +1932,12 @@ export default function SessionScreen() {
   // Rounding it the other way costs a row, which grows the inset by half a row, which costs
   // another — the rows walked 38 → 33 in the log before the floor went in.
   // Below the last line the eye adds the terminal's inset to the key bar's own 5pt, so the
-  // terminal's share is the gap minus that, and the two together come to the gap at the sides.
+  // terminal's share is the gap minus that. At the user's request (2026-09-11) that share is
+  // halved: the split onto both sides made the bottom read as full side gap, and the user wants
+  // it half. The fit still measures against this smaller inset and top-aligns the grid, so the
+  // freed half can only ever buy a whole extra row, not oscillate.
   // The grid is top-aligned inside the webview; any fractional row stays below its last row.
-  const padBottom = Math.max(0, padH - BAR_PAD_TOP);
+  const padBottom = Math.max(0, (padH - BAR_PAD_TOP) / 2);
   /** The card face runs the full window now, so its content clears the notch itself — except
    *  under an armed search, whose row (padded past the notch on its own) already pushed the
    *  terminal area below it. */
