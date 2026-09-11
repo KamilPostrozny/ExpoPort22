@@ -1952,14 +1952,21 @@ export default function SessionScreen() {
    *  safe-area boundary (user, 2026-09-11), the row's bottom edge is the boundary itself, and
    *  nothing may pad the bar back off it. The price is the one the fit always kept — the last
    *  row's slack is state-dependent again, so the row→pill gap moves by up to one cell with the
-   *  keyboard. It only ever gets BIGGER than the old constant (the floor is the old 13pt in
-   *  every state). The row's gap to the RAISED keyboard is `BAR.keyboardGap` — the old constant
+   *  keyboard. The row's gap to the RAISED keyboard is `BAR.keyboardGap` — the old constant
    *  `padBottom`, back in conditional form (user, 2026-09-11, on the device): the bar rides the
    *  keyboard frame-by-frame (`bottom`) and keeps that gap off its top edge the whole ride,
    *  `popBase` carries it too, and at rest (no keyboard) it is 0 and the bar rests flush. */
+  /** The pane's share of that gap. The bar hangs `BAR.keyboardGap` off a raised keyboard, so
+   *  the pane must clear the bar's TOP, not the keyboard's: without this the plate's top edge
+   *  lands exactly on the pane's content bottom and the fit's sub-row remainder is the whole
+   *  clearance — whenever it is under the gap the bar covers the last row's tail (user,
+   *  2026-09-12: keyboard up, prose mode). State like `keyboardPad` itself: at rest the bar is
+   *  flush on the boundary and nothing is owed, and the 1:1 page cards ride it through
+   *  `paneInsets` so a hop with the keyboard up stays seamless. */
+  const kbGapPad = keyboardPad > 0 ? BAR.keyboardGap : 0;
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
    *  the same three numbers, or their text does not line up with the live terminal's. */
-  const paneInsets = { top: notchPad, side: padH, bottom: padBottom + barPad };
+  const paneInsets = { top: notchPad, side: padH, bottom: padBottom + barPad + kbGapPad };
   /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, plus the
    *  home strip and the keyboard's overlap, because that layer's bottom is the window's. The
    *  overlap carries `BAR.keyboardGap` too: the popover anchors to the bar, and the bar hangs
@@ -2444,7 +2451,7 @@ export default function SessionScreen() {
             paddingTop: notchPad,
             paddingLeft: padH + gridCenter,
             paddingRight: padH - gridCenter,
-            paddingBottom: padBottom + barPad,
+            paddingBottom: padBottom + barPad + kbGapPad,
             // The resting corner, stated rather than left to the absence of one — what the view
             // wears before the first frame, and what the code says the page's corner IS. It is
             // not the mechanism that keeps it right (see `cardRadiiStyle`'s note on why the style
@@ -2481,7 +2488,7 @@ export default function SessionScreen() {
           onPress={scrollToBottom}
           style={({ pressed }) => [
             styles.scrollArrow,
-            { right: BAR.sideMargin, bottom: padBottom + barPad + 4 },
+            { right: BAR.sideMargin, bottom: padBottom + barPad + kbGapPad + 4 },
             pressed && PRESSED_KEY,
           ]}>
           {/* The key bar's own tabs circle, stacked above it: the same `Plate` and size, aligned to
