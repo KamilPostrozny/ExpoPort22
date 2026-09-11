@@ -725,6 +725,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       }
       dropPendingFit();
       fitRows();
+      applyStaleClip(); // the fitted grid meets the box: the whole-row clip clears here
       // The size itself already went out with the deferred report; this refreshes the cell the
       // fitted grid actually sits on (the host dedupes the size and takes the new pitch).
       const { w, h } = cell();
@@ -734,6 +735,35 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     const deferFit = () => {
       dropPendingFit();
       pendingFit = { hard: setTimeout(settleFit, DEFER_HARD_MS), quiet: null };
+    };
+    // The deferred window draws a stale, TALLER grid clipped by the webview frame at the new,
+    // smaller box — and the frame cuts it mid-row: a sliver of the next line hangs one line
+    // below the last whole row (its height, `boxH mod pitch`, is wherever the box happens to
+    // land). Snapping the clip to a whole-row boundary instead keeps the window's content to
+    // complete lines; the host's repaint overwrites those lines in place, and `settleFit`
+    // makes the grid exactly the box, at which point the clip clears (the grid no longer
+    // overflows it). The clip lives on the xterm-owned root, not on the host div: React
+    // re-applies the host's style object on every render and would wipe it.
+    let staleClipped = false;
+    const applyStaleClip = () => {
+      const root = host.current;
+      if (root === null) return;
+      const el = root.querySelector<HTMLElement>('.xterm');
+      const grid = root.querySelector<HTMLElement>('.xterm-screen');
+      if (el === null || grid === null) return;
+      const boxH = root.clientHeight;
+      const gridH = grid.clientHeight; // the renderer's explicit canvas height (rows × pitch)
+      if (gridH > boxH + 0.5 && term.rows > 0) {
+        const pitch = gridH / term.rows;
+        const whole = Math.max(1, Math.floor(boxH / pitch)) * pitch;
+        el.style.overflow = 'hidden';
+        el.style.height = `${Math.round(whole)}px`;
+        staleClipped = true;
+      } else if (staleClipped) {
+        el.style.overflow = '';
+        el.style.height = '';
+        staleClipped = false;
+      }
     };
     hostData.current = () => {
       if (pendingFit === null) return;
@@ -764,6 +794,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       // Nothing moved (or the font has not measured yet): a metrics-only re-report.
       if (dims !== undefined && dims.cols === term.cols && dims.rows === term.rows) {
         report();
+        applyStaleClip(); // a box that grows back inside the window (keyboard down) ends it
         return;
       }
       if (dims !== undefined && currentModes().altScreen && dims.rows < term.rows) {
@@ -776,10 +807,12 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         cellSize.current = { w, h };
         latest.current.onResize(dims.cols, dims.rows, w, h);
         deferFit();
+        applyStaleClip(); // until the settle, clip the stale grid at a whole row (see above)
         return;
       }
       fitRows();
       report();
+      applyStaleClip(); // the fit just made the grid meet the box; the clip, if any, clears
     };
     resizer.current = resize;
     // Coming out of a hold, the box this document sits in may not have caught up yet: the layout
@@ -808,6 +841,11 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     const observer = new ResizeObserver((entries) => {
       const e = entries[0];
       if (latest.current.holdSize) return; // the zoom's own height animation — see `holdSize`
+      // The box just moved: re-decide the stale clip in this same frame. `flush` is throttled
+      // to 150ms and a pending settle can beat it, so leaving the clip to them left a grown box
+      // clipped at the old, smaller row count for the whole gap (measured: keyboard-down 85ms
+      // with rows 26..44 hidden under a 445px clip).
+      applyStaleClip();
       clearTimeout(settle);
       const since = Date.now() - lastReport;
       if (since >= 150) flush();
