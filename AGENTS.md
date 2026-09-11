@@ -62,6 +62,10 @@ The two harnesses already exist and neither needs the user's help:
 - iOS — the `ship-and-watch` skill, which decides between a Metro reload and a full CI build plus
   sideload and then watches the device log.
 
+**A Metro bundler on 8081 is taken, not asked.** If one is already running (pid, port), `kill` it
+and start the bundler in-session, because the device log is only readable from the process that
+owns the port; never arm a log watch on someone else's bundler (user, 2026-09-11).
+
 Read the log and the screenshot yourself and say per platform what passed; "did it work?" is not a
 report. If one platform cannot be reached in the session, say which one and that the change is
 therefore unverified there — an untested half is a finding, not a footnote.
