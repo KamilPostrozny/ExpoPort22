@@ -72,9 +72,10 @@ export function gridTop(width: number): number {
  * The gap the pane keeps from the edge of the screen, at design width (user, 2026-08-10). The
  * terminal had none and the cards had their own, which is why the zoom's crossfade stepped: the
  * emulator draws from the very top-left of its box, so the text sat a whole inset higher and
- * further left in the flying surface than in the card it landed on.
+ * further left in the flying surface than in the card it landed on. Halved 8 → 4 at the
+ * user's request (2026-09-11); everything that derives from it (`termPad`, `SHOT_PAD`) follows.
  */
-export const TERM_PAD = 8;
+export const TERM_PAD = 4;
 
 export function termPad(width: number): number {
   return (TERM_PAD / DESIGN_W) * width;
