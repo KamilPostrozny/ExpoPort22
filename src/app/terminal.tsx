@@ -1913,6 +1913,18 @@ export default function SessionScreen() {
    * the padding takes exactly the remainder away, so the fit that follows lands on the same rows.
    */
   const padH = stage === null ? 0 : termPad(stage.w);
+  // The fit's whole-cell columns leave a horizontal sliver — the width the flooring held back, up
+  // to a full cell — that, left-anchored, lands entirely on the right, so the gap to the right edge
+  // read bigger than the one to the left (user, 2026-09). Split it onto both sides so they agree,
+  // the horizontal twin of the vertical gap. Unlike the vertical remainder (see `fitRows` in
+  // terminal.tsx) it is stable across keyboard edges — the keyboard changes rows, not columns — and
+  // it does not move the fit: the + and − cancel, so the webview keeps the exact width the fit
+  // measured, and no second layout/fit is triggered. The live grid, the switcher's cards (seen
+  // through the zoom) and the 1:1 pages all shift by this same value, which is what keeps the
+  // crossfade seamless.
+  const termW = stage === null ? 0 : stage.w - 2 * padH;
+  const gridCenter =
+    liveCols > 0 && cell.w > 0 ? Math.max(0, (termW - liveCols * cell.w) / 2) : 0;
   // The remainder, halved onto each side — and this is the padding the fit will measure against,
   // so it has to give the rows back exactly the height they came from. Two things make that safe:
   // it is clamped to one row (a stale `rows`, mid-keyboard, cannot ask for an absurd inset), and
@@ -2241,6 +2253,7 @@ export default function SessionScreen() {
           stageW={stage.w}
           cell={cell}
           liveCols={liveCols}
+          gridCenter={gridCenter}
           insetTop={insets.top}
           insetBottom={insets.bottom}
           cards={gridCards.current}
@@ -2385,18 +2398,21 @@ export default function SessionScreen() {
           it is what shows in the page gap and behind the rounded corners. At rest the live page
           (square, flex:1) covers it entirely. */}
       <View style={[styles.termArea, { backgroundColor: theme.scrim }]}>
-      {/* The pane's own breathing room. It is also what makes the zoom's crossfade seamless: a
-          card's snapshot is inset by exactly this much seen through the zoom (switcher-model
-          derives one from the other), so the text does not move when the surface hands over.
-          The top and bottom insets carry the safe-area strips and the floating bar's ground —
-          the card face owns those bands now. */}
+      {/* The pane's own breathing room. Horizontally it is the gap PLUS the fit's sliver halved
+          onto each side (`gridCenter`), so the left and right gaps agree — and it is what makes
+          the zoom's crossfade seamless, because the switcher's cards and the 1:1 pages shift by
+          the same value (the cards through the zoom): a card's snapshot is inset by exactly this
+          much seen through the zoom (switcher-model derives one from the other), so the text does
+          not move when the surface hands over. The top and bottom insets carry the safe-area
+          strips and the floating bar's ground — the card face owns those bands now. */}
       <Animated.View
         style={[
           styles.termSlide,
           {
             backgroundColor: theme.background,
             paddingTop: notchPad,
-            paddingHorizontal: padH,
+            paddingLeft: padH + gridCenter,
+            paddingRight: padH - gridCenter,
             paddingBottom: padBottom + barPad,
             // The resting corner, stated rather than left to the absence of one — what the view
             // wears before the first frame, and what the code says the page's corner IS. It is
@@ -2509,7 +2525,7 @@ export default function SessionScreen() {
                 cardClipStyle,
               ]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
+                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} gridCenter={gridCenter} radii={cardRadiiStyle} />
               </Animated.View>
               {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
                   crop's upward translate and clipped out at the top, the ring bug over again
@@ -2535,7 +2551,7 @@ export default function SessionScreen() {
                 cardClipStyle,
               ]}>
               <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} radii={cardRadiiStyle} />
+                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} gridCenter={gridCenter} radii={cardRadiiStyle} />
               </Animated.View>
               {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
                   crop's upward translate and clipped out at the top, the ring bug over again
@@ -2744,6 +2760,7 @@ function PageContent({
   cell,
   insets,
   liveCols,
+  gridCenter,
 }: {
   snap: PageSnap;
   stageW: number;
@@ -2752,6 +2769,9 @@ function PageContent({
   insets: { top: number; side: number; bottom: number };
   /** The live pane's columns — the cap, exactly as on the switcher's cards. */
   liveCols: number;
+  /** The fit's sliver halved — the page rides the live pane 1:1, so it shifts by the same value.
+   *  Asymmetric (left +, right −) so the content keeps its width and only moves. */
+  gridCenter: number;
 }) {
   if (snap === null) return null;
   // Capped at the live pane's width for the same reason the grid's cards are: `window-size
@@ -2766,7 +2786,8 @@ function PageContent({
       style={{
         flex: 1,
         paddingTop: insets.top,
-        paddingHorizontal: insets.side,
+        paddingLeft: insets.side + gridCenter,
+        paddingRight: insets.side - gridCenter,
         paddingBottom: insets.bottom,
       }}>
       <Snapshot
@@ -2787,6 +2808,7 @@ function NeighborPage({
   cell,
   insets,
   liveCols,
+  gridCenter,
   radii,
 }: {
   snap: PageSnap;
@@ -2797,6 +2819,8 @@ function NeighborPage({
   cell: { w: number; h: number };
   insets: { top: number; side: number; bottom: number };
   liveCols: number;
+  /** The fit's sliver halved — see `PageContent`. */
+  gridCenter: number;
 }) {
   return (
     <Animated.View
@@ -2814,6 +2838,7 @@ function NeighborPage({
         cell={cell}
         insets={insets}
         liveCols={liveCols}
+        gridCenter={gridCenter}
       />
     </Animated.View>
   );

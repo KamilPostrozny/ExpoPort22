@@ -397,6 +397,9 @@ export type SwitcherProps = {
   cell: { w: number; h: number };
   /** The live pane's column count. Every card is capped to it — see `liveCols` on the screen. */
   liveCols: number;
+  /** The fit's sliver halved (see `gridCenter` on the screen). Each card shifts its content by this
+   *  seen through the zoom, so a card's text stays put when the flying surface hands over. */
+  gridCenter: number;
   /** Already narrowed by the screen while the search is armed. */
   cards: Card[];
   /** The unfiltered count — the "N of M Tabs" label's M. */
@@ -575,6 +578,7 @@ function SwitcherInner(props: SwitcherProps) {
                 card={card}
                 cell={props.cell}
                 liveCols={props.liveCols}
+                gridCenter={props.gridCenter}
                 hit={props.hits[card.win.id]}
                 query={nq}
                 slot={slotFrame(pos, stageW)}
@@ -741,6 +745,7 @@ function WindowCard({
   card,
   cell,
   liveCols,
+  gridCenter,
   hit,
   query,
   slot,
@@ -762,6 +767,9 @@ function WindowCard({
   card: Card;
   cell: { w: number; h: number };
   liveCols: number;
+  /** The fit's sliver halved (see `gridCenter` on the screen) — the card's content shifts by this
+   *  seen through the zoom, exactly as the live grid does. */
+  gridCenter: number;
   /** T14: the scrollback answer for this window — its context replaces the live snapshot while
    *  armed, so the card shows the first occurrence instead of the pane's bottom. `'failed'` = the
    *  grep never answered; the card stays put and says so under its name. */
@@ -990,6 +998,11 @@ function WindowCard({
   // The ring is drawn OVER the card, not spent on layout. Like the live grid, snapshot rows
   // start at the top with no fractional-row inset, so the zoom's crossfade cannot move them.
   const shotPad = SHOT_PAD * u;
+  // The live grid is centred by `gridCenter` (the fit's sliver halved). This card draws the same
+  // pane seen through the zoom, so its content shifts by that value shrunk by the zoom — left +,
+  // right −, so the content keeps its width and only moves. This is what keeps the crossfade
+  // seamless once the live grid stops being left-anchored.
+  const centerShift = gridCenter * (slot.w / stageW);
 
   // The emulator's cell, shrunk by exactly what the zoom shrinks the stage by — so the card draws
   // the pane the size the flying surface hands over at.
@@ -1055,7 +1068,8 @@ function WindowCard({
                 height: slot.h,
                 borderRadius: CARD_RADIUS * u,
                 backgroundColor: theme.background,
-                paddingHorizontal: shotPad,
+                paddingLeft: shotPad + centerShift,
+                paddingRight: shotPad - centerShift,
                 paddingBottom: shotPad,
               },
             ]}>
