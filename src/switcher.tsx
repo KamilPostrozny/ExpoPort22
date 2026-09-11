@@ -520,7 +520,7 @@ function SwitcherInner(props: SwitcherProps) {
    *  would have taken as layout space is the scroll content's own inset instead: `headerH` is
    *  exactly the offset the screen's zoom aim assumes (`zoomSlot`), so a slot stays where it was. */
   const headerH = props.insetTop + SEARCH_BAR_H + gridTop(stageW);
-  const [barH, setBarH] = useState(64);
+  const [barH, setBarH] = useState(54);
 
   return (
     // No ground of its own: the screen's root paints the one dark everything sits on, and this
@@ -1328,10 +1328,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    // These push the two circles in to where the prototype's are, and the 5/10 split hangs the row
-    // a touch above the home-bar inset the call site adds. `barH` is measured by `onLayout`, so the
-    // grid's content height follows whatever these come to. They are `BAR`'s rather than literals
-    // because the terminal's key bar has to land on exactly the same spot — see `BAR` in style.ts.
+    // These push the two circles in to where the prototype's are. `BAR.padBottom` is 0: the bar
+    // rests FLUSH on the home-bar inset the call site adds (user, 2026-09-11), the circles' bottom
+    // edge is the safe-area boundary. `barH` is measured by `onLayout`, so the grid's content
+    // height follows whatever these come to. They are `BAR`'s rather than literals because the
+    // terminal's key bar has to land on exactly the same spot — see `BAR` in style.ts.
     paddingHorizontal: BAR.sideMargin,
     paddingTop: BAR.padTop,
     paddingBottom: BAR.padBottom,

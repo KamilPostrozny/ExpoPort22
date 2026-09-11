@@ -168,8 +168,12 @@ export const BAR = {
   /** The row's own top gap. `keybar` re-exports it as `BAR_PAD_TOP`, which the terminal's pane
    *  arithmetic reads; this is the one definition. */
   padTop: 5,
-  /** The gap under the row, INSIDE the safe-area inset both bars already sit on. */
-  padBottom: 10,
+  /** The gap under the row. Zero on purpose (user, 2026-09-11): both bars now rest FLUSH on the
+   *  safe-area boundary — the row's bottom edge is the boundary itself — and this one number is
+   *  what keeps them flush together, the same way `sideMargin` keeps them aligned horizontally.
+   *  The price: with no gap left under the row, a bar riding a raised keyboard touches its top
+   *  edge instead of hanging 10pt off it — the flush rest was chosen over that constant 10pt. */
+  padBottom: 0,
   radius: 24.5,
 } as const;
 
