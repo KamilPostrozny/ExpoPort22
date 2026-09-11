@@ -1953,14 +1953,20 @@ export default function SessionScreen() {
    *  nothing may pad the bar back off it. The price is the one the fit always kept — the last
    *  row's slack is state-dependent again, so the row→pill gap moves by up to one cell with the
    *  keyboard. It only ever gets BIGGER than the old constant (the floor is the old 13pt in
-   *  every state), and the pill's ride on the keyboard (`bottom` + `popBase`) is untouched, so
-   *  the gap to the keyboard still comes from the same origin as before. */
+   *  every state). The row's gap to the RAISED keyboard is `BAR.keyboardGap` — the old constant
+   *  `padBottom`, back in conditional form (user, 2026-09-11, on the device): the bar rides the
+   *  keyboard frame-by-frame (`bottom`) and keeps that gap off its top edge the whole ride,
+   *  `popBase` carries it too, and at rest (no keyboard) it is 0 and the bar rests flush. */
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
    *  the same three numbers, or their text does not line up with the live terminal's. */
   const paneInsets = { top: notchPad, side: padH, bottom: padBottom + barPad };
   /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, plus the
-   *  home strip and the keyboard's overlap, because that layer's bottom is the window's. */
-  const popBase = barHeight + 6 + keyboardPad + insets.bottom;
+   *  home strip and the keyboard's overlap, because that layer's bottom is the window's. The
+   *  overlap carries `BAR.keyboardGap` too: the popover anchors to the bar, and the bar hangs
+   *  that far off a raised keyboard. A step, not a ride — a popover is only ever visible with
+   *  the keyboard settled, and both its states (this base, `keyboardPopoverStyle`'s ride) agree
+   *  at the settled point. */
+  const popBase = barHeight + 6 + keyboardPad + insets.bottom + (keyboardPad > 0 ? BAR.keyboardGap : 0);
 
   /**
    * What the surface is aimed at this frame — the hold pose under the finger, the slot once
@@ -2159,12 +2165,27 @@ export default function SessionScreen() {
    *  whole way into the card and then blink out with the stage's fade at the landing, which is a
    *  bar sitting on a tab card for a beat and then not (user, 2026-08-11). Gone by a quarter of
    *  the way in — and back only in the last quarter of the return, on the same curve. */
-  const keyboardBarStyle = useAnimatedStyle(() => ({
-    bottom: insets.bottom + (sw === 'closed' ? keyboardPosition.value : keyboardPad),
-  }));
-  const keyboardPopoverStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: sw === 'closed' ? keyboardPad - keyboardPosition.value : 0 }],
-  }));
+  /** The bar's ground, and its gap from a raised keyboard. The ground is the home strip plus
+   *  the keyboard's own rise (`keyboardPosition` rides it frame-by-frame); the gap is
+   *  `BAR.keyboardGap` pro-rated to how far the keyboard has risen, so it grows with the rise
+   *  and lands at the full value at the top — the row never sticks to the keyboard and never
+   *  jumps off it. At rest (no keyboard, `kb` 0) it is 0, and the bar rests flush on the
+   *  safe-area boundary, which is what `BAR.padBottom: 0` buys. */
+  const keyboardBarStyle = useAnimatedStyle(() => {
+    const kb = sw === 'closed' ? keyboardPosition.value : keyboardPad;
+    return {
+      bottom: insets.bottom + kb + BAR.keyboardGap * Math.min(kb / Math.max(keyboardPad, 1), 1),
+    };
+  });
+  /** The popover's ride on the keyboard — the same drop as the bar's ground (see above), the
+   *  gap pro-rated by the same fraction, so the popover stays 6pt above the bar in every frame
+   *  of the ride, not just at the top of it. */
+  const keyboardPopoverStyle = useAnimatedStyle(() => {
+    if (sw !== 'closed') return { transform: [{ translateY: 0 }] };
+    const kb = keyboardPosition.value;
+    const d = keyboardPad - kb;
+    return { transform: [{ translateY: d * (1 + BAR.keyboardGap / Math.max(keyboardPad, 1)) }] };
+  });
   const barFadeStyle = useAnimatedStyle(() => ({
     opacity: 1 - Math.min(prog.value / 0.25, 1),
   }));

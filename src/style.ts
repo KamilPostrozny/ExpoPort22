@@ -171,9 +171,16 @@ export const BAR = {
   /** The gap under the row. Zero on purpose (user, 2026-09-11): both bars now rest FLUSH on the
    *  safe-area boundary — the row's bottom edge is the boundary itself — and this one number is
    *  what keeps them flush together, the same way `sideMargin` keeps them aligned horizontally.
-   *  The price: with no gap left under the row, a bar riding a raised keyboard touches its top
-   *  edge instead of hanging 10pt off it — the flush rest was chosen over that constant 10pt. */
+   *  The keyboard-up gap is `keyboardGap`, not this: it was this constant until the flush rest
+   *  deleted it, and the user re-claimed it the same day on the device (below). */
   padBottom: 0,
+  /** The gap between the key bar's row and the top of a RAISED keyboard (user, 2026-09-11, on the
+   *  device: the flush rest made the row stick to the keyboard, and the old 10pt came back). It
+   *  is the old constant `padBottom` in conditional form — applied by the terminal only while the
+   *  keyboard is up, riding it frame-by-frame, so the flush rest on the boundary is kept and only
+   *  the contact with the keyboard is gone. The switcher's bar never has a keyboard under it and
+   *  stays on this, not there. */
+  keyboardGap: 10,
   radius: 24.5,
 } as const;
 
