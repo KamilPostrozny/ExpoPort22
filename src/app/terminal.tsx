@@ -1946,6 +1946,21 @@ export default function SessionScreen() {
   /** The floating bar's ground: home strip + the key ROW, all inside the card face. The chord
    *  strip is not in it — it overlays the pane, see `rowHeight`. */
   const barPad = rowHeight + insets.bottom;
+  /** The box the fit measures against — its sub-row remainder is `remPad`, carried by the bar. */
+  const boxH =
+    stage === null ? 0 : stage.h - notchPad - searchRowH - padBottom - barPad - keyboardPad;
+  /** The fit's remainder — `boxH mod cell.h`, the sub-row slack the top-anchored fit leaves
+   *  below the last row. It is STATE-DEPENDENT: the keyboard takes an arbitrary pad off boxH,
+   *  so the remainder differs with the keyboard up and down, and the gap from the last row to
+   *  the key bar read bigger closed than open (user, 2026-09-11). The box itself is left as
+   *  is — FitAddon owns the row count and a native cut of its own would need a second fit to
+   *  agree with its rounding. Instead the remainder goes onto the BAR's ground: the bar's
+   *  container and the popover base (`popBase`) both carry it as extra bottom padding, so the
+   *  bar's pills sit `boxH - rows * cell.h + BAR_PAD_TOP` above the last row in EVERY state,
+   *  i.e. the bar's own padding. The bar rides the keyboard from the same `bottom` origin as
+   *  this offset, so the two move together and nothing else re-lays out.
+   *  Zero until the webview reports a cell. */
+  const remPad = cell.h > 0 ? Math.max(0, boxH) % cell.h : 0;
   // Do not round this box to cell.h here. FitAddon owns whole-row fitting in the webview;
   // native compensation needs a second layout and cannot agree with its rounding exactly.
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
@@ -1953,7 +1968,7 @@ export default function SessionScreen() {
   const paneInsets = { top: notchPad, side: padH, bottom: padBottom + barPad };
   /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, plus the
    *  home strip and the keyboard's overlap, because that layer's bottom is the window's. */
-  const popBase = barHeight + 6 + keyboardPad + insets.bottom;
+  const popBase = barHeight + 6 + keyboardPad + insets.bottom + remPad;
 
   /**
    * What the surface is aimed at this frame — the hold pose under the finger, the slot once
@@ -2584,7 +2599,7 @@ export default function SessionScreen() {
         // bottom bar that it covers, and the fade alone does not stop a hit (see `chromeLive`).
         pointerEvents={chromeLive ? 'auto' : 'none'}
         style={[
-          { position: 'absolute', left: 0, right: 0 },
+          { position: 'absolute', left: 0, right: 0, paddingBottom: remPad },
           keyboardBarStyle,
           barFadeStyle,
         ]}>
