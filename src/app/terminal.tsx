@@ -1964,9 +1964,21 @@ export default function SessionScreen() {
    *  flush on the boundary and nothing is owed, and the 1:1 page cards ride it through
    *  `paneInsets` so a hop with the keyboard up stays seamless. */
   const kbGapPad = keyboardPad > 0 ? BAR.keyboardGap : 0;
+  /** The fit's sub-row slack — `boxH mod cell.h`, the box exactly as the webview measures it.
+   *  The live grid is bottom-seated (src/terminal.tsx's CSS), so this slack sits ABOVE the first
+   *  row, and the last row's gap to the bar is the pane's inset in every keyboard state. The 1:1
+   *  pages draw their text on the pane's own numbers, so the TOP is this slack added to the notch
+   *  — without it their lines sit a sub-row off the live grid at the hop's landing. The live pane
+   *  itself does not pad it in: the canvas seats itself, and a padding the fit measures against
+   *  would just move the slack back into the box. Zero until the webview has reported a cell. */
+  const boxH =
+    stage === null
+      ? 0
+      : stage.h - notchPad - searchRowH - keyboardPad - padBottom - barPad - kbGapPad;
+  const remTop = cell.h > 0 && boxH > 0 ? boxH % cell.h : 0;
   /** What the pane sits inside — the page cards of the T11 slide draw at 1:1 beside it and take
    *  the same three numbers, or their text does not line up with the live terminal's. */
-  const paneInsets = { top: notchPad, side: padH, bottom: padBottom + barPad + kbGapPad };
+  const paneInsets = { top: notchPad + remTop, side: padH, bottom: padBottom + barPad + kbGapPad };
   /** Where a popover's bottom edge sits in the layer below — 6pt above the bar stack, plus the
    *  home strip and the keyboard's overlap, because that layer's bottom is the window's. The
    *  overlap carries `BAR.keyboardGap` too: the popover anchors to the bar, and the bar hangs

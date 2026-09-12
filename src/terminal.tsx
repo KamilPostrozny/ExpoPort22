@@ -206,6 +206,19 @@ const FONT_FACES = ['Regular', 'Bold']
 const CSS = `
   ${FONT_FACES}
   html, body { margin: 0; height: 100%; overflow: hidden; }
+  /* Bottom-anchor the grid: the fit floors the box to whole rows and leaves a sub-row slack, and
+     where it sits decides the gap from the last row to the key bar. Left at the top (xterm's
+     default) the slack lives BELOW the last row — on top of the pane's own inset — and since the
+     keyboard takes an arbitrary number of rows off the box, that gap read differently with the
+     keyboard up than down (user, 2026-09-12: "bigger when closed"). Seated at the box's bottom
+     edge the slack sits ABOVE the first row, behind the notch band, and the gap to the bar is the
+     pane's inset in every state — which is the only place the two user demands (the bar flush on
+     the boundary at rest, the gap constant) meet: the bar's ground cannot carry the slack, and
+     nothing native moves the last row without re-fitting. The price the top-anchor avoided
+     (2026-09-08: "shifts even a short prompt on every keyboard edge") is real but small: the top
+     row moves by (keyboard rise + bar gap) mod pitch — under one line — on a keyboard edge, in
+     the dead band under the notch. */
+  .xterm { position: absolute; left: 0; right: 0; bottom: 0; }
   /* text-size-adjust is NOT the lever for the system font scale, tried and measured 2026-08-16:
      with html { -webkit-text-size-adjust: 100%; text-size-adjust: 100% } set, Android at
      font_scale 1.5 still rendered the cell at 11.6964 instead of 7.7964. That property governs
@@ -681,10 +694,11 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const h = rowPitch();
       return h === 0 ? { w: 0, h: 0 } : { w: advance(), h };
     };
-    // Top-anchor the grid. FitAddon already floors the available height to whole rows; leave
-    // the fractional row BELOW them. Putting `height % pitch` above them shifts even a short
-    // prompt on every keyboard edge. Native-side remainder compensation could only reduce that
-    // shift, not remove it: the bridge and the two layouts round differently (2026-09-08).
+    // Bottom-anchor the grid — the CSS at the top of this file, and the reason: the fit's
+    // sub-row slack goes ABOVE the first row, so the gap from the last row to the bar is the
+    // pane's inset in every keyboard state. The 2026-09-08 top-anchor went the other way on the
+    // prompt's shift, which the 2026-09-11 flush rest then made untenable: with the bar's ground
+    // forbidden to carry the slack, the slack had nowhere left but the top (see the CSS).
     // One fit, no padding mutation and no second layout/fit to cancel the first one.
     const fitRows = () => fitAddon.fit();
     // A shrink of an alt-screen box is a HOST-side event, and the local refit of it is a
@@ -754,14 +768,15 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const boxH = root.clientHeight;
       const gridH = grid.clientHeight; // the renderer's explicit canvas height (rows × pitch)
       if (gridH > boxH + 0.5 && term.rows > 0) {
+        // The grid is bottom-seated, so a stale TALLER grid overhangs the box's TOP, not its
+        // bottom: clip the excess from the top, snapped to a whole-row boundary, keeping the LAST
+        // whole rows — the ones the host's repaint is about to rewrite in place.
         const pitch = gridH / term.rows;
         const whole = Math.max(1, Math.floor(boxH / pitch)) * pitch;
-        el.style.overflow = 'hidden';
-        el.style.height = `${Math.round(whole)}px`;
+        el.style.clipPath = `inset(${Math.max(0, gridH - whole)}px 0 0 0)`;
         staleClipped = true;
       } else if (staleClipped) {
-        el.style.overflow = '';
-        el.style.height = '';
+        el.style.clipPath = '';
         staleClipped = false;
       }
     };
