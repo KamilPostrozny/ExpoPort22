@@ -465,6 +465,10 @@ export default function SessionScreen() {
         },
     onTwoFingerTap: async () => openSettings(),
     onTap: async () => {
+          console.log(
+            '[terminal] tap',
+            JSON.stringify({ kb: Math.round(keyboardPad), mouse: modes.mouseReporting }),
+          );
           if (keyboardPad > 0) Keyboard.dismiss();
           // Mouse-tracking TUIs (pi, Claude Code, htop) own the pointer: §4.3's rule, extended to
           // taps. A stationary tap here is a click that the TUI encodes for itself (iOS WebKit's
