@@ -2,13 +2,23 @@ name: IPA
 
 # The whole iOS loop for a Linux desktop: this repo cannot build the *iOS* half locally (no Xcode,
 # no CocoaPods — Android builds fine on the box, which is why it has no workflow of its own; see
-# docs/ship.md), so every push to `main` produces an unsigned Debug IPA and replaces the rolling `dev`
-# prerelease. `xtool install` on the laptop signs it with the free Apple ID and pushes it to the
-# phone — see docs/ship.md. Signing does not happen here: it would need a paid account's
-# certificate in a secret, and free provisioning holds exactly one certificate that xtool owns.
+# docs/ship.md), so CI builds an unsigned IPA per branch and the laptop signs it with the free
+# Apple ID and pushes it to the phone (docs/ship.md, scripts/install-variant.sh). Signing does not
+# happen here: it would need a paid account's certificate in a secret, and free provisioning holds
+# exactly one certificate that xtool owns.
+#
+# Two variants, one per branch, coexisting on the phone:
+#
+#   main → Release, JS embedded        → `prod` prerelease → Port22 (release)
+#   dev  → Debug dev client (Metro)    → `dev`  prerelease → Port22-dev
+#
+# `dev` is the working branch and is GATED: a push that only touches JS changes no IPA, so no
+# build — the dev client on the phone picks the JS up from Metro. `main` is never gated: the
+# release IPA embeds its JS, so gating it would leave the release app silently running a stale
+# bundle. A slice is merged to main only after it has been tested on the phone as Port22-dev.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     # Docs-only commits do not change the IPA, and a run is ~15 minutes of waiting.
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
@@ -16,11 +26,11 @@ on:
       xcode:
         description: 'Xcode version on the runner (26.6, 26.5, 26.4.1, 26.3, 26.2, 26.1.1, 26.0.1)'
         default: '26.6'
-      configuration:
-        description: 'Debug = dev client fed by Metro (the daily loop). Release = the real thing, JS embedded.'
-        default: 'Debug'
+      force_build:
+        description: 'Bypass the native-change gate (a dispatch on dev still builds otherwise)'
+        default: 'false'
         type: choice
-        options: ['Debug', 'Release']
+        options: ['false', 'true']
 
 concurrency:
   group: ipa-${{ github.ref }}
@@ -30,11 +40,89 @@ permissions:
   contents: write
 
 jobs:
+  gate:
+    # dev-only (main is never gated, see the top) and push-only: workflow_dispatch is the manual
+    # rebuild path and force_build=true skips the gate. ~10 seconds on ubuntu-latest — it exists
+    # so a JS-only push to dev costs nothing, and it says out loud WHY it decided what it did.
+    name: Needs a native build?
+    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || inputs.force_build == 'false')
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.gate.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the diff is against this push's base, not the branch tip
+      - uses: oven-sh/setup-bun@v2
+      - id: gate
+        run: |
+          set -euo pipefail
+          # The push's own diff: a plain commit against its parent, a merge against the merge
+          # base so the merged side's changes count too.
+          if [ "$(git rev-list --parents -n1 HEAD | wc -w)" -ge 3 ]; then
+            base=$(git merge-base HEAD^1 HEAD^2)
+          else
+            base=$(git rev-parse HEAD~1)
+          fi
+          mapfile -t files < <(git diff --name-only "$base" HEAD)
+          printf 'changed files: %s\n' "${files[*]:-<none>}"
+
+          build=false
+          for f in "${files[@]}"; do
+            case "$f" in
+              app.json|modules/*|ios/*|patches/*|.github/workflows/*)
+                echo "native change: $f"
+                build=true
+                ;;
+            esac
+          done
+
+          # package.json / bun.lock: only when a dependency with native code changed. A pure-JS
+          # dependency (or a scripts-only package.json edit) changes no IPA.
+          if [ "$build" = false ] && printf '%s\n' "${files[@]}" | grep -qE '^(package\.json|bun\.lock)$'; then
+            git show "$base:package.json" > base-pkg.json 2>/dev/null || echo '{}' > base-pkg.json
+            changed_deps=$(bun -e '
+              const fs = require("node:fs");
+              const m = (j) => ({ ...(j.dependencies || {}), ...(j.devDependencies || {}), ...(j.peerDependencies || {}) });
+              const a = m(JSON.parse(fs.readFileSync("base-pkg.json", "utf8")));
+              const b = m(JSON.parse(fs.readFileSync("package.json", "utf8")));
+              for (const n of new Set([...Object.keys(a), ...Object.keys(b)]))
+                if (a[n] !== b[n]) console.log(n);
+            ')
+            if [ -n "$changed_deps" ]; then
+              bun install --frozen-lockfile
+              while IFS= read -r dep; do
+                [ -z "$dep" ] && continue
+                if [ -d "node_modules/$dep/ios" ]; then
+                  echo "native dep changed: $dep"
+                  build=true
+                elif ! grep -qF "\"$dep\"" package.json; then
+                  # Removed between base and HEAD: cannot cheaply check the old copy was native — build.
+                  echo "dep removed (native?): $dep"
+                  build=true
+                fi
+              done <<<"$changed_deps"
+            elif printf '%s\n' "${files[@]}" | grep -qx 'bun.lock'; then
+              # Lockfile-only drift (bun update, a transitive bump): the package.json diff cannot
+              # see a transitive native change, so build.
+              echo "bun.lock changed with no package.json dep change"
+              build=true
+            fi
+          fi
+
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          [ "$build" = true ] || echo "no native change — no build (JS-only rides Metro)"
+
   package:
     # macos-26, not macos-15, for Xcode 26.6 alone: it is the image EAS uses for SDK 57, and
     # anything older (26.2 and 26.3 both tried) cannot type-check expo-modules-jsi's own
     # `JavaScriptCodable+Date.swift`, which every SDK 57 build compiles into an xcframework.
     runs-on: macos-26
+    needs: [gate]
+    # main builds unconditionally; dev only when the gate said so (or a dispatch forced it).
+    if: inputs.force_build == 'true' || github.ref != 'refs/heads/dev' || needs.gate.outputs.build == 'true'
+    env:
+      BRANCH: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       # Pinned rather than inherited even though 26.6 is currently the default, so an image bump
@@ -44,30 +132,47 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
 
+      # The dev variant is a different app: its own name, bundle id and URL scheme, so it
+      # coexists on the phone with the release build (which keeps com.kamilpostrozny.port22 and
+      # the expoport22 scheme). app.json stays the source of truth for main; the rewrite happens
+      # here, after checkout, and is never committed.
+      - name: Apply the dev variant
+        if: env.BRANCH == 'dev'
+        run: |
+          bun -e '
+            const fs = require("node:fs");
+            const p = "app.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.expo.name = "Port22-dev";
+            j.expo.scheme = "expoport22dev";
+            j.expo.ios.bundleIdentifier = "com.kamilpostrozny.port22.dev";
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+          '
+
       # `ios/` is generated, never committed — the app.json plugins are the source of truth for it.
       # This is also the step that resolves Citadel: `pod install` writes the Swift package
       # references that ExpoSSH.podspec declares.
       - run: bunx expo prebuild -p ios
 
-      # Debug by default: that is a dev client which loads its JS from Metro over the LAN, which is
-      # the daily loop (docs/ship.md). Release is the on-demand one, and it is a different app in
-      # every way that matters to a measurement:
+      # The configuration follows the branch:
       #
-      #   - `#if DEBUG` in the generated AppDelegate picks the Metro URL; Release returns the
-      #     embedded `main.jsbundle`, so `__DEV__` is false and React runs `ReactFabric-prod.js`
-      #     instead of the dev renderer, with no per-element `__source`/`__self` debug objects.
-      #   - The "Bundle React Native code and images" phase runs `expo export:embed`, which is also
-      #     what writes `www.bundle` — the DOM component's HTML. Without it the terminal's webview
-      #     has nothing to load, which is exactly why `expo start --no-dev` renders a blank
-      #     terminal against a Debug client and cannot be used to measure this app (2026-08-13).
+      #   main → Release. `#if DEBUG` in the generated AppDelegate is what picks the Metro URL;
+      #     Release returns the embedded `main.jsbundle`, so `__DEV__` is false and React runs
+      #     `ReactFabric-prod.js` instead of the dev renderer, with no per-element
+      #     `__source`/`__self` debug objects. The "Bundle React Native code and images" phase
+      #     runs `expo export:embed`, which is also what writes `www.bundle` — the DOM
+      #     component's HTML. Without it the terminal's webview has nothing to load, which is
+      #     exactly why `expo start --no-dev` renders a blank terminal against a Debug client
+      #     and cannot be used to measure this app (2026-08-13).
+      #   dev  → Debug. That is a dev client which loads its JS from Metro over the LAN, the
+      #     daily loop (docs/ship.md).
       #
       # Every frame-rate number this project has was taken on a Debug bundle, so it carries an
-      # unknown constant. This is how to get one that does not.
+      # unknown constant. A Release build from main is how to get one that does not.
       - name: Build and package an unsigned IPA
-        env:
-          CONFIG: ${{ inputs.configuration || 'Debug' }}
         run: |
           set -euo pipefail
+          if [ "$BRANCH" = "main" ]; then CONFIG=Release; else CONFIG=Debug; fi
           workspace=$(ls -d ios/*.xcworkspace)
           scheme=$(basename "$workspace" .xcworkspace)
           xcodebuild -workspace "$workspace" -scheme "$scheme" \
@@ -92,27 +197,26 @@ jobs:
       - name: Keep the IPA whatever the release API does
         uses: actions/upload-artifact@v4
         with:
-          name: Port22-${{ inputs.configuration || 'Debug' }}-ipa
+          name: Port22-${{ github.ref_name == 'main' && 'release' || 'dev' }}-ipa
           path: Port22.ipa
           retention-days: 7
 
-      # Two rolling tags, not one: a Release build must not replace the dev client the daily loop
-      # installs from, and a push to main must not replace a Release build somebody is mid-way
-      # through testing. `dev` is the automatic one, `prod` only ever appears on a dispatch.
+      # Two rolling tags, not one: each is the latest build of its branch, and neither may ever
+      # replace the other — `prod` is the release the phone runs, `dev` the client it develops
+      # against.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          CONFIG: ${{ inputs.configuration || 'Debug' }}
         run: |
           set -euo pipefail
-          if [ "$CONFIG" = "Release" ]; then
+          if [ "$BRANCH" = "main" ]; then
             tag=prod
-            title="prod — Release, JS embedded"
-            notes="Unsigned **Release** build of ${GITHUB_SHA}: JS is embedded (\`main.jsbundle\` + \`www.bundle\`), \`__DEV__\` is false, Metro is not involved. Install with \`xtool install\` and just launch it — do NOT start a bundler for it. Use this to measure; use \`dev\` to develop."
+            title="release — latest main"
+            notes="Unsigned **Release** build of ${GITHUB_SHA} from main: JS is embedded (\`main.jsbundle\` + \`www.bundle\`), \`__DEV__\` is false, Metro is not involved. Install with \`scripts/install-variant.sh release\` and just launch it — do NOT start a bundler for it. Use \`dev\` to develop."
           else
             tag=dev
-            title="dev — latest main"
-            notes="Unsigned Debug dev-client build of ${GITHUB_SHA}. Rolling: every push to main replaces it. Needs \`bunx expo start --dev-client\` running. Install with \`xtool install\`."
+            title="dev — latest dev branch"
+            notes="Unsigned **Debug** dev-client build of ${GITHUB_SHA} from dev: \`Port22-dev\`, bundle \`com.kamilpostrozny.port22.dev\`. Rolling: every native-changing push to dev replaces it. Install with \`scripts/install-variant.sh dev\`; needs \`bunx expo start --dev-client\` running."
           fi
           gh release delete "$tag" --yes --cleanup-tag || true
           # The delete and the create race: deleting the tag is not instant on GitHub's side, and

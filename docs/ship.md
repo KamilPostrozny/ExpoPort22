@@ -6,32 +6,49 @@ and CocoaPods, which a Linux box does not have. Android is built right here.
 
 # iOS — CI builds, the laptop signs
 
-The loop is split — GitHub Actions builds, the laptop signs and installs.
+Two variants, one per branch, coexisting on the phone:
 
 ```
-push to main  →  .github/workflows/ipa.yml  →  `dev` prerelease  →  xtool install  →  phone
+push to dev   →  gate (native change?)  →  Debug build    →  `dev`  prerelease  →  Port22-dev
+push to main  →  always                 →  Release build  →  `prod` prerelease  →  Port22
 ```
 
-CI builds **unsigned**, on purpose. Signing there would mean putting a certificate in a repo
-secret, and free provisioning holds exactly one certificate — xtool already owns it. Signing stays
-on the laptop, where that certificate lives.
+The loop is split — GitHub Actions builds, the laptop signs and installs. CI builds **unsigned**,
+on purpose: signing there would mean putting a certificate in a repo secret, and free
+provisioning holds exactly one certificate — xtool already owns it. Signing stays on the laptop,
+where that certificate lives.
+
+**`dev` is the working branch.** Slices land there first and ride the `Port22-dev` app (a Debug
+dev client fed by Metro, bundle `com.kamilpostrozny.port22.dev`, its own URL scheme). A slice is
+merged to `main` only after it has been tested on the phone, and that merge rebuilds the release
+IPA. `main` is never gated, because the release IPA embeds its JS — a gate would leave it running
+a stale bundle. The `dev` branch *is* gated (the `gate` job in `ipa.yml`, ~10 seconds on
+ubuntu-latest): a push builds only when it touches `app.json`, `modules/**`, `ios/**`,
+`patches/**`, the workflow itself, a dependency that has an `ios/` directory, or shows
+lockfile-only drift. A JS-only push — including a pure-JS dependency — changes no IPA and rides
+Metro.
 
 ## 1. Wait for the build
 
 ```bash
-gh run watch          # or: gh run list --workflow=IPA --limit 1
+gh run list --workflow=IPA --branch dev     # or --branch main for the release rebuild
+gh run watch <id>
 ```
 
-Roughly 15 minutes cold. There is no build cache yet; add one if this starts to hurt.
+Roughly 15 minutes cold. There is no build cache yet; add one if this starts to hurt. A
+JS-only push to `dev` never starts one — that is the gate working, not a broken pipeline.
 
-## 2. Download the rolling build
+## 2. Download and install — one script
 
 ```bash
-gh release download dev --clobber -p Port22.ipa
+scripts/install-variant.sh dev      # the daily loop (Port22-dev, needs Metro)
+scripts/install-variant.sh release  # after a merge to main (Port22, no Metro)
 ```
 
-`dev` is replaced by every push to `main`, so this is always the latest `main`, and the release
-notes name the commit it came from.
+Both tags are rolling: `dev` is the latest native-changing push to `dev`, `prod` the latest push
+to `main`; the release notes name the commit it came from. The script downloads the IPA,
+confirms the phone is reachable, and installs it — sections 3 and 4 are what it does, and what
+goes wrong when done by hand.
 
 ## 3. Confirm the phone is reachable
 
@@ -57,8 +74,11 @@ command times out.
 
 ```bash
 script -qec "env USBMUXD_SOCKET_ADDRESS=UNIX:$HOME/.local/share/port22/nm.sock \
-  xtool install Port22.ipa" /dev/null
+  xtool install Port22-dev.ipa" /dev/null
 ```
+
+This is the manual form of `scripts/install-variant.sh`, which names the file
+`Port22-<variant>.ipa`.
 
 `script -qec … /dev/null` allocates a pty. Without a controlling terminal anything in xtool that
 touches the network or the device dies with `epoll_ctl(...): Operation not permitted`.
@@ -69,8 +89,9 @@ invalidates the other's builds.
 
 ## 5. Point it at Metro
 
-The IPA is a dev client: it ships no JS. Start the bundler on the laptop and open the app —
-both on the same network.
+The **dev** IPA is a dev client: it ships no JS. Start the bundler on the laptop and open the app
+— both on the same network. The release IPA ships its JS embedded: launch it directly, no
+bundler.
 
 ```bash
 bunx expo start --dev-client
@@ -79,7 +100,7 @@ bunx expo start --dev-client
 ## Re-signing
 
 Free provisioning expires after 7 days. When the app stops launching, nothing is wrong with the
-build: run steps 3 and 4 again.
+build: run `scripts/install-variant.sh` for the variant in question (or steps 3 and 4 by hand).
 
 # Android — everything is local
 
