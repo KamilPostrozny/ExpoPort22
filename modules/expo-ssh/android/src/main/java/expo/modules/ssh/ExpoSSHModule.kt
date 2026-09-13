@@ -88,6 +88,12 @@ class ExpoSSHModule : Module() {
       withContext(Dispatchers.IO) { session.upload(data, path, directories) }
     }
 
+    AsyncFunction("download") Coroutine { path: String ->
+      withContext(Dispatchers.IO) {
+        Base64.encodeToString(session.download(path), Base64.NO_WRAP)
+      }
+    }
+
     AsyncFunction("listDirectory") Coroutine { path: String ->
       withContext(Dispatchers.IO) {
         session.listDirectory(path).map {

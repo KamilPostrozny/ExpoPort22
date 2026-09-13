@@ -52,6 +52,12 @@ export function useUploadBusy(): boolean {
   );
 }
 
+/** The flag is "a transfer is in flight", not "an upload" — `src/download.ts` flips it too, so
+ *  the ⋯ circle tints across the download flow as well. */
+export function setUploadBusy(next: boolean) {
+  setBusy(next);
+}
+
 /* --- pickers --- */
 
 /** One of the three ⋯ sources. Resolves `null` on cancel — which is not a

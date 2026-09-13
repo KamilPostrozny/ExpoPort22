@@ -61,7 +61,8 @@
             "minSdkVersion": 28
           }
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,

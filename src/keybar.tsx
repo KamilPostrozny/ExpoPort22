@@ -155,8 +155,8 @@ export type KeyBarProps = {
   /** T9's derived "tabs available": tmux present AND conf applied (§4.5). False renders no tabs
    *  circle at all — no tmux (or a toggled-off config) is silence, not a message (§7). */
   showTabs: boolean;
-  /** §4.6: an upload in flight. The ⋯ circle tints accent and goes inert — the whole progress
-   *  UI. Both flows flip it, via `useUploadBusy`. */
+  /** §4.6: a transfer in flight — an upload or a download. The ⋯ circle tints accent and goes
+   *  inert; the whole progress UI. All flows flip the one flag, via `useUploadBusy`. */
   sending?: boolean;
   /** T10: tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
@@ -1209,6 +1209,7 @@ export function BarMenu({
   textMode,
   onTextMode,
   onUpload,
+  onDownload,
   onOpenSettings,
 }: {
   theme: Theme;
@@ -1219,6 +1220,9 @@ export function BarMenu({
   onTextMode: (on: boolean) => void;
   /** §4.6’s destination flow: the screen runs picker → destination sheet → silent SFTP save. */
   onUpload: (kind: 'files' | 'photo' | 'camera') => void;
+  /** The other half of §4.6: opens the download browse sheet; the screen runs the SFTP fetch and
+   *  the share sheet. */
+  onDownload: () => void;
   /** T16's key screen. It is here rather than only on Setup because Upload ("Add to
    *  authorized_keys") needs a session that is already up, and the only other door to that screen
    *  is Setup — which the terminal reaches through `leave()`, i.e. by disconnecting first. Through
@@ -1245,6 +1249,18 @@ export function BarMenu({
             <Text style={[styles.menuLabel, { color: theme.foreground }]}>{label}</Text>
           </Pressable>
         ))}
+        <View style={[styles.menuBreak, { backgroundColor: theme.scrim }]} />
+        <Text style={[styles.menuHeader, { color: theme.muted }]}>DOWNLOAD FILE</Text>
+        <Pressable
+          onPress={onDownload}
+          style={({ pressed }) => [
+            styles.menuRow,
+            { borderTopColor: hairline(theme) },
+            styles.menuRowFirst,
+            pressed && { backgroundColor: keyTint(theme) },
+          ]}>
+          <Text style={[styles.menuLabel, { color: theme.foreground }]}>Browse the host</Text>
+        </Pressable>
         <View style={[styles.menuBreak, { backgroundColor: theme.scrim }]} />
         <Pressable
           onPress={() => onTextMode(!textMode)}

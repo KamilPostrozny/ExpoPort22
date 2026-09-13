@@ -73,6 +73,10 @@ public class ExpoSSHModule: Module {
       try await self.session.upload([UInt8](data), to: path, creating: directories)
     }
 
+    AsyncFunction("download") { (path: String) -> String in
+      Data(try await self.session.download(from: path)).base64EncodedString()
+    }
+
     AsyncFunction("listDirectory") { (path: String) -> [[String: Any]] in
       try await self.session.listDirectory(path).map {
         ["name": $0.name, "isDirectory": $0.isDirectory, "size": $0.size]

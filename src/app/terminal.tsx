@@ -110,6 +110,8 @@ import { proseFor } from '@/prose-model';
 import { tabsAvailable, tabsHint, type TmuxWindow } from '@/tmux-model';
 import { MONO, rgba, SANS, SANS_BOLD, SANS_SEMIBOLD, type Theme } from '@/theme';
 import { pick, sendFile, useUploadBusy, type UploadKind } from '@/upload';
+import { fetchFile } from '@/download';
+import DownloadSheet from '@/download-sheet';
 import { joinPath, sanitizeFilename, stampName } from '@/upload-model';
 import UploadSheet from '@/upload-sheet';
 
@@ -309,6 +311,14 @@ export default function SessionScreen() {
         ? stampName(new Date(), picked.name ?? 'photo.jpg') // §4.6: camera defaults to timestamp
         : sanitizeFilename(picked.name ?? '');
     setPendingUpload({ base64: picked.base64, suggestedName });
+  };
+
+  // §4.6's other half, brought forward from v2 scope: the browse sheet chooses, this runs the
+  // fetch (and its one failure alert), and the sheet dismisses only on success.
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const startDownload = () => {
+    setOpen('none');
+    setDownloadOpen(true);
   };
 
   const saveUpload = async (dir: string, filename: string) => {
@@ -2694,6 +2704,7 @@ export default function SessionScreen() {
               textMode={textMode}
               onTextMode={onTextModeTap}
               onUpload={startUpload}
+              onDownload={startDownload}
               onOpenSettings={openSettings}
             />
           )}
@@ -2701,6 +2712,15 @@ export default function SessionScreen() {
         </View>
       )}
       </View>
+
+      {downloadOpen && (
+        <DownloadSheet
+          theme={theme}
+          host={host}
+          onCancel={() => setDownloadOpen(false)}
+          onPick={fetchFile}
+        />
+      )}
 
       {pendingUpload !== null && (
         <UploadSheet

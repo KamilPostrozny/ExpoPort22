@@ -27,7 +27,8 @@ remote path is typed into the session, OSC 52 clipboard (write-only into phone),
 links. No accounts, no sync, no analytics, no background modes.
 
 Non-goals (explicit in reference, keep them): password auth, key import, jump hosts, agent
-forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/widgets.
+forwarding, remote file management (the upload-destination and download sheets list; they never
+rename, move or delete), multiple hosts, iPad/tablet layout, push/widgets.
 
 ---
 
@@ -121,9 +122,13 @@ forwarding, file browser/downloads, multiple hosts, iPad/tablet layout, push/wid
 ### 4.6 Uploads (one-way, two flows)
 - **Quick drop** (a non-text pasteboard item, via Paste): SFTP to `/tmp/port22/` (mkdir 0700 on demand), generated name `UTCstamp.ext` (sanitised, same-second overwrite), then remote path + trailing space typed into session — no Return. (It used to be the agent ribbon's 📎 cap; the ribbon is dropped, the drop is not.)
 - **Destination upload** (⋯ menu Files / Photo-video / Camera): **destination browser sheet** — SFTP readdir listing (dirs first, files shown so collisions are visible), breadcrumb path, tap dir to descend, "Save here"; starts at `$HOME`, remembers last destination. Filename field pre-filled with sanitised original name, editable (camera defaults to timestamp); overwrite visible in listing. Saves silently — **nothing typed into the session**. ⋯ circle tints accent + inert during send.
-- Shared: whole file in memory, size user's problem. Failure: "Could not send the file" alert, nothing typed, nothing left behind. Never downloads or deletes; host listing exists only inside the destination picker.
+- Shared: whole file in memory, size user's problem. Failure: "Could not send the file" alert, nothing typed, nothing left behind. The flows never delete; the module's listings exist only inside the two sheets. ("Never downloads" was the v1 line; the user brought downloads forward, so the next section is no longer deferred.)
 
-### 4.7 Clipboard & links
+### 4.6a Downloads (brought forward from v2 scope on user request; the reference app has no spec, so this is new design)
+- **Browse** (⋯ menu DOWNLOAD FILE → "Browse the host"): the upload destination browser turned around — same live SFTP listing, breadcrumb and sheet shell; directories descend, a *file* row is the action, no filename field, no remembered start (always `$HOME`). Starts at `$HOME` because it is a fresh flow, not the upload's destination.
+- Fetch: SFTP read in 32 KB chunks (the module's `download`, mirrored from `upload` on both platforms — Citadel `read(from:length:)` on iOS, sshj offset reads on Android), whole file in memory as for uploads, written to the app cache under `port22/<name>`.
+- Destination: the **system share sheet** (`expo-sharing`, tier-1 package) — Save to Files / AirDrop on iOS, Save to Download / share on Android; the file never lands somewhere the user did not choose. Sheet dismisses only on a successful pick; failure wording is "Could not download the file", one alert, browser left where it was.
+- The ⋯ circle's busy tint covers downloads too: the flag is "a transfer is in flight", flipped by both flows.
 - OSC 52 write → phone pasteboard + pushed into clipboard-slot history. OSC 52 **read: never answered**. Slots: last 3 yanks + phone pasteboard entry; pinnable (pins persist).
 - OSC 8 links underlined, tappable, `http(s)` only, others silently refused. Bare URLs stay plain text.
 

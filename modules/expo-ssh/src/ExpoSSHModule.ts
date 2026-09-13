@@ -27,6 +27,8 @@ declare class ExpoSSHModule extends NativeModule<ExpoSSHModuleEvents> {
 
   /** `directories` is the mkdir chain for `path`, shallowest first: SFTP mkdir has no `-p`. */
   upload(dataBase64: string, path: string, directories: string[]): Promise<void>;
+  /** The whole file, base64 — the mirror of `upload` in the other direction. */
+  download(path: string): Promise<string>;
   listDirectory(path: string): Promise<RemoteEntry[]>;
 }
 

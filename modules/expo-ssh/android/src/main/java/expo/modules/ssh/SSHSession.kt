@@ -238,8 +238,29 @@ class SSHSession {
     }
   }
 
-  /** The listing behind the upload destination browser. Read-only: this module never removes or
-   *  downloads anything. sshj keys `isDirectory` off the readdir attributes and never exposes
+  /** One file from the host to the phone — the mirror of [upload]: read in the same 32 KB
+   *  chunks the write side issues, because the SFTP message limit is per request. sshj answers an
+   *  out-of-range read with status EOF and reports it as `-1`, which ends the loop. */
+  fun download(path: String): ByteArray {
+    val client = client ?: throw IllegalStateException("Not connected")
+    client.newSFTPClient().use { sftp ->
+      val chunks = ArrayList<ByteArray>()
+      sftp.open(path, EnumSet.of(OpenMode.READ)).use { file ->
+        val buffer = ByteArray(32 * 1024)
+        var offset = 0L
+        while (true) {
+          val read = file.read(offset, buffer, 0, buffer.size)
+          if (read <= 0) break
+          chunks.add(if (read < buffer.size) buffer.copyOf(read) else buffer)
+          offset += read
+        }
+      }
+      return chunks.joinToByteArray()
+    }
+  }
+
+  /** The listing behind the upload destination and the download browsers. Read-only: this module
+   *  never removes anything. sshj keys `isDirectory` off the readdir attributes and never exposes
    *  `longname`, so the iOS fallback for servers that omit attributes has no equivalent here. */
   fun listDirectory(path: String): List<RemoteEntry> {
     val client = client ?: throw IllegalStateException("Not connected")

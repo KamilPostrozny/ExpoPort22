@@ -183,8 +183,31 @@ actor SSHSession {
     }
   }
 
-  /// The listing behind the upload destination browser. Read-only: this module never removes or
-  /// downloads anything.
+  /// One file from the host to the phone — the mirror of `upload`, off the PTY like it. Read in
+  /// the same 32 KB chunks the write side issues: the SFTP message limit is per request and no
+  /// server is obliged to answer a bigger read, so `readAll()`'s 4 GB asks are not the shape of
+  /// this call. Citadel answers an out-of-range read with an empty buffer, which ends the loop.
+  func download(from path: String) async throws -> [UInt8] {
+    guard let client else { throw Failure.notConnected }
+    return try await client.withSFTP(logger: Self.chatty) { sftp in
+      try await sftp.withFile(filePath: path, flags: [.read]) { file in
+        // `data` is local to the closure: Citadel's `withFile` takes a `@Sendable` one, and a
+        // mutated capture is a compile error under strict concurrency.
+        var data = [UInt8]()
+        var offset: UInt64 = 0
+        while true {
+          let chunk = try await file.read(from: offset, length: 32 * 1024)
+          let length = chunk.readableBytes
+          if length == 0 { return data }
+          data.append(contentsOf: chunk.readBytes(length: length)!)
+          offset += UInt64(length)
+        }
+      }
+    }
+  }
+
+  /// The listing behind the upload destination and the download browsers. Read-only: this module
+  /// never removes anything.
   func listDirectory(_ path: String) async throws -> [RemoteEntry] {
     guard let client else { throw Failure.notConnected }
     return try await client.withSFTP(logger: Self.chatty) { sftp in
