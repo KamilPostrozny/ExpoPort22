@@ -466,6 +466,13 @@ export default function SessionScreen() {
     onTwoFingerTap: async () => openSettings(),
     onTap: async () => {
           if (keyboardPad > 0) Keyboard.dismiss();
+          // Mouse-tracking TUIs (pi, Claude Code, htop) own the pointer: §4.3's rule, extended to
+          // taps. A stationary tap here is a click that the TUI encodes for itself (iOS WebKit's
+          // synthetic mouse pair reaches xterm's CoreMouseService) — and it used to raise the
+          // keyboard in the same gesture, so tapping a TUI's "scroll to bottom" button scrolled
+          // and popped the keys at once. Mouse off (plain shell, tmux): the tap is the keyboard's
+          // door, as before.
+          else if (modes.mouseReporting) return;
           else setFocusSignal((n) => n + 1);
         },
   };
