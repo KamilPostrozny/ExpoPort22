@@ -469,10 +469,6 @@ export default function SessionScreen() {
             tmux.session !== null && tmux.paneCommand !== null
               ? proseFor(tmux.paneCommand, tmux.paneChildren)
               : null;
-          console.log(
-            '[terminal] tap',
-            JSON.stringify({ kb: Math.round(keyboardPad), pane: tmux.paneCommand, prose }),
-          );
           if (keyboardPad > 0) Keyboard.dismiss();
           // The prose TUIs (pi, Claude Code, codex, aider — the apps with tappable UI) own the
           // pointer: a stationary tap on their screen is a click they encode for themselves (iOS
