@@ -16,8 +16,13 @@ case "$variant" in
 esac
 
 cd "$(dirname "$0")/.."
+# Both tags carry the asset under the same name (Port22.ipa) — -p filters by that name, -D picks
+# the directory; the rename is what keeps the two variants apart on this box.
+dir=$(mktemp -d)
 out="Port22-$variant.ipa"
-gh release download "$tag" --clobber -p "$out"
+gh release download "$tag" --clobber -D "$dir" -p "Port22.ipa"
+mv "$dir/Port22.ipa" "$out"
+rm -rf "$dir"
 echo "downloaded $tag → $out"
 
 # The `UNIX:` prefix is load-bearing — without it libusbmuxd finds nothing. Never `pkill -f
