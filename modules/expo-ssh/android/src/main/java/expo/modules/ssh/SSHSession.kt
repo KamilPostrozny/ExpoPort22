@@ -245,6 +245,7 @@ class SSHSession {
     val client = client ?: throw IllegalStateException("Not connected")
     client.newSFTPClient().use { sftp ->
       val chunks = ArrayList<ByteArray>()
+      var total = 0L
       sftp.open(path, EnumSet.of(OpenMode.READ)).use { file ->
         val buffer = ByteArray(32 * 1024)
         var offset = 0L
@@ -252,10 +253,17 @@ class SSHSession {
           val read = file.read(offset, buffer, 0, buffer.size)
           if (read <= 0) break
           chunks.add(if (read < buffer.size) buffer.copyOf(read) else buffer)
+          total += read
           offset += read
         }
       }
-      return chunks.joinToByteArray()
+      val out = ByteArray(total.toInt())
+      var pos = 0
+      for (chunk in chunks) {
+        chunk.copyInto(out, pos)
+        pos += chunk.size
+      }
+      return out
     }
   }
 
