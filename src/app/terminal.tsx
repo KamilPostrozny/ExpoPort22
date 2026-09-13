@@ -465,18 +465,27 @@ export default function SessionScreen() {
         },
     onTwoFingerTap: async () => openSettings(),
     onTap: async () => {
+          const prose =
+            tmux.session !== null && tmux.paneCommand !== null
+              ? proseFor(tmux.paneCommand, tmux.paneChildren)
+              : null;
           console.log(
             '[terminal] tap',
-            JSON.stringify({ kb: Math.round(keyboardPad), mouse: modes.mouseReporting }),
+            JSON.stringify({ kb: Math.round(keyboardPad), pane: tmux.paneCommand, prose }),
           );
           if (keyboardPad > 0) Keyboard.dismiss();
-          // Mouse-tracking TUIs (pi, Claude Code, htop) own the pointer: §4.3's rule, extended to
-          // taps. A stationary tap here is a click that the TUI encodes for itself (iOS WebKit's
-          // synthetic mouse pair reaches xterm's CoreMouseService) — and it used to raise the
-          // keyboard in the same gesture, so tapping a TUI's "scroll to bottom" button scrolled
-          // and popped the keys at once. Mouse off (plain shell, tmux): the tap is the keyboard's
-          // door, as before.
-          else if (modes.mouseReporting) return;
+          // The prose TUIs (pi, Claude Code, codex, aider — the apps with tappable UI) own the
+          // pointer: a stationary tap on their screen is a click they encode for themselves (iOS
+          // WebKit's synthetic mouse pair reaches xterm's CoreMouseService), and raising the
+          // keyboard in the same gesture is what made tapping their "scroll to bottom" button pop
+          // the keys at once. The decision rides the poll's paneCommand, NOT the client's mouse
+          // flag: that one is DECSET state on the outer terminal and outlives the app that set it —
+          // a pi that dies mid-alt-screen (measured on device 2026-09-13: flag stuck true at the
+          // shell prompt, no DECRST, no buffer transition) swallowed every later tap until the
+          // pane's job name said otherwise. tmux re-answers who is in the pane within one ~2s beat.
+          // `proseFor === true` is the gate; its shell/`false`/`null` answers keep the door, as
+          // before. Without tmux (`session`/`paneCommand` null) the door stays unconditionally.
+          else if (prose === true) return;
           else setFocusSignal((n) => n + 1);
         },
   };
