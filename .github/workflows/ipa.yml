@@ -41,14 +41,19 @@ permissions:
 
 jobs:
   gate:
-    # dev-only (main is never gated, see the top) and push-only: workflow_dispatch is the manual
-    # rebuild path and force_build=true skips the gate. ~10 seconds on ubuntu-latest — it exists
-    # so a JS-only push to dev costs nothing, and it says out loud WHY it decided what it did.
+    # Always runs (~10 seconds on ubuntu-latest), and always says out loud WHY it decided what it
+    # did. main and force_build short-circuit to build=true; dev is where the work is — a JS-only
+    # push to dev costs nothing and rides Metro. One gate for both branches, not two conditional
+    # jobs: a package job that referenced the gate's outputs through a skipped gate was skipped
+    # itself on main (2026-09-13), which is why main never gets to "skip the gate" — the gate just
+    # answers true for it.
     name: Needs a native build?
-    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || inputs.force_build == 'false')
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.gate.outputs.build }}
+    env:
+      BRANCH: ${{ github.ref_name }}
+      FORCE: ${{ inputs.force_build }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +62,13 @@ jobs:
       - id: gate
         run: |
           set -euo pipefail
+          if [ "$FORCE" = "true" ]; then
+            echo "force_build — building anyway"
+            build=true
+          elif [ "$BRANCH" = "main" ]; then
+            echo "main is never gated: the release IPA embeds its JS, so a JS-only push still needs a rebuild"
+            build=true
+          else
           # The push's own diff: a plain commit against its parent, a merge against the merge
           # base so the merged side's changes count too.
           if [ "$(git rev-list --parents -n1 HEAD | wc -w)" -ge 3 ]; then
@@ -109,9 +121,10 @@ jobs:
               build=true
             fi
           fi
+          [ "$build" = true ] || echo "no native change — no build (JS-only rides Metro)"
+          fi
 
           echo "build=$build" >> "$GITHUB_OUTPUT"
-          [ "$build" = true ] || echo "no native change — no build (JS-only rides Metro)"
 
   package:
     # macos-26, not macos-15, for Xcode 26.6 alone: it is the image EAS uses for SDK 57, and
@@ -119,8 +132,8 @@ jobs:
     # `JavaScriptCodable+Date.swift`, which every SDK 57 build compiles into an xcframework.
     runs-on: macos-26
     needs: [gate]
-    # main builds unconditionally; dev only when the gate said so (or a dispatch forced it).
-    if: inputs.force_build == 'true' || github.ref != 'refs/heads/dev' || needs.gate.outputs.build == 'true'
+    # The gate is the single decision point: it always runs and answers for both branches.
+    if: needs.gate.outputs.build == 'true'
     env:
       BRANCH: ${{ github.ref_name }}
     steps:
