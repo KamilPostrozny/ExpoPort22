@@ -223,99 +223,6 @@ export function liftShadow(lift: number): string {
 
 /* --- the zoom (prototype zoomFollow / zoomSty) --- */
 
-/** Upward travel the zoom ignores before it starts — an ORIGIN OFFSET, not a gate: past it the
- *  card tracks the finger continuously, and coming back down re-enters it symmetrically. It
- *  exists because there is no threshold anywhere else any more (2026-08-13): the zoom arms at the
- *  grab, and a thumb swiping a bottom bar sideways arcs 20-odd points upward all by itself — so
- *  without this every flat hop shrank the row a few percent and uncovered the grid behind it
- *  (structured test, movement 2). Sized just past the measured arcs (dy -24…-26). */
-export const ZOOM_DEAD = 30;
-
-/** The dead zone a clearly-vertical gesture pays instead — barely anything. The full ZOOM_DEAD
- *  exists to discount the arc a thumb draws through a SIDEWAYS swipe, and charging it to a pure
- *  flick up made the card feel weighted, needing real travel before it moved (user, 2026-08-13).
- *  The arcs measured 10–19pt sideways at the moment they crossed -24…-26 up, so the zone grows
- *  with |dx| and covers them exactly, while a straight flick pays 8pt. */
-export const ZOOM_DEAD_MIN = 8;
-
-/** Bar-swipe-up drag travel → zoom progress: nothing for the dead zone — sized by how sideways
- *  the gesture is (`sideways` = |dx|, same origin as the travel) — then saturating 280pt later.
- *  Design-width points, scaled. Travel is measured from where the drag-follow ARMS (the grab),
- *  not from touch-down — the slop and the set-up frames are dropped by the screen's re-origin,
- *  so this dead zone is the only one the finger pays. */
-export function zoomProgress(travel: number, width: number, sideways = Infinity): number {
-  'worklet';
-  const s = width / DESIGN_W;
-  const dead = Math.min(ZOOM_DEAD, ZOOM_DEAD_MIN + 1.3 * Math.abs(sideways / s)) * s;
-  return Math.min(Math.max((-travel - dead) / (280 * s), 0), 1);
-}
-
-/** Release above this progress commits to the grid; below springs back. */
-export const ZOOM_COMMIT = 0.25;
-
-/* --- what the card is aimed at, and when --- */
-
-/**
- * The size a pulled card holds at, as a fraction of the stage.
- *
- * Safari does not fly the card to its place in the tab grid while you are still holding it: pull
- * one up and it settles to about this much of the screen, near the middle, and stays there to be
- * moved around — the flight to its actual slot happens on release (user, 2026-08-13, screenshot).
- * Aiming at the slot the whole way is what made ours feel like one step: the card was already
- * halfway to a corner of the grid while the finger still had it, so there was nowhere left to
- * push it sideways to.
- */
-export const HOLD_SCALE = 0.62;
-
-/** How far toward its actual grid slot a HELD card can be pulled — the aim blends hold→slot with
- *  the drag itself, reaching this at full travel, and the release covers the rest. The fixed hold
- *  pose alone read as a wall: past half the flight more travel changed nothing ("stopped by some
- *  force", user 2026-08-13) — and blending the aim is also what shrinks the card's HEIGHT from
- *  the first pixel of the pull, fluidly toward the grid card's shape, expanding back on the way
- *  down. */
-export const HOLD_REACH = 0.7;
-
-
-/** The pose a held card settles into: the whole stage, scaled about its own centre. Nothing is
- *  cropped — `h` scales with `w`, so `zoomFrame`'s clip stays open and the card is the screen made
- *  small, which is what a card in the hand looks like. The grid slot crops; this does not. */
-export function holdFrame(stage: { w: number; h: number }): Frame {
-  'worklet';
-  return {
-    x: (stage.w * (1 - HOLD_SCALE)) / 2,
-    y: (stage.h * (1 - HOLD_SCALE)) / 2,
-    w: stage.w * HOLD_SCALE,
-    h: stage.h * HOLD_SCALE,
-  };
-}
-
-/** The held pose at reach `t`: the SIZE blends hold→slot — the fluid shrink toward the grid
- *  card's shape — but the centre stays the screen's, wherever the slot lives. A bottom-row tab
- *  held low instead of centred is what taking the slot's position while held looked like (user,
- *  2026-08-13, screenshot); the position is the release's business. */
-export function heldFrame(stage: { w: number; h: number }, slot: Frame, t: number): Frame {
-  'worklet';
-  const hold = holdFrame(stage);
-  const w = hold.w + (slot.w - hold.w) * t;
-  // At width w, the ASPECT blends from the screen's toward the slot's — that is the height shrink.
-  const h = w * ((stage.h / stage.w) * (1 - t) + (slot.h / slot.w) * t);
-  return { x: (stage.w - w) / 2, y: (stage.h - h) / 2, w, h };
-}
-
-/** Where the card is aimed right now: the hold pose while the finger owns it (`t` 0), its slot in
- *  the grid once the release has let it go (`t` 1). Every other way into the switcher — the tabs
- *  tap, the close — never leaves `t` 1, so they fly between terminal and slot exactly as before. */
-export function aimFrame(hold: Frame, slot: Frame, t: number): Frame {
-  'worklet';
-  if (t >= 1) return slot;
-  return {
-    x: hold.x + (slot.x - hold.x) * t,
-    y: hold.y + (slot.y - hold.y) * t,
-    w: hold.w + (slot.w - hold.w) * t,
-    h: hold.h + (slot.h - hold.h) * t,
-  };
-}
-
 /**
  * The zoom as a *container* transform: the same scale and the same landing place, for a box that
  * keeps the stage's full height and lets its children do their own cropping.
@@ -332,7 +239,6 @@ export function aimFrame(hold: Frame, slot: Frame, t: number): Frame {
  */
 export function zoomBox(
   t: number,
-  dx: number,
   slot: Frame,
   stage: { w: number; h: number },
 ): { scale: number; translateX: number; translateY: number } {
@@ -340,7 +246,7 @@ export function zoomBox(
   const scale = 1 + (slot.w / stage.w - 1) * t;
   return {
     scale,
-    translateX: slot.x * t + dx * 0.6 - (stage.w * (1 - scale)) / 2,
+    translateX: slot.x * t - (stage.w * (1 - scale)) / 2,
     translateY: slot.y * t - (stage.h * (1 - scale)) / 2,
   };
 }
@@ -362,14 +268,11 @@ export type ZoomFrame = {
 /**
  * Interpolate the whole terminal surface between rest (t=0: identity over the stage) and the
  * card slot (t=1: scaled to the slot frame, bottom clipped away). `slot` is in stage
- * coordinates. `dx` is the finger's horizontal drift during a drag-follow (prototype rides it
- * at 0.6), zero for committed animations. RN scales about the view centre, so the translation
- * compensates to keep the interpolation anchored at the top-left like the prototype's
- * `transform-origin: 0 0`.
+ * coordinates. RN scales about the view centre, so the translation compensates to keep the
+ * interpolation anchored at the top-left like the prototype's `transform-origin: 0 0`.
  */
 export function zoomFrame(
   t: number,
-  dx: number,
   slot: Frame,
   stage: { w: number; h: number },
 ): ZoomFrame {
@@ -377,7 +280,7 @@ export function zoomFrame(
   const S = slot.w / stage.w;
   const scale = 1 + (S - 1) * t;
   const height = stage.h - (stage.h - slot.h / S) * t;
-  const x = slot.x * t + dx * 0.6;
+  const x = slot.x * t;
   const y = slot.y * t;
   return {
     scale,

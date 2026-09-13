@@ -6,14 +6,9 @@
 import { expect, test } from 'bun:test';
 
 import {
-  HOLD_SCALE,
   MONO_ADVANCE,
-  ZOOM_COMMIT,
-  aimFrame,
   gridHeight,
   revealOffset,
-  heldFrame,
-  holdFrame,
   gridTop,
   reorder,
   reorderArgs,
@@ -28,7 +23,6 @@ import {
   termPad,
   zoomBox,
   zoomFrame,
-  zoomProgress,
   liftShadow,
 } from '@/switcher-model';
 import type { TmuxWindow } from '@/tmux-model';
@@ -141,70 +135,12 @@ test('swipe opacity fades to zero one card-width out', () => {
   expect(swipeOpacity(40, 402)).toBe(1); // rightward never fades
 });
 
-test('zoomProgress: a dead zone sized by how sideways the gesture is', () => {
-  expect(zoomProgress(0, 402)).toBe(0);
-  // A flat hop's arc, in full: 10-19pt sideways when dy crosses -26 — never shrinks the card.
-  expect(zoomProgress(-26, 402, 15)).toBe(0);
-  expect(zoomProgress(-26, 402, 19)).toBe(0);
-  // A straight flick pays only the minimum: moving by 10pt up already.
-  expect(zoomProgress(-10, 402, 0)).toBeGreaterThan(0);
-  expect(zoomProgress(-8, 402, 0)).toBe(0);
-  // The legacy full zone with no sideways information.
-  expect(zoomProgress(-30 - 140, 402)).toBeCloseTo(0.5);
-  expect(zoomProgress(-30 - 280, 402)).toBe(1);
-  expect(zoomProgress(-1000, 402)).toBe(1);
-  expect(zoomProgress(50, 402)).toBe(0); // downward drag is not a zoom
-  // Everything scales with the screen like the ramp does.
-  expect(zoomProgress(-14, 201)).toBe(0);
-  expect(zoomProgress(-15 - 70, 201)).toBeCloseTo(0.5); // half of the half-width 140pt ramp
-  expect(ZOOM_COMMIT).toBe(0.25);
-});
-
-
-test('the held pose is the whole screen made small, centred and uncropped', () => {
-  const stage = { w: 402, h: 874 };
-  const hold = holdFrame(stage);
-  // Centred: the margin either side is the same, and likewise above and below.
-  expect(hold.x).toBeCloseTo((402 - hold.w) / 2);
-  expect(hold.y).toBeCloseTo((874 - hold.h) / 2);
-  // Aspect preserved, so `zoomFrame`'s clip never closes — a card in the hand shows the whole
-  // page, unlike a card in the grid, which is cropped to its slot.
-  const f = zoomFrame(1, 0, hold, stage);
-  expect(f.scale).toBeCloseTo(HOLD_SCALE);
-  expect(f.height).toBeCloseTo(stage.h);
-});
-
-test('a held card is slot-sized by its reach but always screen-centred', () => {
-  const stage = { w: 402, h: 874 };
-  const slot = { ...slotFrame(5, 402), y: 900 }; // a bottom-row slot, scrolled low
-  for (const t of [0, 0.4, 0.7]) {
-    const f = heldFrame(stage, slot, t);
-    expect(f.x).toBeCloseTo((stage.w - f.w) / 2); // centred whatever the slot's place
-    expect(f.y).toBeCloseTo((stage.h - f.h) / 2);
-  }
-  expect(heldFrame(stage, slot, 0).w).toBeCloseTo(stage.w * HOLD_SCALE);
-  // at full reach the aspect is the slot's, not the screen's — the height shrink
-  const deep = heldFrame(stage, slot, 1);
-  expect(deep.h / deep.w).toBeCloseTo(slot.h / slot.w);
-});
-
-test('the aim leaves the hold pose only as the release flies it to the slot', () => {
-  const stage = { w: 402, h: 874 };
-  const hold = holdFrame(stage);
-  const slot = slotFrame(3, 402);
-  expect(aimFrame(hold, slot, 0)).toEqual(hold);
-  expect(aimFrame(hold, slot, 1)).toEqual(slot);
-  const half = aimFrame(hold, slot, 0.5);
-  expect(half.x).toBeCloseTo((hold.x + slot.x) / 2);
-  expect(half.w).toBeCloseTo((hold.w + slot.w) / 2);
-});
-
 test('the shared container lands its children exactly where zoomFrame would', () => {
   const stage = { w: 402, h: 874 };
   const slot = slotFrame(3, 402);
   for (const t of [0, 0.3, 0.62, 1]) {
-    const b = zoomBox(t, 0, slot, stage);
-    const f = zoomFrame(t, 0, slot, stage);
+    const b = zoomBox(t, slot, stage);
+    const f = zoomFrame(t, slot, stage);
     expect(b.scale).toBeCloseTo(f.scale);
     // A card pinned at the container's top-left lands on the same screen point either way: the
     // box compensates against the stage's height, the frame against its own clipped one.
@@ -220,7 +156,7 @@ test('the shared container lands its children exactly where zoomFrame would', ()
 test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
   const stage = { w: 402, h: 874 };
   const slot = { ...slotFrame(0, 402), y: slotFrame(0, 402).y + 66 }; // stage coords incl. headroom
-  const rest = zoomFrame(0, 0, slot, stage);
+  const rest = zoomFrame(0, slot, stage);
   expect(rest.scale).toBe(1);
   expect(rest.height).toBe(874);
   expect(rest.translateX).toBe(0);
@@ -229,7 +165,7 @@ test('zoomFrame endpoints: identity at rest, the card slot at 1', () => {
   expect(rest.ringOpacity).toBe(0);
 
   const S = 173 / 402;
-  const zoomed = zoomFrame(1, 0, slot, stage);
+  const zoomed = zoomFrame(1, slot, stage);
   expect(zoomed.scale).toBeCloseTo(S);
   // clip: the visible height scaled down is exactly the card height
   expect(zoomed.height * S).toBeCloseTo(240);
@@ -246,7 +182,7 @@ test('zoomFrame is screen-round at rest and eases to the card corner', () => {
   const slot = slotFrame(0, 402);
   // On screen the corner is `radius * scale` — that is what the eye compares to the phone's own.
   const onScreen = (t: number) => {
-    const f = zoomFrame(t, 0, slot, stage);
+    const f = zoomFrame(t, slot, stage);
     return f.radius * f.scale;
   };
   // The display's corner at rest — no animation from square (user, 2026-08-11).
@@ -254,14 +190,6 @@ test('zoomFrame is screen-round at rest and eases to the card corner', () => {
   // …shrinking monotonically to the card's 14pt by the time it lands in the slot.
   expect(onScreen(0.5)).toBeLessThan(onScreen(0));
   expect(onScreen(1)).toBeCloseTo(14);
-});
-
-test('zoomFrame rides the finger drift at 0.6 like the prototype', () => {
-  const stage = { w: 402, h: 874 };
-  const slot = slotFrame(0, 402);
-  const still = zoomFrame(0.5, 0, slot, stage);
-  const drifted = zoomFrame(0.5, 100, slot, stage);
-  expect(drifted.translateX - still.translateX).toBeCloseTo(60);
 });
 
 test('snapshotFontSize fits the pane columns to the card, clamped to legible', () => {

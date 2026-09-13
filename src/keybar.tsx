@@ -10,8 +10,8 @@
  * brain (autocorrect, capitalization) only when the keyboard ATTACHES to it, and never re-reads
  * it off the attached field (see the fields' comment). The webview never takes focus, typing
  * reaches the PTY through `sendBytes`, and touching the terminal blurs the input natively — which
- * is what lets a long-press selection proceed with the keyboard up. A plain tap on the terminal
- * asks for it back through `focusSignal`; the bar itself never raises it.
+ * is what lets a long-press selection proceed with the keyboard up. The bar itself is its door:
+ * a swipe down sends the keys away, a swipe up asks for them back.
  *
  * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
  * lives in `src/keybar-model.ts`, tested; this file renders and executes.
@@ -68,8 +68,7 @@ import {
   afterChord,
   applyCtrl,
   barDismisses,
-  barGrabbed,
-  KEYS_DROP_DY,
+  barRaises,
   rowJoins,
   controlByte,
   CARET_SETTLE_MS,
@@ -93,7 +92,6 @@ import {
   TEXT,
   leading,
 } from '@/style';
-import { zoomProgress } from '@/switcher-model';
 import { MONO, rgba, SANS, SANS_SEMIBOLD, type Theme } from '@/theme';
 import { pasteFile } from '@/upload';
 import { QUICK_DIR } from '@/upload-model';
@@ -148,10 +146,6 @@ export type KeyBarProps = {
    *  pane simply stops measuring it. `popBase` keeps the full stack, so a popover opened over an
    *  armed Ctrl still clears the strip instead of landing on it. */
   onRowHeight: (height: number) => void;
-  /** Bump to raise the keyboard — a tap on the terminal (§4.4's door to it), or the switcher
-   *  closing back onto a terminal whose keys were up when it left (T10), the
-   *  prototype's `kbShown: true` on return. A counter, not a boolean: every close counts. */
-  focusSignal?: number;
   /** T9's derived "tabs available": tmux present AND conf applied (§4.5). False renders no tabs
    *  circle at all — no tmux (or a toggled-off config) is silence, not a message (§7). */
   showTabs: boolean;
@@ -160,14 +154,6 @@ export type KeyBarProps = {
   sending?: boolean;
   /** T10: tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
-  /** T10: the zoom drag's TRANSITIONS, one JS call each — the per-frame follow runs in this
-   *  file's pan worklet against `panSV`, because the JS thread stalls 40–300ms under load and a
-   *  runOnJS pan hitched with it (perf harness, 2026-08-13). `onZoomGrab` pays the open's
-   *  one-off costs; `onZoomEnd` decides commit-or-spring-back from the release's velocity. */
-  onZoomGrab?: (dx: number, dy: number) => void;
-  onZoomEnd?: (dx: number, dy: number, vx: number, vy: number) => void;
-  /** The card has actually begun to lift — arm the switcher's own state now, not at the grab. */
-  onZoomArm?: () => void;
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
    *  the worklet. The screen owns the model: rubber band, thresholds, commit
@@ -176,20 +162,9 @@ export type KeyBarProps = {
   /** The gesture's shared values, owned by the screen: the worklet writes the hot path here. */
   panSV?: {
     swipeX: SharedValue<number>;
-    prog: SharedValue<number>;
-    dragX: SharedValue<number>;
-    zoomReady: SharedValue<number>;
-    zoomBase: SharedValue<number>;
-    zoomFromX: SharedValue<number>;
-    zoomFromY: SharedValue<number>;
-    zoomFromSet: SharedValue<number>;
-    dragging: SharedValue<number>;
-    armed: SharedValue<number>;
     rowLive: SharedValue<number>;
-    rowVis: SharedValue<number>;
     rowPos: SharedValue<number>;
     rowCount: SharedValue<number>;
-    stage: SharedValue<{ w: number; h: number }>;
   };
   /** The tab-name pills that replace the bar keys during a page swipe (§4.4). `x` is the
    *  screen's page offset, `pitch` its page step — the pills derive the continuous position.
@@ -420,15 +395,6 @@ function KeyBarInner(props: KeyBarProps) {
   /** The pill's measured width — the name-pill pitch (prototype: item + gap exactly fill it). */
   const [pillW, setPillW] = useState(0);
 
-  // Something asked for the keyboard — a tap on the terminal, the switcher closing back onto keys
-  // that were up (0 = never signalled, skip mount). Connecting is NOT one of them: the session
-  // arrives with the terminal in full view, and the keys come up when they are asked for
-  // (user, 2026-08-11). The raise lands on the field matching the CURRENT prose mode, so the
-  // keyboard presents with the right brain from the first frame.
-  useEffect(() => {
-    if (props.focusSignal) (props.textMode ? inputOn : inputOff).current?.focus();
-  }, [props.focusSignal]);
-
   // Prose mode flips the keyboard's own brain, so its context has to start clean in BOTH
   // directions: a shell line already in the pad must not become the correction context for a
   // sentence, and half a sentence must not ride into a command. `repad` is the reset. Mount is
@@ -618,28 +584,26 @@ function KeyBarInner(props: KeyBarProps) {
   // pasteboard as it opens (the accepted moment for the iOS paste banner).
   const onPasteLongPress = () => onOpenChange('clipboard');
 
-  // The bar swipe (§4.4) — one gesture holding the card, with both of Safari's axes live at the
-  // same time rather than an axis chosen at 10pt and held to for the rest of the pan. Sideways is
-  // T11's window hop, up is T10's switcher drag, down puts the keyboard away, and the first two
-  // run TOGETHER: a card already pulled a little off the bar can still be swiped between windows,
-  // and a swipe already running sideways can still be flicked up (user, 2026-08-12). Only the
-  // release picks a winner, and the screen does that — it is the side that knows how far up the
-  // card got. Keys never fire during a swipe: the pan activating cancels the childrens' touches.
+  // The bar swipe (§4.4) — three exits, all travel tests, none of them an axis chosen at 10pt:
+  // sideways is T11's window hop (`rowJoins`), down puts the keyboard away (`barDismisses`),
+  // up asks for it back (`barRaises`). The two verticals and the hop cannot collide because each
+  // demands its axis lead, and a flat hop's own arc (24–26pt up, 2026-08-12) leads sideways by a
+  // lot, so it joins the row and neither keyboard exit sees it. Keys never fire during a swipe:
+  // the pan activating cancels the childrens' touches.
   /** Past the slop: the page is under the finger. Shared values, not refs — the whole pan runs
    *  on the UI thread now. */
   const held = useSharedValue(0);
-  /** The grab happened: both axes are live from here. */
-  const grabbed = useSharedValue(0);
   /** The keyboard has already been sent away by this pan. */
   const dismissed = useSharedValue(0);
-  /** The pan's translation at the instant the card was grabbed. The grab costs `BAR_AXIS_SLOP` of
+  /** The keyboard has already been asked back by this pan. */
+  const raised = useSharedValue(0);
+  /** The pan's translation at the instant the row joined. The slop costs `BAR_AXIS_SLOP` of
    *  travel, and the pan reports it from TOUCH-DOWN — so handing the page `e.translationX` made
    *  it open 10pt along instead of at zero: the card detached from the edge with a jump in the
    *  direction of the finger rather than growing out of it (user, 2026-08-11). The hop measures
    *  from here on, which also makes the commit and flick distances in `barswipe-model` mean the
-   *  travel they say they do, the way the vertical gesture's already budget for this. The vertical
-   *  tests keep the raw translation: the lift is measured from touch-down (its 24pt is the budget),
-   *  and the zoom re-origins for itself at the frame it arms (the screen's `zoomFrom`). */
+   *  travel they say they do. The vertical tests keep the raw translation: both are measured
+   *  from touch-down, and the 24pt they pay IS their budget. */
   const originX = useSharedValue(0);
   /** Stable JS trampolines: the gesture is memoized ONCE, so its worklets must capture functions
    *  whose identity never changes — the latest props are read through a ref at call time. An
@@ -647,22 +611,17 @@ function KeyBarInner(props: KeyBarProps) {
    *  render, mid-gesture (user: "hitching even worse" after the UI-thread move). */
   const cbRef = useRef(props);
   cbRef.current = props;
-  const jsZoomGrab = useCallback((dx: number, dy: number) => cbRef.current.onZoomGrab?.(dx, dy), []);
-  const jsZoomEnd = useCallback(
-    (dx: number, dy: number, vx: number, vy: number) => cbRef.current.onZoomEnd?.(dx, dy, vx, vy),
-    [],
-  );
-  const jsZoomArm = useCallback(() => cbRef.current.onZoomArm?.(), []);
   const jsBarSwipe = useCallback(
     (phase: 'start' | 'end', dx: number) => cbRef.current.onBarSwipe?.(phase, dx),
     [],
   );
   const dismissKeys = useCallback(() => Keyboard.dismiss(), []);
-  /** `showTabs` for the worklet without becoming a gesture dependency. */
-  const showTabsSV = useSharedValue(props.showTabs ? 1 : 0);
-  useEffect(() => {
-    showTabsSV.value = props.showTabs ? 1 : 0;
-  }, [props.showTabs, showTabsSV]);
+  // The raise lands on the field matching the CURRENT prose mode, so the keyboard presents with
+  // the right brain from the first frame — the same focus the text-mode flip moves to below.
+  const raiseKeys = useCallback(() => {
+    const p = cbRef.current;
+    (p.textMode ? inputOn : inputOff).current?.focus();
+  }, []);
   const panSV = props.panSV;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- every capture is identity-stable
   const pan = useMemo(() => Gesture.Pan()
@@ -670,58 +629,27 @@ function KeyBarInner(props: KeyBarProps) {
     .onBegin(() => {
       'worklet';
       held.value = 0;
-      grabbed.value = 0;
       dismissed.value = 0;
+      raised.value = 0;
     })
     .onUpdate((e) => {
       'worklet';
       const sv = props.panSV;
       const tx = e.translationX;
       const ty = e.translationY;
-      // The grab. From here the card is in hand and BOTH axes are simply live — no threshold in
-      // the way of the vertical (user, 2026-08-13). One JS call pays the open's costs; every
-      // frame after is pure shared-value writes on this thread.
-      if (grabbed.value === 0) {
-        if (!barGrabbed(tx, ty)) return;
-        grabbed.value = 1;
-        if (showTabsSV.value === 1) runOnJS(jsZoomGrab)(tx, ty);
-      }
-      if (sv !== undefined && showTabsSV.value === 1 && sv.dragging.value === 1 && sv.zoomReady.value === 1) {
-        if (sv.zoomFromSet.value === 0) {
-          sv.zoomFromSet.value = 1;
-          sv.zoomFromX.value = tx;
-          sv.zoomFromY.value = ty;
-        }
-        // The zoom's horizontal drift freezes once a page swipe is running — two things moving the
-        // card at once is a card travelling twice as far as the finger.
-        if (held.value === 0) sv.dragX.value = tx - sv.zoomFromX.value;
-        sv.prog.value = Math.min(
-          1,
-          sv.zoomBase.value + zoomProgress(ty - sv.zoomFromY.value, sv.stage.value.w, sv.dragX.value),
-        );
-        // The card has left the bar for real: only now does the switcher's React state cost
-        // anything (see `onZoomArm`). A flat hop never reaches here.
-        if (sv.armed.value === 0 && sv.prog.value > 0.01) {
-          sv.armed.value = 1;
-          runOnJS(jsZoomArm)();
-        }
-        // A card lifted off the bar goes to the grid ALONE. It used to gather its neighbours once
-        // the hand settled, and push them away again past a ceiling — removed 2026-08-17 after
-        // three fixes for the same report ("they flicker, and sometimes they don't disappear")
-        // each fitted the evidence and each missed. The two gestures either side of it are the
-        // ones that work and the ones that were being asked for: up goes to the grid, sideways
-        // hops a tab. `git log -S heldAir` finds the latch, the ceiling and its constants.
-      }
-      // The keys get out of the way once the card is visibly off the bar — not at the slop, which
-      // the opening arc of a flat hop passes through on its own (see `KEYS_DROP_DY`).
-      if (dismissed.value === 0 && (ty <= -KEYS_DROP_DY || barDismisses(tx, ty))) {
+      // The two vertical exits, each once per gesture — the leading rule in the tests is what
+      // keeps a flat hop's own arc out of both.
+      if (dismissed.value === 0 && barDismisses(tx, ty)) {
         dismissed.value = 1;
         runOnJS(dismissKeys)();
       }
-      // The page row joins when the finger goes sideways from a standing start on the bar. A card
-      // already climbing is on its way to the grid alone — it has no row to join.
+      if (raised.value === 0 && barRaises(tx, ty, held.value === 1)) {
+        raised.value = 1;
+        runOnJS(raiseKeys)();
+      }
+      // The page row joins when the finger goes sideways from a standing start on the bar.
       if (held.value === 0) {
-        if (!rowJoins(tx, ty, sv?.prog.value ?? 0)) return;
+        if (!rowJoins(tx, ty)) return;
         held.value = 1;
         originX.value = tx;
         runOnJS(jsBarSwipe)('start', 0);
@@ -735,16 +663,11 @@ function KeyBarInner(props: KeyBarProps) {
       }
     })
     // `onFinalize`, not `onEnd`: a pan can leave by being CANCELLED — another handler wins the
-    // race, the view it is on unmounts — and that path never calls `onEnd`. The screen's zoom
-    // phase is only ever left by this callback, so a miss leaves it stuck mid-drag (user,
-    // 2026-08-11). Finalize fires for every exit, successful or not.
+    // race, the view it is on unmounts — and that path never calls `onEnd`. The screen's page
+    // swipe is only ever ended by this callback, so a miss leaves it stuck (user, 2026-08-11).
+    // Finalize fires for every exit, successful or not.
     .onFinalize((e) => {
       'worklet';
-      // Both axes report, in this order, and the screen arbitrates: a release that commits to
-      // the grid ends the page swipe itself, so the second call finds nothing live to decide.
-      if (grabbed.value === 1 && showTabsSV.value === 1)
-        runOnJS(jsZoomEnd)(e.translationX, e.translationY, e.velocityX, e.velocityY);
-      grabbed.value = 0;
       if (held.value === 1) {
         held.value = 0;
         runOnJS(jsBarSwipe)('end', e.translationX - originX.value);

@@ -443,12 +443,11 @@ export type SwitcherProps = {
   gridRef: RefObject<ScrollView | null>;
   /** The window the zoom is flying into (or out of), and the flying surface's own opacity.
    *
-   *  That one card is not drawn while the surface is in the air. The surface is meant to be
-   *  covering its slot the whole way, but it rides the finger sideways during a bar-swipe grab
-   *  (`dragX` at 0.6), so any drift slides it off the slot and the card shows up beside it —
-   *  the same window rendered twice, once in hand and once already parked (user, 2026-08-10,
-   *  screenshot). Hiding it needs no state of its own: "the surface is fully opaque" is exactly
-   *  when it must not draw, and an interrupted transition can't strand it hidden. */
+   *  That one card is not drawn while the surface is in the air: the surface is meant to be
+   *  covering its slot the whole way, so the card underneath would only be the same window
+   *  rendered twice, once flying and once already parked (user, 2026-08-10, screenshot).
+   *  Hiding it needs no state of its own: "the surface is fully opaque" is exactly when it
+   *  must not draw, and an interrupted transition can't strand it hidden. */
   zoomId: string | null;
   fade: SharedValue<number>;
 };

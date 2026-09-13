@@ -23,7 +23,6 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   type AnimatedStyle,
-  type SharedValue,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
@@ -37,7 +36,6 @@ import {
   slideMs,
   rubber,
   swipeTarget,
-  zoomCommits,
 } from '@/barswipe-model';
 import { pushYank } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
@@ -83,9 +81,6 @@ import {
   SEARCH_BAR_H,
   gridTop,
   revealOffset,
-  HOLD_REACH,
-  aimFrame,
-  heldFrame,
   slotFrame,
   snapshotType,
   termPad,
@@ -216,18 +211,6 @@ export default function SessionScreen() {
    *  that thaw the pad afterwards. `Keyboard.metrics()` cannot answer it: it is the last frame the
    *  keyboard was SHOWN at, so mid-hide it still reports the departing one (see `syncPad`). */
   const announcedPad = useRef(0);
-  /**
-   * Were the keys up when the last overlay took the terminal? The way back puts them back the way
-   * they were rather than raising them unconditionally — the reference app's `keyboardHidden` is
-   * the bar's own state and the tabs view never writes it, so closing the grid comes back to
-   * whatever the keys were doing before it opened (user, 2026-08-10). Written only by the doors
-   * the *terminal* leaves through; an overlay opening on top of another one leaves it alone.
-   *
-   * ponytail: the keyboard's frame stands in for focus, which is what the bar actually owns. They
-   * part company only with a hardware keyboard attached (focused, no frame) — plumb a focus
-   * callback out of KeyBar if that ever matters.
-   */
-  const keysWereUp = useRef(false);
   /** The emulator's measured cell and the rows it settled on (see TerminalProps.onResize). The
    *  cell is what every snapshot's type comes from, so a card draws the pane at the size the
    *  flying surface hands over at; the rows are what the vertical inset is worked out from. */
@@ -239,15 +222,6 @@ export default function SessionScreen() {
    *  is a preview of a pane this client is about to size to itself, so this is the width to draw
    *  them all at; anything longer clips, exactly as it will when tmux reflows it. */
   const [liveCols, setLiveCols] = useState(0);
-  /** A keyboard we asked for and have not seen yet — the terminal's size stays held until it
-   *  lands, so the host hears the geometry once. Self-clearing: a focus that never raises one
-   *  (hardware keyboard, a refusal) must not hold the size for the rest of the session. */
-  const [kbSettle, setKbSettle] = useState(false);
-  useEffect(() => {
-    if (!kbSettle) return;
-    const timer = setTimeout(() => setKbSettle(false), 500);
-    return () => clearTimeout(timer);
-  }, [kbSettle]);
   /** Thaw: render the pad the last event announced — for the doors that unfreeze with no keyboard
    *  move left to re-report it. It used to ask `Keyboard.metrics()` where the keyboard is, which is
    *  a question that API does not answer mid-hide (it is the last SHOWN frame; RN clears
@@ -258,11 +232,10 @@ export default function SessionScreen() {
   const syncPad = () => setKeyboardPad(announcedPad.current);
   const keyboardTarget = useCallback((next: number) => {
     announcedPad.current = next; // even while frozen: syncPad must thaw to the latest destination
-    // A zoom owns the stage until it lands. Let the native animation run without resizing the
+    // A switcher owns the stage until it lands. Let the native animation run without resizing the
     // flying card; finishClose reconciles the destination as before.
     if (swRef.current !== 'closed') return;
     setKeyboardPad(next); // React bails out on the identical onEnd destination
-    setKbSettle(false);
   }, []);
   const keyboardPosition = useTerminalKeyboard(insets.bottom, keyboardTarget);
 
@@ -333,24 +306,19 @@ export default function SessionScreen() {
 
   // T12: the Settings sheet (§4.8). Both doors — the ⋯ menu row and the two-finger tap on the
   // grid — land here; the sheet slides over the live terminal, and the prototype puts the
-  // keyboard away for it and gives back what it took on close.
+  // keyboard away for it.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const openSettings = () => {
     console.log('[settings] sheet open');
     setOpen('none');
-    // The grid's door is the grid's business: opening from up there must not record its
-    // (always down) keys as the terminal's, or closing the grid afterwards would leave a
-    // keyboard behind that was up when the person went in.
-    if (swRef.current === 'closed') keysWereUp.current = keyboardPad > 0;
+    // The sheet puts the keys away for itself; giving them back is the bar's own up-swipe, not the
+    // door's job.
     Keyboard.dismiss();
     setSettingsOpen(true);
   };
   const closeSettings = () => {
     console.log('[settings] sheet closed');
     setSettingsOpen(false);
-    // Only onto the terminal, and only if that is where the keys were: closing back onto the
-    // grid would raise the keyboard over it.
-    if (swRef.current === 'closed' && keysWereUp.current) setFocusSignal((n) => n + 1);
   };
 
   /* --- T10: the tab switcher (§4.5) ---
@@ -361,7 +329,7 @@ export default function SessionScreen() {
    * unmount) the very view that has to keep rendering mid-transition. The grid sits behind the
    * stage; the stage wrapper below animates over it, driven by tested math in switcher-model.
    */
-  type SwPhase = 'closed' | 'drag' | 'opening' | 'open' | 'closing' | 'birth';
+  type SwPhase = 'closed' | 'opening' | 'open' | 'closing' | 'birth';
   const [sw, setSw] = useState<SwPhase>('closed');
   /** The phase read from a handler that runs after the render it was written in (same reason as
    *  `searchRef`) — the settings doors both need to know which screen is in front. */
@@ -376,17 +344,11 @@ export default function SessionScreen() {
   // lands (user, 2026-08-11, and the trace agrees — no refit within a second of any landing, just
   // a flush).
   const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
-  const [focusSignal, setFocusSignal] = useState(0);
   const scrollY = useRef(0);
   const gridRef = useRef<ScrollView>(null);
   const prog = useSharedValue(0); // 0 = terminal at rest, 1 = terminal inside its card slot
-  const dragX = useSharedValue(0); // finger drift during the bar-swipe-up follow
   const alpha = useSharedValue(1); // the stage fades out at the end of the zoom-out, back in first on return
   const slotSV = useSharedValue<Frame>({ x: 0, y: 0, w: 1, h: 1 });
-  /** 0 = the card is in the hand, aimed at the centred hold pose; 1 = aimed at its slot in the
-   *  grid. Only the bar drag ever takes it off 1, and only its release puts it back — every other
-   *  route into the switcher flies terminal↔slot as it always did (`aimFrame`). */
-  const flight = useSharedValue(1);
   /** Whose slot `slotSV` is aimed at — the grid leaves that one card undrawn while the surface is
    *  in the air (see `zoomId` in switcher.tsx). Set wherever the aim is: the two are one decision. */
   const [zoomId, setZoomId] = useState<string | null>(null);
@@ -432,7 +394,7 @@ export default function SessionScreen() {
           if (searchRef.current.on && (was === null || was.cols !== cols || was.rows !== rows))
             setSearchFit((n) => n + 1);
           lastFit.current = { cols, rows };
-          if ((sw !== 'closed' && sw !== 'open') || kbSettle) {
+          if (sw !== 'closed' && sw !== 'open') {
             return;
           }
           // Same object back when nothing moved, so React bails out instead of re-rendering: a
@@ -464,26 +426,6 @@ export default function SessionScreen() {
           setModes(next);
         },
     onTwoFingerTap: async () => openSettings(),
-    onTap: async () => {
-          const prose =
-            tmux.session !== null && tmux.paneCommand !== null
-              ? proseFor(tmux.paneCommand, tmux.paneChildren)
-              : null;
-          if (keyboardPad > 0) Keyboard.dismiss();
-          // The prose TUIs (pi, Claude Code, codex, aider — the apps with tappable UI) own the
-          // pointer: a stationary tap on their screen is a click they encode for themselves (iOS
-          // WebKit's synthetic mouse pair reaches xterm's CoreMouseService), and raising the
-          // keyboard in the same gesture is what made tapping their "scroll to bottom" button pop
-          // the keys at once. The decision rides the poll's paneCommand, NOT the client's mouse
-          // flag: that one is DECSET state on the outer terminal and outlives the app that set it —
-          // a pi that dies mid-alt-screen (measured on device 2026-09-13: flag stuck true at the
-          // shell prompt, no DECRST, no buffer transition) swallowed every later tap until the
-          // pane's job name said otherwise. tmux re-answers who is in the pane within one ~2s beat.
-          // `proseFor === true` is the gate; its shell/`false`/`null` answers keep the door, as
-          // before. Without tmux (`session`/`paneCommand` null) the door stays unconditionally.
-          else if (prose === true) return;
-          else setFocusSignal((n) => n + 1);
-        },
   };
   /** One identity-stable object instead of nine one-per-key trampolines: same ref-indirection, one hook. */
   const tv = useMemo(
@@ -497,11 +439,10 @@ export default function SessionScreen() {
       onLink: async (...a: any[]) => termH.current.onLink?.(...a),
       onModes: async (...a: any[]) => termH.current.onModes?.(...a),
       onTwoFingerTap: async (...a: any[]) => termH.current.onTwoFingerTap?.(...a),
-      onTap: async (...a: any[]) => termH.current.onTap?.(...a),
     }),
     [],
   );
-  const termHold = (sw !== 'closed' && sw !== 'open') || kbSettle;
+  const termHold = sw !== 'closed' && sw !== 'open';
   const terminalView = useMemo(
     () => (
       <TerminalView
@@ -518,7 +459,6 @@ export default function SessionScreen() {
         onLink={tv.onLink}
         onModes={tv.onModes}
         onTwoFingerTap={tv.onTwoFingerTap}
-        onTap={tv.onTap}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
     ),
@@ -766,25 +706,12 @@ export default function SessionScreen() {
 
   const finishClose = () => {
     setSw('closed');
-    // The keys come back exactly as they were left (`keysWereUp`), with no exception — T14's "an
-    // armed search hit is for reading, not typing" was overruled on device: whatever the keyboard
-    // was doing before the grid, it is doing again after it (user, 2026-08-15). The size hold
-    // outlives the zoom by exactly that keyboard: released at the end of the animation it measures
-    // a stage with no keyboard in it, reports that, and is corrected ~250ms later — two reflows of
-    // every pane on the host, landing just as the terminal comes back into view (device). Nothing
-    // is raised, nothing to wait for.
-    //
     // The pad froze at the open (see the keyboardWillChangeFrame guard) and no keyboard event is
     // coming to re-report it, so thaw it to the last one that WAS announced. The thaw that MATTERS
     // for the bar's position already happened at the commit (`closeTo`/`springBack`) — this one is
-    // the reconcile, for the two things that can still be owed at the landing: the no-flight
-    // `springBack` path above, which never reaches a commit thaw, and any keyboard event that
-    // landed frozen during the flight's 380ms. Same value on the ordinary path, so React bails.
+    // the reconcile, for any keyboard event that landed frozen during the flight. Same value on
+    // the ordinary path, so React bails.
     syncPad();
-    if (keysWereUp.current) {
-      setKbSettle(true);
-      setFocusSignal((n) => n + 1);
-    }
   };
 
   /**
@@ -801,11 +728,7 @@ export default function SessionScreen() {
     if (showTabs || swRef.current === 'closed') return;
     console.log('[switcher] tearing the grid down: the session it belongs to is gone');
     cancelAnimation(prog);
-    cancelAnimation(dragX);
-    cancelAnimation(flight);
     prog.value = 0;
-    dragX.value = 0;
-    flight.value = 1;
     alpha.value = 1;
     setZoomId(null);
     setCards([]);
@@ -826,33 +749,14 @@ export default function SessionScreen() {
 
   const commitOpen = () => {
     setSw('opening');
-    // Matched SPEED, not duration (user, 2026-09-01): a swipe release partway to the grid has
-    // less distance left, and giving that remainder the button's full ZOOM_OUT made its settle
-    // crawl next to the button's flight. Time scales with the travel left; the floor keeps a
-    // deep pull's slot-slide from reading as a snap. Every value in the release rides this one
-    // curve so the aim, the progress and the sideways settle all arrive together.
+    // Matched SPEED, not duration (user, 2026-09-01): a catch of the close partway home has less
+    // distance left, and giving that remainder the button's full ZOOM_OUT made its settle crawl
+    // next to the button's flight. Time scales with the travel left; the floor keeps a deep
+    // catch's slot-slide from reading as a snap.
     const out = {
       duration: Math.max(120, ZOOM_OUT.duration * Math.max(0, 1 - prog.value)),
       easing: ZOOM_OUT.easing,
     };
-    dragX.value = withTiming(0, out);
-    // The release is what sends the card to its slot: until now it has been aimed at the hold pose
-    // under the finger (`aimFrame`). On every other route in this is already 1 and the timing is a
-    // no-op. It rides ZOOM_OUT so the aim and the progress arrive together — a shorter curve here
-    // would land the card in its slot and then keep scaling into it.
-    //
-    // The hand-over cut (alpha 0, sw 'open') rides whichever of the two values actually has
-    // distance to travel. On a DEEP pull prog is already 1 at the release, its timing finishes
-    // immediately, and a cut attached there fired before the flight moved a point — the
-    // fly-to-grid animation visibly skipped (user, 2026-08-13). On a tap-open it is the mirror:
-    // flight is already 1 and prog travels.
-    const flightTravels = flight.value < 0.999;
-    flight.value = withTiming(1, out, (done) => {
-      if (done && flightTravels) {
-        alpha.value = 0;
-        runOnJS(setSw)('open');
-      }
-    });
     // The prototype fades the surface out only near the end, once it covers its card — and "near
     // the end" is measured in TRAVEL, not in milliseconds. ZOOM_OUT is out-cubic, so at 180ms
     // (53% of 340) the surface is only ~90% of the way there, while the card underneath goes fully
@@ -870,7 +774,7 @@ export default function SessionScreen() {
     // t=1 exactly, where the two pictures are the same picture — which is the whole point of the
     // geometry. A cut, not a fade, for the reason `springBack` snaps its own (see there).
     prog.value = withTiming(1, out, (done) => {
-      if (done && !flightTravels) {
+      if (done) {
         alpha.value = 0;
         runOnJS(setSw)('open');
       }
@@ -878,40 +782,21 @@ export default function SessionScreen() {
   };
 
   const springBack = () => {
-    // A release with nothing to fly home from: the grab armed the zoom (it always does now — the
-    // vertical is live from the first frame) but the finger never actually pulled. Flying anyway
-    // round-tripped `sw` through `closing` for a frame, and the page row's render condition sat
-    // out that frame — both neighbour cards unmounting and remounting mid-slide, which is the
-    // flash on every plain hop (trace, 2026-08-13: `- card:next` one line after the commit,
+    // A close with nothing to fly home from: the surface never left the terminal, so round-
+    // tripping `sw` through `closing` would unmount and remount the page row's cards mid-slide —
+    // the flash on every plain hop (trace, 2026-08-13: `- card:next` one line after the commit,
     // `+ card:next` two lines later).
     if (prog.value < 0.005) {
-      cancelAnimation(dragX);
-      dragX.value = 0;
-      flight.value = 1; // normally the flight's own completion resets the aim — there is none
-      // …and nothing is owed the keyboard either. `keysWereUp` is the promise that an overlay
-      // which TOOK the keys gives them back, but on this path no overlay ever opened: `sw` never
-      // left `closed` (the arm needs prog > 0.01). What can have happened is the other vertical
-      // exit — a swipe DOWN, which is the gesture whose whole purpose is to put the keys away
-      // (`barDismisses`). Both axes are one pan, so the dismiss and this release are the same
-      // gesture, and honouring the promise here raised the keyboard again the instant it had
-      // gone: swipe down, keyboard bounces back up (user, 2026-08-13). A finger that barely moved
-      // dismissed nothing, so clearing this costs that case nothing to give back.
-      keysWereUp.current = false;
-      // …and if the gesture never armed, leave the PAD alone too. `finishClose`'s other half is
-      // `syncPad`, which exists for the doors that thaw a pad the `keyboardWillChangeFrame`
-      // listener was frozen out of (it returns early unless `sw` is `closed`). Here `sw` never
-      // left `closed`, so that listener has been live the whole way through and has already
-      // reported the dismiss. Calling `syncPad` on top of it asks iOS where the keyboard is in
-      // the middle of its hide animation, gets the frame it still has, and writes the old overlap
-      // back — the keys go away and the bar stays parked where they were, mid-screen (user,
-      // 2026-08-13). Nothing to reconcile: the listener owns this one.
+      // If the surface never opened, no pad reconcile is owed either: the
+      // `keyboardWillChangeFrame` listener was live the whole way through and owns whatever the
+      // keys are doing — `syncPad` would only ask iOS for the frame it still has, mid-hide.
       if (swRef.current === 'closed') return;
       finishClose();
       return;
     }
     closeArmed.current = false;
-    setSw('closing'); // already `closing` when `closeTo` armed it two frames ago; a drag release sets it here
-    syncPad(); // the drag path's thaw — see `closeTo`. A no-op on the `closeTo` path, which did it there.
+    setSw('closing'); // already `closing` when `closeTo` armed it two frames ago
+    syncPad(); // the commit's thaw — see `closeTo`. A no-op on the `closeTo` path, which did it there.
     // Solid on the first frame, not dissolved in over 120ms. The card and the surface are the
     // same geometry at t=1 — that is what all the crossfade arithmetic buys — so the swap has
     // nothing to hide, and a dissolve between two pictures that differ AT ALL is ghosting in plain
@@ -920,12 +805,8 @@ export default function SessionScreen() {
     // the last poll's capture, the surface holds the pane tmux just redrew) one frame of cut beats
     // 120ms of double exposure. It also means the flight owes the host nothing but its redraw.
     alpha.value = 1;
-    dragX.value = withTiming(0, { duration: 200 });
     prog.value = withTiming(0, ZOOM_IN, (done) => {
       if (done) {
-        // Back to aiming at the slot. At prog 0 the aim draws nothing, so this costs no frame —
-        // it is only here so the NEXT way in (a tabs tap) does not inherit a hold pose.
-        flight.value = 1;
         runOnJS(finishClose)();
       }
     });
@@ -934,11 +815,11 @@ export default function SessionScreen() {
   const openSwitcher = () => {
     if (stage === null) return;
     if (sw === 'closing') {
-      // The flight home is catchable from the tabs button too, not only the bar grab (see
-      // onZoomGrab): the last stretch of the out-cubic reads as a landed terminal, so a tap
-      // there was swallowed — which is what blocked hopping through tabs via the grid
-      // (user, 2026-09-01). Nothing to set up: the aim, the cards and the size hold are the
-      // ones this close was already flying under, so just reverse the flight.
+      // The flight home is catchable from the tabs button: the last stretch of the out-cubic
+      // reads as a landed terminal, so a tap there was swallowed — which is what blocked hopping
+      // through tabs via the grid (user, 2026-09-01). Nothing to set up: the aim, the cards and
+      // the size hold are the ones this close was already flying under, so just reverse the
+      // flight.
       console.log('[switcher] open (tabs tap caught the close)');
       closeArmed.current = false;
       cancelAnimation(prog);
@@ -950,7 +831,6 @@ export default function SessionScreen() {
     if (sw !== 'closed') return;
     console.log('[switcher] open (tabs tap)');
     setOpen('none');
-    keysWereUp.current = keyboardPad > 0; // read before the dismiss moves it
     Keyboard.dismiss();
     const pos = activePos();
     setZoomId(idAt(pos));
@@ -960,11 +840,11 @@ export default function SessionScreen() {
     // recapture it under the surface, so the crossfade lands on the pane being looked at.
     const aimed = visibleCards[pos]?.win;
     if (aimed) void refreshCard(aimed);
-    // The bar flick pays the open's one-off costs — the phase render, the holdSize marshal into
-    // the webview, the keyboard starting down — frames before its commit, under the finger. The
-    // tap paid them all on the flight's first frame, which is the initial hitch (device,
-    // 2026-08-11). So: flip the phase now, fly two frames later. Progress sits at 0 in the gap,
-    // so nothing on screen moves until the flight's first frame is clean.
+    // The open's one-off costs — the phase render, the holdSize marshal into the webview, the
+    // keyboard starting down — land on the flight's first frame if they are paid now, and that
+    // is the initial hitch (device, 2026-08-11). So: flip the phase now, fly two frames later.
+    // Progress sits at 0 in the gap, so nothing on screen moves until the flight's first frame
+    // is clean.
     setSw('opening');
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
@@ -973,150 +853,16 @@ export default function SessionScreen() {
     );
   };
 
-  // The drag-follow (prototype `zoomFollow`): progress tracks the finger from the GRAB, with
-  // nothing in between — up, back down, up again — and only the release decides, on how far it
-  // got or how fast it was thrown (`zoomCommits`).
-  /** Has the open's one-off cost landed (two frames, as in `openSwitcher`)? Until it has, the
-   *  drag is set-up only and nothing moves. Shared values, not refs: the pan's per-frame path
-   *  runs on the UI thread now (the perf harness convicted the JS thread — 41–305ms stalls under
-   *  every gesture while the UI thread ran clean), and the worklet must read these. */
-  const zoomReadySV = useSharedValue(0);
-  const zoomFromXSV = useSharedValue(0);
-  const zoomFromYSV = useSharedValue(0);
-  const zoomFromSetSV = useSharedValue(0);
-  const zoomBaseSV = useSharedValue(0);
-  const draggingSV = useSharedValue(0);
-  /** Has the worklet already asked React to arm the switcher? (see `onZoomArm`) */
-  const armedSV = useSharedValue(0);
   /** The live page row, mirrored for the worklet: whether a hop is live, and the rubber band's
    *  position/count. */
   const rowLiveSV = useSharedValue(0);
   const rowPosSV = useSharedValue(0);
   const rowCountSV = useSharedValue(0);
-  /** Is a zoom drag live? The gesture's own truth, and the only thing its lifecycle turns on.
-   *  `sw` cannot be: `setSw('drag')` is read back by the very next pan report, and a flick that
-   *  ends in the same frame gets its release judged against a phase React has not written yet —
-   *  the release is dropped, the render lands on `drag`, and nothing is left to end it. That is a
-   *  frozen app (user, 2026-08-11), and it is the same shape as the two before it. */
-  const dragging = useRef(false);
   /** Is the page row on screen? Opacity, not mounting: the cards stay mounted for the life of the
    *  terminal view because each is a snapshot tree of Text runs, and building one costs 53-93ms of
    *  React on the JS thread — the hitch at the start of every swipe the original code was written
    *  to avoid, which mounting them per gesture brought back (perf, 2026-08-13). */
   const rowVisSV = useSharedValue(0);
-
-  /** The grab, one JS call per gesture: the open's one-off costs. Everything per-frame — prog and
-   *  dragX — runs in the bar's worklet against the shared values above. */
-  const onZoomGrab = (dx: number, dy: number) => {
-    if (stage === null) return;
-    const at = swRef.current;
-    {
-      if (!dragging.current && at === 'closed') {
-        // The grab no longer implies a raised keyboard (the swipe ↑ is one gesture whatever the
-        // keys are doing), so read the pad as the tap door does. KeyBar's dismiss is one call old
-        // at this point and iOS reports the frame a beat later, so this is still the pre-drag
-        // truth — and it is what decides whether the keys come back on the way out.
-        keysWereUp.current = keyboardPad > 0;
-        const pos = activePos();
-        revealSlot(pos);
-        slotSV.value = zoomSlot(pos);
-        // In the hand, not on its way to the grid: the card shrinks toward the centred hold pose
-        // and stays somewhere it can still be pushed sideways. `commitOpen` releases it.
-        flight.value = 0;
-        armPos.current = pos;
-        // The tap defers its flight two frames so the open's one-off costs — the phase render, the
-        // holdSize marshal into the webview, the keyboard starting down — are paid before anything
-        // moves (see `openSwitcher`). This gesture used to pay them on the frame its motion
-        // started, which is the same hitch, under a finger instead of an animation (user,
-        // 2026-08-11). It waits the same two frames; where the tap can simply delay, the drag
-        // re-origins at the frame it arms, so the surface grows from zero where the finger has got
-        // to rather than jumping to the travel it spent waiting.
-        dragging.current = true;
-        draggingSV.value = 1;
-        armedSV.value = 0;
-        zoomReadySV.value = 0;
-        zoomFromSetSV.value = 0;
-        zoomBaseSV.value = 0;
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            zoomReadySV.value = 1;
-          }),
-        );
-        return;
-      } else if (!dragging.current && at === 'closing') {
-        // The flight home is catchable. `closed` only arrives when the timing formally ends, and
-        // an out-cubic has spent 99% of its distance at 78% of its duration — so the last ~80ms
-        // look exactly like a landed terminal that refuses to swipe (user, 2026-08-11). Nothing
-        // needs setting up here: the aim, the cards and the size hold are the ones this close was
-        // already flying under, so the grab is free and immediate. It resumes from where the
-        // surface has got to (`zoomBase`) rather than snapping to zero.
-        console.log('[switcher] open (caught the close)');
-        closeArmed.current = false; // caught inside the two-frame gap: no flight is owed
-        dragging.current = true;
-        draggingSV.value = 1;
-        cancelAnimation(prog);
-        cancelAnimation(dragX);
-        cancelAnimation(alpha);
-        alpha.value = 1;
-        zoomBaseSV.value = prog.value;
-        zoomFromXSV.value = dx;
-        zoomFromYSV.value = dy;
-        zoomFromSetSV.value = 1;
-        zoomReadySV.value = 1;
-        setSw('drag');
-        return;
-      }
-    }
-  };
-
-  /** Which window the grab aimed at, for the deferred arm. */
-  const armPos = useRef(0);
-  /**
-   * The switcher's own state, armed only once the card has ACTUALLY started to lift.
-   *
-   * The grab arms nothing but shared values now. Since the vertical lost its threshold, every
-   * horizontal hop grabs — and doing the full open there charged each flat swipe a phase render,
-   * a grid re-render and an SSH capture it never used before, which is JS-thread work inside the
-   * gesture (perf, 2026-08-13). Nothing here is needed to SHOW the card moving: the box's
-   * transform reads `prog`, which the worklet writes from the first pixel.
-   */
-  const onZoomArm = () => {
-    if (swRef.current !== 'closed' || !dragging.current) return;
-    setOpen('none');
-    setZoomId(idAt(armPos.current));
-    const aimed = visibleCards[armPos.current]?.win;
-    if (aimed) void refreshCard(aimed);
-    setSw('drag');
-  };
-
-  const onZoomEnd = (dx: number, dy: number, vx: number, vy: number) => {
-    if (stage === null) return;
-    if (dragging.current) {
-      dragging.current = false;
-      draggingSV.value = 0;
-      // The row goes back out to the sides so the card flies to the grid alone — unless a hop is
-      // landing, whose own clear cuts it (see `clearBarSwipe`).
-      if (swipeInfo.current?.live !== true) rowVisSV.value = withTiming(0, { duration: 160 });
-      // The hop is asked FIRST: a hop's own arc can carry `prog` past ZOOM_COMMIT, so asking the
-      // grid first meant a sideways release could be taken as a lift (user, 2026-08-13). The grid
-      // takes the release only when the horizontal axis decides nothing.
-      const info = swipeInfo.current;
-      const hopWould =
-        info?.live === true &&
-        swipeTarget(swipeX.value, Date.now() - info.t0, info.pos, info.slots) !== info.pos;
-      if (!hopWould && zoomCommits(prog.value, vx, vy)) {
-        // The grid outranks the hop: the card flying into the grid is the one that was under the
-        // finger, so a page swipe still open under this release must decide nothing. It is told by
-        // this flag rather than by a call, because the bar reports the two axes in order and the
-        // horizontal's own 'end' is the next thing to arrive.
-        // ponytail: the flight always aims at the window it started on. Committing to the grid
-        // from 80% of the way to the NEXT tab could reasonably land there instead; nobody has
-        // asked, and it costs a re-aim mid-release.
-        gridTookIt.current = true;
-        commitOpen();
-      } else springBack();
-    }
-  };
 
   const closeTo = (pos: number, gate?: (done: () => void) => void) => {
     // The phase flip and the aim first, the motion two frames later — the same gap `openSwitcher`
@@ -1126,11 +872,9 @@ export default function SessionScreen() {
     // 33ms at prog 0.92). Progress does not move in the gap, so nothing on screen is waiting.
     if (swRef.current === 'opening') {
       // A Done can land mid-fly-out now (`tappable`, user 2026-09-01: the ✓ was dead until the
-      // flight formally ended). Kill the open's cut callbacks — its timings would fire alpha=0
-      // and `sw: 'open'` into the middle of this close — and send the aim home without one.
+      // flight formally ended). Kill the open's cut callbacks — its timing would fire alpha=0
+      // and `sw: 'open'` into the middle of this close — and fly home without one.
       cancelAnimation(prog);
-      cancelAnimation(flight);
-      if (flight.value < 1) flight.value = withTiming(1, ZOOM_OUT);
     }
     setZoomId(idAt(pos));
     slotSV.value = zoomSlot(pos);
@@ -1417,22 +1161,17 @@ export default function SessionScreen() {
   // A transitional phase makes the grid non-interactive and the stage an animation, so a phase
   // that never resolves is an app that has frozen — which it has done twice today, from two
   // different missed callbacks (user, 2026-08-11). Rather than trusting the next one not to,
-  // this puts the screen back into a resting state a beat later whatever the reason. `drag` is
-  // not here: a finger may legitimately hold it for a minute, and the pan's `onFinalize` is what
-  // ends it. If this ever fires, the log line is the bug report.
+  // this puts the screen back into a resting state a beat later whatever the reason. If this
+  // ever fires, the log line is the bug report.
   useEffect(() => {
-    // `drag` counts too, but only with no finger on it: a real one may hold still for a minute,
-    // and `dragging` is what says whether the gesture is still there to end it.
-    if (sw !== 'opening' && sw !== 'closing' && sw !== 'drag') return;
+    if (sw !== 'opening' && sw !== 'closing') return;
     const stuck = setTimeout(() => {
-      if (sw === 'drag' && dragging.current) return;
       console.log('[switcher] phase stuck in', sw, '— resolving it');
       if (sw === 'opening') {
         prog.value = 1;
         alpha.value = 0;
         setSw('open');
       } else {
-        dragging.current = false;
         prog.value = 0;
         alpha.value = 1;
         finishClose();
@@ -1446,9 +1185,7 @@ export default function SessionScreen() {
   // stand on. Reset without animation; the §4.9 overlay is already up.
   useEffect(() => {
     if (!connected && sw !== 'closed') {
-      dragging.current = false;
       prog.value = 0;
-      dragX.value = 0;
       alpha.value = 1;
       setSw('closed');
       syncPad(); // the pad froze at the open; no event is coming to thaw it
@@ -1663,21 +1400,14 @@ export default function SessionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageSwipe]);
 
-  /** The page slides home and the swipe is over, no hop. Both ways out that decide nothing: a
-   *  release under the thresholds, and a release that committed to the grid instead — there the
-   *  hop is not cancelled so much as outranked, and marking the swipe spent here is what stops the
-   *  bar's own 'end' (which arrives straight after) from also hopping. */
-  /** Set by a release that committed to the grid, read by the page swipe's own 'end' a call later:
-   *  one gesture, two axes, and only one of them gets to decide the release. */
-  const gridTookIt = useRef(false);
-
-  const springPageHome = (skipRefresh: boolean) => {
+  /** The page slides home and the swipe is over, no hop: a release under the thresholds. */
+  const springPageHome = () => {
     if (swipeInfo.current === null) return;
     swipeInfo.current.live = false;
     rowLiveSV.value = 0;
     setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim' }));
     // No edge-fade timer: the slide home takes x to 0 and the travel factor fades it with it.
-    slideTo(0, () => clearBarSwipe(skipRefresh));
+    slideTo(0, clearBarSwipe);
   };
 
   // `-next-line`, never the block form. A block `eslint-disable` makes babel-plugin-react-compiler
@@ -1688,20 +1418,9 @@ export default function SessionScreen() {
   const panBridge = useMemo(
     () => ({
       swipeX,
-      prog,
-      dragX,
-      zoomReady: zoomReadySV,
-      zoomBase: zoomBaseSV,
-      zoomFromX: zoomFromXSV,
-      zoomFromY: zoomFromYSV,
-      zoomFromSet: zoomFromSetSV,
-      dragging: draggingSV,
-      armed: armedSV,
       rowLive: rowLiveSV,
-      rowVis: rowVisSV,
       rowPos: rowPosSV,
       rowCount: rowCountSV,
-      stage: stageSV,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- every member is a stable shared value
     [],
@@ -1710,10 +1429,8 @@ export default function SessionScreen() {
   const onBarSwipe = (phase: 'start' | 'end', dx: number) => {
     if (stage === null) return;
     if (phase === 'start') {
-      // `drag` is a swipe that has ALREADY lifted — Safari's card can be paged sideways after it
-      // has left the bar, and the finger may only decide that a hundred points into the pull up
-      // (user, 2026-08-12). Off the ref, not the render: mid-gesture the render is a frame behind.
-      if ((swRef.current !== 'closed' && swRef.current !== 'drag') || !connected) return;
+      // Off the ref, not the render: mid-gesture the render is a frame behind.
+      if (swRef.current !== 'closed' || !connected) return;
       // The last hop's cache warm has 350ms to land and this finger did not wait for it: two execs
       // and two ANSI parses inside the drag are the stutter it exists to prevent. Dropped, not
       // deferred — the next `clearBarSwipe` arms a fresher one over newer neighbours anyway.
@@ -1729,9 +1446,6 @@ export default function SessionScreen() {
       const windows = cards.map((c) => c.win);
       if (windows.length === 0) return;
       const pos = activePosIn(cards);
-      // A lift that never went sideways leaves the flag set — no 'end' arrives on this axis to
-      // read it — so every swipe starts by clearing it rather than trusting the last one to.
-      gridTookIt.current = false;
       // One slot past the last tab, always: committing onto it births a window. It used to be
       // withheld from a card held in the air, which had no new-tab page to land on; that whole
       // path went on 2026-08-17.
@@ -1753,17 +1467,9 @@ export default function SessionScreen() {
     } else {
       const info = swipeInfo.current;
       if (!info?.live) return;
-      // The same release lifted the card into the grid: this axis yields (see `onSwitcherDrag`).
-      // The refresh is skipped — a capture per window on the JS thread is the stutter
-      // `clearBarSwipe` describes, and here it would land inside the flight.
-      if (gridTookIt.current) {
-        gridTookIt.current = false;
-        springPageHome(true);
-        return;
-      }
       const target = swipeTarget(dx, Date.now() - info.t0, info.pos, info.slots);
       if (target === info.pos) {
-        springPageHome(false);
+        springPageHome();
       } else {
         info.live = false;
         rowLiveSV.value = 0;
@@ -1851,21 +1557,15 @@ export default function SessionScreen() {
     onHeight: setBarHeight,
     onRowHeight: setRowHeight,
     onTabsTap: openSwitcher,
-    onZoomGrab,
-    onZoomArm,
-    onZoomEnd,
     onBarSwipe,
   };
-  /** One identity-stable object instead of eight one-per-key trampolines. */
+  /** One identity-stable object instead of five one-per-key trampolines. */
   const kb = useMemo(
     () => ({
       sendBytes: (...a: any[]) => kbH.current.sendBytes(...a),
       onHeight: (...a: any[]) => kbH.current.onHeight(...a),
       onRowHeight: (...a: any[]) => kbH.current.onRowHeight(...a),
       onTabsTap: (...a: any[]) => kbH.current.onTabsTap(...a),
-      onZoomGrab: (...a: any[]) => kbH.current.onZoomGrab(...a),
-      onZoomArm: (...a: any[]) => kbH.current.onZoomArm(...a),
-      onZoomEnd: (...a: any[]) => kbH.current.onZoomEnd(...a),
       onBarSwipe: (...a: any[]) => kbH.current.onBarSwipe(...a),
     }),
     [],
@@ -2002,31 +1702,6 @@ export default function SessionScreen() {
   const popBase = barHeight + 6 + keyboardPad + insets.bottom + (keyboardPad > 0 ? BAR.keyboardGap : 0);
 
   /**
-   * What the surface is aimed at this frame — the hold pose under the finger, the slot once
-   * released, interpolated by `flight` (see `aimFrame`). Every style that draws the zoom reads the
-   * aim rather than the slot, so the card, its ring and its neighbours agree by construction.
-   *
-   * Deliberately a per-render closure, which makes it a changing dependency of the four mappers
-   * that call it (`boxStyle`, `cardClipStyle`, `cardRadiiStyle`, `ringStyle`) and restarts all
-   * four on every render. That churn was hoisted to module scope for exactly that reason — and the
-   * hoist put the keyboard-up page's rounded bottom corners back (user, 2026-08-13).
-   *
-   * Why: these mappers are attached CONDITIONALLY (`zoomActive && …`). A restarting mapper
-   * re-runs and rewrites its props the moment it is re-registered, so the accidental every-render
-   * restart was also what repainted the radius whenever the style attached. With stable
-   * dependencies the mapper only re-runs when a dependency or a shared value it reads changes —
-   * and `zoomActive` flipping true is neither, so the newly attached view kept the radius from the
-   * last gesture, rounded, under a raised keyboard where `kbSquare` wants it square.
-   *
-   * That debt is paid: `cardClipStyle` is unconditional too now (2026-09-02), for the stronger
-   * version of the same fault — a stuck crop, not a stuck corner. Nothing left here is attached
-   * conditionally, so the hoist stands on its own cost alone.
-   */
-  /** The shared values `aimAt` reads, as one stable object — see `aimAt` at module scope. */
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- every member is a stable shared value
-  const aimSV = useMemo(() => ({ stage: stageSV, slot: slotSV, prog, flight }), []);
-
-  /**
    * A neighbouring page's card, INSIDE the zoomed container with the live one. It carries nothing
    * but its pitch and the crop — the scale and the flight are the container's, which is the only
    * way two cards are guaranteed to agree (see `zoomBox`).
@@ -2036,8 +1711,8 @@ export default function SessionScreen() {
   const usePageCardStyle = (side: -1 | 1, phantom = false) =>
     useAnimatedStyle(() => {
       // Deliberately reads only what it uses: a leftover `zoomFrame` call here made this worklet
-      // a dependent of prog, dragX, slotSV and flight, so it recomputed on every value the zoom
-      // touches instead of only on the ones that move the row.
+      // a dependent of prog and slotSV, so it recomputed on every value the zoom touches instead
+      // of only on the ones that move the row.
       const pitch = stageSV.value.w * (1 + PAGE_GAP);
       // The join's approach, locked to the TRAVEL rather than a clock: the card starts a little
       // beyond its pitch and closes in as the finger uncovers the gap, fully seated by 130pt —
@@ -2064,14 +1739,14 @@ export default function SessionScreen() {
    * twice). Nothing to displace if the style never leaves.
    *
    * It costs nothing to keep: a mapper runs when a value it READS changes, and this one reads
-   * `prog`, `dragX`, the aim's values and `stageSV` — none of which move during a flat hop, which
-   * animates `swipeX` alone. So the raster write 85b36ab took out of the hop stays out; what comes
-   * back is one write when `kbSquare` flips, which is exactly the write that was going missing.
-   * At rest the worklet computes the same `pageR`/`pageRB` the static style states.
+   * `prog`, `slotSV` and `stageSV` — none of which move during a flat hop, which animates `swipeX`
+   * alone. So the raster write 85b36ab took out of the hop stays out; what comes back is one
+   * write when `kbSquare` flips, which is exactly the write that was going missing. At rest the
+   * worklet computes the same `pageR`/`pageRB` the static style states.
    */
   const cardRadiiStyle = useAnimatedStyle(() => {
     'worklet';
-    const r = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value).radius;
+    const r = zoomFrame(prog.value, slotSV.value, stageSV.value).radius;
     const rb = kbSquare ? 0 : r;
     const rt = searchSquare ? 0 : r;
     return {
@@ -2108,13 +1783,13 @@ export default function SessionScreen() {
    * that prop did not change from React's side, so nothing is sent.
    *
    * It costs nothing to keep, by the same arithmetic `cardRadiiStyle` states: a mapper runs when
-   * a value it READS changes, and this one reads `prog`, `dragX`, the aim's values and `stageSV`,
-   * none of which move during a flat hop. So 85b36ab's measurement — no layout or raster props
-   * written during a hop — still holds; what comes back is the write at the end of a flight, and
-   * that write is the fix.
+   * a value it READS changes, and this one reads `prog`, `slotSV` and `stageSV`, none of which
+   * move during a flat hop. So 85b36ab's measurement — no layout or raster props written during a
+   * hop — still holds; what comes back is the write at the end of a flight, and that write is the
+   * fix.
    */
   const cardClipStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
+    const f = zoomFrame(prog.value, slotSV.value, stageSV.value);
     const rb = kbSquare ? 0 : f.radius;
     return {
       height: f.height,
@@ -2142,11 +1817,10 @@ export default function SessionScreen() {
    * one. This says out loud what iOS was getting for free, so both platforms do it for the same
    * reason.
    *
-   * `closing` and `drag` stay live on purpose: the bar owns the drag gesture, and the phase
-   * outlives the motion by the tail of its ease-out — a dead bar there is a terminal that looks
-   * landed and will not swipe (user, 2026-08-11).
+   * `closing` stays live on purpose: the phase outlives the motion by the tail of its ease-out —
+   * a dead bar there is a terminal that looks landed and will not swipe (user, 2026-08-11).
    */
-  const chromeLive = sw === 'closed' || sw === 'closing' || sw === 'drag';
+  const chromeLive = sw === 'closed' || sw === 'closing';
 
   /** The grid's arrival, the same travel that carries the card (§7's no-clocks principle): the
    *  backdrop stays dark until the card is halfway to the tabs view, then the grid comes in
@@ -2156,20 +1830,11 @@ export default function SessionScreen() {
   const gridInStyle = useAnimatedStyle(() => ({
     opacity: Math.min(Math.max((prog.value - 0.75) / 0.15, 0), 1),
   }));
-  /** …and it arrives BLURRED, sharpening only as the card lands — Safari's sequencing (user's
-   *  reference screenshots). The blur's INTENSITY is fixed and its OPACITY animates: animating
-   *  intensity rebuilds the blur effect every frame over a full screen of text, which is GPU
-   *  work no CPU-side frame counter sees — the "5fps, and your numbers do not show it" lag
-   *  (user, 2026-08-13). A fixed-effect view fading out is plain compositing. */
-  const gridBlurStyle = useAnimatedStyle(() => ({
-    opacity: 1 - flight.value,
-  }));
-
   /** The container every card rides: one scale, one flight, one place. Its height is the stage's
    *  and stays there — the cards inside clip themselves — so it can hold pages a pitch to either
    *  side without a clip cutting them off. */
   const boxStyle = useAnimatedStyle(() => {
-    const b = zoomBox(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
+    const b = zoomBox(prog.value, slotSV.value, stageSV.value);
     return {
       opacity: alpha.value,
       transform: [
@@ -2224,17 +1889,11 @@ export default function SessionScreen() {
   }));
 
   const cropTop = notchPad + searchRowH;
-  // The chrome crop follows the FLIGHT, not the progress: a grid card is the page cropped past
-  // the status bar, but a card in the hand is the whole screen made small — `holdFrame` is
-  // uncropped by construction, and cropping on `prog` alone slid the content up inside the held
-  // card while the hold's clip (deliberately) never closed: a grown forehead above, an exposed
-  // band below with the page's own rounded corners floating inside the ring (movement 3,
-  // screenshot). `prog * flight` is zero for the whole hold and exactly the old value on every
-  // flight to the grid, where the two ramp together.
+  // The chrome crop follows the PROGRESS: a grid card is the page cropped past the status bar,
+  // and `prog` is zero at rest and exactly 1 for every flight to the grid, so the crop ramps
+  // with the surface.
   const cropStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: -cropTop * prog.value * Math.max(flight.value, HOLD_REACH * prog.value) },
-    ],
+    transform: [{ translateY: -cropTop * prog.value }],
   }));
 
   // The accent ring riding the transition (§4.5) — inside the wrapper so it clips and scales
@@ -2242,7 +1901,7 @@ export default function SessionScreen() {
   // the same width the grid card it hands over to draws. It was 3 against that card's 2 and the
   // ring stepped thinner on the landing frame (user, 2026-08-17).
   const ringStyle = useAnimatedStyle(() => {
-    const f = zoomFrame(prog.value, dragX.value, aimAt(aimSV), stageSV.value);
+    const f = zoomFrame(prog.value, slotSV.value, stageSV.value);
     return {
       opacity: f.ringOpacity,
       borderRadius: f.radius,
@@ -2340,24 +1999,6 @@ export default function SessionScreen() {
           zoomId={zoomId}
           fade={alpha}
         />
-        {/* The grid recedes behind the flying card. This was a backdrop blur; it is a wash of the
-            screen's own ground now, because a backdrop blur is not something both platforms can
-            draw from one code path (see `Plate` in `src/keybar.tsx`). The wash reads the same at
-            this scale — the grid is already small and moving — and it is a flat fill, so the
-            per-frame cost the blur had is simply gone. That cost was real and measured: a
-            UIVisualEffectView re-renders its backdrop continuously and does NOT stop costing GPU
-            because a parent's opacity is zero (user, 2026-08-13: laggy inside the animation),
-            which is why this still mounts only while the zoom is live. */}
-        {zoomActive && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              StyleSheet.absoluteFill,
-              { backgroundColor: rgba(theme.background, 0.55) },
-              gridBlurStyle,
-            ]}
-          />
-        )}
         </Animated.View>
       )}
 
@@ -2365,8 +2006,7 @@ export default function SessionScreen() {
           actually running — the pages either side of it. It keeps the stage's full height and does
           NOT clip, so a card a pitch away is not cut off; each card inside crops itself. */}
       <Animated.View
-        // See `chromeLive`: the same phases the key bar and the ribbon band answer to. The gesture
-        // picks the flight up from where it is (see `onSwitcherDrag`).
+        // See `chromeLive`: the same phases the key bar and the ribbon band answer to.
         pointerEvents={chromeLive ? 'auto' : 'none'}
         style={[
           stage === null ? styles.screen : [styles.zoomBox, { width: stage.w, height: stage.h }],
@@ -2570,15 +2210,11 @@ export default function SessionScreen() {
           Mounted unconditionally, and shown by `rowVis` alone (a91809f) — the phase test that used
           to stand here (`sw === 'closed' || 'drag' || 'closing'`, so gone for `opening`) is not a
           condition on this JSX any more, and every reason it existed is now a reason `rowVis` has
-          to be written: a release that commits to the GRID must take the row out, or the
+          to be written: a hop's LANDING must take the row out at the same instant cut, or the
           neighbours fly in one pitch behind the card — tabs arriving in pairs (user, 2026-08-13,
-          screenshot). `onZoomEnd` is where that write lives.
-
-          The exits are conditional on purpose: releasing a card to the grid — held, or mid-hop —
-          sends the neighbours back out to their sides so it flies alone (user, 2026-08-13) — but a
-          hop's LANDING must stay an instant cut, because the landed card sits exactly over the
-          live pane's identical picture, and sliding it away would show the same tab twice, one
-          peeling off the other. */}
+          screenshot). `clearBarSwipe` is where that write lives. A hop's landing must STAY an
+          instant cut, because the landed card sits exactly over the live pane's identical
+          picture, and sliding it away would show the same tab twice, one peeling off the other. */}
       {stage !== null && showTabs && connected && (
         <>
           {anchor > 0 && (
@@ -2659,16 +2295,12 @@ export default function SessionScreen() {
         onOpenChange={setOpen}
         onHeight={kb.onHeight}
         onRowHeight={kb.onRowHeight}
-        focusSignal={focusSignal}
         sending={sending}
         // §4.5: tabs are reachable only with tmux present AND the config applied AND a client
         // attached. False no longer removes the button — it greys it, and the tap explains itself
         // (`tabsHint`, user 2026-08-12).
         showTabs={showTabs}
         onTabsTap={kb.onTabsTap}
-        onZoomGrab={kb.onZoomGrab}
-        onZoomArm={kb.onZoomArm}
-        onZoomEnd={kb.onZoomEnd}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? kb.onBarSwipe : undefined}
@@ -2765,38 +2397,6 @@ export default function SessionScreen() {
       )}
     </View>
   );
-}
-
-/**
- * What the surface is aimed at this frame — the hold pose under the finger, the slot once
- * released, interpolated by `flight` (see `aimFrame`). Every style that draws the zoom reads the
- * aim rather than the slot, so the card, its ring and its neighbours agree by construction.
- *
- * At MODULE scope, taking its shared values as an argument, because four `useAnimatedStyle`
- * worklets call it. Reanimated derives a mapper's dependencies from its worklet's closure, and the
- * plugin mints a new function object for a worklet declared in a component body on every render —
- * so an `aim` living inside the component restarted `boxStyle`, `cardClipStyle`, `cardRadiiStyle`
- * and `ringStyle` on every render of the screen.
- *
- * This was hoisted once before and reverted, because the keyboard-up page came back with rounded
- * bottom corners. That was the wrong culprit: the corner was `cardRadiiStyle` being DETACHED at
- * rest and leaving its last write on the view, and the per-render restart had been papering over
- * it by rewriting the radius on every commit. The style is attached for good now (see its note),
- * so the papering-over is not needed — and with four views permanently attached, a mapper that
- * restarts every render rewrites raster props on all four every render, which is worse than what
- * it was hiding. Stable identity here, one write when something actually moves.
- */
-function aimAt(sv: {
-  stage: SharedValue<{ w: number; h: number }>;
-  slot: SharedValue<Frame>;
-  prog: SharedValue<number>;
-  flight: SharedValue<number>;
-}): Frame {
-  'worklet';
-  // Held: slot-SIZED by the pull's reach, screen-centred (`heldFrame`). Released: the flight
-  // carries whatever pose the hold reached into the real slot.
-  const held = heldFrame(sv.stage.value, sv.slot.value, HOLD_REACH * sv.prog.value);
-  return aimFrame(held, sv.slot.value, sv.flight.value);
 }
 
 /* --- T11: the page-slide's cards --- */

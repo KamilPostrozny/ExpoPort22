@@ -175,58 +175,48 @@ export function caretKeys(delta: number, decckm: boolean): string {
 export const BAR_AXIS_SLOP = 10;
 /** Vertical travel at which the keyboard gesture fires (the prototype's 24px). */
 export const BAR_SWIPE_FIRE = 24;
+/** Travel before an up-swipe RAISES the keyboard — 48, not the 24 the dismiss uses, because a
+ *  flat hop's own arc crosses 24–26pt of upward travel by itself (2026-08-12, ten hops at
+ *  -24…-26), so a raise at the dismiss threshold would lift the keys mid-hop; 48 clears the arc
+ *  with room. */
+export const BAR_RAISE_FIRE = 48;
 
-/**
- * The grab: the finger has left the slop and the card is in hand. Either axis counts, because
- * from here BOTH are live and neither is a decision — the vertical drives the zoom continuously
- * from this point (there is no lift event any more, and no threshold standing between a swipe and
- * the switcher: user, 2026-08-13, "you should be able to move it up mid swipe and then back down"),
- * and the horizontal starts the page row as soon as it has somewhere to go.
- *
- * That the row itself waits for horizontal travel is a separate question, asked with `dx` alone —
- * a card held up on its own has no row around it until the finger starts moving sideways.
- */
+/** The slop test either axis: the finger has left the slop. Both of the bar's exits that start
+ *  before a decision — the horizontal row join and the vertical tests below — budget for it the
+ *  same way, so this is the tested form of that shared budget rather than a second number. */
 export function barGrabbed(dx: number, dy: number): boolean {
   'worklet';
   return Math.abs(dx) > BAR_AXIS_SLOP || Math.abs(dy) > BAR_AXIS_SLOP;
 }
 
-/** Zoom progress below which the card is still ON THE BAR, and a sideways move is a tab hop.
- *  Not raw `dy`: a flat hop's own arc crosses 30pt of upward travel by itself (2026-08-12, ten
- *  hops at -24…-26) and a raw-dy boundary threw those hops into the air branch, where they wait
- *  for a settle a hop never makes — no neighbours at all (user, 2026-08-14). `prog` is the arc
- *  already discounted: its dead zone grows with |dx| precisely to read a sideways swipe as zero. */
-export const ROW_AIR_PROG = 0.05;
-
 /**
- * Horizontal travel that earns the page row (see `barGrabbed`): the slop, on the bar, going
- * sideways more than up.
+ * Horizontal travel that earns the page row: the slop, and sideways has to LEAD.
  *
- * `prog` rather than raw `dy`, because a flat hop's own arc crosses 30pt of upward travel by
- * itself (2026-08-12, ten hops at -24…-26) and a raw-dy test read those as a lift. `prog` is that
- * arc already discounted: its dead zone grows with |dx| precisely to score a sideways swipe zero.
- * And sideways has to LEAD, because the first 25pt of a pull up are below `ROW_AIR_PROG` too, so
- * the 10–20pt of drift a rising thumb makes by itself would otherwise start a hop nobody asked for
- * (user, 2026-08-14).
- *
- * A card that is already climbing gets no row: it is one tab on its way to the grid. That used to
- * be a second branch here — a held, settled card could still gather neighbours on a deliberate
- * 48pt sideways move — and it went with the rest of the held row on 2026-08-17.
+ * The leading test is what keeps the two verticals out of the row: a flat hop's own arc crosses
+ * 24–26pt of upward travel by itself (2026-08-12, ten hops at -24…-26), where the sideways still
+ * leads by a lot, while the 10–20pt of drift a rising thumb makes by itself (2026-08-14) leads
+ * the wrong way and never joins.
  */
-export function rowJoins(dx: number, dy: number, prog: number): boolean {
+export function rowJoins(dx: number, dy: number): boolean {
   'worklet';
-  return prog <= ROW_AIR_PROG && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > BAR_AXIS_SLOP;
+  return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > BAR_AXIS_SLOP;
 }
-
-/** Upward travel at which the keyboard gets out of the way. Not the slop: the opening of an
- *  ordinary flat swipe on a bottom bar IS upward — a thumb pivots, and the device log has ten
- *  hops in a row crossing -24…-26 with barely any sideways travel (2026-08-12) — so dropping the
- *  keys on that would take them away from every hop. By here the card is visibly off the bar. */
-export const KEYS_DROP_DY = 60;
 
 /** The other vertical exit: a swipe down puts the keyboard away (§4.4). Same travel test as the
  *  pull up, mirrored — a sideways swipe that sags does not count. */
 export function barDismisses(dx: number, dy: number): boolean {
   'worklet';
   return dy >= BAR_SWIPE_FIRE && dy >= Math.abs(dx);
+}
+
+/** The vertical's other way out: a swipe UP raises the keyboard. The travel test is
+ *  `BAR_RAISE_FIRE` (48, not the 24 `barDismisses` uses) — a flat hop's own arc crosses 24–26pt of
+ *  upward travel by itself, so the raise has to clear it — with the same leading rule as
+ *  `barDismisses`, mirrored: a sideways swipe that arcs up does not count. `hopLive` is the belt
+ *  to that brace: while the finger is inside the page row (a window hop in flight) the raise is
+ *  suppressed outright, arc or no arc. */
+export function barRaises(dx: number, dy: number, hopLive: boolean): boolean {
+  'worklet';
+  if (hopLive) return false;
+  return dy <= -BAR_RAISE_FIRE && Math.abs(dy) >= Math.abs(dx);
 }

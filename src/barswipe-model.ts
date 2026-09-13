@@ -8,7 +8,7 @@
  * `src/barswipe-model.test.ts`; the screen and the bar render and execute.
  */
 
-import { DESIGN_W, SCREEN_R, ZOOM_COMMIT } from '@/switcher-model';
+import { DESIGN_W, SCREEN_R } from '@/switcher-model';
 
 /* --- page geometry --- */
 
@@ -57,25 +57,6 @@ export function swipeTarget(dx: number, dtMs: number, pos: number, count: number
   if (dx < -COMMIT_PX || (dx < -FLICK_PX && dtMs < FLICK_MS)) return Math.min(pos + 1, count - 1);
   if (dx > COMMIT_PX || (dx > FLICK_PX && dtMs < FLICK_MS)) return Math.max(pos - 1, 0);
   return pos;
-}
-
-/** Upward speed at the release, pt/s, that sends the card to the grid whatever the travel was. */
-export const ZOOM_FLICK_VY = 700;
-
-/**
- * The vertical release: does letting go open the switcher, or spring the terminal back?
- *
- * Two ways, and now they are the ONLY vertical decision in the gesture — nothing is judged while
- * the finger is down any more, because the card follows it up and back down with no threshold in
- * between (user, 2026-08-13). `prog` past `ZOOM_COMMIT` is the pull: a quarter of the way into the
- * card and let go. The flick is a slight swipe up off the bar that sends the tab to the grid
- * without dragging it there (user, 2026-08-10) — and it is asked of the SPEED at the release, not
- * of the travel, because travel cannot tell an upward flick from the arc a thumb draws through an
- * ordinary flat swipe (2026-08-12: ten hops crossing -24…-26). At the release those two look
- * nothing alike: a flick is going up faster than it is going sideways, and a hop is not going up.
- */
-export function zoomCommits(prog: number, vx: number, vy: number): boolean {
-  return prog > ZOOM_COMMIT || (vy <= -ZOOM_FLICK_VY && Math.abs(vy) > Math.abs(vx));
 }
 
 /** The release slide's speed, pt per ms — the duration scales with the distance left, so an

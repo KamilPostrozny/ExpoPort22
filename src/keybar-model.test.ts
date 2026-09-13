@@ -15,8 +15,8 @@ import {
   caretKeys,
   barDismisses,
   barGrabbed,
+  barRaises,
   rowJoins,
-  ROW_AIR_PROG,
   controlByte,
   ctrlTap,
   diffInput as planInputEdit,
@@ -239,35 +239,44 @@ test('the grab is either axis — from there both are live and neither is a deci
 });
 
 test('the row joins at the slop on the bar, and only there', () => {
-  expect(rowJoins(5, 0, 0)).toBe(false);
-  expect(rowJoins(11, 0, 0)).toBe(true);
-  // The flat hop is on the bar however much its own arc lifts: the arc is what `prog`'s dead zone
-  // discounts, and a hop reads as zero there.
-  expect(rowJoins(-60, -26, 0)).toBe(true);
-  expect(rowJoins(60, -26, ROW_AIR_PROG)).toBe(true);
+  expect(rowJoins(5, 0)).toBe(false);
+  expect(rowJoins(11, 0)).toBe(true);
+  // The flat hop is on the bar however much its own arc lifts: a hop's sideways still leads by a
+  // lot (2026-08-12, ten hops at -24…-26 of arc).
+  expect(rowJoins(-60, -26)).toBe(true);
+  expect(rowJoins(60, -26)).toBe(true);
   // But a rising thumb's own drift is not a hop, low or not: sideways has to LEAD.
-  expect(rowJoins(11, -25, 0)).toBe(false);
+  expect(rowJoins(11, -25)).toBe(false);
 });
 
-test('a card that has left the bar goes to the grid alone', () => {
-  // No neighbours at any height once the card is climbing — the held row and its ceiling were
-  // removed 2026-08-17, so `prog` past `ROW_AIR_PROG` is simply the end of the hop's territory.
-  expect(rowJoins(60, -120, 0.1)).toBe(false);
-  expect(rowJoins(60, -120, 0.5)).toBe(false);
-  expect(rowJoins(200, -400, 0.9)).toBe(false);
+test('an upward pull never joins the row — up is the keyboard now', () => {
+  // The vertical's exits are `barRaises` and `barDismisses`, both of which a pure sideways lead
+  // fails. A climbing thumb is one tab, on its way to the keys.
+  expect(rowJoins(60, -120)).toBe(false);
+  expect(rowJoins(200, -400)).toBe(false);
 });
 
-test('nothing about the vertical is judged mid-gesture any more', () => {
-  // The whole point of the rewrite: no cone, no flick test, no threshold between a swipe and the
-  // switcher (user, 2026-08-13). The card follows the finger up and back down; only the release
-  // decides, in `zoomCommits`. This test exists to fail if a mid-gesture gate creeps back in.
-  expect(Object.keys(model).filter((k) => /lift/i.test(k))).toEqual([]);
+test('no lift/zoom vocabulary creeps back into the model', () => {
+  // The drag-zoom machine is gone: the card no longer follows the finger up, and the vertical is
+  // judged by the two exits below, not by a mid-gesture threshold. This test exists to fail if a
+  // lift or a zoom progress sneaks back in.
+  expect(Object.keys(model).filter((k) => /lift|zoom/i.test(k))).toEqual([]);
 });
 
 test('down dismisses the keyboard, a sagging sideways swipe does not', () => {
   expect(barDismisses(0, 30)).toBe(true);
   expect(barDismisses(-60, 30)).toBe(false);
   expect(barDismisses(0, 15)).toBe(false);
+});
+
+test('up raises the keyboard, a sagging sideways swipe does not', () => {
+  expect(barRaises(0, -30, false)).toBe(false); // a hop-arc-sized lift is not a raise
+  expect(barRaises(0, -47, false)).toBe(false); // one pt short of the raise
+  expect(barRaises(0, -48, false)).toBe(true); // the raise threshold, exactly
+  expect(barRaises(-60, -30, false)).toBe(false); // sideways leads: that is the hop
+  expect(barRaises(60, -26, false)).toBe(false); // the flat hop's own arc does not ask for the keys
+  expect(barRaises(0, -15, false)).toBe(false); // below the travel
+  expect(barRaises(0, -60, true)).toBe(false); // would raise, but the hop is live
 });
 
 /* --- two-finger tap (lives with the touch layer's brain in scroll-model) --- */

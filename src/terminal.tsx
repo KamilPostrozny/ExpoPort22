@@ -25,7 +25,6 @@ import {
   COAST_MIN_VELOCITY,
   FLICK_MIN_VELOCITY,
   PAN_SLOP_PX,
-  TAP_MS,
   VelocityTracker,
   arrowKey,
   coastDistance,
@@ -120,10 +119,6 @@ export type TerminalProps = {
    *  on the next ~2s beat. Fired from the touch layer's `spend`, throttled, on the wheel route
    *  only — arrows and local scroll do not touch tmux copy mode. */
   onScroll?: () => void;
-  /** A plain one-finger tap on the terminal — §4.4's door to the keyboard, now that the bar's
-   *  swipe ↑ always goes to the switcher. Detected here for the same reason as the two-finger
-   *  tap: only this layer knows the touch was neither a scroll nor a long-press selection. */
-  onTap: () => Promise<void>;
   ref?: Ref<TerminalHandle>;
   dom?: DOMProps;
 };
@@ -1055,11 +1050,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       // that path is gone and without this the selection and its edit menu simply stay (T13/T6.7).
       if (pan === 'pending' && fingers === 1 && document.getSelection()?.isCollapsed === false) {
         document.getSelection()?.removeAllRanges();
-      }
-      // Otherwise a quick one-finger tap asks for the keyboard (§4.4). A tap that dismissed a
-      // selection is that dismissal and nothing more; a slow press is WebKit's long-press.
-      else if (pan === 'pending' && fingers === 1 && ev.timeStamp - downAt < TAP_MS) {
-        latest.current.onTap();
       }
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
       // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.
