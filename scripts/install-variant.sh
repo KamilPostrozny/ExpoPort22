@@ -17,12 +17,12 @@ esac
 
 cd "$(dirname "$0")/.."
 # Both tags carry the asset under the same name (Port22.ipa) — -p filters by that name, -D picks
-# the directory; the rename is what keeps the two variants apart on this box.
-dir=$(mktemp -d)
-out="Port22-$variant.ipa"
-gh release download "$tag" --clobber -D "$dir" -p "Port22.ipa"
-mv "$dir/Port22.ipa" "$out"
-rm -rf "$dir"
+# the directory. The staging dir lives outside the repo: 30 MB in the working tree on every
+# install is a mess, and xtool does not care where the file sits.
+out="${TMPDIR:-/tmp}/port22-install/Port22-$variant.ipa"
+mkdir -p "$(dirname "$out")"
+gh release download "$tag" --clobber -D "$(dirname "$out")" -p "Port22.ipa"
+mv "$(dirname "$out")/Port22.ipa" "$out"
 echo "downloaded $tag → $out"
 
 # The `UNIX:` prefix is load-bearing — without it libusbmuxd finds nothing. Never `pkill -f
