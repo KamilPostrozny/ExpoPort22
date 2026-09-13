@@ -199,7 +199,9 @@ actor SSHSession {
           let chunk = try await file.read(from: offset, length: 32 * 1024)
           let length = chunk.readableBytes
           if length == 0 { return data }
-          data.append(contentsOf: chunk.readBytes(length: length)!)
+          // `getBytes`, not `readBytes`: the swift-nio this podspec resolves (2.84) only has the
+          // MUTATING spelling, and the closure's buffer is a `let`.
+          data.append(contentsOf: chunk.getBytes(at: chunk.readerIndex, length: length)!)
           offset += UInt64(length)
         }
       }
