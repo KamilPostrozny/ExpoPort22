@@ -673,6 +673,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
   // the right brain from the first frame — the same focus the text-mode flip moves to below.
   const raiseKeys = useCallback(() => {
     const p = cbRef.current;
+    console.log('[keys] raise');
     (p.textMode ? inputOn : inputOff).current?.focus();
   }, []);
   /** The re-aim owed by the unasked blur — WHICH field to hand back, and whether it has been
@@ -696,9 +697,11 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
     if (Platform.OS !== 'ios') return;
     const onShow = () => {
       kbShown.current = true;
+      console.log('[keys] kb show');
     };
     const onHide = () => {
       kbShown.current = false;
+      console.log('[keys] kb hide, owed re-aim:', rearm.current);
       maybeRearm();
     };
     const showSub = Keyboard.addListener('keyboardDidShow', onShow);
@@ -1013,6 +1016,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
         submitBehavior="submit" // Return sends without blurring
         onFocus={() => {
           focusedIn.current = 'off';
+          console.log('[keys] focus off');
         }}
         onBlur={blurOff}
         // Prose mode (see `KeyBarProps.textMode`): this field is the OFF brain — no corrections,
@@ -1042,6 +1046,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
         submitBehavior="submit" // Return sends without blurring
         onFocus={() => {
           focusedIn.current = 'on';
+          console.log('[keys] focus on');
         }}
         onBlur={blurOn}
         autoCorrect
