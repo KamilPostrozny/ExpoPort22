@@ -849,6 +849,13 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
     includeFontPadding: false,
     fontSize: TEXT.mono,
   };
+  /** T6.7 rework: the pill is full with four keys (2026-08-31: Paste's edge meets the divider),
+   *  so the selection's Copy joins by COMPACTION, not by taking room — while a selection is live
+   *  every key in the group drops to a smaller label and 2pt padding and the gaps tighten. On the
+   *  widths this app runs (390pt and up) the five fit with margin; `flexShrink` is the guard for
+   *  a narrower body, where the plates shrink before they ever overlap. */
+  const tight = props.hasSelection;
+  const tightLabel: StyleProp<TextStyle> = { fontSize: 11 };
 
   const ctrlStyle: StyleProp<ViewStyle> =
     ctrl === 'armed'
@@ -960,22 +967,22 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
               pointerEvents={props.pills?.live ? 'none' : 'auto'}>
             <Plate theme={theme} radius={BAR.radius} style={styles.pillPlate}>
             <View style={styles.keysRow}>
-              <View style={styles.keysGroup}>
-                <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
-                  <Text style={keyLabel}>Ctrl</Text>
+              <View style={[styles.keysGroup, tight && { gap: 2 }]}>
+                <Key onPress={onCtrlTap} style={[styles.key, tight && styles.keyTight, ctrlStyle]}>
+                  <Text style={[keyLabel, tight && tightLabel]}>Ctrl</Text>
                 </Key>
-                <Key onPress={() => track('\x1b')} style={styles.key}>
-                  <Text style={keyLabel}>Esc</Text>
+                <Key onPress={() => track('\x1b')} style={[styles.key, tight && styles.keyTight]}>
+                  <Text style={[keyLabel, tight && tightLabel]}>Esc</Text>
                 </Key>
-                <Key onPress={() => track('\x09')} style={styles.key}>
-                  <Text style={keyLabel}>Tab</Text>
+                <Key onPress={() => track('\x09')} style={[styles.key, tight && styles.keyTight]}>
+                  <Text style={[keyLabel, tight && tightLabel]}>Tab</Text>
                 </Key>
                 <Key
                   onPress={onPaste}
                   onLongPress={onPasteLongPress}
                   delayLongPress={420}
-                  style={styles.key}>
-                  <Text style={keyLabel}>Paste</Text>
+                  style={[styles.key, tight && styles.keyTight]}>
+                  <Text style={[keyLabel, tight && tightLabel]}>Paste</Text>
                 </Key>
                 {/* T6.7 rework: the selection's Copy, present only while a selection is live.
                     Accent-tinted like an armed Ctrl — it is the only key on the bar that does
@@ -983,8 +990,8 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
                 {props.hasSelection && (
                   <Key
                     onPress={props.onCopySelection}
-                    style={[styles.key, { backgroundColor: rgba(theme.accent, 0.5) }]}>
-                    <Text style={[keyLabel, { color: theme.accent }]}>
+                    style={[styles.key, styles.keyTight, { backgroundColor: rgba(theme.accent, 0.5) }]}>
+                    <Text style={[keyLabel, tightLabel, { color: theme.accent }]}>
                       Copy
                     </Text>
                   </Key>
@@ -1541,6 +1548,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: BAR.keyPad,
     borderRadius: BAR.keyRadius,
     ...CENTER,
+  },
+  /** The selection-mode compaction (see `tightLabel`): the padding that gave the four-key spread
+   *  its air is the room the fifth key lives in. */
+  keyTight: {
+    paddingHorizontal: 2,
+    flexShrink: 1,
   },
   pillDivider: { width: 1, height: 27 },
   // No overflow clip: a pill mid-slide is partly outside the slot, and the clip sheared its
