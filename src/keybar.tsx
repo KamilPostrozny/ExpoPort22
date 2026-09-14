@@ -106,6 +106,7 @@ import {
 import { MONO, rgba, SANS, SANS_SEMIBOLD, type Theme } from '@/theme';
 import { pasteFile } from '@/upload';
 import { QUICK_DIR } from '@/upload-model';
+import WebGuard from '../modules/expo-webguard/src/ExpoWebGuardModule';
 
 export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
 
@@ -384,6 +385,13 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
    *  a prose flip is a focus move (keyboard up) or a silent re-aim (keyboard down: the next raise
    *  lands on the right field and presents with the new brain from the first frame). */
   const focusedIn = useRef<'off' | 'on' | null>(null);
+  /** Keep the bar's field the first responder: the terminal's webview cannot steal it from under
+   *  the keys (see `expo-webguard`). Fed from every place `focusedIn` changes, so the flag is up
+   *  by the time the first tap after a raise can land, and down before a swipe's hide settles.
+   *  No-op on Android, where the focused field survives outside touches. */
+  const syncHold = () => {
+    WebGuard.setHold(focusedIn.current !== null);
+  };
   /** What the (uncontrolled) TextInput last held — the other half of `diffInput`. */
   const typed = useRef(PAD);
   /** The field's text, set *only* to top the pad back up (see `PAD`); `undefined` the rest of the
@@ -724,6 +732,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
         const to = focusedIn.current;
         focusedIn.current = null;
         repad();
+        syncHold();
         console.log('[keys] kb hide stole the responder, field still', to, '→ re-aim');
         rearm.current = to;
       }
@@ -754,6 +763,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
     });
     focusedIn.current = null;
     repad();
+    syncHold();
     if (expectingBlur.current > 0) {
       expectingBlur.current -= 1; // owed to the flip or a door: the keys stay down
       if (flipTarget.current !== null) {
@@ -1042,6 +1052,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
         submitBehavior="submit" // Return sends without blurring
         onFocus={() => {
           focusedIn.current = 'off';
+          syncHold();
           console.log('[keys] focus off');
         }}
         onBlur={blurOff}
@@ -1072,6 +1083,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
         submitBehavior="submit" // Return sends without blurring
         onFocus={() => {
           focusedIn.current = 'on';
+          syncHold();
           console.log('[keys] focus on');
         }}
         onBlur={blurOn}

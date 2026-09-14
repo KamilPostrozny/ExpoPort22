@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["ExpoWebGuardModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.webguard.ExpoWebGuardModule"]
+  }
+}
