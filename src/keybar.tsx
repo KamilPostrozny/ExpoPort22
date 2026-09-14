@@ -661,6 +661,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
     // field is not focused the keys may be mid-re-aim (an unasked blur owed, the hide not
     // settled) — a door or a swipe then means the user wants them DOWN, so the re-aim is spent
     // on the dismiss rather than re-raising the keys over the sheet that just opened.
+    intentionalAt.current = Date.now();
     if (focusedIn.current !== null) expectingBlur.current += 1;
     else rearm.current = null;
     Keyboard.dismiss();
@@ -679,6 +680,13 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
   /** The re-aim owed by the unasked blur — WHICH field to hand back, and whether it has been
    *  spent. See `blurField` for why it cannot happen in the blur's own tick. */
   const rearm = useRef<'off' | 'on' | null>(null);
+  /** When a DELIBERATE `Keyboard.dismiss()` last ran (a swipe, a door). The hide's re-aim must
+   *  not fight it. It is a timestamp, not the `expectingBlur` counter, because that counter is
+   *  owed by blurs that on this app never arrive (the prose flip's focus move, measured below),
+   *  and a stuck credit would swallow every hide after it — including the tap's. (Measured,
+   *  iPhone, 2026-09-14: the tap that also flipped the prose mode stuck the flag and the
+   *  re-aim stopped landing; a dismiss is the only intentional hide, and it stamps.) */
+  const intentionalAt = useRef(0);
   /** Whether the keyboard is on screen right now, per its own show/hide events — the re-aim must
    *  not land while the keys are up (it would be a no-op at best) and must land once the hide is
    *  DONE: UIKit refuses a become that rides the hide's own animation, and that refusal is exactly
@@ -709,7 +717,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
       // field is still focused in RN's eyes — hand the field back.
       if (
         rearm.current === null &&
-        expectingBlur.current === 0 &&
+        Date.now() - intentionalAt.current > 600 &&
         focusedIn.current !== null &&
         cbRef.current.holdKeys
       ) {
