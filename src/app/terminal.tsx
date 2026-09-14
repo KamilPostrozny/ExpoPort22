@@ -434,8 +434,15 @@ export default function SessionScreen() {
           pushYank(text);
         },
         onSelection: (text) => {
+          const live = text.length > 0;
           selectionText.current = text;
-          setSelectionLive(text.length > 0);
+          // Log the TRANSITION, not every extension step: a drag crosses a cell every few frames
+          // and the line exists so the device watch can screenshot the frame — the word at
+          // long-press is the frame. The clear prints `selection ""`, which the watch deliberately
+          // skips (see scripts/watch-and-shoot.sh).
+          if (live !== selectionLive)
+            console.log('[terminal] selection', JSON.stringify(live ? text.slice(0, 80) : ''));
+          setSelectionLive(live);
         },
     onLink: async (url) => {
           await WebBrowser.openBrowserAsync(url);
@@ -1593,6 +1600,7 @@ export default function SessionScreen() {
       if (text.length === 0) return;
       await Clipboard.setStringAsync(text);
       pushYank(text);
+      console.log('[keybar] copy', `${text.length} chars`);
     },
   };
   /** One identity-stable object instead of five one-per-key trampolines. */
