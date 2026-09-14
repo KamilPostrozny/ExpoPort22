@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
@@ -48,6 +47,7 @@ import KeyBar, {
   Plate,
   TabsHintPopover,
   type BarPopover,
+  type KeyBarHandle,
 } from '@/keybar';
 import type { ModeSignal } from '@/scroll-model';
 import {
@@ -128,6 +128,11 @@ export default function SessionScreen() {
   const tmux = useTmux();
   const sending = useUploadBusy();
   const terminal = useRef<TerminalHandle>(null);
+  /** The key bar's handle: the screen's doors put the keyboard away through it (see
+   *  `KeyBarHandle.dismiss`) rather than `Keyboard.dismiss()` directly — the blur that dismiss
+   *  causes must arrive EXPECTED, or the field re-aims itself and raises the keyboard over the
+   *  sheet that just opened. */
+  const keybar = useRef<KeyBarHandle>(null);
   const detach = useRef<(() => void) | null>(null);
   const [open, setOpen] = useState<BarPopover>('none');
   /** Prose mode (see `KeyBarProps.textMode`). Deliberately NOT persisted: a mode that survived a
@@ -313,7 +318,7 @@ export default function SessionScreen() {
     setOpen('none');
     // The sheet puts the keys away for itself; giving them back is the bar's own up-swipe, not the
     // door's job.
-    Keyboard.dismiss();
+    keybar.current?.dismiss();
     setSettingsOpen(true);
   };
   const closeSettings = () => {
@@ -831,7 +836,7 @@ export default function SessionScreen() {
     if (sw !== 'closed') return;
     console.log('[switcher] open (tabs tap)');
     setOpen('none');
-    Keyboard.dismiss();
+    keybar.current?.dismiss();
     const pos = activePos();
     setZoomId(idAt(pos));
     revealSlot(pos);
@@ -2304,6 +2309,12 @@ export default function SessionScreen() {
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? kb.onBarSwipe : undefined}
+        // At rest the bar keeps the keyboard against a terminal tap (the field re-aims, see
+        // KeyBar's `onBlur`). Suppressed while the search field is up — there a blur of the bar's
+        // field is a move to a sibling the bar must not fight back — and while a sheet or the
+        // switcher owns the screen (their doors put the keys away through `keybar.dismiss`).
+        holdKeys={!search.on && !settingsOpen && sw === 'closed'}
+        ref={keybar}
         // The pan's per-frame writes happen on the UI thread against these (perf: the JS thread
         // stalls 40-300ms under load and a runOnJS pan hitched with it). A STABLE object: the
         // bar memoizes its gesture on it, and an inline literal re-serialized the worklets and

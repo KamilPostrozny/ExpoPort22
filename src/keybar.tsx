@@ -9,9 +9,10 @@
  * MODE, and the keyboard attaches to whichever matches `textMode` — because iOS reads a field's
  * brain (autocorrect, capitalization) only when the keyboard ATTACHES to it, and never re-reads
  * it off the attached field (see the fields' comment). The webview never takes focus, typing
- * reaches the PTY through `sendBytes`, and touching the terminal blurs the input natively — which
- * is what lets a long-press selection proceed with the keyboard up. The bar itself is its door:
- * a swipe down sends the keys away, a swipe up asks for them back.
+ * reaches the PTY through `sendBytes`. Touching the terminal blurs the input natively, but the
+ * blur is undone (see the fields' `onBlur`) — a terminal tap is a click the pane gets, never a way
+ * to put the keyboard away. The bar itself is its door: a swipe down sends the keys away, a
+ * swipe up asks for them back.
  *
  * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
  * lives in `src/keybar-model.ts`, tested; this file renders and executes.
@@ -20,7 +21,17 @@
  */
 
 import * as Haptics from 'expo-haptics';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
 import {
   Keyboard,
   Platform,
@@ -154,6 +165,12 @@ export type KeyBarProps = {
   sending?: boolean;
   /** T10: tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
+  /** The bar keeps the keyboard against a blur nobody asked for — the terminal's own touch
+   *  (iOS resigns these fields for any touch another native view accepts). While the SEARCH
+   *  field is up, a blur of these fields is a focus move to a sibling the bar must not fight
+   *  back, so the screen keeps this false then; at rest the search is the only other
+   *  focus-taker in the window. */
+  holdKeys?: boolean;
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
    *  the worklet. The screen owns the model: rubber band, thresholds, commit
@@ -344,7 +361,14 @@ function Key({
  */
 const PAD = ' '.repeat(512);
 
-function KeyBarInner(props: KeyBarProps) {
+/** What the screen may do to the keyboard from out there — the doors (settings, the switcher)
+ *  put the keys away through `dismiss`, never `Keyboard.dismiss()` directly, so the blur
+ *  arrives expected (see `expectingBlur`) and the field does not re-aim it back up. */
+export type KeyBarHandle = {
+  dismiss: () => void;
+};
+
+function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
   const { theme, open, onOpenChange } = props;
   /** The keyboard's owners — one field per prose mode, each BORN with its own brain. iOS reads a
    *  field's autocorrect/capitalization when the keyboard attaches to it, and NOT when the
@@ -366,6 +390,16 @@ function KeyBarInner(props: KeyBarProps) {
    *  time, which leaves the field uncontrolled so ordinary typing never round-trips through
    *  React — the flip back is the effect below. */
   const [padWrite, setPadWrite] = useState<string | undefined>(undefined);
+  /** Intentional blurs, owed to `onBlur`. iOS resigns the field for any touch another native
+   *  view accepts — so a terminal tap arrives as a blur nobody asked for, and it is the only
+   *  blur the bar undoes (see the fields' `onBlur`). Every path that puts the keyboard away on
+   *  purpose — the down-swipe, the prose flip's focus move, the screen's doors through `dismiss`
+   *  — spends one of these first, so their blur arrives expected and the keys stay down where
+   *  they were sent. */
+  const expectingBlur = useRef(0);
+  /** Which field the prose flip that OWES the next blur is moving focus to — spent by that
+   *  blur's re-aim, which cannot read `props.textMode` (see the flip's effect). */
+  const flipTarget = useRef<'on' | 'off' | null>(null);
   /** Where the PTY's cursor stands, in field coordinates — everything up to here has been sent. */
   const caret = useRef(PAD.length);
   /** Where the field's caret stands right now, which during a drag runs ahead of `caret`. */
@@ -409,6 +443,12 @@ function KeyBarInner(props: KeyBarProps) {
     textModeWas.current = props.textMode;
     repad();
     if (focusedIn.current !== null) {
+      // The blur of the field LEFT is owed; the re-aim must land where THIS flip is moving TO.
+      // It cannot read `props.textMode`: the blur event fires before the flip's render,
+      // where the prop is still the old value, and an off-by-one render is the whole point
+      // of the focus move.
+      flipTarget.current = props.textMode ? 'on' : 'off';
+      expectingBlur.current += 1;
       (props.textMode ? inputOn : inputOff).current?.focus();
     }
   }, [props.textMode, repad]);
@@ -615,13 +655,49 @@ function KeyBarInner(props: KeyBarProps) {
     (phase: 'start' | 'end', dx: number) => cbRef.current.onBarSwipe?.(phase, dx),
     [],
   );
-  const dismissKeys = useCallback(() => Keyboard.dismiss(), []);
+  const dismissKeys = useCallback(() => {
+    // Only when a field actually holds it: a dismiss with the keyboard down blurs nothing, and
+    // an owed blur that never arrives would swallow the next terminal tap's re-aim.
+    if (focusedIn.current !== null) expectingBlur.current += 1;
+    Keyboard.dismiss();
+  }, []);
+  // The screen's doors (settings, the switcher) put the keys away through here rather than
+  // `Keyboard.dismiss()` directly: the blur they cause must arrive expected, or the field would
+  // re-aim itself and raise the keyboard over the sheet that just opened.
+  useImperativeHandle(ref, () => ({ dismiss: dismissKeys }), [dismissKeys]);
   // The raise lands on the field matching the CURRENT prose mode, so the keyboard presents with
   // the right brain from the first frame — the same focus the text-mode flip moves to below.
   const raiseKeys = useCallback(() => {
     const p = cbRef.current;
     (p.textMode ? inputOn : inputOff).current?.focus();
   }, []);
+  /** The blur nobody asked for is the terminal's touch. iOS resigns these fields for any touch
+   *  another native view accepts — without the re-aim that touch is the keyboard's only exit
+   *  while it is up, and the tap-to-dismiss it is not supposed to have any more (user,
+   *  2026-09-14: it should be gone; the iOS build holds its responder, so a tap is a click the
+   *  pane gets, keys still up). Android's focused EditText survives outside touches and never
+   *  blurs, so it needs no re-aim: same answer, the platforms' own arithmetic. The re-aim
+   *  defers a tick because UIKit's resign and a become in the same pass race, and the become
+   *  loses. */
+  const blurField = (field: { current: TextInput | null }) => () => {
+    focusedIn.current = null;
+    repad();
+    if (expectingBlur.current > 0) {
+      expectingBlur.current -= 1; // owed to the flip or a door: the keys stay down
+      if (flipTarget.current !== null) {
+        const to = flipTarget.current;
+        flipTarget.current = null;
+        // One tick: the resign and a become in the same pass race, and the become loses.
+        setTimeout(() => (to === 'on' ? inputOn : inputOff).current?.focus(), 0);
+      }
+      return;
+    }
+    if (Platform.OS !== 'ios' || !props.holdKeys) return;
+    // One tick, same reason as the flip's: see there.
+    setTimeout(() => field.current?.focus(), 0);
+  };
+  const blurOff = () => blurField(inputOff);
+  const blurOn = () => blurField(inputOn);
   const panSV = props.panSV;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- every capture is identity-stable
   const pan = useMemo(() => Gesture.Pan()
@@ -893,10 +969,7 @@ function KeyBarInner(props: KeyBarProps) {
         onFocus={() => {
           focusedIn.current = 'off';
         }}
-        onBlur={() => {
-          focusedIn.current = null;
-          repad();
-        }}
+        onBlur={blurOff}
         // Prose mode (see `KeyBarProps.textMode`): this field is the OFF brain — no corrections,
         // no capitalization. Its twin below is the ON brain; the flip moves focus between them
         // rather than mutating these. `spellCheck` stays off in both — the squiggle is noise on a
@@ -925,10 +998,7 @@ function KeyBarInner(props: KeyBarProps) {
         onFocus={() => {
           focusedIn.current = 'on';
         }}
-        onBlur={() => {
-          focusedIn.current = null;
-          repad();
-        }}
+        onBlur={blurOn}
         autoCorrect
         autoCapitalize="sentences"
         spellCheck={false}
@@ -955,7 +1025,7 @@ function KeyBarInner(props: KeyBarProps) {
  * would have done this unasked, but this component bails out of compilation (verified by running
  * the plugin over the file), so it is done by hand.
  */
-export default memo(KeyBarInner);
+export default memo(forwardRef(KeyBarInner));
 
 /* --- the name pills (§4.4: they replace the keys during a bar swipe) --- */
 
