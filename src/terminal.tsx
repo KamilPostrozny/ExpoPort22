@@ -611,6 +611,13 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
 
     term.onData((data) => latest.current.onData(data));
     term.onBell(() => latest.current.onBell());
+    // Instrumentation (the callout's Copy fired on nothing, 2026-09-12): log EVERY change of xterm's
+    // own selection model, whatever caused it — our `select`/`clearSelection`, or xterm's internal
+    // clears (a user-input key, a rows-changed resize, a buffer swap). The line names the content
+    // so the log read shows which clear ate the selection.
+    term.onSelectionChange(() => {
+      console.log('[terminal] sel', JSON.stringify((term.getSelection() ?? '').slice(0, 40)));
+    });
     // Mouse reports xterm encodes for the wheels synthesized below. SGR (what tmux, htop and
     // anything from this decade negotiates) is ASCII and arrives via `onData`; only the legacy
     // single-byte DEFAULT encoding comes through here, as a string of raw char codes.
@@ -1142,6 +1149,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     el.appendChild(callout);
 
     const showCallout = () => {
+      console.log('[terminal] callout show', JSON.stringify({ sel: term.hasSelection() }));
       const t = latest.current.theme;
       callout.style.background = t.surface;
       callout.style.border = `1px solid ${t.border}`;
@@ -1165,17 +1173,23 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       e.stopPropagation();
       e.preventDefault();
       rowTint(true);
+      console.log('[terminal] callout touchstart');
     });
     calloutRow.addEventListener('touchend', (e) => {
       e.stopPropagation();
       e.preventDefault();
       rowTint(false);
+      console.log(
+        '[terminal] callout touchend',
+        JSON.stringify({ sel: term.hasSelection(), cb: typeof latest.current.onCopySelection }),
+      );
       if (term.hasSelection()) latest.current.onCopySelection();
       hideCallout();
     });
     calloutRow.addEventListener('touchcancel', (e) => {
       e.stopPropagation();
       rowTint(false);
+      console.log('[terminal] callout touchcancel');
     });
 
     const touchStart = (ev: TouchEvent) => {
