@@ -63,7 +63,7 @@ private extension UIResponder {
 
   /** Up the chain, so it holds across WebKit's internal renames — `WKWebView` is public and stable. */
   var isInsideWebView: Bool {
-    var node: UIView? = self
+    var node: UIView? = self as? UIView
     var depth = 0
     while let view = node, depth < 40 {
       if view is WKWebView { return true }
