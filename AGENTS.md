@@ -48,13 +48,17 @@ quietly ship.
 
 # Nothing is done until it has run on both
 
-**Every new implementation is tested on the Android emulator *and* on the real iPhone before it is
-reported as working.** Not one of them, not "it type-checks", not "the Android half is the same
-code so it must render the same" — both, on the actual screens, with a screenshot and a log read.
-The whole point of the rule above is that the two builds look alike, and that is a claim about
-pixels, which only a device can settle. Half the divergences this repo has found (a Material teal
-switch thumb, a tofu chevron, an Android font scale) were invisible in the source and obvious on
-the screen.
+- **Every new implementation is tested on the Android emulator *and* on the real iPhone before it is
+  reported as working.**
+- Not one of them, not "it type-checks", not "the Android half is the same code so it must render the
+  same" — both, on the actual screens, with a screenshot and a log read.
+- The whole point of the rule above is that the two builds look alike, and that is a claim about
+  pixels, which only a device can settle.
+- Half the divergences this repo has found (a Material teal switch thumb, a tofu chevron, an Android
+  font scale) were invisible in the source and obvious on the screen.
+
+Before reporting any Expo change as shipped, invoke `ship-and-watch` and complete its
+platform-specific verification path.
 
 The two harnesses already exist and neither needs the user's help:
 
@@ -66,9 +70,10 @@ The two harnesses already exist and neither needs the user's help:
 and start the bundler in-session, because the device log is only readable from the process that
 owns the port; never arm a log watch on someone else's bundler (user, 2026-09-11).
 
-Read the log and the screenshot yourself and say per platform what passed; "did it work?" is not a
-report. If one platform cannot be reached in the session, say which one and that the change is
-therefore unverified there — an untested half is a finding, not a footnote.
+Completion reports must contain separate Android and iPhone entries, each stating what the
+screenshot showed and what the logs showed. If one platform cannot be reached, explicitly mark it
+unverified; typechecks, tests, static inspection, or evidence from only the other platform do not
+substitute.
 
 # Look for the package before writing native code
 
