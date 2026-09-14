@@ -21,8 +21,7 @@
  *
  * The Catppuccin package also ships an `ansiColors` set. It is deliberately not used: the four
  * flavours here follow the official *ports* — bright repeats the normal hue and only the grey ramp
- * steps — which is what the reference app's terminal was tuned against, and which is what
- * catppuccin/kitty and catppuccin/alacritty actually install. The ports and the style guide's own
+ * steps — which is what catppuccin/kitty and catppuccin/alacritty actually install. The ports and the style guide's own
  * ANSI table disagree about `color7`/`color15` and the brights; the ports win here. Latte's ramp
  * inversion below comes from the guide and from catppuccin/kitty — not from catppuccin/alacritty,
  * whose latte port is the outlier upstream. The generated schemes carry their own authors' 16.

@@ -1,7 +1,7 @@
 /**
  * Download — the other half of §4.6. The app used to be "never downloads" (PLAN.md kept the file
- * browser out of v1 scope); the user brought it forward, and the reference app has no spec for it,
- * so this is new design: the ⋯ menu's DOWNLOAD section opens the browse sheet
+ * browser out of v1 scope); the user brought it forward, and there was no prior spec for it, so
+ * this is new design: the ⋯ menu's DOWNLOAD section opens the browse sheet
  * (`src/download-sheet.tsx`), the sheet chooses, and this file fetches.
  *
  * SFTP read → cache file → the system share sheet, which is where the file actually goes (Save to

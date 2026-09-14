@@ -4,9 +4,8 @@
  * `bun test` with no SSH and no native modules; `src/tmux.ts` owns the store, the poll timer and
  * the real connection.
  *
- * Ported behaviour from the reference `Port22Core/TmuxConfig.swift` + `TmuxTabs.swift` (spec, not
- * source), including its hardest-won lesson (their T60): an exec channel hands its string to the
- * user's **login shell**, and on a fish host a POSIX heredoc is a parse error that `try?` eats.
+ * The hardest-won lesson in this file: an exec channel hands its string to the user's **login
+ * shell**, and on a fish host a POSIX heredoc is a parse error that `try?` eats.
  * So the conf itself travels over SFTP — no shell in that path at all — and every command that
  * stays on the exec path is one line fish and POSIX sh parse identically: single quotes, `\;`,
  * `~/` at the start of a word (the one spelling of `$HOME` both agree on), `2>/dev/null`, `;`,
@@ -46,8 +45,8 @@ export const CONF_DIRECTORIES = [".config", CONF_DIRECTORY];
  * server for a feature that does not read it. A dead option is a deletion, not a preference.
  *
  * `@port22` is the verify handle: a user option, because a real option like `mouse` can be masked
- * by the user's own conf setting the same value — which is exactly how a failed push once hid from
- * the reference app's read-back check. Both halves carry the same version: which of the two is on
+ * by the user's own conf setting the same value — which is exactly how a failed push can hide from
+ * the read-back check. Both halves carry the same version: which of the two is on
  * the host is settled by content equality (see `needsPush`), not by the marker.
  */
 export function generateConf(extras: boolean): string {
@@ -119,8 +118,8 @@ ${extras ? EXTRAS : ""}`;
  * part, then the part the user said yes to.
  *
  * This is the hand-written `~/.tmux.conf` this app's own author had been running (2026-08-09),
- * minus what only the reference Swift app needed — its `M-1`..`M-9` window row and the `set-titles`
- * string it read to know which windows existed, neither of which this app has ever sent or read —
+ * minus the `M-1`..`M-9` window row and the `set-titles` string that read which windows existed —
+ * neither of which this app has ever sent or read —
  * and minus the two lines that are a person's taste rather than a phone's needs (`base-index`,
  * `pane-base-index`). Every option here is global, i.e. a desktop client on the same server gets it
  * too, and that is exactly why the half is a toggle instead of a fact.

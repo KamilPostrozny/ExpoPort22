@@ -107,7 +107,7 @@ EDGE = 20  # units; a point this near a side counts as sitting on it (0.78 devic
 # 32 units stops being a whole pixel and the x seams can come back. Invisible at thumbnail size,
 # which is why it is not worth a second pair of numbers. If a pane ever gets very small, or the
 # seams turn up somewhere that matters, the fix is to stop shipping geometry in a font and let a
-# canvas renderer draw these two ranges as rectangles, the way SwiftTerm does in ../Port22.
+# canvas renderer draw these two ranges as rectangles, the way SwiftTerm does.
 BLEED_X, BLEED_Y = 16, 56
 
 

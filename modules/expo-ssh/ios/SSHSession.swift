@@ -10,7 +10,7 @@ import NIOSSH
 @preconcurrency import Citadel
 
 /// The Citadel wrapper: connect, ed25519 auth, one PTY, short-lived exec channels, SFTP.
-/// Ported from the reference app's `Port22Core/SSHSession.swift`; nothing above this sees a NIO type.
+/// Nothing above this sees a NIO type.
 actor SSHSession {
   enum Failure: Error {
     case notConnected

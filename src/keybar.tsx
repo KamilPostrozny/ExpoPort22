@@ -352,9 +352,8 @@ function Key({
 /**
  * §4.2 held-delete: iOS gates the delete key's auto-repeat on the first responder's `hasText`, and
  * the field empties as soon as the diff has eaten what was typed — long before the *line* is empty —
- * so the repeat died after a character or two. The reference app answers that question with an
- * always-true `hasText` (Port22's TerminalHostView.swift:226); RN's `RCTUITextField` is not ours to
- * subclass, so the field is kept permanently non-empty instead: it holds a pad nobody ever sees
+ * so the repeat died after a character or two. RN's `RCTUITextField` is not ours to subclass, so
+ * the field is kept permanently non-empty instead: it holds a pad nobody ever sees
  * (1×1, `opacity: 0`), each pad character a repeat eats diffs into one more DEL, and the pad is
  * topped back up before it runs out. Spaces, because iOS's delete accelerates to whole words once
  * it has been held a while, and a pad of spaces is one word per character — a pad of letters would
@@ -618,12 +617,11 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
 
   const toggle = (which: Exclude<BarPopover, 'none'>) => {
     // §4.4: opening a popover closes the others — single-valued state does that by itself.
-    // The ⋯ menu used to drop the keyboard on the way in, which the reference app never does:
-    // its bar lives in the keyboard's own accessory window and its plus is a UIKit `Menu`, so
-    // the keys stay up under it. Here it was covering for the popovers' anchor, which measured
-    // from the screen's bottom edge rather than the keyboard's — with that fixed the menu fits
-    // above the keys and the dismiss is just a keyboard that goes away for no reason the person
-    // asked for (user, 2026-08-10). Every door the menu opens still puts the keyboard away for
+    // The ⋯ menu used to drop the keyboard on the way in, and a menu opening never puts the keys
+    // away — they stay up under it. The drop here was covering for the popovers' anchor, which
+    // measured from the screen's bottom edge rather than the keyboard's — with that fixed the
+    // menu fits above the keys and the dismiss is just a keyboard that goes away for no reason
+    // the person asked for (user, 2026-08-10). Every door the menu opens still puts the keyboard away for
     // itself: Settings in `openSettings`, the pickers by being system modals.
     onOpenChange(open === which ? 'none' : which);
   };

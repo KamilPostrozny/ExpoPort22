@@ -1,12 +1,12 @@
 # ExpoPort22 — Implementation Plan
 
-Port22 rebuilt from scratch in Expo (SDK 57) for iOS **and** Android. This plan is the
+Port22, built from scratch in Expo (SDK 57), for iOS **and** Android. This plan is the
 contract for a series of independent Claude sessions: each task below is sized for one
 session, states its dependencies, and has acceptance criteria. Read
 https://docs.expo.dev/versions/v57.0.0/ before writing code in any session (AGENTS.md rule).
 
 Sources of truth:
-- **Functionality**: distilled from the reference Swift app (`../Port22`, branch `xtool`) — described here; do not copy its implementation.
+- **Functionality**: described here.
 - **Design & interactions**: ~~Claude Design project `16acd697-…`~~ — **retired 2026-08-16.** The
   design files are deleted and are not to be re-fetched (AGENTS.md, "One app, two platforms").
   The shipped **iOS build is the visual and interaction spec**, and Android is an exact copy of
@@ -26,7 +26,7 @@ grid + bar swipes), one-way uploads whose
 remote path is typed into the session, OSC 52 clipboard (write-only into phone), OSC 8
 links. No accounts, no sync, no analytics, no background modes.
 
-Non-goals (explicit in reference, keep them): password auth, key import, jump hosts, agent
+Non-goals (keep them): password auth, key import, jump hosts, agent
 forwarding, remote file management (the upload-destination and download sheets list; they never
 rename, move or delete), multiple hosts, iPad/tablet layout, push/widgets.
 
@@ -107,7 +107,7 @@ rename, move or delete), multiple hosts, iPad/tablet layout, push/widgets.
 - **Tab key**: sends Tab (completion). **Esc** sends ESC.
 - **Paste**: tap pastes top clipboard slot; long-press (~420ms) opens **clipboard popover**: last three OSC 52 yanks + phone pasteboard **with content preview** (accepted: iOS paste banner fires on popover open), provenance labels ("tmux yank · 2 min ago"), pin to keep, tap types it (never executes). Yanks session-transient; pins persist in SecureStore (may hold secrets).
 - **Arrows cluster**: toggle button opens glass popover, inverted-T ↑↓←→ + Home/End; sends proper escape sequences (DECCKM-aware). (Prototype's history/caret simulation = what the shell does with those keys; app just sends keys.)
-- **⋯ menu**: UPLOAD FILE — Files / Photo or video / Camera — divider — Settings. Opening closes other popovers; the keyboard stays up under it, as in the reference app (its bar is the keyboard's own accessory view). The doors it opens put the keyboard away for themselves — Settings, and the system pickers. During upload the circle tints accent and goes inert (that's the whole progress UI).
+- **⋯ menu**: UPLOAD FILE — Files / Photo or video / Camera — divider — Settings. Opening closes other popovers; the keyboard stays up under it. The doors it opens put the keyboard away for themselves — Settings, and the system pickers. During upload the circle tints accent and goes inert (that's the whole progress UI).
 - Every key: press-dim/shrink + light haptic on touch, not on echo. Swipe on bar never presses keys.
 - **Dropped 2026-09-01**: the context band (the recipe-driven ribbon, in all three of its designs —
   in-bar pill, 5pt edge handle, "Accessory") is gone, code and spec. Nothing keys on
@@ -115,7 +115,7 @@ rename, move or delete), multiple hosts, iPad/tablet layout, push/widgets.
 
 ### 4.5 tmux integration
 - On connect probe `command -v tmux`; absent → no tabs button, no switcher, no mention.
-- A tmux start mode (§4.1) pushes `~/.config/port22/port22.conf` over SFTP, sourced; `# port22-conf-v2` marker, version-bump replaces. No toggle: choosing tmux is choosing the features the file buys. Two halves: **required** — notch wheel bindings both copy-mode flavours, `mouse on`, the two OSC 52 lines, no toggle because a feature dies without each — and **comforts** behind the §4.8 opt-out toggle (default on), which are the author's own hand-written `~/.tmux.conf` minus what only the reference Swift app used: `terminal-features ',*:RGB,*:usstyle'` + an `if-shell`-guarded `default-terminal tmux-256color` (truecolor through tmux; guarded because a TERM with no terminfo on the host breaks every pane), `status off` + `bind S` to bring it back, `escape-time 0` (a `set -s`, so server-wide) and `history-limit 50000`. All global — which is the reason they are a toggle. v1's `set-titles` + format string is in neither: the badge reads the poll, never a title, and the file was retitling every terminal on the server for nothing. Off takes effect on the next connect — `source-file` adds to a running server, it cannot un-set. Verify by reading `@port22` back; surface off/applied/not-applied in Settings. A non-tmux mode hides the tabs button (switcher needs configured tmux).
+- A tmux start mode (§4.1) pushes `~/.config/port22/port22.conf` over SFTP, sourced; `# port22-conf-v2` marker, version-bump replaces. No toggle: choosing tmux is choosing the features the file buys. Two halves: **required** — notch wheel bindings both copy-mode flavours, `mouse on`, the two OSC 52 lines, no toggle because a feature dies without each — and **comforts** behind the §4.8 opt-out toggle (default on), which are the author's own hand-written `~/.tmux.conf` minus: `terminal-features ',*:RGB,*:usstyle'` + an `if-shell`-guarded `default-terminal tmux-256color` (truecolor through tmux; guarded because a TERM with no terminfo on the host breaks every pane), `status off` + `bind S` to bring it back, `escape-time 0` (a `set -s`, so server-wide) and `history-limit 50000`. All global — which is the reason they are a toggle. v1's `set-titles` + format string is in neither: the badge reads the poll, never a title, and the file was retitling every terminal on the server for nothing. Off takes effect on the next connect — `source-file` adds to a running server, it cannot un-set. Verify by reading `@port22` back; surface off/applied/not-applied in Settings. A non-tmux mode hides the tabs button (switcher needs configured tmux).
 - **Switcher**: full-screen card grid (2 cols) over crust bg; per tmux window a live colour `capture-pane` snapshot card + name + directory sub. Active card accent ring. Tap → select; ✕ or left-swipe-fling → close (rubber-band right); long-press lifts card (scale/rotate/shadow, mauve ring) → drag-to-reorder with dashed target slot → `move-window` on drop; + births a new terminal that zooms out of the button (Safari new-tab); Done ✓ returns. Header "N Tabs". Terminal zooms into/out of its card slot (drag-following zoom on bar-swipe-up, accent ring during transition). Closing last window ends session. The keyboard is remembered, never re-decided: the switcher (and the Settings sheet) gives back the keys it took, so going in with them down comes back with them down — except a card tapped with the search armed, which lands with them down either way.
 - All switcher actions on short-lived exec channels (`list-windows`, `capture-pane`, `select-window`, `kill-window`, `new-window`, `move-window`) — never the attached PTY.
 
@@ -124,7 +124,7 @@ rename, move or delete), multiple hosts, iPad/tablet layout, push/widgets.
 - **Destination upload** (⋯ menu Files / Photo-video / Camera): **destination browser sheet** — SFTP readdir listing (dirs first, files shown so collisions are visible), breadcrumb path, tap dir to descend, "Save here"; starts at `$HOME`, remembers last destination. Filename field pre-filled with sanitised original name, editable (camera defaults to timestamp); overwrite visible in listing. Saves silently — **nothing typed into the session**. ⋯ circle tints accent + inert during send.
 - Shared: whole file in memory, size user's problem. Failure: "Could not send the file" alert, nothing typed, nothing left behind. The flows never delete; the module's listings exist only inside the two sheets. ("Never downloads" was the v1 line; the user brought downloads forward, so the next section is no longer deferred.)
 
-### 4.6a Downloads (brought forward from v2 scope on user request; the reference app has no spec, so this is new design)
+### 4.6a Downloads (brought forward from v2 scope on user request; new design, no prior spec to follow)
 - **Browse** (⋯ menu DOWNLOAD FILE → "Browse the host"): the upload destination browser turned around — same live SFTP listing, breadcrumb and sheet shell; directories descend, a *file* row is the action, no filename field, no remembered start (always `$HOME`). Starts at `$HOME` because it is a fresh flow, not the upload's destination.
 - Fetch: SFTP read in 32 KB chunks (the module's `download`, mirrored from `upload` on both platforms — Citadel `read(from:length:)` on iOS, sshj offset reads on Android), whole file in memory as for uploads, written to the app cache under `port22/<name>`.
 - Destination: the **system share sheet** (`expo-sharing`, tier-1 package) — Save to Files / AirDrop on iOS, Save to Download / share on Android; the file never lands somewhere the user did not choose. Sheet dismisses only on a successful pick; failure wording is "Could not download the file", one alert, browser left where it was.
@@ -160,7 +160,7 @@ dev-client config, `app.json` (portrait+landscape, phone-only, camera usage stri
 copied from design project + loaded, theme module (4 flavours × 26 colours, semantic roles,
 ANSI derivation, `auto` listener), settings store (AsyncStorage, tolerant decode, defaults).
 *Accept*: dev build runs both platforms, theme hook flips with system, fonts render.
-Landed: `src/theme.ts` (ported from reference `Port22Core/Theme.swift` — palette, ANSI ramp,
+Landed: `src/theme.ts` (palette, ANSI ramp,
 chrome roles, `colorSchemeNotification`), `src/settings.ts` (singleton +
 `useSyncExternalStore`, no `keyRow`/`snippets` per §6), `src/hooks/use-theme.ts`,
 `src/app/_layout.tsx` (font load + hydrate behind the splash), `src/app/index.tsx`
@@ -176,8 +176,8 @@ ed25519 pubkey auth (seed passed from JS), shell channel (PTY, `TERM`, resize, b
 events both ways), exec channel (run, collect stdout, exit code), SFTP (mkdir mode, readdir
 with types, write bytes). Typed TS API + event emitter.
 *Accept*: demo screen connects to a real host, runs `ls` via exec, streams shell I/O, uploads a file.
-Landed: local module `modules/expo-ssh` (`ExpoSSH`) — `ios/SSHSession.swift` (Citadel actor ported
-from the reference `Port22Core/SSHSession.swift`, plus `listDirectory`), `ios/ExpoSSHModule.swift`
+Landed: local module `modules/expo-ssh` (`ExpoSSH`) — `ios/SSHSession.swift` (the Citadel actor, plus
+`listDirectory`), `ios/ExpoSSHModule.swift`
 (definition, `SHA256:` fingerprint, base64 payloads), `src/ExpoSSHModule.ts` (typed API) and
 `src/ExpoSSH.types.ts`. Also `src/keys.ts` (seed in SecureStore device-only + `authorized_keys`
 line, T5 reuses it) and a T2 harness in `src/app/index.tsx` on top of the T1 palette one.
@@ -459,8 +459,8 @@ config-status/tabs states, `shellQuote`), `src/tmux.ts` (the store singleton + p
 real exec/SFTP calls), `startTmux`/`stopTmux` riding `set()` in `src/session.ts`, `showTabs` +
 live `windowIndex` on the bar (`src/keybar.tsx`, wired in `src/app/terminal.tsx`).
 Decisions, the load-bearing ones measured rather than assumed: the conf travels over **SFTP, not
-a heredoc** — the reference (`TmuxConfig.swift`, their T60) learned that an exec channel hands
-its string to the *login shell* and fish cannot parse a heredoc; every command left on the exec
+a heredoc** — an exec channel hands its string to the *login shell*, and fish cannot parse a
+heredoc (measured against a `fish` login shell); every command left on the exec
 path here is one line fish and POSIX sh parse identically, each run through `fish -c` before
 landing. Apply and verify are **one tmux client command** (`start-server \; source-file \; show
 -gv @port22`): measured locally, a session-less server exits with its last client, so a separate
@@ -861,15 +861,14 @@ Settled (user decisions, 2026-08-09):
 - Chord strip is the static five (C·Z·R·L·D) — no context-aware sets.
 - Uploads split: ⋯ menu = destination-browser flow (readdir listing, original editable
   filename, saves silently); a pasted file = quick `/tmp/port22` + typed path.
-  (Departure from reference's never-list-the-host stance, deliberate.)
+  (Listing the host is deliberate — the destination flow needs it.)
 
 ## 7. Deliberate behaviours (features, not bugs — keep them exactly so)
 
 - No reply to OSC 52 reads; non-http links do nothing; no tmux = no tabs button, no message; failed conf push changes nothing visible.
 - No haptic on tab select; `^D` instant, no confirmation.
-- **Log freely.** The reference app's SPEC §5 banned logging host, session bytes and filenames even
-  in debug; user decision 2026-08-09 drops that outright — debuggability wins, and this app has one
-  user on his own LAN. Every `ExpoSSH` call, result and event goes to the Metro console
+- **Log freely.** Logging host, session bytes and filenames is fine, even in debug — user decision
+  2026-08-09; debuggability wins, and this app has one user on his own LAN. Every `ExpoSSH` call, result and event goes to the Metro console
   (`modules/expo-ssh/src/ExpoSSHModule.ts`, `LOG`). The one thing still held back is the ed25519
   seed: it has no debug value where the public key does, so `src/keys.ts` logs the
   `authorized_keys` line instead. Say the word and that goes too.
