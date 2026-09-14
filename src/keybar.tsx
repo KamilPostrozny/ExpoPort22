@@ -701,6 +701,24 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
     };
     const onHide = () => {
       kbShown.current = false;
+      // THE measured failure (iPhone, 2026-09-14, traced in the [keys] log: raise → focus →
+      // show → hide, with NO blur and NO `Keyboard.dismiss` anywhere in the tree): a terminal
+      // touch can take the responder away while React still believes the field is focused, and
+      // the keyboard goes with it. A blur-based re-aim never saw it, because the blur does not
+      // come. So the hide is its own trigger: the keys left, no one owed the leaving, and the
+      // field is still focused in RN's eyes — hand the field back.
+      if (
+        rearm.current === null &&
+        expectingBlur.current === 0 &&
+        focusedIn.current !== null &&
+        cbRef.current.holdKeys
+      ) {
+        const to = focusedIn.current;
+        focusedIn.current = null;
+        repad();
+        console.log('[keys] kb hide stole the responder, field still', to, '→ re-aim');
+        rearm.current = to;
+      }
       console.log('[keys] kb hide, owed re-aim:', rearm.current);
       maybeRearm();
     };
