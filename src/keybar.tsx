@@ -657,8 +657,12 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
   );
   const dismissKeys = useCallback(() => {
     // Only when a field actually holds it: a dismiss with the keyboard down blurs nothing, and
-    // an owed blur that never arrives would swallow the next terminal tap's re-aim.
+    // an owed blur that never arrives would swallow the next terminal tap's re-aim. When the
+    // field is not focused the keys may be mid-re-aim (an unasked blur owed, the hide not
+    // settled) — a door or a swipe then means the user wants them DOWN, so the re-aim is spent
+    // on the dismiss rather than re-raising the keys over the sheet that just opened.
     if (focusedIn.current !== null) expectingBlur.current += 1;
+    else rearm.current = null;
     Keyboard.dismiss();
   }, []);
   // The screen's doors (settings, the switcher) put the keys away through here rather than
@@ -671,14 +675,47 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
     const p = cbRef.current;
     (p.textMode ? inputOn : inputOff).current?.focus();
   }, []);
+  /** The re-aim owed by the unasked blur — WHICH field to hand back, and whether it has been
+   *  spent. See `blurField` for why it cannot happen in the blur's own tick. */
+  const rearm = useRef<'off' | 'on' | null>(null);
+  /** Whether the keyboard is on screen right now, per its own show/hide events — the re-aim must
+   *  not land while the keys are up (it would be a no-op at best) and must land once the hide is
+   *  DONE: UIKit refuses a become that rides the hide's own animation, and that refusal is exactly
+   *  what made the first re-aim (a one-tick setTimeout in the blur) leave the keys down on device.
+   *  (Measured, iPhone, 2026-09-14: tap still dismissed with the one-tick re-aim in place.) */
+  const kbShown = useRef(false);
+  const maybeRearm = () => {
+    if (rearm.current !== null && !kbShown.current) {
+      const to = rearm.current;
+      rearm.current = null;
+      console.log('[keys] re-aimed the unasked blur →', to);
+      (to === 'off' ? inputOff : inputOn).current?.focus();
+    }
+  };
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    const onShow = () => {
+      kbShown.current = true;
+    };
+    const onHide = () => {
+      kbShown.current = false;
+      maybeRearm();
+    };
+    const showSub = Keyboard.addListener('keyboardDidShow', onShow);
+    const hideSub = Keyboard.addListener('keyboardDidHide', onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   /** The blur nobody asked for is the terminal's touch. iOS resigns these fields for any touch
    *  another native view accepts — without the re-aim that touch is the keyboard's only exit
    *  while it is up, and the tap-to-dismiss it is not supposed to have any more (user,
    *  2026-09-14: it should be gone; the iOS build holds its responder, so a tap is a click the
    *  pane gets, keys still up). Android's focused EditText survives outside touches and never
-   *  blurs, so it needs no re-aim: same answer, the platforms' own arithmetic. The re-aim
-   *  defers a tick because UIKit's resign and a become in the same pass race, and the become
-   *  loses. */
+   *  blurs, so it needs no re-aim: same answer, the platforms' own arithmetic. The re-aim is OWED
+   *  by this blur and SPENT by the hide that the resign starts (see `maybeRearm`), with a timeout
+   *  behind it for the hide that never fires. */
   const blurField = (field: { current: TextInput | null }) => () => {
     focusedIn.current = null;
     repad();
@@ -693,8 +730,10 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
       return;
     }
     if (Platform.OS !== 'ios' || !props.holdKeys) return;
-    // One tick, same reason as the flip's: see there.
-    setTimeout(() => field.current?.focus(), 0);
+    rearm.current = field === inputOff ? 'off' : 'on';
+    console.log('[keys] unasked blur → keys re-aim when the hide settles');
+    // The belt: some hides never fire their event, and a tap must not leave the keys down.
+    setTimeout(maybeRearm, 300);
   };
   const blurOff = () => blurField(inputOff);
   const blurOn = () => blurField(inputOn);
