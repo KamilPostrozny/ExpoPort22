@@ -717,6 +717,12 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
    *  by this blur and SPENT by the hide that the resign starts (see `maybeRearm`), with a timeout
    *  behind it for the hide that never fires. */
   const blurField = (field: { current: TextInput | null }) => () => {
+    console.log('[keys] blur', field === inputOff ? 'off' : 'on', {
+      owed: expectingBlur.current,
+      flip: flipTarget.current,
+      hold: props.holdKeys,
+      os: Platform.OS,
+    });
     focusedIn.current = null;
     repad();
     if (expectingBlur.current > 0) {
