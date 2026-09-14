@@ -161,6 +161,14 @@ export type KeyBarProps = {
   /** T9's derived "tabs available": tmux present AND conf applied (§4.5). False renders no tabs
    *  circle at all — no tmux (or a toggled-off config) is silence, not a message (§7). */
   showTabs: boolean;
+  /** The owned selection is live (T6.7 rework, 2026-09-12): the Copy key exists in the keys
+   *  pill only while it is — a key that has nothing to copy is chrome for the day it is not
+   *  needed, and the pill's width is measured content, not a reserved slot. */
+  hasSelection: boolean;
+  /** Copy the live selection: the screen writes the system pasteboard and a yank slot, exactly
+   *  the OSC 52 treatment — the rework replaced the iOS callout and the Android edit menu with
+   *  this key, on both platforms, which is what §4's one-app-two-platforms rule asks for. */
+  onCopySelection: () => void;
   /** §4.6: a transfer in flight — an upload or a download. The ⋯ circle tints accent and goes
    *  inert; the whole progress UI. All flows flip the one flag, via `useUploadBusy`. */
   sending?: boolean;
@@ -969,6 +977,18 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
                   style={styles.key}>
                   <Text style={keyLabel}>Paste</Text>
                 </Key>
+                {/* T6.7 rework: the selection's Copy, present only while a selection is live.
+                    Accent-tinted like an armed Ctrl — it is the only key on the bar that does
+                    something the session does not know about. */}
+                {props.hasSelection && (
+                  <Key
+                    onPress={props.onCopySelection}
+                    style={[styles.key, { backgroundColor: rgba(theme.accent, 0.5) }]}>
+                    <Text style={[keyLabel, { color: theme.accent }]}>
+                      Copy
+                    </Text>
+                  </Key>
+                )}
               </View>
               <View style={[styles.pillDivider, { backgroundColor: theme.border }]} />
               <Key

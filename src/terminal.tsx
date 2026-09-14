@@ -31,9 +31,12 @@ import {
   coastVelocity,
   compoundVelocity,
   isTwoFingerTap,
+  LONGPRESS_MS,
   modesEqual,
   scrollRoute,
+  selectionSpan,
   takeNotches,
+  wordBounds,
   type ModeSignal,
 } from '@/scroll-model';
 import { MONO_ADVANCE } from '@/switcher-model';
@@ -73,6 +76,10 @@ export type TerminalHandle = {
   /** Stop a running fling (the touch layer's coast): the host's "scroll to bottom" tap calls it so
    *  a fling does not keep spending wheels after the pane has been sent to its live bottom. */
   stopScroll(): void;
+  /** Clear the owned selection and report `''` over the bridge. The host calls it on a window
+   *  hop: the incoming window rewrites every row, so a selection that survived would be the
+   *  newcomer's text wearing the old highlight, and a Copy of it would be the wrong content. */
+  clearSelection(): void;
 };
 
 export type TerminalProps = {
@@ -105,6 +112,11 @@ export type TerminalProps = {
   onBell: () => Promise<void>;
   /** An OSC 52 yank, already decoded. Reads are refused before they get here. */
   onClipboard: (text: string) => Promise<void>;
+  /** The owned selection's text, pushed on every change (T6.7 rework, 2026-09-12) — `''` when
+   *  there is none. The key bar's Copy key reads the last push rather than the other way round:
+   *  the webview bridge's imperative calls do not carry a return value, and the buffer that owns
+   *  the text lives on this side of the bridge. */
+  onSelection: (text: string) => void;
   /** An OSC 8 link the user tapped, always `http(s)`. */
   onLink: (url: string) => Promise<void>;
   /** The emulator-internal mode flags, fired on change and once per boot as
@@ -250,14 +262,17 @@ const CSS = `
        on the span, where the geometry is ours. */
     text-underline-offset: 0.1em;
   }
-  /* Long-press has to reach the system edit menu (§4.2), so the rows stay real selectable text —
-     xterm turns selection off because it drives its own from mouse events, which a finger is not.
-     The whole chain down to the rows has to allow it: WebKit starts the gesture from the container
-     under the finger, so one "none" anywhere above the text is enough to stop it happening. */
+  /* The rows are NOT selectable text (T6.7 rework, 2026-09-12). The highlight is xterm's buffer
+     selection, driven from the touch layer below — WebKit's DOM selection died on every TUI
+     redraw (a TUI rewrites the rows under it) and its "Copy" only existed in the iOS callout,
+     which Android never sends. none all the way down, because WebKit starts the gesture from
+     the container under the finger; touch-callout: none with it, so a long-press has no
+     competing system meaning left — the touch layer's own 500ms timer is the long-press now,
+     and the edit menu is gone by design (Copy lives on the key bar). */
   .xterm, .xterm .xterm-screen, .xterm .xterm-rows, .xterm .xterm-rows * {
-    -webkit-user-select: text;
-    user-select: text;
-    -webkit-touch-callout: default;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
   /* Except the parts that are not text: the hidden textarea and the measuring elements. */
   .xterm .xterm-helpers { -webkit-user-select: none; user-select: none; }
@@ -313,6 +328,10 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
    *  tap can stop it: a fling left to coast keeps dispatching wheels after the pane has been
    *  cancelled back to its live bottom, so it scrolls up a notch past where it was meant to land. */
   const stopCoastRef = useRef<() => void>(() => {});
+  /** The touch layer's own clear, held out so the imperative handle can reach it — a hop
+   *  reinterprets the buffer and a stale selection would be the wrong content wearing the right
+   *  highlight (see `clearSelection` on `TerminalHandle`). */
+  const clearSelRef = useRef<() => void>(() => {});
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
   const latest = useRef({ theme, holdSize, ...handlers });
@@ -442,8 +461,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
           // where `foreground` on yellow does not. The others wear the match grey the addon's
           // decorations used to, so "every occurrence" still reads as a set with one of them live.
           (on ? `background:${t.warning};color:${t.onAccent};` : `background:${t.selection};`) +
-          // The rows are deliberately selectable (§4.2's long press) and this text is a copy of
-          // theirs — a selection dragged over the mark must not pick it up twice.
+          // The mark is a copy of row text the selection engine never reads from (it reads the
+          // buffer), and selectable text would give WebKit something to compete with.
           '-webkit-user-select:none;user-select:none;';
         rows.appendChild(el);
         hitMark.current.push(el);
@@ -473,6 +492,9 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     },
     stopScroll: () => {
       stopCoastRef.current();
+    },
+    clearSelection: () => {
+      clearSelRef.current();
     },
   };
   useDOMImperativeHandle(
@@ -882,7 +904,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
    */
   function bindTouch(term: Terminal, currentModes: () => ModeSignal) {
     const el = host.current!;
-    let pan: 'idle' | 'pending' | 'panning' = 'idle';
+    let pan: 'idle' | 'pending' | 'selecting' | 'panning' = 'idle';
     let panX = 0;
     let panY = 0;
     let carry = 0;
@@ -901,6 +923,127 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
      *  poll nudge is throttled, not one per notch. */
     let lastScrollNudge = 0;
 
+    /* --- The owned selection (T6.7 rework, 2026-09-12) ---
+     *
+     * The highlight is xterm's, not WebKit's: the touch layer decides, `term.select` writes
+     * xterm's selection model and it draws the highlight itself, and `term.selectionText` is
+     * what the key bar's Copy reads. Two things the DOM selection could not: it survives the
+     * app redrawing (so it works in vim and htop, which rewrite the rows constantly), and it
+     * survives the viewport moving (so a live selection no longer freezes the scroll — T4's
+     * handover, which existed only to keep a DOM selection still, is gone with it).
+     */
+    let lp: number | null = null; // the long-press timer
+    let auto: number | null = null; // the extension auto-scroll interval
+    let autoDir: 'up' | 'down' | null = null;
+    /** The word's start, buffer-ABSOLUTE (viewport row + ydisp at the moment it was anchored):
+     *  the anchor that stays put while the drag extends and the auto-scroll scrolls. */
+    let selAnchor: { col: number; row: number } | null = null;
+    /** Where the finger last was — the auto-scroll's wheels land here, like a coast's. */
+    let selPt = { x: 0, y: 0 };
+
+    // `viewportY`, not the model's ydisp by name: the public IBuffer exposes the same quantity —
+    // "the line within the buffer where the top of the viewport is" — and that is all the math
+    // here wants (viewport row + viewportY = buffer-absolute row).
+    /** The line under the finger as a CELL-ALIGNED string: one entry per grid cell, a width-2
+     *  character in its lead cell and a NUL sentinel in the cell it swallows, ` ` for the rest.
+     *  The naive `translateToString(true)` is NOT cell-aligned — its walker steps by cell WIDTH,
+     *  so every column after the first wide char (CJK, emoji) is off by one and the word scan
+     *  would select the wrong word. Width comes from the API itself, not a Unicode table:
+     *  a one-cell slice of a width-2 cell returns the whole grapheme, so it equals the two-cell
+     *  slice, while a one-cell slice of a narrow cell is always one char shorter than the
+     *  two-cell one. Runs once per long-press, so the per-cell calls cost nothing. */
+    const lineCells = (row: number): string => {
+      const line = term.buffer.active.getLine(ydisp() + row);
+      if (line === undefined) return '';
+      let s = '';
+      for (let i = 0; i < term.cols; ) {
+        const one = line.translateToString(false, i, i + 1);
+        if (one !== ' ' && line.translateToString(false, i, i + 2) === one) {
+          s += one + '\u0000';
+          i += 2;
+        } else {
+          s += one;
+          i += 1;
+        }
+      }
+      return s;
+    };
+
+    const ydisp = () => term.buffer.active.viewportY;
+
+    /** The viewport cell under a point in client coordinates, or `null` before the grid exists. */
+    const cellAt = (x: number, y: number): { col: number; row: number } | null => {
+      const screen = term.element?.querySelector('.xterm-screen');
+      const w = cellSize.current.w;
+      const h = cellSize.current.h;
+      if (!screen || w <= 0 || h <= 0 || term.rows === 0 || term.cols === 0) return null;
+      const r = screen.getBoundingClientRect();
+      return {
+        col: Math.max(0, Math.min(term.cols - 1, Math.floor((x - r.left) / w))),
+        row: Math.max(0, Math.min(term.rows - 1, Math.floor((y - r.top) / h))),
+      };
+    };
+
+    /** Draw the selection anchor→endpoint (buffer-absolute) and tell the host the new text.
+     *  `term.select` writes the model directly, so it works even while mouse reporting has
+     *  disabled xterm's own selection service — which is exactly the TUI case. */
+    let lastSelPush = '';
+    /** Tell the host the selection's text — but only when it changed: an extension drag crosses
+     *  a cell every few frames, and the bridge call exists to flip the Copy key, not to mirror
+     *  every frame. */
+    const pushSelection = (text: string) => {
+      if (text === lastSelPush) return;
+      lastSelPush = text;
+      latest.current.onSelection(text);
+    };
+
+    const applySelection = (end: { col: number; row: number }) => {
+      if (selAnchor === null) return;
+      const span = selectionSpan(term.cols, selAnchor, end);
+      term.select(span.col, span.row, span.len);
+      pushSelection(term.getSelection());
+    };
+
+    const clearSelection = () => {
+      if (!term.hasSelection()) return;
+      term.clearSelection();
+      pushSelection('');
+    };
+    clearSelRef.current = clearSelection;
+
+    const stopAuto = () => {
+      if (auto !== null) clearInterval(auto);
+      auto = null;
+      autoDir = null;
+    };
+
+    /** One auto-scroll tick: a line toward the edge, then extend to the edge cell. The line is
+     *  spent through `spend` — the same routes a normal scroll uses — so the extension works
+     *  in tmux's copy mode (wheel), the alt screen (arrows) and shell scrollback (local), each
+     *  through its existing path. Mirrors what xterm's own mouse drag-scroll does (50ms
+     *  interval, read off the bundled build) for a pointer that can leave the screen; here the
+     *  finger cannot, so the edge margin is one cell inside it instead.
+     *
+     *  The sign: extending toward the TOP edge wants OLDER lines, which a pan gets by moving
+     *  DOWN — so the top edge spends positive dy, exactly what a downward pan does, and the
+     *  bottom edge its negative. `spend`'s routing then does the rest per mode. */
+    const autoStep = () => {
+      const h = cellHeight();
+      if (h <= 0 || autoDir === null) return;
+      spend(autoDir === 'up' ? h : -h, selPt.x, selPt.y);
+      const c = cellAt(selPt.x, selPt.y);
+      const row = ydisp() + (autoDir === 'up' ? 0 : term.rows - 1);
+      applySelection({ col: c === null ? 0 : c.col, row });
+    };
+
+    const setAuto = (dir: 'up' | 'down' | null) => {
+      if (dir === autoDir && (dir === null ? auto === null : auto !== null)) return;
+      stopAuto();
+      if (dir !== null) {
+        autoDir = dir;
+        auto = window.setInterval(autoStep, 50);
+      }
+    };
     // Measured, not asked for: the screen element is exactly `rows` cells tall, and xterm's cell
     // metrics live on internal services.
     const cellHeight = () => {
@@ -1007,22 +1150,52 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       downAt = ev.timeStamp;
       tracker = new VelocityTracker();
       tracker.add(ev.timeStamp, t.clientY);
+      // The long-press is ours to time (WebKit's is off with the callout): a still finger over
+      // the grid selects the word under it. Motion past the slop spends it (touchMove), any end
+      // cancels it. A second long-press re-anchors over the old selection, native-style.
+      lp = window.setTimeout(() => {
+        lp = null;
+        if (pan !== 'pending') return;
+        const c = cellAt(panX, panY);
+        if (c === null) return;
+        const { start, len } = wordBounds(lineCells(c.row), c.col);
+        selAnchor = { col: start, row: ydisp() + c.row };
+        pan = 'selecting';
+        applySelection({ col: start + len - 1, row: selAnchor.row }); // the whole word
+      }, LONGPRESS_MS);
     };
 
     const touchMove = (ev: TouchEvent) => {
       const t = ev.touches[0];
       if (pan === 'pending') {
-        // Once WebKit has begun a selection, the moves are its drag handles, not a pan (T4).
-        if (document.getSelection()?.isCollapsed === false) {
-          pan = 'idle';
-          return;
-        }
+        // T4's handover is gone with the DOM selection it protected: a buffer selection survives
+        // the viewport moving, so a fresh finger on a live selection is just a scroll.
         if (Math.hypot(t.clientX - panX, t.clientY - panY) < PAN_SLOP_PX) return;
+        if (lp !== null) {
+          clearTimeout(lp);
+          lp = null;
+        }
         pan = 'panning';
         panY = t.clientY; // the slop is spent on deciding, not scrolled
         tracker = new VelocityTracker();
         tracker.add(ev.timeStamp, t.clientY);
         ev.preventDefault();
+        return;
+      }
+      if (pan === 'selecting') {
+        // The extension drag: the selection follows the finger, and the finger reaches an edge
+        // the glass will not let it cross — past one cell of margin the auto-scroll takes over
+        // and keeps extending the selection line by line until the finger lifts.
+        ev.preventDefault();
+        selPt = { x: t.clientX, y: t.clientY };
+        const c = cellAt(selPt.x, selPt.y);
+        if (c !== null) applySelection({ col: c.col, row: ydisp() + c.row });
+        const screen = term.element?.querySelector('.xterm-screen');
+        const h = cellHeight();
+        const r = screen ? screen.getBoundingClientRect() : null;
+        if (r !== null && h > 0) {
+          setAuto(selPt.y < r.top + h ? 'up' : selPt.y > r.bottom - h ? 'down' : null);
+        }
         return;
       }
       if (pan !== 'panning') return;
@@ -1041,16 +1214,24 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         panY = ev.touches[0].clientY;
         return;
       }
+      stopAuto();
+      if (lp !== null) {
+        clearTimeout(lp);
+        lp = null;
+      }
       if (pan === 'panning') {
         startCoast(compoundVelocity(tracker.velocity(), carried), panX, panY);
         carried = 0;
       }
-      // A one-finger tap on a live selection clears it. xterm would normally do this itself, off
-      // the synthetic mouse pair iOS sends — but its textarea is disabled and touch is ours, so
-      // that path is gone and without this the selection and its edit menu simply stay (T13/T6.7).
-      if (pan === 'pending' && fingers === 1 && document.getSelection()?.isCollapsed === false) {
-        document.getSelection()?.removeAllRanges();
+      if (pan === 'selecting') {
+        // Lift keeps the selection: that is the whole point of the rework — a selection outlives
+        // the gesture that made it, and the key bar's Copy key is where it goes from there.
+        pan = 'idle';
+        return;
       }
+      // A one-finger tap on a live selection clears it (T13's tap-to-clear, kept; the mechanism
+      // is ours now — xterm's own path runs off a synthetic mouse pair that touch never sends).
+      if (pan === 'pending' && fingers === 1) clearSelection();
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
       // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.
       if (pan === 'pending' && isTwoFingerTap(fingers, false, ev.timeStamp - downAt)) {
@@ -1060,6 +1241,11 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     };
 
     const touchCancel = () => {
+      stopAuto();
+      if (lp !== null) {
+        clearTimeout(lp);
+        lp = null;
+      }
       pan = 'idle';
     };
 
@@ -1071,7 +1257,11 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     el.addEventListener('touchcancel', touchCancel);
     return () => {
       stopCoast();
+      stopAuto();
+      if (lp !== null) clearTimeout(lp);
+      lastSelPush = '';
       stopCoastRef.current = () => {};
+      clearSelRef.current = () => {};
       el.removeEventListener('touchstart', touchStart);
       el.removeEventListener('touchmove', touchMove);
       el.removeEventListener('touchend', touchEnd);

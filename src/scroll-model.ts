@@ -156,3 +156,66 @@ export const TAP_MS = 300;
 export function isTwoFingerTap(fingers: number, panned: boolean, durationMs: number): boolean {
   return fingers === 2 && !panned && durationMs < TAP_MS;
 }
+
+/* --- the owned selection (T6.7 rework, 2026-09-12) --- */
+
+/** How long a still finger has to rest on the grid before the long-press selects a word. xterm's
+ *  own (mouse, desktop) long-press reference is 500ms, read off the bundled build — this is the
+ *  value a mouse user's muscle memory and the web's expect, and a faster one fights the
+ *  two-finger-tap Settings door (also ~300ms of rest). */
+export const LONGPRESS_MS = 500;
+
+/** The characters xterm's word selection treats as *not* word characters — the default
+ *  `wordSeparator` option, read off the bundled build (`node_modules/@xterm/xterm`, 2026-09-12),
+ *  not remembered: space, parens, brackets, braces, quotes, backslash. Everything else — `-`,
+ *  `.`, `_`, `/`, `:` — is word, which is what makes `foo/bar-baz.txt` select as one word. */
+export const WORD_SEP = " ()[]{}'\"";
+
+function isWordChar(c: string): boolean {
+  return c !== ' ' && c !== '' && !WORD_SEP.includes(c);
+}
+
+/**
+ * The word under `col` in `text`, xterm's own semantics (`SelectionService._getWordAt`): a maximal
+ * run of word characters; a maximal run of spaces; a separator character is its own single-cell
+ * word; a cell past the end of the text is its own single cell. `text` is a line as
+ * `translateToString` gives it (no trailing padding), so absent cells read as end-of-word.
+ */
+export function wordBounds(text: string, col: number): { start: number; len: number } {
+  if (col < 0 || col >= text.length) return { start: Math.max(col, 0), len: 1 };
+  const c = text[col];
+  if (c === ' ') {
+    let s = col;
+    while (s > 0 && text[s - 1] === ' ') s--;
+    let e = col;
+    while (e < text.length - 1 && text[e + 1] === ' ') e++;
+    return { start: s, len: e - s + 1 };
+  }
+  if (isWordChar(c)) {
+    let s = col;
+    while (s > 0 && isWordChar(text[s - 1])) s--;
+    let e = col;
+    while (e < text.length - 1 && isWordChar(text[e + 1])) e++;
+    return { start: s, len: e - s + 1 };
+  }
+  return { start: col, len: 1 }; // a separator: its own cell
+}
+
+/**
+ * The `term.select(col, row, length)` call that spans two buffer-ABSOLUTE cells — the coordinates
+ * xterm's selection model stores (its mouse handler adds `ydisp` to the viewport row before
+ * storing, and `select()` writes the model directly). The span is linear in cells, which is how
+ * the model's `finalSelectionEnd` unpacks `length` back into a cell, so start/end order does not
+ * matter: the call always comes back with the smaller (row, col) first.
+ */
+export function selectionSpan(
+  cols: number,
+  anchor: { col: number; row: number },
+  end: { col: number; row: number },
+): { col: number; row: number; len: number } {
+  const a = anchor.row * cols + anchor.col;
+  const b = end.row * cols + end.col;
+  const start = Math.min(a, b);
+  const stop = Math.max(a, b);
+  return { col: start % cols, row: Math.floor(start / cols), len: stop - start + 1 };
+}

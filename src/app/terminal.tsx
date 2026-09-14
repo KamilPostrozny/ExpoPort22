@@ -160,6 +160,12 @@ export default function SessionScreen() {
     decckm: false,
     bracketedPaste: false,
   });
+  /** The owned selection's state on THIS side of the bridge (T6.7 rework, 2026-09-12). The text
+   *  rides in over `onSelection` on every change and stays in a ref — only its PRESENCE is a
+   *  state value, because that is all the key bar's Copy key draws on, and a selection growing
+   *  cell by cell must not re-render the screen cell by cell. */
+  const selectionText = useRef('');
+  const [selectionLive, setSelectionLive] = useState(false);
   /**
    * T7.15's auto half. The context is the pane's foreground as the poll last saw it — the
    * basename plus, while that basename is an interpreter, the children's argvs that disambiguate
@@ -412,6 +418,10 @@ export default function SessionScreen() {
           setSize(cols, rows);
         },
     onBoot: async () => {
+          // A reload reaped the webview that owned the selection: nothing is selected until the
+          // touch layer says otherwise, or the Copy key would sit there over an empty pasteboard.
+          selectionText.current = '';
+          setSelectionLive(false);
           detach.current?.();
           detach.current = attachTerminal((chunks) => {
             dataSeq.current += chunks.length; // "has the host redrawn yet" — see `afterHostRedraw`
@@ -422,6 +432,10 @@ export default function SessionScreen() {
     onClipboard: async (text) => {
           await Clipboard.setStringAsync(text);
           pushYank(text);
+        },
+        onSelection: (text) => {
+          selectionText.current = text;
+          setSelectionLive(text.length > 0);
         },
     onLink: async (url) => {
           await WebBrowser.openBrowserAsync(url);
@@ -441,6 +455,7 @@ export default function SessionScreen() {
       onBoot: async (...a: any[]) => termH.current.onBoot?.(...a),
       onBell: async (...a: any[]) => termH.current.onBell?.(...a),
       onClipboard: async (...a: any[]) => termH.current.onClipboard?.(...a),
+      onSelection: async (...a: any[]) => termH.current.onSelection?.(...a),
       onLink: async (...a: any[]) => termH.current.onLink?.(...a),
       onModes: async (...a: any[]) => termH.current.onModes?.(...a),
       onTwoFingerTap: async (...a: any[]) => termH.current.onTwoFingerTap?.(...a),
@@ -461,6 +476,7 @@ export default function SessionScreen() {
         onBoot={tv.onBoot}
         onBell={tv.onBell}
         onClipboard={tv.onClipboard}
+        onSelection={tv.onSelection}
         onLink={tv.onLink}
         onModes={tv.onModes}
         onTwoFingerTap={tv.onTwoFingerTap}
@@ -542,6 +558,13 @@ export default function SessionScreen() {
   const awaiting = useRef<{ index: number; tries: number } | null>(null);
   const awaitWindow = (index: number) => {
     awaiting.current = { index, tries: 0 };
+    // The hop reinterprets the whole buffer: the incoming window rewrites every row, and a
+    // selection that survived it would be the newcomer's text wearing the old highlight — a Copy
+    // would hand the wrong content back. Cleared at the one place every hop passes through: the
+    // card select, the bar swipe, a born tab, a kill's landing.
+    terminal.current?.clearSelection();
+    selectionText.current = '';
+    setSelectionLive(false);
   };
 
   /** The active window's position in `list` — tmux's fresher poll first, the list's flag second.
@@ -1563,6 +1586,14 @@ export default function SessionScreen() {
     onRowHeight: setRowHeight,
     onTabsTap: openSwitcher,
     onBarSwipe,
+    // The owned selection's Copy: the OSC 52 treatment — system pasteboard and a yank slot
+    // (it is a yank: text the user took out of the terminal, newest on top, pinnable).
+    onCopySelection: async () => {
+      const text = selectionText.current;
+      if (text.length === 0) return;
+      await Clipboard.setStringAsync(text);
+      pushYank(text);
+    },
   };
   /** One identity-stable object instead of five one-per-key trampolines. */
   const kb = useMemo(
@@ -1572,6 +1603,7 @@ export default function SessionScreen() {
       onRowHeight: (...a: any[]) => kbH.current.onRowHeight(...a),
       onTabsTap: (...a: any[]) => kbH.current.onTabsTap(...a),
       onBarSwipe: (...a: any[]) => kbH.current.onBarSwipe(...a),
+      onCopySelection: (...a: any[]) => kbH.current.onCopySelection(...a),
     }),
     [],
   );
@@ -2306,6 +2338,8 @@ export default function SessionScreen() {
         // (`tabsHint`, user 2026-08-12).
         showTabs={showTabs}
         onTabsTap={kb.onTabsTap}
+        hasSelection={selectionLive}
+        onCopySelection={kb.onCopySelection}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? kb.onBarSwipe : undefined}

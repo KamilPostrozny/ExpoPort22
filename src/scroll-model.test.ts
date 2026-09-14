@@ -15,7 +15,9 @@ import {
   compoundVelocity,
   modesEqual,
   scrollRoute,
+  selectionSpan,
   takeNotches,
+  wordBounds,
   type ModeSignal,
 } from '@/scroll-model';
 
@@ -132,4 +134,78 @@ test('compounding: same-direction flicks stack, reversals and stops do not', () 
   // Stacking is clamped: repeated catches must not walk the coast up to a seek.
   expect(compoundVelocity(COAST_MAX_VELOCITY, COAST_MAX_VELOCITY)).toBe(COAST_MAX_VELOCITY);
   expect(compoundVelocity(-COAST_MAX_VELOCITY, -COAST_MAX_VELOCITY)).toBe(-COAST_MAX_VELOCITY);
+});
+
+/* --- the owned selection (T6.7 rework, 2026-09-12) --- */
+
+test('word bounds: xterm semantics — word chars run, spaces run, separators are one cell', () => {
+  // `-`, `.`, `_`, `/`, `:` are word (not in xterm's default wordSeparator): paths and versions
+  // select as one word, which is the case a path-fiddling user has.
+  expect(wordBounds('foo/bar-baz.txt', 3)).toEqual({ start: 0, len: 15 });
+  expect(wordBounds('the quick brown fox', 1)).toEqual({ start: 0, len: 3 });
+  // Punctuation from the separator set is its own single-cell word, like xterm's mouse path.
+  expect(wordBounds('(123)', 0)).toEqual({ start: 0, len: 1 });
+  expect(wordBounds('(123)', 1)).toEqual({ start: 1, len: 3 });
+  expect(wordBounds('(123)', 4)).toEqual({ start: 4, len: 1 });
+  // A run of spaces is the word — double-clicking between columns selects the gap, as it does
+  // on desktop xterm.
+  expect(wordBounds('ab   cd', 2)).toEqual({ start: 2, len: 3 });
+  // Edges: the first and last cell of the line, and a cell past the end (a padded cell).
+  expect(wordBounds('abc', 0)).toEqual({ start: 0, len: 3 });
+  expect(wordBounds('abc', 2)).toEqual({ start: 0, len: 3 });
+  expect(wordBounds('abc', 7)).toEqual({ start: 7, len: 1 });
+  // Empty line: every cell is its own one-cell word.
+  expect(wordBounds('', 0)).toEqual({ start: 0, len: 1 });
+});
+
+test('word bounds: the cell-aligned line — width-2 cells ride as NUL and stay in the word', () => {
+  // The touch layer builds the line one cell per entry: a width-2 character in its lead cell,
+  // \u0000 in the cell it swallows (never a separator, so the pair and its neighbours form one
+  // word — xterm's own mouse selection includes the wide cell in the run). A CJK run selects
+  // whole, and ASCII after the wide char is NOT shifted: col 7 is `x`, the cell after the pair.
+  const line = 'ab \u4f60\u0000\u597d\u0000 xy'; // a b ␣ 你 好 ␣ x y  (ten cells)
+  expect(wordBounds(line, 3)).toEqual({ start: 3, len: 4 }); // 你好
+  expect(wordBounds(line, 0)).toEqual({ start: 0, len: 2 }); // ab
+  expect(wordBounds(line, 8)).toEqual({ start: 8, len: 2 }); // xy — x is cell 8, NOT shifted
+  expect(wordBounds(line, 4)).toEqual({ start: 3, len: 4 }); // inside the pair: same word
+});
+
+test('selection span: linear in cells, order-agnostic, unpacks the way the model does', () => {
+  // Same line, both directions — the smaller (col) always comes back first.
+  expect(selectionSpan(10, { col: 2, row: 0 }, { col: 5, row: 0 })).toEqual({
+    col: 2,
+    row: 0,
+    len: 4,
+  });
+  expect(selectionSpan(10, { col: 5, row: 0 }, { col: 2, row: 0 })).toEqual({
+    col: 2,
+    row: 0,
+    len: 4,
+  });
+  // One cell: the long-press's minimum, and a drag that never left its word's start.
+  expect(selectionSpan(10, { col: 3, row: 2 }, { col: 3, row: 2 })).toEqual({
+    col: 3,
+    row: 2,
+    len: 1,
+  });
+  // Across lines, buffer-absolute rows, wrapping the length the way `finalSelectionEnd` does:
+  // start row 5 col 7 through end row 7 col 2 of a 10-col grid is 7..9, 0..9, 0..2 = 16 cells.
+  expect(selectionSpan(10, { col: 7, row: 5 }, { col: 2, row: 7 })).toEqual({
+    col: 7,
+    row: 5,
+    len: 16,
+  });
+  // The reverse drag gives the identical call — the extension must not flicker when the finger
+  // crosses the anchor.
+  expect(selectionSpan(10, { col: 2, row: 7 }, { col: 7, row: 5 })).toEqual({
+    col: 7,
+    row: 5,
+    len: 16,
+  });
+  // Scrollback rows are just bigger rows: no wraparound, no special case.
+  expect(selectionSpan(10, { col: 9, row: 400 }, { col: 0, row: 401 })).toEqual({
+    col: 9,
+    row: 400,
+    len: 2,
+  });
 });
