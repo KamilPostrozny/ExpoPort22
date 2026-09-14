@@ -113,10 +113,14 @@ export type TerminalProps = {
   /** An OSC 52 yank, already decoded. Reads are refused before they get here. */
   onClipboard: (text: string) => Promise<void>;
   /** The owned selection's text, pushed on every change (T6.7 rework, 2026-09-12) — `''` when
-   *  there is none. The key bar's Copy key reads the last push rather than the other way round:
+   *  there is none. The callout's Copy reads the last push rather than the other way round:
    *  the webview bridge's imperative calls do not carry a return value, and the buffer that owns
    *  the text lives on this side of the bridge. */
   onSelection: (text: string) => void;
+  /** The callout's Copy row was tapped: copy the last-pushed selection. The native side holds
+   *  the text (its own ref, fed by `onSelection`), so the push is empty — it is a trigger, and
+   *  the host writes the pasteboard and the yank slot from what it already has. */
+  onCopySelection: () => void;
   /** An OSC 8 link the user tapped, always `http(s)`. */
   onLink: (url: string) => Promise<void>;
   /** The emulator-internal mode flags, fired on change and once per boot as
@@ -1007,6 +1011,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     const clearSelection = () => {
       if (!term.hasSelection()) return;
       term.clearSelection();
+      hideCallout();
       pushSelection('');
     };
     clearSelRef.current = clearSelection;
@@ -1119,7 +1124,64 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       coast = requestAnimationFrame(step);
     };
 
+    /** The selection's Copy door, and the answer to "where did the edit menu go": the iOS
+     *  callout cannot be summoned programmatically — WebKit raises it only for its own long-press
+     *  over its own selection, which is the state the rework exists to avoid. So the callout is
+     *  ours: a plate in the app's chrome, at the finger, looking native, on both platforms.
+     *  It shows when the long-press lands the word, dies on any drag (the finger is extending
+     *  now) and on any OTHER touch, and outlives the lift: the tap on Copy is a fresh touch, and
+     *  the row swallows it — stopPropagation is what keeps it away from the gesture code below,
+     *  because that code's one-finger tap ends in clearSelection(). */
+    const callout = document.createElement('div');
+    const calloutRow = document.createElement('div');
+    calloutRow.textContent = 'Copy';
+    callout.appendChild(calloutRow);
+    callout.style.cssText = 'position:fixed;display:none;z-index:50;';
+    calloutRow.style.cssText =
+      'padding:9px 18px;font:400 15px system-ui,sans-serif;border-radius:12px;';
+    el.appendChild(callout);
+
+    const showCallout = () => {
+      const t = latest.current.theme;
+      callout.style.background = t.surface;
+      callout.style.border = `1px solid ${t.border}`;
+      callout.style.borderRadius = '14px';
+      callout.style.boxShadow = '0 4px 16px rgba(0,0,0,0.35)';
+      calloutRow.style.color = t.foreground;
+      callout.style.display = 'block';
+      const w = callout.offsetWidth;
+      const h = callout.offsetHeight;
+      callout.style.left = `${Math.min(Math.max(panX - w / 2, 6), window.innerWidth - w - 6)}px`;
+      // Above the finger, native-style; below it when the finger is near the top.
+      callout.style.top = `${panY - h - 14 < 6 ? panY + 22 : panY - h - 14}px`;
+    };
+    const hideCallout = () => {
+      callout.style.display = 'none';
+    };
+    const rowTint = (on: boolean) => {
+      calloutRow.style.background = on ? `${latest.current.theme.accent}40` : '';
+    };
+    calloutRow.addEventListener('touchstart', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      rowTint(true);
+    });
+    calloutRow.addEventListener('touchend', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      rowTint(false);
+      if (term.hasSelection()) latest.current.onCopySelection();
+      hideCallout();
+    });
+    calloutRow.addEventListener('touchcancel', (e) => {
+      e.stopPropagation();
+      rowTint(false);
+    });
+
     const touchStart = (ev: TouchEvent) => {
+      // Any touch that reaches the grid is not on the callout (the row stops its own), so the
+      // plate from the previous gesture dies here, before this one decides what it is.
+      hideCallout();
       // §4.3 said a touch during the coast stops it and does nothing else. On device that reads as
       // dead: the finger that caught the scroll cannot then drag it, so it takes a *third* touch to
       // move again. iOS hands the drag over inside the same gesture, so a catch goes straight to
@@ -1162,6 +1224,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         selAnchor = { col: start, row: ydisp() + c.row };
         pan = 'selecting';
         applySelection({ col: start + len - 1, row: selAnchor.row }); // the whole word
+        showCallout();
       }, LONGPRESS_MS);
     };
 
@@ -1187,6 +1250,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         // the glass will not let it cross — past one cell of margin the auto-scroll takes over
         // and keeps extending the selection line by line until the finger lifts.
         ev.preventDefault();
+        hideCallout(); // the finger is extending now; the plate would ride the drag
         selPt = { x: t.clientX, y: t.clientY };
         const c = cellAt(selPt.x, selPt.y);
         if (c !== null) applySelection({ col: c.col, row: ydisp() + c.row });
@@ -1260,6 +1324,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       stopAuto();
       if (lp !== null) clearTimeout(lp);
       lastSelPush = '';
+      callout.remove();
       stopCoastRef.current = () => {};
       clearSelRef.current = () => {};
       el.removeEventListener('touchstart', touchStart);

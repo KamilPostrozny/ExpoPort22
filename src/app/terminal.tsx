@@ -160,12 +160,11 @@ export default function SessionScreen() {
     decckm: false,
     bracketedPaste: false,
   });
-  /** The owned selection's state on THIS side of the bridge (T6.7 rework, 2026-09-12). The text
-   *  rides in over `onSelection` on every change and stays in a ref — only its PRESENCE is a
-   *  state value, because that is all the key bar's Copy key draws on, and a selection growing
-   *  cell by cell must not re-render the screen cell by cell. */
+  /** The owned selection's text on THIS side of the bridge (T6.7 rework, 2026-09-12). It rides
+   *  in over `onSelection` on every change and stays in a ref — the callout's Copy reads the
+   *  last push, and a selection growing cell by cell must not re-render the screen at all: a
+   *  terminal screen has no state to flip on a selection, the DOM side shows the plate. */
   const selectionText = useRef('');
-  const [selectionLive, setSelectionLive] = useState(false);
   /**
    * T7.15's auto half. The context is the pane's foreground as the poll last saw it — the
    * basename plus, while that basename is an interpreter, the children's argvs that disambiguate
@@ -419,9 +418,8 @@ export default function SessionScreen() {
         },
     onBoot: async () => {
           // A reload reaped the webview that owned the selection: nothing is selected until the
-          // touch layer says otherwise, or the Copy key would sit there over an empty pasteboard.
+          // touch layer says otherwise, or a Copy would write an empty pasteboard.
           selectionText.current = '';
-          setSelectionLive(false);
           detach.current?.();
           detach.current = attachTerminal((chunks) => {
             dataSeq.current += chunks.length; // "has the host redrawn yet" — see `afterHostRedraw`
@@ -434,15 +432,24 @@ export default function SessionScreen() {
           pushYank(text);
         },
         onSelection: (text) => {
-          const live = text.length > 0;
+          const was = selectionText.current.length > 0;
           selectionText.current = text;
+          const live = text.length > 0;
           // Log the TRANSITION, not every extension step: a drag crosses a cell every few frames
           // and the line exists so the device watch can screenshot the frame — the word at
           // long-press is the frame. The clear prints `selection ""`, which the watch deliberately
           // skips (see scripts/watch-and-shoot.sh).
-          if (live !== selectionLive)
+          if (live !== was)
             console.log('[terminal] selection', JSON.stringify(live ? text.slice(0, 80) : ''));
-          setSelectionLive(live);
+        },
+        // The callout's Copy row: the OSC 52 treatment — system pasteboard and a yank slot
+        // (it is a yank: text the user took out of the terminal, newest on top, pinnable).
+        onCopySelection: async () => {
+          const text = selectionText.current;
+          if (text.length === 0) return;
+          await Clipboard.setStringAsync(text);
+          pushYank(text);
+          console.log('[terminal] copy', `${text.length} chars`);
         },
     onLink: async (url) => {
           await WebBrowser.openBrowserAsync(url);
@@ -463,6 +470,7 @@ export default function SessionScreen() {
       onBell: async (...a: any[]) => termH.current.onBell?.(...a),
       onClipboard: async (...a: any[]) => termH.current.onClipboard?.(...a),
       onSelection: async (...a: any[]) => termH.current.onSelection?.(...a),
+      onCopySelection: async (...a: any[]) => termH.current.onCopySelection?.(...a),
       onLink: async (...a: any[]) => termH.current.onLink?.(...a),
       onModes: async (...a: any[]) => termH.current.onModes?.(...a),
       onTwoFingerTap: async (...a: any[]) => termH.current.onTwoFingerTap?.(...a),
@@ -484,6 +492,7 @@ export default function SessionScreen() {
         onBell={tv.onBell}
         onClipboard={tv.onClipboard}
         onSelection={tv.onSelection}
+        onCopySelection={tv.onCopySelection}
         onLink={tv.onLink}
         onModes={tv.onModes}
         onTwoFingerTap={tv.onTwoFingerTap}
@@ -571,7 +580,6 @@ export default function SessionScreen() {
     // card select, the bar swipe, a born tab, a kill's landing.
     terminal.current?.clearSelection();
     selectionText.current = '';
-    setSelectionLive(false);
   };
 
   /** The active window's position in `list` — tmux's fresher poll first, the list's flag second.
@@ -1593,15 +1601,6 @@ export default function SessionScreen() {
     onRowHeight: setRowHeight,
     onTabsTap: openSwitcher,
     onBarSwipe,
-    // The owned selection's Copy: the OSC 52 treatment — system pasteboard and a yank slot
-    // (it is a yank: text the user took out of the terminal, newest on top, pinnable).
-    onCopySelection: async () => {
-      const text = selectionText.current;
-      if (text.length === 0) return;
-      await Clipboard.setStringAsync(text);
-      pushYank(text);
-      console.log('[keybar] copy', `${text.length} chars`);
-    },
   };
   /** One identity-stable object instead of five one-per-key trampolines. */
   const kb = useMemo(
@@ -1611,7 +1610,6 @@ export default function SessionScreen() {
       onRowHeight: (...a: any[]) => kbH.current.onRowHeight(...a),
       onTabsTap: (...a: any[]) => kbH.current.onTabsTap(...a),
       onBarSwipe: (...a: any[]) => kbH.current.onBarSwipe(...a),
-      onCopySelection: (...a: any[]) => kbH.current.onCopySelection(...a),
     }),
     [],
   );
@@ -2346,8 +2344,6 @@ export default function SessionScreen() {
         // (`tabsHint`, user 2026-08-12).
         showTabs={showTabs}
         onTabsTap={kb.onTabsTap}
-        hasSelection={selectionLive}
-        onCopySelection={kb.onCopySelection}
         // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
         // hop through; without it the axis is silence, like the tabs button (§7).
         onBarSwipe={showTabs ? kb.onBarSwipe : undefined}
