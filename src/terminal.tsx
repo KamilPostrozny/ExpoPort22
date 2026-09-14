@@ -968,6 +968,23 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     let selAnchor: { col: number; row: number } | null = null;
     /** Where the finger last was — the auto-scroll's wheels land here, like a coast's. */
     let selPt = { x: 0, y: 0 };
+    /** The span last written to xterm's model, with the column count it was written at. A
+     *  resize that changes only the ROWS (the keyboard appearing) clears xterm's selection out
+     *  of habit, but the buffer itself has not rewrapped — same width, same lines — so the
+     *  buffer-absolute span is still correct and gets put back (the onResize handler below).
+     *  Nulled when the buffer genuinely changes (a window hop) or we clear on purpose. */
+    let selSpan: { col: number; row: number; len: number; cols: number } | null = null;
+    /** The press point of the long-press — the extension drag's slop is measured from here, so
+     *  the finger's own tremor (a pixel or two, steady for a half-second or more) does not turn
+     *  the long-press into a drag on its first tremor (trace 2026-09-12: the selection crawled
+     *  cell by cell while the plate hid itself, and the read was "the button appears too early"). */
+    let selStart = { x: 0, y: 0 };
+    let extending = false;
+    // The dead band between a trembling finger and an intentional extension drag. A hold is not
+    // still — the 2026-09-12 trace crawled one cell per touchMove ("Metro " → "Metro w" →
+    // "Metro wa") and the first tremor hid the plate. An intentional extension crosses a whole
+    // cell (≈7px); tremor stays under 2. Four sits between.
+    const EXTEND_SLOP_PX = 4;
 
     // `viewportY`, not the model's ydisp by name: the public IBuffer exposes the same quantity —
     // "the line within the buffer where the top of the viewport is" — and that is all the math
@@ -1029,16 +1046,32 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       if (selAnchor === null) return;
       const span = selectionSpan(term.cols, selAnchor, end);
       term.select(span.col, span.row, span.len);
+      selSpan = { col: span.col, row: span.row, len: span.len, cols: term.cols };
       pushSelection(term.getSelection());
     };
 
     const clearSelection = () => {
       if (!term.hasSelection()) return;
       term.clearSelection();
+      selSpan = null; // deliberate: a cleared selection must not be resurrected by a resize
       hideCallout();
       pushSelection('');
     };
     clearSelRef.current = clearSelection;
+
+    // A rows-only resize (the keyboard appearing) clears xterm's selection out of habit — the
+    // service's own onResize listener runs on rowsChanged — but the buffer has NOT rewrapped:
+    // same width, same lines, and the span is buffer-absolute. Put it back. xterm's listener is
+    // registered at construction and ours here after it, so this runs after their clear. A cols
+    // change (rotation) DID rewrap: the coordinates are void, and a buffer swap is a different
+    // screen outright — both null the span and let the selection die.
+    term.onResize((c) => {
+      if (selSpan !== null && selSpan.cols === c.cols && term.buffer.active === term.buffer.normal) {
+        term.select(selSpan.col, selSpan.row, selSpan.len);
+      } else {
+        selSpan = null; // rotated (rewrapped) or on a different buffer: the span is void
+      }
+    });
 
     const stopAuto = () => {
       if (auto !== null) clearInterval(auto);
@@ -1166,6 +1199,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     el.appendChild(callout);
 
     const showCallout = () => {
+      if (!term.hasSelection()) return; // a plate over no selection has nothing to copy
       const t = latest.current.theme;
       callout.style.background = t.surface;
       callout.style.border = `1px solid ${t.border}`;
@@ -1232,6 +1266,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       panX = t.clientX;
       panY = t.clientY;
       carry = 0;
+      extending = false; // a new gesture gets a fresh tremor budget
       fingers = ev.touches.length;
       downAt = ev.timeStamp;
       tracker = new VelocityTracker();
@@ -1246,6 +1281,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         if (c === null) return;
         const { start, len } = wordBounds(lineCells(c.row), c.col);
         selAnchor = { col: start, row: ydisp() + c.row };
+        selStart = { x: panX, y: panY }; // the extension slop is measured from here
+        extending = false;
         pan = 'selecting';
         applySelection({ col: start + len - 1, row: selAnchor.row }); // the whole word
         showCallout();
@@ -1274,8 +1311,16 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
         // the glass will not let it cross — past one cell of margin the auto-scroll takes over
         // and keeps extending the selection line by line until the finger lifts.
         ev.preventDefault();
-        hideCallout(); // the finger is extending now; the plate would ride the drag
         selPt = { x: t.clientX, y: t.clientY };
+        panX = t.clientX; // the plate comes back at the LIFT point (touchEnd), positioned from here
+        panY = t.clientY;
+        // The tremor gate: until the finger has actually LEFT the word, this is still the
+        // long-press — the selection and the plate both stay put.
+        if (!extending && Math.hypot(selPt.x - selStart.x, selPt.y - selStart.y) < EXTEND_SLOP_PX) {
+          return;
+        }
+        extending = true;
+        hideCallout(); // the finger is extending now; the plate would ride the drag
         const c = cellAt(selPt.x, selPt.y);
         if (c !== null) applySelection({ col: c.col, row: ydisp() + c.row });
         const screen = term.element?.querySelector('.xterm-screen');
@@ -1313,8 +1358,12 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       }
       if (pan === 'selecting') {
         // Lift keeps the selection: that is the whole point of the rework — a selection outlives
-        // the gesture that made it, and the key bar's Copy key is where it goes from there.
+        // the gesture that made it. And the plate comes back at the lift: a gesture that extended
+        // dragged it away on its first step, and an extended selection with no plate has no Copy —
+        // on the phone that read as "you can't copy" (user, 2026-09-12). A press that never
+        // extended re-shows the same plate at the same point, which is a no-op repaint.
         pan = 'idle';
+        showCallout();
         return;
       }
       // A one-finger tap on a live selection clears it (T13's tap-to-clear, kept; the mechanism
