@@ -13,6 +13,8 @@ class ExpoWebGuardModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("ExpoWebGuard")
 
-    AsyncFunction("setHold") { (_: Boolean) -> {} }
+    AsyncFunction("setHold") { hold: Boolean ->
+      // no-op: Android's focused EditText survives outside touches, so the flag is dropped
+    }
   }
 }
