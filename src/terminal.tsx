@@ -611,10 +611,27 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
 
     term.onData((data) => latest.current.onData(data));
     term.onBell(() => latest.current.onBell());
-    // Instrumentation (the callout's Copy fired on nothing, 2026-09-12): log EVERY change of xterm's
-    // own selection model, whatever caused it — our `select`/`clearSelection`, or xterm's internal
-    // clears (a user-input key, a rows-changed resize, a buffer swap). The line names the content
-    // so the log read shows which clear ate the selection.
+    // Instrumentation (the callout's Copy fired on nothing, 2026-09-12): the selection model died
+    // between the long-press landing and the Copy tap, and xterm clears it from several internal
+    // places (user input, rows-changed resize, buffer swap, a right-click/contextmenu path) without
+    // saying so. Patch clearSelection itself so every clear prints WHO called it, and watch the
+    // resizes that ride on the keyboard. The lines go away with the rest of the instrumentation.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- private service, see above
+    const selSvc = (term as any)._core._selectionService;
+    const origClear = selSvc.clearSelection.bind(selSvc);
+    selSvc.clearSelection = () => {
+      console.log(
+        '[terminal] clear BY',
+        (new Error().stack ?? '')
+          .split('\n')
+          .slice(2, 6)
+          .join(' | '),
+      );
+      origClear();
+    };
+    term.onResize((c) => console.log('[terminal] resize', `${c.cols}x${c.rows}`));
+    // Every model change, whatever the mechanism — a collapse via selectionStart/End writes
+    // bypasses clearSelection, so the model watch stays too.
     term.onSelectionChange(() => {
       console.log('[terminal] sel', JSON.stringify((term.getSelection() ?? '').slice(0, 40)));
     });
@@ -1149,7 +1166,6 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     el.appendChild(callout);
 
     const showCallout = () => {
-      console.log('[terminal] callout show', JSON.stringify({ sel: term.hasSelection() }));
       const t = latest.current.theme;
       callout.style.background = t.surface;
       callout.style.border = `1px solid ${t.border}`;
@@ -1173,23 +1189,17 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       e.stopPropagation();
       e.preventDefault();
       rowTint(true);
-      console.log('[terminal] callout touchstart');
     });
     calloutRow.addEventListener('touchend', (e) => {
       e.stopPropagation();
       e.preventDefault();
       rowTint(false);
-      console.log(
-        '[terminal] callout touchend',
-        JSON.stringify({ sel: term.hasSelection(), cb: typeof latest.current.onCopySelection }),
-      );
       if (term.hasSelection()) latest.current.onCopySelection();
       hideCallout();
     });
     calloutRow.addEventListener('touchcancel', (e) => {
       e.stopPropagation();
       rowTint(false);
-      console.log('[terminal] callout touchcancel');
     });
 
     const touchStart = (ev: TouchEvent) => {
