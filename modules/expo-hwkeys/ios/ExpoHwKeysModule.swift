@@ -1,11 +1,6 @@
 import ExpoModulesCore
 import UIKit
 
-/// Private UIKit: the per-key-down subevent of a `UIPhysicalKeyboardEvent`. Not in the public
-/// headers, so it is declared here for the signatures and the casts only — at runtime the ObjC
-/// runtime resolves the same class UIKit defines, so `as? UIKeyboardInput` succeeds.
-@objc class UIKeyboardInput: NSObject {}
-
 /**
  * The physical-keyboard seam.
  *
@@ -95,12 +90,17 @@ private final class KeyTap {
     return set
   }()
 
-  static func intercept(input: UIKeyboardInput, modifiers: UIKeyModifierFlags, keyDown: Bool) -> Bool {
+  /// A per-key-down subevent of the physical event. Typed as the public `UIEvent` on purpose:
+  /// the concrete class is private UIKit, and a Swift declaration of it would be a *sibling*
+  /// class in the ObjC runtime (different class object, same superclass), so an `as?` cast to a
+  /// stub would always fail. Name checks and KVC touch it without declaring it.
+  static func intercept(subevent: UIEvent, modifiers: UIKeyModifierFlags, keyDown: Bool) -> Bool {
     guard mode != "off" else { return false }
     guard keyDown else { return false }
-    // The fields are private too — KVC keeps this stub free of any ABI assumption about their
-    // types. A missing key reads as a number of zero, which is not in any intercept set.
-    let code = Int((input.value(forKey: "keyCode") as? NSNumber)?.intValue ?? 0)
+    guard NSStringFromClass(type(of: subevent)) == "UIKeyboardInput" else { return false }
+    // The fields are private too — KVC keeps this free of any ABI assumption about their types.
+    // A missing key reads as a number of zero, which is not in any intercept set.
+    let code = Int((subevent.value(forKey: "keyCode") as? NSNumber)?.intValue ?? 0)
     let ctrl = modifiers.contains(.control)
     let alt = modifiers.contains(.alternate)
     let meta = modifiers.contains(.command)
@@ -113,12 +113,12 @@ private final class KeyTap {
     return plain.contains(code) || fKeys.contains(code)
   }
 
-  static func emit(_ input: UIKeyboardInput, modifiers: UIKeyModifierFlags) {
+  static func emit(subevent: UIEvent, modifiers: UIKeyModifierFlags) {
     module?.sendEvent("onKey", [
       "platform": "ios",
-      "keyCode": Int((input.value(forKey: "keyCode") as? NSNumber)?.intValue ?? 0),
-      "character": input.value(forKey: "characters") as? String ?? "",
-      "baseCharacter": input.value(forKey: "charactersIgnoringModifiers") as? String ?? "",
+      "keyCode": Int((subevent.value(forKey: "keyCode") as? NSNumber)?.intValue ?? 0),
+      "character": subevent.value(forKey: "characters") as? String ?? "",
+      "baseCharacter": subevent.value(forKey: "charactersIgnoringModifiers") as? String ?? "",
       "shiftKey": modifiers.contains(.shift),
       "ctrlKey": modifiers.contains(.control),
       "altKey": modifiers.contains(.alternate),
@@ -133,15 +133,16 @@ private extension UIApplication {
   @objc func handleKeyUIEvent(_ event: UIEvent) {}
 
   @objc func hwKeysHandleKeyUIEvent(_ event: UIEvent) {
-    if let physical = event as? UIPhysicalKeyboardEvent {
-      let modifiers = physical.allKeys
+    // `UIPhysicalKeyboardEvent` is private UIKit; resolved by name, never declared.
+    let physicalClass = NSClassFromString("UIPhysicalKeyboardEvent")
+    if let physicalClass, event.isKind(of: physicalClass) {
       // Key up/down per event: the private flag React Native reads for exactly this. If it ever
       // disappears the answer is "pass everything through" (a no-op), never a doubled key.
-      let keyDown = (physical.value(forKey: "_isKeyDown") as? Bool) ?? false
-      for subevent in physical.subevents ?? [] {
-        guard let input = subevent as? UIKeyboardInput else { continue }
-        if KeyTap.intercept(input: input, modifiers: modifiers, keyDown: keyDown) {
-          KeyTap.emit(input, modifiers: modifiers)
+      let keyDown = (event.value(forKey: "_isKeyDown") as? Bool) ?? false
+      let modifiers = event.allKeys
+      for subevent in event.subevents ?? [] {
+        if KeyTap.intercept(subevent: subevent, modifiers: modifiers, keyDown: keyDown) {
+          KeyTap.emit(subevent: subevent, modifiers: modifiers)
           return // consumed: the field never sees it
         }
       }
