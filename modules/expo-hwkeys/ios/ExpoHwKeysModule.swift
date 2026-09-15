@@ -133,14 +133,15 @@ private extension UIApplication {
   @objc func handleKeyUIEvent(_ event: UIEvent) {}
 
   @objc func hwKeysHandleKeyUIEvent(_ event: UIEvent) {
-    // `UIPhysicalKeyboardEvent` is private UIKit; resolved by name, never declared.
-    let physicalClass = NSClassFromString("UIPhysicalKeyboardEvent")
-    if let physicalClass, event.isKind(of: physicalClass) {
+    // `UIKeyboardEvent` is the public base of the private `UIPhysicalKeyboardEvent`, so the cast
+    // is a normal one — no name lookup. Touch events are not keyboard events, so this is the
+    // only kind that reaches the loop.
+    if let keyboard = event as? UIKeyboardEvent {
       // Key up/down per event: the private flag React Native reads for exactly this. If it ever
       // disappears the answer is "pass everything through" (a no-op), never a doubled key.
-      let keyDown = (event.value(forKey: "_isKeyDown") as? Bool) ?? false
-      let modifiers = event.allKeys
-      for subevent in event.subevents ?? [] {
+      let keyDown = (keyboard.value(forKey: "_isKeyDown") as? Bool) ?? false
+      let modifiers = keyboard.allKeys
+      for subevent in keyboard.subevents ?? [] {
         if KeyTap.intercept(subevent: subevent, modifiers: modifiers, keyDown: keyDown) {
           KeyTap.emit(subevent: subevent, modifiers: modifiers)
           return // consumed: the field never sees it
