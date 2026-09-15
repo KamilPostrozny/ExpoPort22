@@ -39,6 +39,7 @@ import {
 import { pushYank } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
 import { useTerminalKeyboard } from '@/hooks/use-terminal-keyboard';
+import { useHwKeys, type HwKeysMode } from '@/hooks/use-hwkeys';
 import KeyBar, {
   ArrowsPopover,
   BAR_PAD_TOP,
@@ -116,6 +117,7 @@ import {
   scrollBottom,
   searchWindow,
   selectWindow,
+  selectWindowByNumber,
   useTmux,
 } from '@/tmux';
 import { proseFor } from '@/prose-model';
@@ -360,6 +362,9 @@ export default function SessionScreen() {
    */
   type SwPhase = 'closed' | 'opening' | 'open' | 'closing' | 'birth';
   const [sw, setSw] = useState<SwPhase>('closed');
+  /** The bar's field is who holds focus — the bar reports it (`onFieldFocus`). The hardware
+   *  keys' mode keys on it: they are intercepted only while the terminal is the one listening. */
+  const [fieldFocused, setFieldFocused] = useState(false);
   /** The phase read from a handler that runs after the render it was written in (same reason as
    *  `searchRef`) — the settings doors both need to know which screen is in front. */
   const swRef = useRef(sw);
@@ -990,6 +995,37 @@ export default function SessionScreen() {
   };
   /** Is a `closeTo` waiting out its two frames? Cleared by the flight itself and by a grab. */
   const closeArmed = useRef(false);
+
+  /**
+   * The physical keyboard (`modules/expo-hwkeys` + `src/hwkeys-model.ts`): the 1×1 field only
+   * consumes plain printables, Return, Backspace and Space — a hardware Esc, Tab, arrows, F-keys
+   * and chords either wander focus or are dropped, so the module intercepts those and hands them
+   * here. The mode is the app's own answer to "who is listening": the field's focus, and the
+   * switcher — open, it keeps only Escape (it closes) while the search field keeps the rest.
+   * Without tabs (`showTabs`) the window keys fall through to plain Alt bytes, tmux decides.
+   */
+  const hwKeysMode: HwKeysMode =
+    !fieldFocused && sw === 'closed' ? 'off' : sw !== 'closed' ? 'switcher' : 'terminal';
+  useHwKeys(
+    hwKeysMode,
+    { decckm: modes.decckm, tmux: showTabs },
+    {
+      onBytes: (bytes) => keybar.current?.emitDirect(bytes),
+      onWindowSelect: (number) => {
+        selectWindowByNumber(number).catch((error) =>
+          console.log('[hwkeys] select-window', number, 'failed:', error),
+        );
+      },
+      onWindowNew: () => {
+        newWindow().catch((error) => console.log('[hwkeys] new-window failed:', error));
+      },
+      onSwitcher: openSwitcher,
+      onPaste: () => keybar.current?.paste(),
+      onEscape: () => {
+        if (swRef.current === 'open' || swRef.current === 'opening') closeTo(activePos());
+      },
+    },
+  );
 
   /**
    * Leaving the grid for the active window — Done, and Android's back press. Unlike a card tap,
@@ -2460,6 +2496,7 @@ export default function SessionScreen() {
             // field is a move to a sibling the bar must not fight back — and while a sheet or the
             // switcher owns the screen (their doors put the keys away through `keybar.dismiss`).
             holdKeys={!search.on && !settingsOpen && sw === 'closed'}
+            onFieldFocus={setFieldFocused}
             ref={keybar}
             // The pan's per-frame writes happen on the UI thread against these (perf: the JS thread
             // stalls 40-300ms under load and a runOnJS pan hitched with it). A STABLE object: the

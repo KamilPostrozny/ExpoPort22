@@ -166,6 +166,10 @@ export type KeyBarProps = {
    *  back, so the screen keeps this false then; at rest the search is the only other
    *  focus-taker in the window. */
   holdKeys?: boolean;
+  /** The field's answer to "who holds focus" — the screen's hardware-key mode keys on it
+   *  (`src/hooks/use-hwkeys.ts`): the keys are intercepted only while this field is the one the
+   *  keyboard would feed. */
+  onFieldFocus?: (focused: boolean) => void;
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
    *  the worklet. The screen owns the model: rubber band, thresholds, commit
@@ -359,6 +363,12 @@ const PAD = ' '.repeat(512);
  *  arrives expected (see `expectingBlur`) and the field does not re-aim it back up. */
 export type KeyBarHandle = {
   dismiss: () => void;
+  /** PTY bytes in through the bar's tracked seam — the hardware keys' door (`src/hooks/use-hwkeys.ts`)
+   *  — so line-length and the dictation filter see them exactly as the bar's own keys. */
+  emitDirect: (bytes: string) => void;
+  /** Paste by the bar's own rules — its clipboard slots first, the phone pasteboard, the file
+   *  upload as the last door (the ⋯ key's `onPaste`). */
+  paste: () => void;
 };
 
 function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
@@ -668,7 +678,20 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
   // The screen's doors (settings, the switcher) put the keys away through here rather than
   // `Keyboard.dismiss()` directly: the blur they cause must arrive expected, or the field would
   // re-aim itself and raise the keyboard over the sheet that just opened.
-  useImperativeHandle(ref, () => ({ dismiss: dismissKeys }), [dismissKeys]);
+  // The hardware keys (`src/hooks/use-hwkeys.ts`) arrive out of React's sight, so the handle
+  // routes them through the bar's own seams: `track`, so the bytes take the same tracked seam as
+  // a typed key, and `onPaste`, so the paste takes the same clipboard rules as the ⋯ key's tap.
+  useImperativeHandle(
+    ref,
+    () => ({
+      dismiss: dismissKeys,
+      emitDirect: (bytes: string) => track(bytes),
+      paste: () => {
+        void onPaste();
+      },
+    }),
+    [dismissKeys, track, onPaste],
+  );
   // The raise lands on the field matching the CURRENT prose mode, so the keyboard presents with
   // the right brain from the first frame — the same focus the text-mode flip moves to below.
   const raiseKeys = useCallback(() => {
@@ -745,6 +768,13 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
    *  blurs, so it needs no re-aim: same answer, the platforms' own arithmetic. The re-aim is OWED
    *  by this blur and SPENT by the hide that the resign starts (see `maybeRearm`), with a timeout
    *  behind it for the hide that never fires. */
+  /** Every focus change of the bar's fields, the one place it is written: the field state for
+   *  the bar's own re-aim, and the screen's hardware-key mode behind it. */
+  const reportFocus = (to: 'on' | 'off' | null) => {
+    focusedIn.current = to;
+    cbRef.current.onFieldFocus?.(to !== null);
+  };
+
   const blurField = (field: { current: TextInput | null }) => () => {
     console.log('[keys] blur', field === inputOff ? 'off' : 'on', {
       owed: expectingBlur.current,
@@ -752,7 +782,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
       hold: props.holdKeys,
       os: Platform.OS,
     });
-    focusedIn.current = null;
+    reportFocus(null);
     repad();
     syncHold();
     if (expectingBlur.current > 0) {
@@ -1045,7 +1075,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
         value={padWrite}
         submitBehavior="submit" // Return sends without blurring
         onFocus={() => {
-          focusedIn.current = 'off';
+          reportFocus('off');
           syncHold();
           console.log('[keys] focus off');
         }}
@@ -1076,7 +1106,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
         value={padWrite}
         submitBehavior="submit" // Return sends without blurring
         onFocus={() => {
-          focusedIn.current = 'on';
+          reportFocus('on');
           syncHold();
           console.log('[keys] focus on');
         }}

@@ -50,6 +50,7 @@ import {
   readFileCommand,
   scrollBottomCommand,
   selectWindowCommand,
+  sessionScope,
   type ConfigStatus,
   type TmuxWindow,
 } from '@/tmux-model';
@@ -462,6 +463,14 @@ const NUDGE_AFTER_SLIDE_MS = 400;
 
 export async function selectWindow(windowId: string): Promise<void> {
   await run1(selectWindowCommand(windowId));
+  setTimeout(() => void poll(), NUDGE_AFTER_SLIDE_MS);
+}
+
+/** Select by the window's NUMBER rather than its id — the hardware keys' door (Alt+1..9/0 from
+ *  `src/hwkeys-model.ts`): the number is tmux's own `window_index`, the one the badge shows, so
+ *  `=N` reaches the window the user means no matter how `moveWindow` has shuffled the grid. */
+export async function selectWindowByNumber(number: number): Promise<void> {
+  await run1(`tmux select-window -t ${sessionScope(scope(), `=${number}`)}`);
   setTimeout(() => void poll(), NUDGE_AFTER_SLIDE_MS);
 }
 
