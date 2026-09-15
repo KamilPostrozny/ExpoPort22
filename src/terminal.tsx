@@ -633,7 +633,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // Every model change, whatever the mechanism — a collapse via selectionStart/End writes
     // bypasses clearSelection, so the model watch stays too.
     term.onSelectionChange(() => {
-      console.log('[terminal] sel', JSON.stringify((term.getSelection() ?? '').slice(0, 40)));
+      const s = term.getSelection() ?? '';
+      console.log('[terminal] sel', s.length, JSON.stringify(s.slice(0, 40)));
     });
     // Mouse reports xterm encodes for the wheels synthesized below. SGR (what tmux, htop and
     // anything from this decade negotiates) is ASCII and arrives via `onData`; only the legacy
@@ -1092,10 +1093,26 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     const autoStep = () => {
       const h = cellHeight();
       if (h <= 0 || autoDir === null) return;
+      // The extend must read the viewport AFTER the line it spent has landed. xterm's scrollLines
+      // moves the model's viewportY synchronously but the visible scroll is an animated step on the
+      // render layer, and a 50ms interval is the same clock as that animation — reading ydisp() in
+      // the same tick as the spend samples the viewport one line behind, and the extend chases the
+      // previous line: the highlight TRACKS the scroll instead of extending it (user, 2026-09-12).
+      // A frame is the shortest delay at which the scroll has landed; the model and the render are
+      // in agreement again by then.
+      console.log(
+        '[terminal] auto',
+        autoDir,
+        scrollRoute(currentModes()),
+        `ydisp=${ydisp()}`,
+      );
       spend(autoDir === 'up' ? h : -h, selPt.x, selPt.y);
-      const c = cellAt(selPt.x, selPt.y);
-      const row = ydisp() + (autoDir === 'up' ? 0 : term.rows - 1);
-      applySelection({ col: c === null ? 0 : c.col, row });
+      requestAnimationFrame(() => {
+        if (auto === null) return;
+        const c = cellAt(selPt.x, selPt.y);
+        const row = ydisp() + (autoDir === 'up' ? 0 : term.rows - 1);
+        applySelection({ col: c === null ? 0 : c.col, row });
+      });
     };
 
     const setAuto = (dir: 'up' | 'down' | null) => {
