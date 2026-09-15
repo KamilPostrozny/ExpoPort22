@@ -60,6 +60,7 @@ bun run typecheck
 into ignored `dist/`. It validates JavaScript/assets, not native compilation, signing or installation.
 For APK/IPA builds use [docs/ship.md](docs/ship.md); `bun run android` / `bun run ios` only start
 Expo. Use custom native dev clients, never Expo Go. `typecheck` runs `tsc --noEmit` in strict mode.
+`src/expo-types.d.ts` loads Expo's CSS/global types even before the CLI generates `expo-env.d.ts`.
 
 ## Test
 
