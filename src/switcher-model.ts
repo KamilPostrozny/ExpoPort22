@@ -271,11 +271,7 @@ export type ZoomFrame = {
  * coordinates. RN scales about the view centre, so the translation compensates to keep the
  * interpolation anchored at the top-left like the prototype's `transform-origin: 0 0`.
  */
-export function zoomFrame(
-  t: number,
-  slot: Frame,
-  stage: { w: number; h: number },
-): ZoomFrame {
+export function zoomFrame(t: number, slot: Frame, stage: { w: number; h: number }): ZoomFrame {
   'worklet';
   const S = slot.w / stage.w;
   const scale = 1 + (S - 1) * t;

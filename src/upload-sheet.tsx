@@ -195,7 +195,8 @@ export default function UploadSheet(props: UploadSheetProps) {
   }, [dir]);
 
   const filename = sanitizeFilename(name);
-  const collision = entries?.some((entry) => !entry.isDirectory && entry.name === filename) ?? false;
+  const collision =
+    entries?.some((entry) => !entry.isDirectory && entry.name === filename) ?? false;
 
   const row = (entry: RemoteEntry) => (
     <Pressable
@@ -206,7 +207,8 @@ export default function UploadSheet(props: UploadSheetProps) {
         styles.row,
         { borderBottomColor: theme.border },
         pressed && { backgroundColor: theme.surface },
-      ]}>
+      ]}
+    >
       <Text style={[styles.rowIcon, { color: entry.isDirectory ? theme.accent : theme.muted }]}>
         {entry.isDirectory ? '\uf07b' : '\uf15b' /* Nerd Font folder / file */}
       </Text>
@@ -216,7 +218,8 @@ export default function UploadSheet(props: UploadSheetProps) {
           styles.rowName,
           { color: entry.isDirectory ? theme.foreground : theme.muted },
           !entry.isDirectory && entry.name === filename && { color: theme.warning },
-        ]}>
+        ]}
+      >
         {entry.name}
       </Text>
       {!entry.isDirectory && (
@@ -253,23 +256,24 @@ export default function UploadSheet(props: UploadSheetProps) {
       animationType="none"
       statusBarTranslucent
       onRequestClose={systemBack}
-      visible>
+      visible
+    >
       {/* The dim over the terminal, opacity tied to the slide so it fades rather than blinking on.
           Tapping it dismisses — one target for the whole strip above the sheet. */}
       <Animated.View
-        style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}>
+        style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}
+      >
         <Pressable style={styles.fill} onPress={close} />
       </Animated.View>
       {/* The sheet stops short of the top by taking the safe-area inset plus the app's own gutter,
           which is a number we choose rather than one we were guessing at off a system sheet.
           The SAVE AS field sits at the bottom, so a raised keyboard covers both it and the Save
           button unless the content is lifted (found on device, T13/T8.9). */}
-      <Animated.View style={[styles.fill, { paddingTop: insets.top + SPACE.sm }]} pointerEvents="box-none">
-        <View
-          style={[
-            styles.sheet,
-            { backgroundColor: theme.panel, paddingBottom: keyboardPad },
-          ]}>
+      <Animated.View
+        style={[styles.fill, { paddingTop: insets.top + SPACE.sm }]}
+        pointerEvents="box-none"
+      >
+        <View style={[styles.sheet, { backgroundColor: theme.panel, paddingBottom: keyboardPad }]}>
           <View style={styles.grabberRow}>
             <View style={[styles.grabber, { backgroundColor: theme.border }]} />
           </View>
@@ -293,9 +297,14 @@ export default function UploadSheet(props: UploadSheetProps) {
                     styles.crumb,
                     {
                       color:
-                        i === 0 ? theme.accent : i === all.length - 1 ? theme.foreground : theme.muted,
+                        i === 0
+                          ? theme.accent
+                          : i === all.length - 1
+                            ? theme.foreground
+                            : theme.muted,
                     },
-                  ]}>
+                  ]}
+                >
                   {i > 1 && <Text style={{ color: theme.placeholder }}>{'› '}</Text>}
                   {segment}
                 </Text>
@@ -318,7 +327,8 @@ export default function UploadSheet(props: UploadSheetProps) {
                         styles.row,
                         { borderBottomColor: theme.border },
                         pressed && { backgroundColor: theme.surface },
-                      ]}>
+                      ]}
+                    >
                       <Text style={[styles.rowIcon, { color: theme.accent }]}>{'\uf07b'}</Text>
                       <Text style={[styles.rowName, { color: theme.foreground }]}>..</Text>
                     </Pressable>
@@ -340,7 +350,8 @@ export default function UploadSheet(props: UploadSheetProps) {
               // The `keyboardPad === 0` guard stays and is not about platform: with the keyboard
               // up, `insets.bottom` is already inside the keyboard's height and would double-count.
               keyboardPad === 0 && { paddingBottom: insets.bottom + 12 },
-            ]}>
+            ]}
+          >
             <Text style={[styles.saveAs, { color: theme.muted }]}>
               SAVE AS{collision ? ' — replaces the existing file' : ''}
             </Text>
@@ -366,7 +377,8 @@ export default function UploadSheet(props: UploadSheetProps) {
                 styles.save,
                 { backgroundColor: theme.accent },
                 (pressed || dir === null) && PRESSED,
-              ]}>
+              ]}
+            >
               <Text style={[styles.saveLabel, { color: theme.onAccent }]}>Save here</Text>
               {dir !== null && (
                 <Text style={[styles.savePath, { color: theme.onAccent }]} numberOfLines={1}>
@@ -438,7 +450,12 @@ const styles = StyleSheet.create({
     paddingBottom: 26,
     gap: 10,
   },
-  saveAs: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: 10, letterSpacing: 0.6 },
+  saveAs: {
+    fontFamily: SANS_SEMIBOLD,
+    includeFontPadding: false,
+    fontSize: 10,
+    letterSpacing: 0.6,
+  },
   nameField: {
     height: 42,
     borderRadius: RADIUS.control,
@@ -461,5 +478,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   saveLabel: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: TEXT.button },
-  savePath: { fontFamily: MONO, includeFontPadding: false, fontSize: 12, opacity: 0.65, flexShrink: 1 },
+  savePath: {
+    fontFamily: MONO,
+    includeFontPadding: false,
+    fontSize: 12,
+    opacity: 0.65,
+    flexShrink: 1,
+  },
 });

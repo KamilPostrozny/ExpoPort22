@@ -169,7 +169,7 @@ export const LONGPRESS_MS = 500;
  *  `wordSeparator` option, read off the bundled build (`node_modules/@xterm/xterm`, 2026-09-12),
  *  not remembered: space, parens, brackets, braces, quotes, backslash. Everything else — `-`,
  *  `.`, `_`, `/`, `:` — is word, which is what makes `foo/bar-baz.txt` select as one word. */
-export const WORD_SEP = " ()[]{}'\"";
+export const WORD_SEP = ' ()[]{}\'"';
 
 function isWordChar(c: string): boolean {
   return c !== ' ' && c !== '' && !WORD_SEP.includes(c);

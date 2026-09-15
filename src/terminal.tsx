@@ -93,12 +93,7 @@ export type TerminalProps = {
    *  of it, so 48 cells occupy 374 of 395pt on device. A snapshot that spreads the same columns
    *  across the whole box therefore draws ~6% large — a step in size at the zoom's crossfade, which
    *  two photographs of the same card caught (2026-08-10). */
-  onResize: (
-    cols: number,
-    rows: number,
-    cellW: number,
-    cellH: number,
-  ) => Promise<void>;
+  onResize: (cols: number, rows: number, cellW: number, cellH: number) => Promise<void>;
   /** Hold the size where it is: no fit, no report, until it goes false again (then one of each).
    *  §4.5's zoom animates the stage's *height*, and the keyboard leaves on the way in — so an
    *  unheld transition walks the PTY through half a dozen row counts (26 → 41 → 29 → 26 on
@@ -169,9 +164,22 @@ const DEFER_HARD_MS = 300;
 const DEFER_QUIET_MS = 60;
 
 const ANSI_SLOTS = [
-  'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
-  'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
-  'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
+  'black',
+  'red',
+  'green',
+  'yellow',
+  'blue',
+  'magenta',
+  'cyan',
+  'white',
+  'brightBlack',
+  'brightRed',
+  'brightGreen',
+  'brightYellow',
+  'brightBlue',
+  'brightMagenta',
+  'brightCyan',
+  'brightWhite',
 ] as const;
 
 function xtermTheme(theme: Theme): ITheme {
@@ -319,7 +327,13 @@ function monoArrived(fontSize: number): boolean {
  * advance is still MATCHED — `advance()` measures whatever the pane ends up on — so what is left
  * is where inside a pixel each glyph sits, and neither engine offers a say in that.
  */
-export default function TerminalView({ theme, fontSize, holdSize, ref, ...handlers }: TerminalProps) {
+export default function TerminalView({
+  theme,
+  fontSize,
+  holdSize,
+  ref,
+  ...handlers
+}: TerminalProps) {
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -622,10 +636,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     selSvc.clearSelection = () => {
       console.log(
         '[terminal] clear BY',
-        (new Error().stack ?? '')
-          .split('\n')
-          .slice(2, 6)
-          .join(' | '),
+        (new Error().stack ?? '').split('\n').slice(2, 6).join(' | '),
       );
       origClear();
     };
@@ -754,8 +765,10 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // data lands in this document — or by the hard cap when no repaint comes at all. Growing
     // (keyboard down) stays on the ordinary path: the trim appends at the bottom and the host
     // only fills the new rows, so there is one move either way and nothing to defer.
-    let pendingFit: { hard: ReturnType<typeof setTimeout>; quiet: ReturnType<typeof setTimeout> | null } | null =
-      null;
+    let pendingFit: {
+      hard: ReturnType<typeof setTimeout>;
+      quiet: ReturnType<typeof setTimeout> | null;
+    } | null = null;
     const dropPendingFit = () => {
       if (pendingFit === null) return;
       clearTimeout(pendingFit.hard);
@@ -1006,7 +1019,7 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       const line = term.buffer.active.getLine(ydisp() + row);
       if (line === undefined) return '';
       let s = '';
-      for (let i = 0; i < term.cols; ) {
+      for (let i = 0; i < term.cols;) {
         const one = line.translateToString(false, i, i + 1);
         if (one !== ' ' && line.translateToString(false, i, i + 2) === one) {
           s += one + '\u0000';
@@ -1071,7 +1084,11 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     // change (rotation) DID rewrap: the coordinates are void, and a buffer swap is a different
     // screen outright — both null the span and let the selection die.
     term.onResize((c) => {
-      if (selSpan !== null && selSpan.cols === c.cols && term.buffer.active === term.buffer.normal) {
+      if (
+        selSpan !== null &&
+        selSpan.cols === c.cols &&
+        term.buffer.active === term.buffer.normal
+      ) {
         term.select(selSpan.col, selSpan.row, selSpan.len);
       } else {
         selSpan = null; // rotated (rewrapped) or on a different buffer: the span is void
@@ -1458,7 +1475,10 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
   return (
     <>
       <style>{CSS}</style>
-      <div ref={host} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: -GUTTER }} />
+      <div
+        ref={host}
+        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: -GUTTER }}
+      />
     </>
   );
 }

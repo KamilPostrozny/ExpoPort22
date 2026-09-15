@@ -37,16 +37,7 @@ import Animated, {
 
 import { highlightLine, parseAnsi, spanColor, type SpanLine } from '@/ansi-spans';
 import { SEARCH_DEBOUNCE_MS, normalizeQuery, type SearchAnswer } from '@/search-model';
-import {
-  BAR,
-  CARD_RADIUS,
-  CENTER,
-  PRESSED_KEY,
-  RADIUS,
-  SEARCH_RADIUS,
-  SPACE,
-  TEXT,
-} from '@/style';
+import { BAR, CARD_RADIUS, CENTER, PRESSED_KEY, RADIUS, SEARCH_RADIUS, SPACE, TEXT } from '@/style';
 import {
   CARD_RING,
   CARD_RING_IDLE,
@@ -81,7 +72,6 @@ export type Card = { win: TmuxWindow; snap: Snap | null };
 /** More than a card can show at any legal font size — parse output is truncated here so a
  *  50k-line scrollback capture never becomes 50k <Text> nodes. */
 const MAX_LINES = 44;
-
 
 /**
  * The switcher's data: the window list (kept warm while `enabled`, so the first zoom-out knows
@@ -366,7 +356,15 @@ export function useScrollbackSearch(query: string, cards: Card[], active: boolea
       ).then((hits) => {
         if (seq.current !== mine) return;
         if (failure !== null) {
-          console.log('[search]', lost.length, 'of', wins.length, 'greps failed:', lost.join(' '), failure);
+          console.log(
+            '[search]',
+            lost.length,
+            'of',
+            wins.length,
+            'greps failed:',
+            lost.join(' '),
+            failure,
+          );
         }
         console.log(
           '[search] grep settled:',
@@ -531,7 +529,9 @@ function SwitcherInner(props: SwitcherProps) {
       {filtered && display.length === 0 && (
         <View style={styles.noHits} pointerEvents="none">
           <Text style={[styles.noHitsLead, { color: theme.muted }]}>No window contains</Text>
-          <Text style={[styles.noHitsQuery, { color: theme.foreground }]}>“{props.query.trim()}”</Text>
+          <Text style={[styles.noHitsQuery, { color: theme.foreground }]}>
+            “{props.query.trim()}”
+          </Text>
         </View>
       )}
       <ScrollView
@@ -542,7 +542,8 @@ function SwitcherInner(props: SwitcherProps) {
         scrollEventThrottle={16}
         contentContainerStyle={{
           height: headerH + gridHeight(display.length, stageW) + barH + props.insetBottom,
-        }}>
+        }}
+      >
         {/* The slots' origin. Everything inside is placed by `slotFrame` exactly as before; the
             header inset lives here instead of in the scroll view's top edge. */}
         <View style={{ position: 'absolute', top: headerH, left: 0, right: 0, bottom: 0 }}>
@@ -617,8 +618,11 @@ function SwitcherInner(props: SwitcherProps) {
           // the state the system back button recovered from, so this reaches the same door.
           onPress={tappable ? props.onDone : undefined}
           accessibilityRole="button"
-          accessibilityLabel="Could not reach the host — back to the terminal">
-          <Text style={[styles.noHitsLead, { color: theme.warning }]}>Could not reach the host</Text>
+          accessibilityLabel="Could not reach the host — back to the terminal"
+        >
+          <Text style={[styles.noHitsLead, { color: theme.warning }]}>
+            Could not reach the host
+          </Text>
           <Text style={[styles.noHitsSub, { color: theme.muted }]}>
             The window list did not come back. Trying again — tap to go back.
           </Text>
@@ -628,18 +632,29 @@ function SwitcherInner(props: SwitcherProps) {
       {/* The bottom bar: + circle | "N Tabs" | Done ✓. */}
       <View
         style={[styles.bar, { marginBottom: props.insetBottom }]}
-        onLayout={(e) => setBarH(e.nativeEvent.layout.height)}>
+        onLayout={(e) => setBarH(e.nativeEvent.layout.height)}
+      >
         <Pressable
           onPress={interactive ? props.onNew : undefined}
           style={({ pressed }) => [
             styles.circle,
             { backgroundColor: theme.surface },
             pressed && PRESSED_KEY,
-          ]}>
+          ]}
+        >
           {/* The bundled Nerd Font draws both bar glyphs, so the two circles hold the same mark
               from the same face on both platforms. 18/16pt is the size the icon set this replaced
               drew at, minus 2 — the conversion the tabs circle already established. */}
-          <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 18, color: theme.foreground }}>{''}</Text>
+          <Text
+            style={{
+              fontFamily: MONO,
+              includeFontPadding: false,
+              fontSize: 18,
+              color: theme.foreground,
+            }}
+          >
+            {''}
+          </Text>
         </Pressable>
         <Text style={[styles.count, { color: theme.foreground }]}>
           {filtered
@@ -652,8 +667,18 @@ function SwitcherInner(props: SwitcherProps) {
             styles.circle,
             { backgroundColor: theme.accent },
             pressed && PRESSED_KEY,
-          ]}>
-          <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 16, color: theme.onAccent }}>{''}</Text>
+          ]}
+        >
+          <Text
+            style={{
+              fontFamily: MONO,
+              includeFontPadding: false,
+              fontSize: 16,
+              color: theme.onAccent,
+            }}
+          >
+            {''}
+          </Text>
         </Pressable>
       </View>
       {/* T14: the search field. Same string as the terminal view's bar; the ✕ disarms both.
@@ -666,15 +691,21 @@ function SwitcherInner(props: SwitcherProps) {
             degrees: clear halfway down the field, solid at the very top of the screen (user,
             2026-08-12). Its weakest edge is therefore behind the field, which is opaque. */}
         {props.zoomActive && (
-          <ScrollUnderRamp
-            height={props.insetTop + SEARCH_FIELD_H / 2}
-            ground={theme.background}
-          />
+          <ScrollUnderRamp height={props.insetTop + SEARCH_FIELD_H / 2} ground={theme.background} />
         )}
         <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
           {/*  is the Nerd Font magnifier, already bundled — the icon itself, on both platforms.
               13pt is the 14pt symbol it replaces minus 2, the conversion the bar circles use too. */}
-          <Text style={{ color: theme.muted, fontSize: 13, fontFamily: MONO, includeFontPadding: false  }}>{''}</Text>
+          <Text
+            style={{
+              color: theme.muted,
+              fontSize: 13,
+              fontFamily: MONO,
+              includeFontPadding: false,
+            }}
+          >
+            {''}
+          </Text>
           <TextInput
             value={props.query}
             onChangeText={props.onQuery}
@@ -689,7 +720,8 @@ function SwitcherInner(props: SwitcherProps) {
             <Pressable
               onPress={props.onClearSearch}
               hitSlop={10}
-              style={[styles.searchClear, { backgroundColor: theme.muted }]}>
+              style={[styles.searchClear, { backgroundColor: theme.muted }]}
+            >
               <Text style={[styles.searchClearGlyph, { color: theme.scrim }]}>✕</Text>
             </Pressable>
           )}
@@ -734,7 +766,13 @@ function ScrollUnderRamp({ height, ground }: { height: number; ground: string })
 }
 
 function frameStyle(f: Frame) {
-  return { left: 0, top: 0, width: f.w, height: f.h, transform: [{ translateX: f.x }, { translateY: f.y }] };
+  return {
+    left: 0,
+    top: 0,
+    width: f.w,
+    height: f.h,
+    transform: [{ translateX: f.x }, { translateY: f.y }],
+  };
 }
 
 /* --- one card --- */
@@ -1057,62 +1095,64 @@ function WindowCard({
         style={[
           { position: 'absolute', left: 0, top: 0, width: slot.w, zIndex: dragged ? 10 : 1 },
           posStyle,
-        ]}>
-      <Animated.View style={style}>
-        <Animated.View style={[shadowStyle, { borderRadius: CARD_RADIUS * u }]}>
-          <View
-            style={[
-              styles.shot,
-              {
-                height: slot.h,
-                borderRadius: CARD_RADIUS * u,
-                backgroundColor: theme.background,
-                paddingLeft: shotPad + centerShift,
-                paddingRight: shotPad - centerShift,
-                paddingBottom: shotPad,
-              },
-            ]}>
-            <Snapshot lines={shownLines} theme={theme} {...type} />
-            {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
-            {closable && (
-              <View style={[styles.close, { backgroundColor: theme.foreground }]}>
-                <Text style={[styles.closeGlyph, { color: theme.background }]}>✕</Text>
-              </View>
-            )}
-            {/* The ring, drawn over the card exactly as the flying surface draws its own — an
+        ]}
+      >
+        <Animated.View style={style}>
+          <Animated.View style={[shadowStyle, { borderRadius: CARD_RADIUS * u }]}>
+            <View
+              style={[
+                styles.shot,
+                {
+                  height: slot.h,
+                  borderRadius: CARD_RADIUS * u,
+                  backgroundColor: theme.background,
+                  paddingLeft: shotPad + centerShift,
+                  paddingRight: shotPad - centerShift,
+                  paddingBottom: shotPad,
+                },
+              ]}
+            >
+              <Snapshot lines={shownLines} theme={theme} {...type} />
+              {/* visual only — the card's tap gesture owns the hit (see `tap` above) */}
+              {closable && (
+                <View style={[styles.close, { backgroundColor: theme.foreground }]}>
+                  <Text style={[styles.closeGlyph, { color: theme.background }]}>✕</Text>
+                </View>
+              )}
+              {/* The ring, drawn over the card exactly as the flying surface draws its own — an
                 absoluteFill, so it costs the content no layout and the two agree by construction
                 rather than by three subtractions that have to stay in step. Last child: on top,
                 like the flight's. */}
-            <View
-              pointerEvents="none"
-              style={[StyleSheet.absoluteFill, ring, { borderRadius: CARD_RADIUS * u }]}
-            />
-          </View>
-        </Animated.View>
-        <HlText
-          text={card.win.name}
-          query={query}
-          theme={theme}
-          style={[styles.name, { color: card.win.active ? theme.accent : theme.foreground }]}
-        />
-        {/* T14: a window whose grep never came back keeps its card and wears the reason in place
+              <View
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, ring, { borderRadius: CARD_RADIUS * u }]}
+              />
+            </View>
+          </Animated.View>
+          <HlText
+            text={card.win.name}
+            query={query}
+            theme={theme}
+            style={[styles.name, { color: card.win.active ? theme.accent : theme.foreground }]}
+          />
+          {/* T14: a window whose grep never came back keeps its card and wears the reason in place
             of its directory — the one line the card has to spare. Dropping it instead would read
             as "nothing here", which is the one thing we do not know (disabled over hidden: say it
             rather than hide it). `warning`, not `danger`: the next settled keystroke asks again
             and usually gets an answer. */}
-        {hit === 'failed' ? (
-          <Text style={[styles.sub, { color: theme.warning }]} numberOfLines={1}>
-            not searched
-          </Text>
-        ) : (
-          <HlText
-            text={directory}
-            query={query}
-            theme={theme}
-            style={[styles.sub, { color: theme.muted }]}
-          />
-        )}
-      </Animated.View>
+          {hit === 'failed' ? (
+            <Text style={[styles.sub, { color: theme.warning }]} numberOfLines={1}>
+              not searched
+            </Text>
+          ) : (
+            <HlText
+              text={directory}
+              query={query}
+              theme={theme}
+              style={[styles.sub, { color: theme.muted }]}
+            />
+          )}
+        </Animated.View>
       </Animated.View>
     </GestureDetector>
   );
@@ -1156,7 +1196,15 @@ export const Snapshot = memo(function Snapshot({
           // the device pixel, so every row lands within a third of a point of where the pane has
           // it, with nothing accumulating. It also holds a blank line — an empty span list, and so
           // an empty <Text> — open at its proper height.
-          style={{ fontFamily: MONO, includeFontPadding: false, fontSize, lineHeight, height: lineHeight, color: theme.foreground }}>
+          style={{
+            fontFamily: MONO,
+            includeFontPadding: false,
+            fontSize,
+            lineHeight,
+            height: lineHeight,
+            color: theme.foreground,
+          }}
+        >
           {line.map((span, j) => (
             <Text key={j} style={spanStyle(span, theme)}>
               {span.text}
@@ -1229,7 +1277,8 @@ function HlText({
               backgroundColor: theme.warning,
               color: theme.isDark ? theme.scrim : theme.foreground,
             }
-          }>
+          }
+        >
           {p.t}
         </Text>
       ))}
@@ -1265,7 +1314,13 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
   },
-  searchInput: { flex: 1, fontFamily: SANS, includeFontPadding: false, fontSize: 14, paddingVertical: 0 },
+  searchInput: {
+    flex: 1,
+    fontFamily: SANS,
+    includeFontPadding: false,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
   searchClear: {
     width: 19,
     height: 19,
@@ -1339,6 +1394,18 @@ const styles = StyleSheet.create({
   // §3's 49pt bar circle; its 25 was exactly half of that, which is `RADIUS.pill` said properly.
   circle: { width: BAR.circle, height: BAR.circle, borderRadius: RADIUS.pill, ...CENTER },
   count: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.mono },
-  name: { textAlign: 'center', fontFamily: MONO, includeFontPadding: false, fontSize: 12, marginTop: 7 },
-  sub: { textAlign: 'center', fontFamily: MONO, includeFontPadding: false, fontSize: 10, marginTop: 2 },
+  name: {
+    textAlign: 'center',
+    fontFamily: MONO,
+    includeFontPadding: false,
+    fontSize: 12,
+    marginTop: 7,
+  },
+  sub: {
+    textAlign: 'center',
+    fontFamily: MONO,
+    includeFontPadding: false,
+    fontSize: 10,
+    marginTop: 2,
+  },
 });

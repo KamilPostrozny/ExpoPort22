@@ -126,8 +126,11 @@ export default function DownloadSheet(props: DownloadSheetProps) {
         styles.row,
         { borderBottomColor: theme.border },
         pressed && { backgroundColor: theme.surface },
-      ]}>
-      <Text style={[styles.rowIcon, { color: entry.isDirectory ? theme.accent : theme.foreground }]}>
+      ]}
+    >
+      <Text
+        style={[styles.rowIcon, { color: entry.isDirectory ? theme.accent : theme.foreground }]}
+      >
         {entry.isDirectory ? '\uf07b' : '\uf15b' /* Nerd Font folder / file */}
       </Text>
       <Text numberOfLines={1} style={[styles.rowName, { color: theme.foreground }]}>
@@ -161,18 +164,24 @@ export default function DownloadSheet(props: DownloadSheetProps) {
       animationType="none"
       statusBarTranslucent
       onRequestClose={systemBack}
-      visible>
+      visible
+    >
       {/* The dim over the terminal, opacity tied to the slide; tapping it dismisses. */}
       <Animated.View
-        style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}>
+        style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}
+      >
         <Pressable style={styles.fill} onPress={close} />
       </Animated.View>
-      <Animated.View style={[styles.fill, { paddingTop: insets.top + SPACE.sm }]} pointerEvents="box-none">
+      <Animated.View
+        style={[styles.fill, { paddingTop: insets.top + SPACE.sm }]}
+        pointerEvents="box-none"
+      >
         <View
           style={[
             styles.sheet,
             { backgroundColor: theme.panel, paddingBottom: insets.bottom + 12 },
-          ]}>
+          ]}
+        >
           <View style={styles.grabberRow}>
             <View style={[styles.grabber, { backgroundColor: theme.border }]} />
           </View>
@@ -196,9 +205,14 @@ export default function DownloadSheet(props: DownloadSheetProps) {
                     styles.crumb,
                     {
                       color:
-                        i === 0 ? theme.accent : i === all.length - 1 ? theme.foreground : theme.muted,
+                        i === 0
+                          ? theme.accent
+                          : i === all.length - 1
+                            ? theme.foreground
+                            : theme.muted,
                     },
-                  ]}>
+                  ]}
+                >
                   {i > 1 && <Text style={{ color: theme.placeholder }}>{'› '}</Text>}
                   {segment}
                 </Text>
@@ -222,7 +236,8 @@ export default function DownloadSheet(props: DownloadSheetProps) {
                         styles.row,
                         { borderBottomColor: theme.border },
                         pressed && { backgroundColor: theme.surface },
-                      ]}>
+                      ]}
+                    >
                       <Text style={[styles.rowIcon, { color: theme.accent }]}>{'\uf07b'}</Text>
                       <Text style={[styles.rowName, { color: theme.foreground }]}>..</Text>
                     </Pressable>

@@ -95,7 +95,12 @@ test('directories first, then names', () => {
     { name: 'bundle.tar.gz', isDirectory: false, size: 14_000_000 },
     { name: 'incoming', isDirectory: true, size: 0 },
   ]);
-  expect(sorted.map((e) => e.name)).toEqual(['incoming', 'releases', 'bundle.tar.gz', 'nginx.conf']);
+  expect(sorted.map((e) => e.name)).toEqual([
+    'incoming',
+    'releases',
+    'bundle.tar.gz',
+    'nginx.conf',
+  ]);
 });
 
 test('the dot entries SFTP returns are dropped — the sheet draws its own up row', () => {

@@ -56,13 +56,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
-import {
-  pillCont,
-  pillDist,
-  pillOpacity,
-  pillWidthFrac,
-  rubber,
-} from '@/barswipe-model';
+import { pillCont, pillDist, pillOpacity, pillWidthFrac, rubber } from '@/barswipe-model';
 import {
   getClipboard,
   pinPasteboard,
@@ -290,7 +284,8 @@ export function Plate({
           backgroundColor: theme.surface,
         },
         style,
-      ]}>
+      ]}
+    >
       {children}
     </View>
   );
@@ -340,10 +335,8 @@ function Key({
       }
       onLongPress={onLongPress}
       delayLongPress={delayLongPress}
-      style={({ pressed }) => [
-        style,
-        pressed && PRESSED_KEY,
-      ]}>
+      style={({ pressed }) => [style, pressed && PRESSED_KEY]}
+    >
       {children}
     </Pressable>
   );
@@ -782,55 +775,59 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
   const blurOn = () => blurField(inputOn);
   const panSV = props.panSV;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- every capture is identity-stable
-  const pan = useMemo(() => Gesture.Pan()
-    .maxPointers(1)
-    .onBegin(() => {
-      'worklet';
-      held.value = 0;
-      dismissed.value = 0;
-      raised.value = 0;
-    })
-    .onUpdate((e) => {
-      'worklet';
-      const sv = props.panSV;
-      const tx = e.translationX;
-      const ty = e.translationY;
-      // The two vertical exits, each once per gesture — the leading rule in the tests is what
-      // keeps a flat hop's own arc out of both.
-      if (dismissed.value === 0 && barDismisses(tx, ty)) {
-        dismissed.value = 1;
-        runOnJS(dismissKeys)();
-      }
-      if (raised.value === 0 && barRaises(tx, ty, held.value === 1)) {
-        raised.value = 1;
-        runOnJS(raiseKeys)();
-      }
-      // The page row joins when the finger goes sideways from a standing start on the bar.
-      if (held.value === 0) {
-        if (!rowJoins(tx, ty)) return;
-        held.value = 1;
-        originX.value = tx;
-        runOnJS(jsBarSwipe)('start', 0);
-        return;
-      }
-      if (sv !== undefined) {
-        // Guarded by the screen's own live flag: the JS 'start' above may still be in flight for
-        // the first frame or two, and the rubber band needs its position/count.
-        if (sv.rowLive.value === 1)
-          sv.swipeX.value = rubber(tx - originX.value, sv.rowPos.value, sv.rowCount.value);
-      }
-    })
-    // `onFinalize`, not `onEnd`: a pan can leave by being CANCELLED — another handler wins the
-    // race, the view it is on unmounts — and that path never calls `onEnd`. The screen's page
-    // swipe is only ever ended by this callback, so a miss leaves it stuck (user, 2026-08-11).
-    // Finalize fires for every exit, successful or not.
-    .onFinalize((e) => {
-      'worklet';
-      if (held.value === 1) {
-        held.value = 0;
-        runOnJS(jsBarSwipe)('end', e.translationX - originX.value);
-      }
-    }), [panSV]);
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .maxPointers(1)
+        .onBegin(() => {
+          'worklet';
+          held.value = 0;
+          dismissed.value = 0;
+          raised.value = 0;
+        })
+        .onUpdate((e) => {
+          'worklet';
+          const sv = props.panSV;
+          const tx = e.translationX;
+          const ty = e.translationY;
+          // The two vertical exits, each once per gesture — the leading rule in the tests is what
+          // keeps a flat hop's own arc out of both.
+          if (dismissed.value === 0 && barDismisses(tx, ty)) {
+            dismissed.value = 1;
+            runOnJS(dismissKeys)();
+          }
+          if (raised.value === 0 && barRaises(tx, ty, held.value === 1)) {
+            raised.value = 1;
+            runOnJS(raiseKeys)();
+          }
+          // The page row joins when the finger goes sideways from a standing start on the bar.
+          if (held.value === 0) {
+            if (!rowJoins(tx, ty)) return;
+            held.value = 1;
+            originX.value = tx;
+            runOnJS(jsBarSwipe)('start', 0);
+            return;
+          }
+          if (sv !== undefined) {
+            // Guarded by the screen's own live flag: the JS 'start' above may still be in flight for
+            // the first frame or two, and the rubber band needs its position/count.
+            if (sv.rowLive.value === 1)
+              sv.swipeX.value = rubber(tx - originX.value, sv.rowPos.value, sv.rowCount.value);
+          }
+        })
+        // `onFinalize`, not `onEnd`: a pan can leave by being CANCELLED — another handler wins the
+        // race, the view it is on unmounts — and that path never calls `onEnd`. The screen's page
+        // swipe is only ever ended by this callback, so a miss leaves it stuck (user, 2026-08-11).
+        // Finalize fires for every exit, successful or not.
+        .onFinalize((e) => {
+          'worklet';
+          if (held.value === 1) {
+            held.value = 0;
+            runOnJS(jsBarSwipe)('end', e.translationX - originX.value);
+          }
+        }),
+    [panSV],
+  );
 
   // No `fontWeight` beside `MONO`: it is a one-face family, so a numeric weight selects nothing
   // on iOS and risks minikin's synthetic bold on Android — a divergence for a weight the bundled
@@ -881,13 +878,11 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
           entering={POP_IN}
           exiting={POP_OUT}
           onLayout={(e) => setStripH(e.nativeEvent.layout.height)}
-          style={styles.chordWrap}>
+          style={styles.chordWrap}
+        >
           <Plate theme={theme} radius={22} style={styles.chordPill}>
             {CHORD_STRIP.map(({ letter, caption }) => (
-              <Key
-                key={letter}
-                onPress={() => sendChord(letter)}
-                style={styles.cap}>
+              <Key key={letter} onPress={() => sendChord(letter)} style={styles.cap}>
                 <Text style={[styles.capLetter, { color: theme.foreground }]}>{letter}</Text>
                 <Text style={[styles.capCaption, { color: theme.muted }]}>{caption}</Text>
               </Key>
@@ -902,10 +897,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
           {/* §4.6: during an upload the circle tints accent and goes inert — the whole progress
               UI. The Pressable disables, so a tap during a send does nothing at all. */}
           <Key onPress={props.sending ? undefined : () => toggle('menu')} style={styles.circleSlot}>
-            <Plate
-              theme={theme}
-              radius={BAR.radius}
-              style={styles.circle}>
+            <Plate theme={theme} radius={BAR.radius} style={styles.circle}>
               {/* §4.6's busy tint, drawn *over* the plate rather than under it. As the container's
                   backgroundColor it sat beneath the plate's own fill,
                   which washed the accent out to a pale wash and left the glyph — painted in
@@ -926,11 +918,8 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
                   U+22EF's are square and read as a different mark at 18pt. The bundled face carries
                   it on both platforms; §4.6's busy tint rides the glyph's colour. */}
               <Text
-                style={[
-                  keyLabel,
-                  { fontSize: 18 },
-                  props.sending && { color: theme.onAccent },
-                ]}>
+                style={[keyLabel, { fontSize: 18 }, props.sending && { color: theme.onAccent }]}
+              >
                 {'\uF141'}
               </Text>
             </Plate>
@@ -949,55 +938,59 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
                 free.) */}
             <View
               style={[StyleSheet.absoluteFill, props.pills?.live && DISPLAY_NONE]}
-              pointerEvents={props.pills?.live ? 'none' : 'auto'}>
-            <Plate theme={theme} radius={BAR.radius} style={styles.pillPlate}>
-            <View style={styles.keysRow}>
-              <View style={styles.keysGroup}>
-                <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
-                  <Text style={keyLabel}>Ctrl</Text>
-                </Key>
-                <Key onPress={() => track('\x1b')} style={styles.key}>
-                  <Text style={keyLabel}>Esc</Text>
-                </Key>
-                <Key onPress={() => track('\x09')} style={styles.key}>
-                  <Text style={keyLabel}>Tab</Text>
-                </Key>
-                <Key
-                  onPress={onPaste}
-                  onLongPress={onPasteLongPress}
-                  delayLongPress={420}
-                  style={styles.key}>
-                  <Text style={keyLabel}>Paste</Text>
-                </Key>
-              </View>
-              <View style={[styles.pillDivider, { backgroundColor: theme.border }]} />
-              <Key
-                onPress={() => toggle('arrows')}
-                style={[
-                  styles.arrowsButton,
-                  open === 'arrows' && {
-                    backgroundColor: rgba(theme.accent, 0.5),
-                    borderWidth: 1,
-                    borderColor: rgba(theme.accent, 0.9),
-                  },
-                ]}>
-                {/* U+EB22 (nf-cod-move): the four-way arrow drawn OPEN and hairline, which is the
+              pointerEvents={props.pills?.live ? 'none' : 'auto'}
+            >
+              <Plate theme={theme} radius={BAR.radius} style={styles.pillPlate}>
+                <View style={styles.keysRow}>
+                  <View style={styles.keysGroup}>
+                    <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
+                      <Text style={keyLabel}>Ctrl</Text>
+                    </Key>
+                    <Key onPress={() => track('\x1b')} style={styles.key}>
+                      <Text style={keyLabel}>Esc</Text>
+                    </Key>
+                    <Key onPress={() => track('\x09')} style={styles.key}>
+                      <Text style={keyLabel}>Tab</Text>
+                    </Key>
+                    <Key
+                      onPress={onPaste}
+                      onLongPress={onPasteLongPress}
+                      delayLongPress={420}
+                      style={styles.key}
+                    >
+                      <Text style={keyLabel}>Paste</Text>
+                    </Key>
+                  </View>
+                  <View style={[styles.pillDivider, { backgroundColor: theme.border }]} />
+                  <Key
+                    onPress={() => toggle('arrows')}
+                    style={[
+                      styles.arrowsButton,
+                      open === 'arrows' && {
+                        backgroundColor: rgba(theme.accent, 0.5),
+                        borderWidth: 1,
+                        borderColor: rgba(theme.accent, 0.9),
+                      },
+                    ]}
+                  >
+                    {/* U+EB22 (nf-cod-move): the four-way arrow drawn OPEN and hairline, which is the
                     one that sits right next to Ctrl/Esc/Tab/Paste. U+F047 (nf-fa-arrows) is the
                     same shape as a solid slab and read as a much heavier mark than the letters
                     beside it (user, 2026-09-01). Both are in the bundled face; ✛ was in
                     neither and fell through to Noto — see `MONO` in fonts.ts and the CHROME
                     guard in scripts/patch-font.py, which is where a swap like this is registered. */}
-                <Text style={[keyLabel, { fontSize: 18 }]}>{'\uEB22'}</Text>
-              </Key>
-            </View>
-            </Plate>
+                    <Text style={[keyLabel, { fontSize: 18 }]}>{'\uEB22'}</Text>
+                  </Key>
+                </View>
+              </Plate>
             </View>
             {/* §4.4: during a bar swipe the tab-name pills replace the keys. Mounted from
                 the moment tabs are reachable — see the pills prop — visible only while live. */}
             {props.pills != null && pillW > 0 && (
               <View
                 pointerEvents="none"
-                style={[styles.namesWrap, !props.pills.live && DISPLAY_NONE]}>
+                style={[styles.namesWrap, !props.pills.live && DISPLAY_NONE]}
+              >
                 <NameStrip theme={theme} pills={props.pills} width={pillW} />
               </View>
             )}
@@ -1010,11 +1003,13 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
               pills' slot the same width everywhere. */}
           <Key
             onPress={props.showTabs ? props.onTabsTap : () => toggle('tabsHint')}
-            style={styles.circleSlot}>
+            style={styles.circleSlot}
+          >
             <Plate
               theme={theme}
               radius={BAR.radius}
-              style={[styles.circle, !props.showTabs && styles.circleOff]}>
+              style={[styles.circle, !props.showTabs && styles.circleOff]}
+            >
               {/* U+F24D (nf-fa-clone) is the icon on both platforms now: two offset squares, the
                   shape SF's `square.on.square` drew. The old ▣ is in no bundled face at all, so
                   it fell through to Noto at a different weight — see `MONO` in fonts.ts. Sized
@@ -1024,7 +1019,8 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
                   keyLabel,
                   { fontSize: 22 },
                   !props.showTabs && { color: theme.placeholder },
-                ]}>
+                ]}
+              >
                 {'\uF24D'}
               </Text>
             </Plate>
@@ -1174,7 +1170,8 @@ function NamePill({
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, styles.namePillSlot, anchor]}
-      pointerEvents="none">
+      pointerEvents="none"
+    >
       <Animated.View style={[styles.namePillClip, style]}>
         <Plate theme={theme} radius={BAR.radius} style={styles.namePill}>
           <Text numberOfLines={1} style={[styles.namePillText, { color: theme.foreground }]}>
@@ -1213,10 +1210,7 @@ export function ArrowsPopover({
     </Key>
   );
   return (
-    <Animated.View
-      entering={POP_IN}
-      exiting={POP_OUT}
-      style={[styles.arrowsPop, { bottom }]}>
+    <Animated.View entering={POP_IN} exiting={POP_OUT} style={[styles.arrowsPop, { bottom }]}>
       <Plate theme={theme} radius={22} style={styles.arrowsPlate}>
         <View style={styles.dpad}>
           <View style={styles.dpadRow}>
@@ -1268,7 +1262,8 @@ export function TabsHintPopover({
       pointerEvents="none"
       entering={POP_IN}
       exiting={POP_OUT}
-      style={[styles.hintPop, { bottom }]}>
+      style={[styles.hintPop, { bottom }]}
+    >
       <Plate theme={theme} radius={16} style={styles.hintPlate}>
         <Text style={[styles.hintText, { color: theme.foreground }]}>{text}</Text>
       </Plate>
@@ -1309,10 +1304,7 @@ export function BarMenu({
   onOpenSettings: () => void;
 }) {
   return (
-    <Animated.View
-      entering={POP_IN}
-      exiting={POP_OUT}
-      style={[styles.menuPop, { bottom }]}>
+    <Animated.View entering={POP_IN} exiting={POP_OUT} style={[styles.menuPop, { bottom }]}>
       <Plate theme={theme} radius={MENU_RADIUS}>
         <Text style={[styles.menuHeader, { color: theme.muted }]}>UPLOAD FILE</Text>
         {UPLOAD_ROWS.map(({ label, kind }, i) => (
@@ -1324,7 +1316,8 @@ export function BarMenu({
               { borderTopColor: hairline(theme) },
               i === 0 && styles.menuRowFirst,
               pressed && { backgroundColor: keyTint(theme) },
-            ]}>
+            ]}
+          >
             <Text style={[styles.menuLabel, { color: theme.foreground }]}>{label}</Text>
           </Pressable>
         ))}
@@ -1337,7 +1330,8 @@ export function BarMenu({
             { borderTopColor: hairline(theme) },
             styles.menuRowFirst,
             pressed && { backgroundColor: keyTint(theme) },
-          ]}>
+          ]}
+        >
           <Text style={[styles.menuLabel, { color: theme.foreground }]}>Browse the host</Text>
         </Pressable>
         <View style={[styles.menuBreak, { backgroundColor: theme.scrim }]} />
@@ -1347,13 +1341,10 @@ export function BarMenu({
             styles.menuRow,
             { borderTopColor: hairline(theme), flexDirection: 'row', alignItems: 'center' },
             pressed && { backgroundColor: keyTint(theme) },
-          ]}>
+          ]}
+        >
           <Text style={[styles.menuLabel, { color: theme.foreground, flex: 1 }]}>Prose mode</Text>
-          <Text
-            style={[
-              styles.menuState,
-              { color: textMode ? theme.accent : theme.placeholder },
-            ]}>
+          <Text style={[styles.menuState, { color: textMode ? theme.accent : theme.placeholder }]}>
             {textMode ? 'on' : 'off'}
           </Text>
         </Pressable>
@@ -1364,7 +1355,8 @@ export function BarMenu({
             styles.menuRow,
             { borderTopColor: hairline(theme) },
             pressed && { backgroundColor: keyTint(theme) },
-          ]}>
+          ]}
+        >
           <Text style={[styles.menuLabel, { color: theme.foreground }]}>Settings</Text>
         </Pressable>
       </Plate>
@@ -1414,7 +1406,8 @@ export function ClipboardPopover({
         { borderTopColor: hairline(theme) },
         highlight && { backgroundColor: rgba(theme.accent, 0.12) },
         pressed && { backgroundColor: keyTint(theme) },
-      ]}>
+      ]}
+    >
       <View style={styles.clipBody}>
         <Text numberOfLines={1} style={[styles.clipText, { color: theme.foreground }]}>
           {slot.text}
@@ -1431,7 +1424,8 @@ export function ClipboardPopover({
             includeFontPadding: false,
             fontSize: 13,
             color: slot.pinned ? theme.accentAlternate : theme.placeholder,
-          }}>
+          }}
+        >
           {'\uF08D'}
         </Text>
       </Pressable>
@@ -1439,14 +1433,18 @@ export function ClipboardPopover({
   );
 
   return (
-    <Animated.View
-      entering={POP_IN}
-      exiting={POP_OUT}
-      style={[styles.clipPop, { bottom }]}>
+    <Animated.View entering={POP_IN} exiting={POP_OUT} style={[styles.clipPop, { bottom }]}>
       <Plate theme={theme} radius={20} style={styles.clipPlate}>
         <Text style={[styles.clipHeader, { color: theme.border }]}>CLIPBOARD</Text>
         {slots.map((slot, i) => (
-          <View key={`${slot.at}-${i}`}>{row(slot, i === 0, () => togglePin(i), () => type(slot.text))}</View>
+          <View key={`${slot.at}-${i}`}>
+            {row(
+              slot,
+              i === 0,
+              () => togglePin(i),
+              () => type(slot.text),
+            )}
+          </View>
         ))}
         {pasteboard !== null && row(pasteboard, false, pinPasteboard, () => type(pasteboard.text))}
         {/* A photo or a file on the pasteboard: no pin (the bytes are the pasteboard's, not ours)
@@ -1461,7 +1459,8 @@ export function ClipboardPopover({
               styles.clipRow,
               { borderTopColor: hairline(theme) },
               pressed && { backgroundColor: keyTint(theme) },
-            ]}>
+            ]}
+          >
             <View style={styles.clipBody}>
               <Text numberOfLines={1} style={[styles.clipText, { color: theme.foreground }]}>
                 {pasteboardFile}
@@ -1473,7 +1472,9 @@ export function ClipboardPopover({
           </Pressable>
         )}
         {slots.length === 0 && pasteboard === null && pasteboardFile === null && (
-          <Text style={[styles.clipEmpty, { color: theme.muted, borderTopColor: hairline(theme) }]}>Nothing yanked or copied yet.</Text>
+          <Text style={[styles.clipEmpty, { color: theme.muted, borderTopColor: hairline(theme) }]}>
+            Nothing yanked or copied yet.
+          </Text>
         )}
       </Plate>
     </Animated.View>
@@ -1541,7 +1542,14 @@ const styles = StyleSheet.create({
   /* chord strip */
   /** Absolute, pinned to the top of the bar stack — which is exactly the region the spacer above
    *  it reserves. Out of flow on purpose; see the spacer's comment. */
-  chordWrap: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', paddingTop: 2 },
+  chordWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingTop: 2,
+  },
   chordPill: { flexDirection: 'row', gap: SPACE.xs, padding: 6 },
   cap: {
     width: 48,
@@ -1574,7 +1582,12 @@ const styles = StyleSheet.create({
   enterKey: { height: 34, borderRadius: 13, ...CENTER },
   hintPop: { position: 'absolute', right: BAR.sideMargin, maxWidth: 240 },
   hintPlate: { paddingHorizontal: 14, paddingVertical: 10 },
-  hintText: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
+  hintText: {
+    fontFamily: SANS,
+    includeFontPadding: false,
+    fontSize: TEXT.base,
+    lineHeight: leading(TEXT.base),
+  },
   menuPop: { position: 'absolute', left: BAR.sideMargin, width: 256 },
   // The ⋯ menu's own header and rows keep the prototype's 11pt/0.5 and 18pt gutter — its numbers
   // are not the settings sheet's, and `SECTION_HEADER` deliberately does not reach here.

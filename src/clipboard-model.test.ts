@@ -83,7 +83,10 @@ test('provenance reads like the design', () => {
 /* --- pin persistence --- */
 
 test('pins round-trip; unpinned slots do not travel', () => {
-  const slots = [yank('a', 5), { text: 'ghp_x', source: 'pasteboard' as const, at: 7, pinned: true }];
+  const slots = [
+    yank('a', 5),
+    { text: 'ghp_x', source: 'pasteboard' as const, at: 7, pinned: true },
+  ];
   const restored = decodePins(serializePins(slots));
   expect(restored).toEqual([{ text: 'ghp_x', source: 'pasteboard', at: 7, pinned: true }]);
 });

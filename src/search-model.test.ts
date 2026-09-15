@@ -62,7 +62,9 @@ test('search command targets the window id, and rejects anything that is not one
 });
 
 test('grep output parses into context lines with the hit line marked', () => {
-  const hit = parseSearchOutput('41-  Compiling tokio\n42:POST /hooks/deploy 502\n43-GET /healthz 200\n');
+  const hit = parseSearchOutput(
+    '41-  Compiling tokio\n42:POST /hooks/deploy 502\n43-GET /healthz 200\n',
+  );
   expect(hit).toEqual({
     lines: ['  Compiling tokio', 'POST /hooks/deploy 502', 'GET /healthz 200'],
     hitLine: 1,
@@ -121,7 +123,9 @@ test('window search targets the window id, and rejects anything that is not one'
 });
 
 test('window search output: the count, then every position on the screen', () => {
-  const out = ['@3', '1284', '3:deploy started', '7:  re-deploy failed after deploy', ''].join('\n');
+  const out = ['@3', '1284', '3:deploy started', '7:  re-deploy failed after deploy', ''].join(
+    '\n',
+  );
   expect(parseWindowSearch(out, 'deploy')).toEqual({
     total: 1284,
     // grep counts lines from 1, the screen's top row is 0; two occurrences in one line are two

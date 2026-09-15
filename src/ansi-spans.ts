@@ -149,7 +149,12 @@ export function parseAnsi(text: string): SpanLine[] {
       } else if (next === ']') {
         // OSC: until BEL or ST (ESC \).
         let j = i + 2;
-        while (j < text.length && text[j] !== '\x07' && !(text[j] === '\x1b' && text[j + 1] === '\\')) j++;
+        while (
+          j < text.length &&
+          text[j] !== '\x07' &&
+          !(text[j] === '\x1b' && text[j + 1] === '\\')
+        )
+          j++;
         i = j >= text.length ? text.length : text[j] === '\x1b' ? j + 1 : j;
       } else if (next === undefined) {
         break; // lone ESC at end
@@ -177,7 +182,10 @@ export function parseAnsi(text: string): SpanLine[] {
 export function highlightLine(line: SpanLine, query: string): SpanLine {
   const q = query.toLowerCase();
   if (q === '') return line;
-  const joined = line.map((s) => s.text).join('').toLowerCase();
+  const joined = line
+    .map((s) => s.text)
+    .join('')
+    .toLowerCase();
   if (!joined.includes(q)) return line;
 
   // Every position covered by some occurrence, in [start, end) ranges.

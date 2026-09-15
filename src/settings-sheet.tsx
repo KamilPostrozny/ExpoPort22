@@ -55,15 +55,7 @@ import AppearanceCard, { switchColors } from '@/appearance';
 import { sheetShouldDismiss } from '@/input-model';
 import { forgetPinnedHostKey } from '@/session';
 import { endpoint, updateSettings, useSettings, usesTmux } from '@/settings';
-import {
-  GRABBER,
-  leading,
-  RADIUS,
-  SECTION_HEADER,
-  SHEET_RADIUS,
-  SPACE,
-  TEXT,
-} from '@/style';
+import { GRABBER, leading, RADIUS, SECTION_HEADER, SHEET_RADIUS, SPACE, TEXT } from '@/style';
 import { SANS, type Theme } from '@/theme';
 
 /** How far offscreen the sheet starts and returns to. The window's own height, because that is the
@@ -174,7 +166,9 @@ export default function SettingsSheet({
     <Modal transparent statusBarTranslucent animationType="none" onRequestClose={close}>
       {/* RNGH needs its own root inside a Modal's native window. */}
       <GestureHandlerRootView style={styles.fill}>
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}>
+        <Animated.View
+          style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}
+        >
           <Pressable style={styles.fill} onPress={close} />
         </Animated.View>
 
@@ -184,7 +178,8 @@ export default function SettingsSheet({
               styles.sheet,
               { backgroundColor: theme.panel, paddingBottom: insets.bottom + 8 },
               sheetStyle,
-            ]}>
+            ]}
+          >
             {/* the grabber — tap or swipe, there is no Done */}
             <Pressable onPress={close} style={styles.grabberZone}>
               <View style={[styles.grabber, { backgroundColor: theme.border }]} />
@@ -201,7 +196,8 @@ export default function SettingsSheet({
               // state where the drag-to-dismiss goes dead again.
               onScroll={trackTop}
               onScrollEndDrag={trackTop}
-              onMomentumScrollEnd={trackTop}>
+              onMomentumScrollEnd={trackTop}
+            >
               <Text style={[styles.header, { color: theme.muted }]}>APPEARANCE</Text>
               <AppearanceCard theme={theme} card={theme.surface} />
 
@@ -213,7 +209,9 @@ export default function SettingsSheet({
                     TMUX
                   </Text>
                   <View style={[styles.card, styles.row, { backgroundColor: theme.surface }]}>
-                    <Text style={[styles.label, { color: theme.foreground }]}>Comfort settings</Text>
+                    <Text style={[styles.label, { color: theme.foreground }]}>
+                      Comfort settings
+                    </Text>
                     <Switch
                       value={settings.tmuxExtras}
                       onValueChange={toggleExtras}
@@ -233,7 +231,8 @@ export default function SettingsSheet({
                   style={({ pressed }) => [
                     styles.actionRow,
                     pressed && { backgroundColor: theme.surface },
-                  ]}>
+                  ]}
+                >
                   <Text style={[styles.label, { color: theme.accent }]}>Disconnect</Text>
                 </Pressable>
                 <Pressable
@@ -243,7 +242,8 @@ export default function SettingsSheet({
                     styles.rowLine,
                     { borderTopColor: theme.border },
                     pressed && { backgroundColor: theme.surface },
-                  ]}>
+                  ]}
+                >
                   <Text style={[styles.label, { color: theme.danger }]}>Forget host key</Text>
                 </Pressable>
               </View>

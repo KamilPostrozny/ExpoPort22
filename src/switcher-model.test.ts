@@ -202,7 +202,7 @@ test('snapshotFontSize fits the pane columns to the card, clamped to legible', (
 // The one number the zoom's crossfade rests on: a card's inset has to BE the terminal's inset
 // after the zoom has shrunk it, or the text steps sideways and down the moment the flying
 // surface hands over to the snapshot underneath it.
-test('a card\'s snapshot inset is the terminal\'s inset seen through the zoom', () => {
+test("a card's snapshot inset is the terminal's inset seen through the zoom", () => {
   for (const width of [402, 393, 440]) {
     const scale = slotFrame(0, width).w / width; // what the zoom shrinks the stage by
     const cardInset = (SHOT_PAD / 402) * width; // as switcher.tsx applies it

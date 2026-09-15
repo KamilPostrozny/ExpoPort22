@@ -47,7 +47,13 @@ const listeners = new Set<() => void>();
 
 function set(next: ClipboardState) {
   state = next;
-  console.log('[clipboard]', state.slots.length, 'slots,', state.slots.filter((s) => s.pinned).length, 'pinned');
+  console.log(
+    '[clipboard]',
+    state.slots.length,
+    'slots,',
+    state.slots.filter((s) => s.pinned).length,
+    'pinned',
+  );
   for (const listener of listeners) listener();
 }
 
@@ -82,7 +88,10 @@ function persistPins() {
 
 /** The OSC 52 path (§4.7): every yank also lands here, newest on top. */
 export function pushYank(text: string): void {
-  set({ ...state, slots: push(state.slots, { text, source: 'yank', at: Date.now(), pinned: false }) });
+  set({
+    ...state,
+    slots: push(state.slots, { text, source: 'yank', at: Date.now(), pinned: false }),
+  });
 }
 
 export function togglePin(index: number): void {

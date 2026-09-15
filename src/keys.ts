@@ -56,4 +56,3 @@ function publicKeyBlob(publicKey: Uint8Array): Uint8Array {
   blob.set(publicKey, 8 + KEY_TYPE.length);
   return blob;
 }
-

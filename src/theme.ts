@@ -127,8 +127,22 @@ function fromFlavour(name: FlavourName): Theme {
     cursor: p.rosewater,
     selection: p.surface0,
     ansi: [
-      black, p.red, p.green, p.yellow, p.blue, p.pink, p.teal, white,
-      brightBlack, p.red, p.green, p.yellow, p.blue, p.pink, p.teal, brightWhite,
+      black,
+      p.red,
+      p.green,
+      p.yellow,
+      p.blue,
+      p.pink,
+      p.teal,
+      white,
+      brightBlack,
+      p.red,
+      p.green,
+      p.yellow,
+      p.blue,
+      p.pink,
+      p.teal,
+      brightWhite,
     ],
 
     accent: p.blue,
@@ -244,7 +258,11 @@ const LAYER = { panel: 3.2, scrim: 6.5 };
  *  is not: on GitHub Dark's #0d1117 a fifth of the way to black moves 1.14 L*, and a sheet over the
  *  terminal stops reading as a sheet at all. Three schemes take the second branch. */
 const layer = (bg: string, fg: string, drop: number) =>
-  search(bg, lightness(bg) >= drop ? '#000000' : fg, (h) => Math.abs(lightness(h) - lightness(bg)) >= drop);
+  search(
+    bg,
+    lightness(bg) >= drop ? '#000000' : fg,
+    (h) => Math.abs(lightness(h) - lightness(bg)) >= drop,
+  );
 
 /**
  * `c`, brightened or darkened until it clears `target` against `bg`.
@@ -314,9 +332,7 @@ const ALL: Theme[] = [
   ...SCHEMES.map(fromScheme),
 ];
 
-export const THEMES: Record<ThemeName, Theme> = Object.fromEntries(
-  ALL.map((t) => [t.name, t]),
-);
+export const THEMES: Record<ThemeName, Theme> = Object.fromEntries(ALL.map((t) => [t.name, t]));
 
 /** Catppuccin first — it is the app's own — then the generated schemes in the generator's order.
  *  Not every scheme has both cuts, so the two lists are different lengths on purpose. */

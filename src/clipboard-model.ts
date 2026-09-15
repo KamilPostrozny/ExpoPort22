@@ -79,7 +79,10 @@ export function decodePins(raw: string | null): Slot[] {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((entry): Slot[] => {
-      const o = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
+      const o = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<
+        string,
+        unknown
+      >;
       if (typeof o.text !== 'string' || o.text === '') return [];
       return [
         {

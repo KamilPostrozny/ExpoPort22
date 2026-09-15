@@ -76,7 +76,6 @@ export function slideMs(distance: number): number {
 
 /* --- the name pills replacing the bar keys during the swipe --- */
 
-
 /** The continuous position between windows: `pos` at rest, sliding with the page offset. */
 export function pillCont(pos: number, x: number, pitch: number): number {
   'worklet';
@@ -125,4 +124,3 @@ export function pillOpacity(dist: number): number {
   const m = pillMorph(dist);
   return 1 - m * m;
 }
-

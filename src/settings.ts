@@ -114,7 +114,9 @@ export function decode(raw: unknown): Settings {
   const hosts = Array.isArray(outer.hosts) ? outer.hosts : [];
   const o = {
     ...outer,
-    ...(typeof hosts[0] === 'object' && hosts[0] !== null ? (hosts[0] as Record<string, unknown>) : {}),
+    ...(typeof hosts[0] === 'object' && hosts[0] !== null
+      ? (hosts[0] as Record<string, unknown>)
+      : {}),
   };
   const startupCommand = typeof o.startupCommand === 'string' ? o.startupCommand : null;
   return {
@@ -137,8 +139,7 @@ export function decode(raw: unknown): Settings {
     fontSize: clampFontSize(num(o.fontSize, DEFAULTS.fontSize)),
     // Settings written before the switch existed carry one field, whose `'auto'` is exactly what
     // the switch now means — so an upgrade keeps the appearance the user had without asking.
-    followSystem:
-      typeof o.followSystem === 'boolean' ? o.followSystem : !isThemeName(o.theme),
+    followSystem: typeof o.followSystem === 'boolean' ? o.followSystem : !isThemeName(o.theme),
     theme: isThemeName(o.theme) ? o.theme : DEFAULTS.theme,
     themeDark: isThemeName(o.themeDark) ? o.themeDark : DEFAULTS.themeDark,
     themeLight: isThemeName(o.themeLight) ? o.themeLight : DEFAULTS.themeLight,

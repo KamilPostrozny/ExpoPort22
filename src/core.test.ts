@@ -29,16 +29,8 @@ mock.module('expo-secure-store', () => ({
 const { flavors } = await import('@catppuccin/palette');
 const { DARK_THEMES, LIGHT_THEMES, THEMES, resolveTheme } = await import('@/theme');
 const { SCHEMES } = await import('@/themes-generated');
-const {
-  DEFAULTS,
-  clampFontSize,
-  decode,
-  endpoint,
-  startupLine,
-  themeNameFor,
-  usesTmux,
-  validate,
-} = await import('@/settings');
+const { DEFAULTS, clampFontSize, decode, endpoint, startupLine, themeNameFor, usesTmux, validate } =
+  await import('@/settings');
 
 const { isHttpLink, parseOsc52 } = await import('@/terminal-protocol');
 const { hostKeyVerdict } = await import('@/host-keys');
@@ -219,9 +211,17 @@ test('a startup command written by an older build still runs, as the custom mode
 test('a blob written with a host list comes back as that first host', () => {
   const s = decode({
     hosts: [
-      { id: 'a', host: 'box.lan', port: 2222, username: 'kamil', startMode: 'attach',
-        attachSession: 'work', knownSessions: ['work'], startupCommand: 'tmux attach -t work',
-        lastUploadDir: '/home/kamil/drop' },
+      {
+        id: 'a',
+        host: 'box.lan',
+        port: 2222,
+        username: 'kamil',
+        startMode: 'attach',
+        attachSession: 'work',
+        knownSessions: ['work'],
+        startupCommand: 'tmux attach -t work',
+        lastUploadDir: '/home/kamil/drop',
+      },
       { id: 'b', host: 'other.lan' },
     ],
     fontSize: 17,
@@ -305,7 +305,7 @@ test('validation says what is wrong in plain English', () => {
   expect(validate({ ...ok, port: 0 })).toBe('Port must be between 1 and 65535.');
   expect(validate({ ...ok, port: 70000 })).toBe('Port must be between 1 and 65535.');
   expect(validate({ ...ok, username: 'two words' })).toBe(
-    'Username cannot be empty or contain spaces.'
+    'Username cannot be empty or contain spaces.',
   );
   expect(endpoint(ok)).toBe('box.lan:22');
 });

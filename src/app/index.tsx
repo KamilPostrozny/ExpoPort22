@@ -8,7 +8,14 @@ import AppearanceCard from '@/appearance';
 import { useTheme } from '@/hooks/use-theme';
 import { loadOrCreateKey, type KeyPair } from '@/keys';
 import { connect, listHostSessions } from '@/session';
-import { SESSION_NAME, getSettings, updateSettings, useSettings, validate, type StartMode } from '@/settings';
+import {
+  SESSION_NAME,
+  getSettings,
+  updateSettings,
+  useSettings,
+  validate,
+  type StartMode,
+} from '@/settings';
 import { CENTER, PRESSED, RADIUS, SECTION_HEADER, SPACE, TEXT, TINT, leading } from '@/style';
 import { MONO, SANS, SANS_BOLD, SANS_SEMIBOLD } from '@/theme';
 
@@ -129,7 +136,8 @@ export default function Setup() {
             <Pressable
               key={mode}
               onPress={() => pickMode(mode)}
-              style={[styles.row, styles.modeRow, { backgroundColor: theme.panel }]}>
+              style={[styles.row, styles.modeRow, { backgroundColor: theme.panel }]}
+            >
               <View style={styles.modeText}>
                 <Text style={[styles.modeLabel, { color: theme.foreground }]}>{label}</Text>
                 <Text style={[styles.modeNote, { color: theme.muted }]}>{note}</Text>
@@ -155,7 +163,8 @@ export default function Setup() {
               <Pressable
                 key={name ?? MOST_RECENT}
                 onPress={() => updateSettings({ attachSession: name })}
-                style={[styles.row, styles.modeRow, { backgroundColor: theme.panel }]}>
+                style={[styles.row, styles.modeRow, { backgroundColor: theme.panel }]}
+              >
                 <Text style={[styles.modeLabel, styles.modeText, { color: theme.foreground }]}>
                   {name ?? MOST_RECENT}
                 </Text>
@@ -167,7 +176,9 @@ export default function Setup() {
           </View>
         )}
 
-        {problem !== null && <Text style={[styles.problem, { color: theme.danger }]}>{problem}</Text>}
+        {problem !== null && (
+          <Text style={[styles.problem, { color: theme.danger }]}>{problem}</Text>
+        )}
 
         <Pressable
           onPress={start}
@@ -175,7 +186,8 @@ export default function Setup() {
             styles.connect,
             { backgroundColor: theme.accent },
             pressed && PRESSED,
-          ]}>
+          ]}
+        >
           <Text style={[styles.connectLabel, { color: theme.onAccent }]}>Connect</Text>
         </Pressable>
 
@@ -193,7 +205,8 @@ export default function Setup() {
               styles.copy,
               { backgroundColor: theme.surface },
               pressed && PRESSED,
-            ]}>
+            ]}
+          >
             <Text style={[styles.copyLabel, { color: theme.foreground }]}>
               {copied ? 'Copied' : 'Copy'}
             </Text>
@@ -214,7 +227,12 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { padding: SPACE.xl, gap: SPACE.md },
   title: { fontFamily: SANS_BOLD, includeFontPadding: false, fontSize: 34 },
-  caption: { fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.base, lineHeight: leading(TEXT.base) },
+  caption: {
+    fontFamily: SANS,
+    includeFontPadding: false,
+    fontSize: TEXT.base,
+    lineHeight: leading(TEXT.base),
+  },
   /** The label over a card, drawn the way the settings sheet draws its own group headers. */
   header: { ...SECTION_HEADER, paddingHorizontal: SPACE.gutter, paddingBottom: 7 },
   card: { borderRadius: RADIUS.card, overflow: 'hidden' },
@@ -233,7 +251,13 @@ const styles = StyleSheet.create({
   modeNote: { fontFamily: SANS, includeFontPadding: false, fontSize: 12, lineHeight: 16 },
   /** The bundled Nerd Font check, not `✓` U+2713 — see the call sites. */
   tick: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.label },
-  label: { fontFamily: SANS, includeFontPadding: false, width: 88, paddingLeft: SPACE.gutter, fontSize: TEXT.label },
+  label: {
+    fontFamily: SANS,
+    includeFontPadding: false,
+    width: 88,
+    paddingLeft: SPACE.gutter,
+    fontSize: TEXT.label,
+  },
   input: {
     fontFamily: SANS,
     includeFontPadding: false,
@@ -247,7 +271,13 @@ const styles = StyleSheet.create({
   // whatever the label plus a padding comes to.
   connect: { borderRadius: RADIUS.button, height: 48, ...CENTER },
   connectLabel: { fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: TEXT.button },
-  key: { fontFamily: MONO, includeFontPadding: false, fontSize: 11, lineHeight: 16, padding: SPACE.gutter },
+  key: {
+    fontFamily: MONO,
+    includeFontPadding: false,
+    fontSize: 11,
+    lineHeight: 16,
+    padding: SPACE.gutter,
+  },
   // Shrink-wrapped and left-aligned like its old `keyButtons` row wrapper: `card` is a column, so
   // without `alignSelf` the Pressable would stretch to the card's full width.
   copy: {

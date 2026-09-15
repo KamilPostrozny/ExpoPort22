@@ -65,7 +65,11 @@ test('case does not matter and non-chordable keys return null', () => {
 test('the strip is the static five, in order, with captions', () => {
   expect(CHORD_STRIP.map((c) => c.letter).join('')).toBe('CZRLD');
   expect(CHORD_STRIP.map((c) => c.caption)).toEqual([
-    'interrupt', 'suspend', 'history', 'clear', 'EOF',
+    'interrupt',
+    'suspend',
+    'history',
+    'clear',
+    'EOF',
   ]);
 });
 
@@ -176,7 +180,9 @@ test('autocorrect rewrites the shared suffix behind the cursor, including the ap
 
 test('correction at a moved caret rewrites only up to that caret', () => {
   expect(planInputEdit('lets go', 'let’s go', 4)).toEqual({
-    ahead: 0, keys: DEL + '’s', caret: 5,
+    ahead: 0,
+    keys: DEL + '’s',
+    caret: 5,
   });
   expect(planInputEdit('aaa', 'aaaa', 1)).toEqual({ ahead: 0, keys: 'a', caret: 2 });
   expect(planInputEdit('aaa', 'aa', 1)).toEqual({ ahead: 0, keys: DEL, caret: 0 });
@@ -184,17 +190,28 @@ test('correction at a moved caret rewrites only up to that caret', () => {
 
 test('a replacement extending beyond the caret moves to its old end first', () => {
   expect(planInputEdit('teh next', 'the next', 1)).toEqual({
-    ahead: 2, keys: DEL.repeat(2) + 'he', caret: 3,
+    ahead: 2,
+    keys: DEL.repeat(2) + 'he',
+    caret: 3,
   });
 });
 
 test('terminal replay agrees with native text and cursor across correction/edit sequences', () => {
   const cases: [string, string, number][] = [
-    ['lets', 'let’s', 4], ['lets ', "let's ", 5], ['let’s ', 'lets ', 6],
-    ['teh ', 'the ', 4], ['helo world ', 'hello world ', 11],
-    ['lets go', 'let’s go', 4], ['ls -la', 'ls x-la', 3], ['ls -la', 'ls-la', 3],
-    ['aaa', 'aaaa', 1], ['aaa', 'aa', 1], ['teh next', 'the next', 1],
-    ['😀lets', '😀let’s', 6], ['a😀', 'b😀', 3], ['😀😀', '😀x😀', 2],
+    ['lets', 'let’s', 4],
+    ['lets ', "let's ", 5],
+    ['let’s ', 'lets ', 6],
+    ['teh ', 'the ', 4],
+    ['helo world ', 'hello world ', 11],
+    ['lets go', 'let’s go', 4],
+    ['ls -la', 'ls x-la', 3],
+    ['ls -la', 'ls-la', 3],
+    ['aaa', 'aaaa', 1],
+    ['aaa', 'aa', 1],
+    ['teh next', 'the next', 1],
+    ['😀lets', '😀let’s', 6],
+    ['a😀', 'b😀', 3],
+    ['😀😀', '😀x😀', 2],
     [' '.repeat(512) + 'lets', ' '.repeat(512) + 'let’s', 516],
   ];
   for (const [prev, next, caret] of cases) {

@@ -311,7 +311,9 @@ async function poll(): Promise<void> {
     const wanted = pollSession(getSettings());
     if (wanted !== aimedAt) {
       aimedAt = wanted;
-      console.log(`[tmux] poll aimed at ${wanted === null ? 'nothing (untargeted)' : `session ${wanted}`}`);
+      console.log(
+        `[tmux] poll aimed at ${wanted === null ? 'nothing (untargeted)' : `session ${wanted}`}`,
+      );
     }
     // The session that answered last time is asked first — it is where the shell actually IS, and
     // that does not change because a setting did (a start-mode change takes effect on the next
@@ -334,17 +336,12 @@ async function poll(): Promise<void> {
     // `(node, [])` then `(node, [claude])` — would repad the keyboard twice in a row, the second
     // time mid-word, where a repad throws away the correction context the user was in.
     let paneChildren: string[] = [];
-    if (
-      attached &&
-      answer !== null &&
-      answer.panePid > 0 &&
-      INTERPRETERS.has(answer.paneCommand)
-    ) {
+    if (attached && answer !== null && answer.panePid > 0 && INTERPRETERS.has(answer.paneCommand)) {
       try {
         paneChildren = (await run1(childrenCommand(answer.panePid)))
-          .split("\n")
+          .split('\n')
           .map((line) => line.trim())
-          .filter((line) => line !== "");
+          .filter((line) => line !== '');
       } catch {
         // One beat without the disambiguation: the interpreter default is OFF — the terminal's own
         // default. Nothing to say, like a missed poll; the next beat asks again.
@@ -357,7 +354,7 @@ async function poll(): Promise<void> {
       session: attached ? session : null,
       windowIndex: answer?.attached ? answer.windowIndex : null,
       scrolled: answer?.attached ? answer.paneInMode > 0 : false,
-      paneCommand: attached ? answer?.paneCommand ?? null : null,
+      paneCommand: attached ? (answer?.paneCommand ?? null) : null,
       paneChildren: attached ? paneChildren : [],
     });
   } catch {
@@ -376,7 +373,7 @@ async function poll(): Promise<void> {
  * lands where it would have.
  */
 export function nudgePoll(): void {
- void poll();
+  void poll();
 }
 
 /** What the host is running, remembered for Setup's attach picker (§4.1) — that screen has no
@@ -483,8 +480,8 @@ export async function killWindow(windowId: string): Promise<void> {
  * once, five times sooner than the 2s beat would carry it.
  */
 export async function scrollBottom(windowId: string): Promise<void> {
- await run1(scrollBottomCommand(windowId));
- void poll();
+  await run1(scrollBottomCommand(windowId));
+  void poll();
 }
 
 // Deferred like `selectWindow`: committing a swipe past the last tab births a window, and that

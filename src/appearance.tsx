@@ -95,7 +95,9 @@ export default function AppearanceCard({
   //  is the Nerd Font tick, pinned to MONO so both platforms draw the same one — the switcher's
   // Done tick is the same glyph in the same family, and the two must not drift apart.
   const check = (
-    <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 13, color: theme.accent }}>
+    <Text
+      style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 13, color: theme.accent }}
+    >
       {''}
     </Text>
   );
@@ -120,14 +122,22 @@ export default function AppearanceCard({
             styles.rowLine,
             { borderTopColor: theme.border },
             pressed && { backgroundColor: theme.surface },
-          ]}>
+          ]}
+        >
           <Text style={[styles.label, { color: theme.foreground }]}>{label}</Text>
           <Text style={[styles.value, { color: theme.muted }]} numberOfLines={1}>
             {resolveTheme(settings[field]).label}
           </Text>
           {/*  / , the Nerd Font chevrons, in MONO: the U+2304 this used to fall back to is in
               neither Roboto nor Noto Sans, so it drew a tofu box on Android. */}
-          <Text style={{ fontFamily: MONO, includeFontPadding: false, fontSize: 12, color: theme.muted }}>
+          <Text
+            style={{
+              fontFamily: MONO,
+              includeFontPadding: false,
+              fontSize: 12,
+              color: theme.muted,
+            }}
+          >
             {isOpen ? '' : ''}
           </Text>
         </Pressable>
@@ -142,7 +152,8 @@ export default function AppearanceCard({
                 styles.rowLine,
                 { borderTopColor: theme.border },
                 pressed && { backgroundColor: theme.surface },
-              ]}>
+              ]}
+            >
               <Text style={[styles.label, { color: theme.foreground }]} numberOfLines={1}>
                 {t.label}
               </Text>
@@ -164,7 +175,11 @@ export default function AppearanceCard({
     <View style={[styles.card, { backgroundColor: card }]}>
       <View style={styles.row}>
         <Text style={[styles.label, { color: theme.foreground }]}>Follow system</Text>
-        <Switch value={settings.followSystem} onValueChange={toggleFollow} {...switchColors(theme)} />
+        <Switch
+          value={settings.followSystem}
+          onValueChange={toggleFollow}
+          {...switchColors(theme)}
+        />
       </View>
       {/* Straight under the switch that decides how many of these rows there are — the font stepper
           used to sit between them, which put the answer two scrolls from the question. */}
@@ -182,13 +197,15 @@ export default function AppearanceCard({
         <View style={[styles.stepper, { backgroundColor: theme.surface }]}>
           <Pressable
             onPress={() => stepFont(-1)}
-            style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}>
+            style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}
+          >
             <Text style={[styles.stepGlyph, { color: theme.foreground }]}>−</Text>
           </Pressable>
           <View style={[styles.stepDivider, { backgroundColor: theme.border }]} />
           <Pressable
             onPress={() => stepFont(1)}
-            style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}>
+            style={({ pressed }) => [styles.stepKey, pressed && PRESSED]}
+          >
             <Text style={[styles.stepGlyph, { color: theme.foreground }]}>+</Text>
           </Pressable>
         </View>
@@ -213,7 +230,12 @@ const styles = StyleSheet.create({
   /** A theme inside an expanded list, indented off the disclosure row that opened it. */
   subRow: { paddingLeft: SPACE.xxl },
   label: { flex: 1, fontFamily: SANS, includeFontPadding: false, fontSize: TEXT.label },
-  value: { fontFamily: MONO, includeFontPadding: false, fontSize: TEXT.base, marginRight: SPACE.md },
+  value: {
+    fontFamily: MONO,
+    includeFontPadding: false,
+    fontSize: TEXT.base,
+    marginRight: SPACE.md,
+  },
   // The swatch strip and its chips are the prototype's own one-off geometry (gap:3, padding:3,
   // 9×13 chips at 2.5) — a single element's numbers, deliberately not in the shared vocabulary.
   swatch: {

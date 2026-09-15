@@ -61,7 +61,14 @@ import {
   useSession,
   type Session,
 } from '@/session';
-import { endpoint, getSettings, pollSession, updateSettings, useSettings, usesTmux } from '@/settings';
+import {
+  endpoint,
+  getSettings,
+  pollSession,
+  updateSettings,
+  useSettings,
+  usesTmux,
+} from '@/settings';
 import {
   SEARCH_DEBOUNCE_MS,
   normalizeQuery,
@@ -89,7 +96,17 @@ import {
   type Frame,
 } from '@/switcher-model';
 import SettingsSheet from '@/settings-sheet';
-import { BAR, CENTER, PRESSED, PRESSED_KEY, RADIUS, SEARCH_RADIUS, SPACE, TEXT, leading } from '@/style';
+import {
+  BAR,
+  CENTER,
+  PRESSED,
+  PRESSED_KEY,
+  RADIUS,
+  SEARCH_RADIUS,
+  SPACE,
+  TEXT,
+  leading,
+} from '@/style';
 import TerminalView, { type TerminalHandle } from '@/terminal';
 import {
   killWindow,
@@ -208,9 +225,10 @@ export default function SessionScreen() {
    *  time; the two only part while the strip is up. */
   const [rowHeight, setRowHeight] = useState(60);
   /** A picked file waiting on a destination (§4.6): the sheet is up exactly while this is set. */
-  const [pendingUpload, setPendingUpload] = useState<{ base64: string; suggestedName: string } | null>(
-    null,
-  );
+  const [pendingUpload, setPendingUpload] = useState<{
+    base64: string;
+    suggestedName: string;
+  } | null>(null);
   /** The terminal's FINAL keyboard overlap. Its box changes once per destination; only the
    * bar follows the per-frame position. Animating this padding would refit xterm through every
    * intermediate row count and make full-screen editors redraw repeatedly. */
@@ -261,7 +279,8 @@ export default function SessionScreen() {
 
   // The TOFU prompt (§4.1). Keyed on the fingerprint rather than the session object so it is raised
   // once per unknown key, not once per re-render that happens to be in `connecting`.
-  const fingerprint = session.status === 'connecting' ? (session.hostKey?.fingerprint ?? null) : null;
+  const fingerprint =
+    session.status === 'connecting' ? (session.hostKey?.fingerprint ?? null) : null;
   useEffect(() => {
     if (fingerprint === null) return;
     Alert.alert(
@@ -395,69 +414,69 @@ export default function SessionScreen() {
       nudgePoll();
     },
     onResize: async (cols, rows, cellW, cellH) => {
-          const was = lastFit.current;
-          // A resize re-rolls the search: the host reflows the pane for the new size, so every
-          // on-screen hit position the last capture reported is about to be wrong (a keyboard open
-          // takes eighteen rows off the bottom, and the marks would stay where they were). Only
-          // when a search is armed, and only on a size that actually moved — this callback also
-          // fires as a re-report that changes nothing.
-          if (searchRef.current.on && (was === null || was.cols !== cols || was.rows !== rows))
-            setSearchFit((n) => n + 1);
-          lastFit.current = { cols, rows };
-          if (sw !== 'closed' && sw !== 'open') {
-            return;
-          }
-          // Same object back when nothing moved, so React bails out instead of re-rendering: a
-          // re-report carries the cell it already carried, and a fresh `{w,h}` is a new identity
-          // every time — which re-ran this screen once per switcher open for a cell that had
-          // not changed.
-          if (cellW > 0 && cellH > 0)
-            setCell((c) => (c.w === cellW && c.h === cellH ? c : { w: cellW, h: cellH }));
-          if (cols > 0) setLiveCols(cols);
-          setSize(cols, rows);
-        },
+      const was = lastFit.current;
+      // A resize re-rolls the search: the host reflows the pane for the new size, so every
+      // on-screen hit position the last capture reported is about to be wrong (a keyboard open
+      // takes eighteen rows off the bottom, and the marks would stay where they were). Only
+      // when a search is armed, and only on a size that actually moved — this callback also
+      // fires as a re-report that changes nothing.
+      if (searchRef.current.on && (was === null || was.cols !== cols || was.rows !== rows))
+        setSearchFit((n) => n + 1);
+      lastFit.current = { cols, rows };
+      if (sw !== 'closed' && sw !== 'open') {
+        return;
+      }
+      // Same object back when nothing moved, so React bails out instead of re-rendering: a
+      // re-report carries the cell it already carried, and a fresh `{w,h}` is a new identity
+      // every time — which re-ran this screen once per switcher open for a cell that had
+      // not changed.
+      if (cellW > 0 && cellH > 0)
+        setCell((c) => (c.w === cellW && c.h === cellH ? c : { w: cellW, h: cellH }));
+      if (cols > 0) setLiveCols(cols);
+      setSize(cols, rows);
+    },
     onBoot: async () => {
-          // A reload reaped the webview that owned the selection: nothing is selected until the
-          // touch layer says otherwise, or a Copy would write an empty pasteboard.
-          selectionText.current = '';
-          detach.current?.();
-          detach.current = attachTerminal((chunks) => {
-            dataSeq.current += chunks.length; // "has the host redrawn yet" — see `afterHostRedraw`
-            terminal.current?.write(chunks);
-          });
-        },
+      // A reload reaped the webview that owned the selection: nothing is selected until the
+      // touch layer says otherwise, or a Copy would write an empty pasteboard.
+      selectionText.current = '';
+      detach.current?.();
+      detach.current = attachTerminal((chunks) => {
+        dataSeq.current += chunks.length; // "has the host redrawn yet" — see `afterHostRedraw`
+        terminal.current?.write(chunks);
+      });
+    },
     onBell: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light),
     onClipboard: async (text) => {
-          await Clipboard.setStringAsync(text);
-          pushYank(text);
-        },
-        onSelection: (text) => {
-          const was = selectionText.current.length > 0;
-          selectionText.current = text;
-          const live = text.length > 0;
-          // Log the TRANSITION, not every extension step: a drag crosses a cell every few frames
-          // and the line exists so the device watch can screenshot the frame — the word at
-          // long-press is the frame. The clear prints `selection ""`, which the watch deliberately
-          // skips (see scripts/watch-and-shoot.sh).
-          if (live !== was)
-            console.log('[terminal] selection', JSON.stringify(live ? text.slice(0, 80) : ''));
-        },
-        // The callout's Copy row: the OSC 52 treatment — system pasteboard and a yank slot
-        // (it is a yank: text the user took out of the terminal, newest on top, pinnable).
-        onCopySelection: async () => {
-          const text = selectionText.current;
-          if (text.length === 0) return;
-          await Clipboard.setStringAsync(text);
-          pushYank(text);
-          console.log('[terminal] copy', `${text.length} chars`);
-        },
+      await Clipboard.setStringAsync(text);
+      pushYank(text);
+    },
+    onSelection: (text) => {
+      const was = selectionText.current.length > 0;
+      selectionText.current = text;
+      const live = text.length > 0;
+      // Log the TRANSITION, not every extension step: a drag crosses a cell every few frames
+      // and the line exists so the device watch can screenshot the frame — the word at
+      // long-press is the frame. The clear prints `selection ""`, which the watch deliberately
+      // skips (see scripts/watch-and-shoot.sh).
+      if (live !== was)
+        console.log('[terminal] selection', JSON.stringify(live ? text.slice(0, 80) : ''));
+    },
+    // The callout's Copy row: the OSC 52 treatment — system pasteboard and a yank slot
+    // (it is a yank: text the user took out of the terminal, newest on top, pinnable).
+    onCopySelection: async () => {
+      const text = selectionText.current;
+      if (text.length === 0) return;
+      await Clipboard.setStringAsync(text);
+      pushYank(text);
+      console.log('[terminal] copy', `${text.length} chars`);
+    },
     onLink: async (url) => {
-          await WebBrowser.openBrowserAsync(url);
-        },
+      await WebBrowser.openBrowserAsync(url);
+    },
     onModes: async (next) => {
-          console.log('[session] modes', JSON.stringify(next));
-          setModes(next);
-        },
+      console.log('[session] modes', JSON.stringify(next));
+      setModes(next);
+    },
     onTwoFingerTap: async () => openSettings(),
   };
   /** One identity-stable object instead of nine one-per-key trampolines: same ref-indirection, one hook. */
@@ -589,7 +608,9 @@ export default function SessionScreen() {
    *  phantom slot and birthed a window instead of returning (user, 2026-08-26). */
   const activePosIn = (list: Card[]) => {
     const wait = awaiting.current;
-    const byIndex = list.findIndex((c) => c.win.index === (wait === null ? tmux.windowIndex : wait.index));
+    const byIndex = list.findIndex(
+      (c) => c.win.index === (wait === null ? tmux.windowIndex : wait.index),
+    );
     if (byIndex >= 0) return byIndex;
     const byFlag = list.findIndex((c) => c.win.active);
     return byFlag >= 0 ? byFlag : 0;
@@ -650,7 +671,10 @@ export default function SessionScreen() {
           if (!live) return;
           console.log(
             `[search] ${JSON.stringify(q)} in ${activeWinId}:`,
-            answer.total, 'in the window,', answer.onScreen.length, 'on screen',
+            answer.total,
+            'in the window,',
+            answer.onScreen.length,
+            'on screen',
           );
           setFound(answer);
           setHitAt(0);
@@ -1003,7 +1027,10 @@ export default function SessionScreen() {
    */
   const switchTo = (win: TmuxWindow) =>
     selectWindow(win.id).catch(async (error) => {
-      console.log(`[terminal] select failed: ${win.id}(:${win.index}) — the tab did not change`, error);
+      console.log(
+        `[terminal] select failed: ${win.id}(:${win.index}) — the tab did not change`,
+        error,
+      );
       await refresh(false); // undo the optimistic `active` flip: whatever tmux says is where we are
     });
 
@@ -1068,7 +1095,8 @@ export default function SessionScreen() {
       const seen = dataSeq.current;
       const settled = seen > base && seen === lastFrame; // arrived, and quiet for a frame
       lastFrame = seen;
-      if (frames >= ZOOM_WEDGE_FRAMES) console.log('[terminal] redraw never arrived — going anyway');
+      if (frames >= ZOOM_WEDGE_FRAMES)
+        console.log('[terminal] redraw never arrived — going anyway');
       else if (!settled) {
         frames++;
         requestAnimationFrame(step);
@@ -1102,7 +1130,11 @@ export default function SessionScreen() {
       console.log(
         '[switcher] kill failed:',
         win.id,
-        alive === null ? 'still there? the re-list failed too' : alive ? 'WINDOW IS STILL ALIVE' : 'window is gone anyway',
+        alive === null
+          ? 'still there? the re-list failed too'
+          : alive
+            ? 'WINDOW IS STILL ALIVE'
+            : 'window is gone anyway',
         error,
       );
     });
@@ -1528,7 +1560,9 @@ export default function SessionScreen() {
         // Optimistic `active` flip, here and not with the switch below: the pills, the anchor and
         // the next grid open all read it, and none of them may wait for a roundtrip.
         if (win)
-          setCards((prev) => prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })));
+          setCards((prev) =>
+            prev.map((c) => ({ ...c, win: { ...c.win, active: c.win.id === win.id } })),
+          );
         setPageSwipe((s) => (s === null ? s : { ...s, phase: 'anim', target }));
         // The HOST is told at the landing, not here — see `settleBarSwipe`.
         slideTo((info.pos - target) * pagePitch(stage.w), () => settleBarSwipe(win));
@@ -1659,16 +1693,16 @@ export default function SessionScreen() {
      `pillNamesKey`; the shared values are stable. */
   const pillsProp = useMemo(
     () =>
-    showTabs && connected && stage !== null
-      ? {
-          names: pillNames,
-          pos: pillPosSV,
-          hold: pillHoldSV,
-          x: swipeX,
-          pitch: pagePitch(stage.w),
-          live: pillsLive,
-        }
-      : null,
+      showTabs && connected && stage !== null
+        ? {
+            names: pillNames,
+            pos: pillPosSV,
+            hold: pillHoldSV,
+            x: swipeX,
+            pitch: pagePitch(stage.w),
+            live: pillsLive,
+          }
+        : null,
     [showTabs, connected, stage, pillNamesKey, pillsLive, pillPosSV, pillHoldSV, swipeX],
   );
 
@@ -1692,8 +1726,7 @@ export default function SessionScreen() {
   // through the zoom) and the 1:1 pages all shift by this same value, which is what keeps the
   // crossfade seamless.
   const termW = stage === null ? 0 : stage.w - 2 * padH;
-  const gridCenter =
-    liveCols > 0 && cell.w > 0 ? Math.max(0, (termW - liveCols * cell.w) / 2) : 0;
+  const gridCenter = liveCols > 0 && cell.w > 0 ? Math.max(0, (termW - liveCols * cell.w) / 2) : 0;
   // The remainder, halved onto each side — and this is the padding the fit will measure against,
   // so it has to give the rows back exactly the height they came from. Two things make that safe:
   // it is clamped to one row (a stale `rows`, mid-keyboard, cannot ask for an absurd inset), and
@@ -1742,7 +1775,8 @@ export default function SessionScreen() {
    *  that far off a raised keyboard. A step, not a ride — a popover is only ever visible with
    *  the keyboard settled, and both its states (this base, `keyboardPopoverStyle`'s ride) agree
    *  at the settled point. */
-  const popBase = barHeight + 6 + keyboardPad + insets.bottom + (keyboardPad > 0 ? BAR.keyboardGap : 0);
+  const popBase =
+    barHeight + 6 + keyboardPad + insets.bottom + (keyboardPad > 0 ? BAR.keyboardGap : 0);
 
   /**
    * A neighbouring page's card, INSIDE the zoomed container with the live one. It carries nothing
@@ -2004,75 +2038,82 @@ export default function SessionScreen() {
           const { width, height } = e.nativeEvent.layout;
           setStage({ w: width, h: height });
           stageSV.value = { w: width, h: height };
-        }}>
-      {/* Mounted from the moment tabs are reachable, not from the moment the zoom starts: a grid
+        }}
+      >
+        {/* Mounted from the moment tabs are reachable, not from the moment the zoom starts: a grid
           of N cards is N snapshot trees of up to MAX_LINES <Text> runs each, and building them on
           the frame the gesture commits is a stall on that frame — the flight then crosses an empty
           grid and the cards appear as it lands (user, 2026-08-10). It costs nothing to leave up:
           the stage wrapper in front of it is opaque and full-screen at rest, so while `closed` this
           is a static subtree nobody can see or touch. Same condition as the snapshot cache's own
           `enabled` (T14A) — the content and the views it draws warm together. */}
-      {stage !== null && (sw !== 'closed' || (showTabs && connected)) && (
-        <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, gridInStyle]}>
-        <Switcher
-          theme={theme}
-          stageW={stage.w}
-          cell={cell}
-          liveCols={liveCols}
-          gridCenter={gridCenter}
-          insetTop={insets.top}
-          insetBottom={insets.bottom}
-          cards={gridCards.current}
-          total={cards.length}
-          unreachable={listFailed}
-          query={search.on ? search.q : ''}
-          hits={hits}
-          onQuery={swOps.onQuery}
-          onClearSearch={swOps.onClearSearch}
-          interactive={sw === 'open'}
-          tappable={sw === 'open' || sw === 'opening'}
-          zoomActive={zoomActive}
-          onSelect={swOps.onSelect}
-          onKill={swOps.onKill}
-          onNew={swOps.onNew}
-          onDone={swOps.onDone}
-          onMove={swOps.onMove}
-          onScrollY={swOps.onScrollY}
-          gridRef={gridRef}
-          zoomId={zoomId}
-          fade={alpha}
-        />
-        </Animated.View>
-      )}
+        {stage !== null && (sw !== 'closed' || (showTabs && connected)) && (
+          <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, gridInStyle]}>
+            <Switcher
+              theme={theme}
+              stageW={stage.w}
+              cell={cell}
+              liveCols={liveCols}
+              gridCenter={gridCenter}
+              insetTop={insets.top}
+              insetBottom={insets.bottom}
+              cards={gridCards.current}
+              total={cards.length}
+              unreachable={listFailed}
+              query={search.on ? search.q : ''}
+              hits={hits}
+              onQuery={swOps.onQuery}
+              onClearSearch={swOps.onClearSearch}
+              interactive={sw === 'open'}
+              tappable={sw === 'open' || sw === 'opening'}
+              zoomActive={zoomActive}
+              onSelect={swOps.onSelect}
+              onKill={swOps.onKill}
+              onNew={swOps.onNew}
+              onDone={swOps.onDone}
+              onMove={swOps.onMove}
+              onScrollY={swOps.onScrollY}
+              gridRef={gridRef}
+              zoomId={zoomId}
+              fade={alpha}
+            />
+          </Animated.View>
+        )}
 
-      {/* The zoomed container: one scale, one flight, holding the live card and — once a swipe is
+        {/* The zoomed container: one scale, one flight, holding the live card and — once a swipe is
           actually running — the pages either side of it. It keeps the stage's full height and does
           NOT clip, so a card a pitch away is not cut off; each card inside crops itself. */}
-      <Animated.View
-        // See `chromeLive`: the same phases the key bar and the ribbon band answer to.
-        pointerEvents={chromeLive ? 'auto' : 'none'}
-        style={[
-          stage === null ? styles.screen : [styles.zoomBox, { width: stage.w, height: stage.h }],
-          stage !== null && boxStyle,
-        ]}>
-
-      {/* The live card: the clipped, rounded, ringed terminal surface. Identity at rest — at which
+        <Animated.View
+          // See `chromeLive`: the same phases the key bar and the ribbon band answer to.
+          pointerEvents={chromeLive ? 'auto' : 'none'}
+          style={[
+            stage === null ? styles.screen : [styles.zoomBox, { width: stage.w, height: stage.h }],
+            stage !== null && boxStyle,
+          ]}
+        >
+          {/* The live card: the clipped, rounded, ringed terminal surface. Identity at rest — at which
           point it is the screen — and the thing the ring belongs to at every other. Its ground is
           safe again now the neighbours are drawn IN FRONT (an arriving card covers it rather than
           hiding behind it), and the flight needs it: the crop view's keyboard-pad band is bare
           otherwise, a see-through strip along the held card's bottom. */}
-      <Animated.View
-        style={[
-          stage === null
-            ? styles.screen
-            : [
-                styles.stageWrapper,
-                { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
-              ],
-          // The live card's crop and corner — never conditional, see `cardClipStyle`.
-          stage !== null && cardClipStyle,
-        ]}>
-      {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
+          <Animated.View
+            style={[
+              stage === null
+                ? styles.screen
+                : [
+                    styles.stageWrapper,
+                    {
+                      width: stage.w,
+                      height: stage.h,
+                      borderRadius: pageR,
+                      backgroundColor: theme.background,
+                    },
+                  ],
+              // The live card's crop and corner — never conditional, see `cardClipStyle`.
+              stage !== null && cardClipStyle,
+            ]}
+          >
+            {/* The stage: everything above the keyboard. The popover layer fills *this* view, not the
           screen, so it clips and flies with the zoom — but it fills the border box, padding and
           all (Yoga), so what it covers is the screen and `popBase` adds the keyboard back.
           Its height is the stage's own, fixed, NOT the wrapper's: the wrapper's height is what
@@ -2083,140 +2124,163 @@ export default function SessionScreen() {
           is the jolt at the end of the flight (user, 2026-08-10). Fixed here, the wrapper clips
           instead: the bar slides out of the bottom of the frame, the pane keeps its geometry the
           whole way, and the snapshot it lands on is drawing the same rows at the same size. */}
-      <Animated.View
-        style={[
-          stage === null ? styles.screen : { height: stage.h },
-          { paddingBottom: keyboardPad },
-          cropStyle,
-        ]}>
-      {/* T14: the terminal view's search bar — up exactly while the shared search is armed. The
+            <Animated.View
+              style={[
+                stage === null ? styles.screen : { height: stage.h },
+                { paddingBottom: keyboardPad },
+                cropStyle,
+              ]}
+            >
+              {/* T14: the terminal view's search bar — up exactly while the shared search is armed. The
           same string as the switcher's field; prev/next walk the addon's occurrences; Done
           disarms both views. */}
-      {search.on && (
-        <View style={[styles.searchRow, { paddingTop: insets.top }]}>
-          <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
-            <TextInput
-              value={search.q}
-              onChangeText={(q) => setSearch({ q, on: true })}
-              placeholder="Search this window"
-              placeholderTextColor={theme.placeholder}
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-              style={[styles.searchInput, { color: theme.foreground, fontFamily: MONO, includeFontPadding: false  }]}
-            />
-            {/* BUGS.md §6: the count is the host's now — every occurrence in the window, tmux's
+              {search.on && (
+                <View style={[styles.searchRow, { paddingTop: insets.top }]}>
+                  <View style={[styles.searchField, { backgroundColor: theme.surface }]}>
+                    <TextInput
+                      value={search.q}
+                      onChangeText={(q) => setSearch({ q, on: true })}
+                      placeholder="Search this window"
+                      placeholderTextColor={theme.placeholder}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      spellCheck={false}
+                      style={[
+                        styles.searchInput,
+                        { color: theme.foreground, fontFamily: MONO, includeFontPadding: false },
+                      ]}
+                    />
+                    {/* BUGS.md §6: the count is the host's now — every occurrence in the window, tmux's
                 whole history included. `searchLabel` owns the wording, because the honesty is in
                 the arithmetic: the index is the hit's place in the WHOLE window, so `1265/1284`
                 says both what this hit is and how much of the search is above the screen and out
                 of the steppers' reach. Same Text, same MONO 11 in `muted`. */}
-            <Text numberOfLines={1} style={[styles.searchCount, { color: theme.muted }]}>
-              {search.q.trim() === '' ? '' : searchLabel(found, hitAt)}
-            </Text>
-          </View>
-          {/* The pair, in a group of its own: they are one segmented control, so they sit closer
+                    <Text numberOfLines={1} style={[styles.searchCount, { color: theme.muted }]}>
+                      {search.q.trim() === '' ? '' : searchLabel(found, hitAt)}
+                    </Text>
+                  </View>
+                  {/* The pair, in a group of its own: they are one segmented control, so they sit closer
               to each other than the row's own gap puts them — and Done stays outside it. */}
-          <View style={{ flexDirection: 'row', gap: 2 }}>
-            {(['prev', 'next'] as const).map((dir) => (
-              <Pressable
-                key={dir}
-                disabled={!stepsLive}
-                onPress={() => stepHit(dir === 'prev' ? -1 : 1)}
-                style={({ pressed }) => [
-                  styles.searchStep,
-                  { backgroundColor: theme.surface, opacity: stepsLive ? 1 : 0.35 },
-                  pressed && PRESSED,
-                ]}>
-                <Text style={{ color: theme.foreground, fontFamily: SANS_SEMIBOLD, includeFontPadding: false, fontSize: 13 }}>
-                  {dir === 'prev' ? '∧' : '∨'}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          <Pressable onPress={disarmSearch} hitSlop={8}>
-            <Text style={[styles.searchDone, { color: theme.accent }]}>Done</Text>
-          </Pressable>
-        </View>
-      )}
-      {/* The terminal area: the full window face. During a bar swipe the live terminal slides
+                  <View style={{ flexDirection: 'row', gap: 2 }}>
+                    {(['prev', 'next'] as const).map((dir) => (
+                      <Pressable
+                        key={dir}
+                        disabled={!stepsLive}
+                        onPress={() => stepHit(dir === 'prev' ? -1 : 1)}
+                        style={({ pressed }) => [
+                          styles.searchStep,
+                          { backgroundColor: theme.surface, opacity: stepsLive ? 1 : 0.35 },
+                          pressed && PRESSED,
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            color: theme.foreground,
+                            fontFamily: SANS_SEMIBOLD,
+                            includeFontPadding: false,
+                            fontSize: 13,
+                          }}
+                        >
+                          {dir === 'prev' ? '∧' : '∨'}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Pressable onPress={disarmSearch} hitSlop={8}>
+                    <Text style={[styles.searchDone, { color: theme.accent }]}>Done</Text>
+                  </Pressable>
+                </View>
+              )}
+              {/* The terminal area: the full window face. During a bar swipe the live terminal slides
           inside it as a rounded page card — notch strip to home strip, the whole screen as one
           card (user, 2026-08-11, Safari screenshots) — with the neighbour snapshots as its
           siblings and the bar floating on top. Crust behind it, as behind the switcher's cards:
           it is what shows in the page gap and behind the rounded corners. At rest the live page
           (square, flex:1) covers it entirely. */}
-      <View style={[styles.termArea, { backgroundColor: theme.scrim }]}>
-      {/* The pane's own breathing room. Horizontally it is the gap PLUS the fit's sliver halved
+              <View style={[styles.termArea, { backgroundColor: theme.scrim }]}>
+                {/* The pane's own breathing room. Horizontally it is the gap PLUS the fit's sliver halved
           onto each side (`gridCenter`), so the left and right gaps agree — and it is what makes
           the zoom's crossfade seamless, because the switcher's cards and the 1:1 pages shift by
           the same value (the cards through the zoom): a card's snapshot is inset by exactly this
           much seen through the zoom (switcher-model derives one from the other), so the text does
           not move when the surface hands over. The top and bottom insets carry the safe-area
           strips and the floating bar's ground — the card face owns those bands now. */}
-      <Animated.View
-        style={[
-          styles.termSlide,
-          {
-            backgroundColor: theme.background,
-            paddingTop: notchPad,
-            paddingLeft: padH + gridCenter,
-            paddingRight: padH - gridCenter,
-            paddingBottom: padBottom + barPad + kbGapPad,
-            // The resting corner, stated rather than left to the absence of one — what the view
-            // wears before the first frame, and what the code says the page's corner IS. It is
-            // not the mechanism that keeps it right (see `cardRadiiStyle`'s note on why the style
-            // is no longer detached); stating it twice is deliberate, and the two agree by
-            // construction: `zoomFrame`'s radius at t=0 is `SCREEN_R * stage.w`, which is
-            // `pageRadius`, and `pageRB` carries the same `kbSquare` the worklet applies.
-            borderTopLeftRadius: pageRT,
-            borderTopRightRadius: pageRT,
-            borderBottomLeftRadius: pageRB,
-            borderBottomRightRadius: pageRB,
-          },
-          cardRadiiStyle,
-        ]}>
-      {terminalView}
-      {/* see pageEdgeStyle — the live page's card edge while a swipe is on */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          styles.pageEdge,
-          { borderColor: theme.accent, borderRadius: pageR, borderTopLeftRadius: pageRT, borderTopRightRadius: pageRT, borderBottomLeftRadius: pageRB, borderBottomRightRadius: pageRB },
-          cardRadiiStyle,
-          pageEdgeStyle,
-        ]}
-      />
-      {/* The "scrolled up" arrow — bottom-right of the pane, a few points above the last line and
+                <Animated.View
+                  style={[
+                    styles.termSlide,
+                    {
+                      backgroundColor: theme.background,
+                      paddingTop: notchPad,
+                      paddingLeft: padH + gridCenter,
+                      paddingRight: padH - gridCenter,
+                      paddingBottom: padBottom + barPad + kbGapPad,
+                      // The resting corner, stated rather than left to the absence of one — what the view
+                      // wears before the first frame, and what the code says the page's corner IS. It is
+                      // not the mechanism that keeps it right (see `cardRadiiStyle`'s note on why the style
+                      // is no longer detached); stating it twice is deliberate, and the two agree by
+                      // construction: `zoomFrame`'s radius at t=0 is `SCREEN_R * stage.w`, which is
+                      // `pageRadius`, and `pageRB` carries the same `kbSquare` the worklet applies.
+                      borderTopLeftRadius: pageRT,
+                      borderTopRightRadius: pageRT,
+                      borderBottomLeftRadius: pageRB,
+                      borderBottomRightRadius: pageRB,
+                    },
+                    cardRadiiStyle,
+                  ]}
+                >
+                  {terminalView}
+                  {/* see pageEdgeStyle — the live page's card edge while a swipe is on */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      styles.pageEdge,
+                      {
+                        borderColor: theme.accent,
+                        borderRadius: pageR,
+                        borderTopLeftRadius: pageRT,
+                        borderTopRightRadius: pageRT,
+                        borderBottomLeftRadius: pageRB,
+                        borderBottomRightRadius: pageRB,
+                      },
+                      cardRadiiStyle,
+                      pageEdgeStyle,
+                    ]}
+                  />
+                  {/* The "scrolled up" arrow — bottom-right of the pane, a few points above the last line and
           clear of the floating key bar's band (the card's own `paddingBottom` reserves it). Part of
           the card, so it flies with the zoom; only drawn at rest, so it never scales on screen. */}
-      {showScrollArrow && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Scroll to bottom"
-          accessibilityHint="Return the terminal to its live output"
-          onPress={scrollToBottom}
-          style={({ pressed }) => [
-            styles.scrollArrow,
-            { right: BAR.sideMargin, bottom: padBottom + barPad + kbGapPad + 4 },
-            pressed && PRESSED_KEY,
-          ]}>
-          {/* The key bar's own tabs circle, stacked above it: the same `Plate` and size, aligned to
+                  {showScrollArrow && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Scroll to bottom"
+                      accessibilityHint="Return the terminal to its live output"
+                      onPress={scrollToBottom}
+                      style={({ pressed }) => [
+                        styles.scrollArrow,
+                        { right: BAR.sideMargin, bottom: padBottom + barPad + kbGapPad + 4 },
+                        pressed && PRESSED_KEY,
+                      ]}
+                    >
+                      {/* The key bar's own tabs circle, stacked above it: the same `Plate` and size, aligned to
               that circle's column by the same `right`, so the two read as one vertical stack. */}
-          <Plate theme={theme} radius={BAR.radius} style={styles.scrollArrowPlate}>
-            <Text
-              style={[styles.scrollArrowGlyph, { color: theme.foreground, fontFamily: MONO }]}>
-              {'\u2193'}
-            </Text>
-          </Plate>
-        </Pressable>
-      )}
-      </Animated.View>
+                      <Plate theme={theme} radius={BAR.radius} style={styles.scrollArrowPlate}>
+                        <Text
+                          style={[
+                            styles.scrollArrowGlyph,
+                            { color: theme.foreground, fontFamily: MONO },
+                          ]}
+                        >
+                          {'\u2193'}
+                        </Text>
+                      </Plate>
+                    </Pressable>
+                  )}
+                </Animated.View>
+              </View>
+            </Animated.View>
 
-
-      </View>
-      </Animated.View>
-
-      {/* The transition's accent ring — absoluteFill of the CARD, deliberately outside the crop
+            {/* The transition's accent ring — absoluteFill of the CARD, deliberately outside the crop
           view. Inside it the ring rode the crop's upward translate: its top line left through the
           wrapper's clip and its bottom line hovered above the card's true edge, with the page's
           square keyboard-cut corners poking out beneath (movement 3, screenshot).
@@ -2229,15 +2293,15 @@ export default function SessionScreen() {
           4.5pt (emulator, 2026-09-02, measured 12px at density 420 = `CARD_RING / scale` at t=1),
           a blue outline round the whole screen until the next flight repainted it. A fresh view
           per zoom cannot carry the last one's props. */}
-      {zoomActive && (
-        <Animated.View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
-        />
-      )}
-      </Animated.View>
+            {zoomActive && (
+              <Animated.View
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, { borderColor: theme.accent }, ringStyle]}
+              />
+            )}
+          </Animated.View>
 
-      {/* The neighbouring windows, a page-pitch to either side. They JOIN when the swipe does, not
+          {/* The neighbouring windows, a page-pitch to either side. They JOIN when the swipe does, not
           when the card lifts: a card held up on its own has no row around it until the finger
           actually starts moving sideways (user, 2026-08-13) — which is exactly `pageSwipe`, the
           state a horizontal swipe creates.
@@ -2258,156 +2322,203 @@ export default function SessionScreen() {
           screenshot). `clearBarSwipe` is where that write lives. A hop's landing must STAY an
           instant cut, because the landed card sits exactly over the live pane's identical
           picture, and sliding it away would show the same tab twice, one peeling off the other. */}
-      {stage !== null && showTabs && connected && (
-        <>
-          {anchor > 0 && (
-            <Animated.View pointerEvents="none" style={[
-                styles.stageWrapper,
-                { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
-                prevCardStyle,
-                cardClipStyle,
-              ]}>
-              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(-1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} gridCenter={gridCenter} radii={cardRadiiStyle} />
-              </Animated.View>
-              {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
+          {stage !== null && showTabs && connected && (
+            <>
+              {anchor > 0 && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.stageWrapper,
+                    {
+                      width: stage.w,
+                      height: stage.h,
+                      borderRadius: pageR,
+                      backgroundColor: theme.background,
+                    },
+                    prevCardStyle,
+                    cardClipStyle,
+                  ]}
+                >
+                  <Animated.View
+                    style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}
+                  >
+                    <NeighborPage
+                      snap={neighbour(-1)}
+                      stageW={stage.w}
+                      theme={theme}
+                      cell={cell}
+                      insets={paneInsets}
+                      liveCols={liveCols}
+                      gridCenter={gridCenter}
+                      radii={cardRadiiStyle}
+                    />
+                  </Animated.View>
+                  {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
                   crop's upward translate and clipped out at the top, the ring bug over again
                   (user, 2026-08-13, "outlines bugging out"). */}
-              <Animated.View
-                pointerEvents="none"
-                style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.accent }, cardRadiiStyle]}
-              />
-            </Animated.View>
-          )}
-          {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      styles.pageEdge,
+                      { borderColor: theme.accent },
+                      cardRadiiStyle,
+                    ]}
+                  />
+                </Animated.View>
+              )}
+              {/* One past the last window is the new-tab page: no snapshot, so it slides in as the
               empty pane the shell about to be born will draw into. That blank page is what covers
               the moment the new shell is being drawn, and taking it away left the arrival blinking
               dark with the card's accent edge standing on it (user, 2026-08-13). It used to be
               withheld from a card held in the air — hidden by `heldAir` inside the style rather
               than unmounted here, because a React commit lags the worklet by long enough to see it
               appear and then go; that whole path went on 2026-08-17. */}
-          {anchor < cards.length && (
-            <Animated.View pointerEvents="none" style={[
-                styles.stageWrapper,
-                { width: stage.w, height: stage.h, borderRadius: pageR, backgroundColor: theme.background },
-                nextCardStyle,
-                cardClipStyle,
-              ]}>
-              <Animated.View style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}>
-                <NeighborPage snap={neighbour(1)} stageW={stage.w} theme={theme} cell={cell} insets={paneInsets} liveCols={liveCols} gridCenter={gridCenter} radii={cardRadiiStyle} />
-              </Animated.View>
-              {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
+              {anchor < cards.length && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.stageWrapper,
+                    {
+                      width: stage.w,
+                      height: stage.h,
+                      borderRadius: pageR,
+                      backgroundColor: theme.background,
+                    },
+                    nextCardStyle,
+                    cardClipStyle,
+                  ]}
+                >
+                  <Animated.View
+                    style={[{ height: stage.h, paddingBottom: keyboardPad }, cropStyle]}
+                  >
+                    <NeighborPage
+                      snap={neighbour(1)}
+                      stageW={stage.w}
+                      theme={theme}
+                      cell={cell}
+                      insets={paneInsets}
+                      liveCols={liveCols}
+                      gridCenter={gridCenter}
+                      radii={cardRadiiStyle}
+                    />
+                  </Animated.View>
+                  {/* The card's outline, at the CARD's bounds — inside the crop view it rode the
                   crop's upward translate and clipped out at the top, the ring bug over again
                   (user, 2026-08-13, "outlines bugging out"). */}
-              <Animated.View
-                pointerEvents="none"
-                style={[StyleSheet.absoluteFill, styles.pageEdge, { borderColor: theme.accent }, cardRadiiStyle]}
-              />
-            </Animated.View>
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      styles.pageEdge,
+                      { borderColor: theme.accent },
+                      cardRadiiStyle,
+                    ]}
+                  />
+                </Animated.View>
+              )}
+            </>
           )}
-        </>
-      )}
+        </Animated.View>
 
-      </Animated.View>
-
-      {/* Everything from here down is SCREEN-STATIC chrome, deliberately outside the box the
+        {/* Everything from here down is SCREEN-STATIC chrome, deliberately outside the box the
           cards ride in: the box carries the swipe itself now (no page/card handover — see
           cardCarry's removal), so anything inside it would slide with every hop. The settle
           overlay is static for the same reason: it covers the stage while the box snaps home
           beneath it. */}
 
-      {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
+        {/* The bar floats over the card face's bottom band — absolute, so the cards can run the
           full window height under it. Its own glass pills carry no full-width ground, so the
           card's background (or the crust gap, mid-swipe) shows through around them. */}
-      <Animated.View
-        // It used to ride inside the zoom box, which gated it; out here it is the grid's own
-        // bottom bar that it covers, and the fade alone does not stop a hit (see `chromeLive`).
-        pointerEvents={chromeLive ? 'auto' : 'none'}
-        style={[
-          { position: 'absolute', left: 0, right: 0 },
-          keyboardBarStyle,
-          barFadeStyle,
-        ]}>
-      <KeyBar
-        theme={theme}
-        decckm={modes.decckm}
-        bracketedPaste={modes.bracketedPaste}
-        textMode={textMode}
-        sendBytes={kb.sendBytes}
-        open={open}
-        onOpenChange={setOpen}
-        onHeight={kb.onHeight}
-        onRowHeight={kb.onRowHeight}
-        sending={sending}
-        // §4.5: tabs are reachable only with tmux present AND the config applied AND a client
-        // attached. False no longer removes the button — it greys it, and the tap explains itself
-        // (`tabsHint`, user 2026-08-12).
-        showTabs={showTabs}
-        onTabsTap={kb.onTabsTap}
-        // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
-        // hop through; without it the axis is silence, like the tabs button (§7).
-        onBarSwipe={showTabs ? kb.onBarSwipe : undefined}
-        // At rest the bar keeps the keyboard against a terminal tap (the field re-aims, see
-        // KeyBar's `onBlur`). Suppressed while the search field is up — there a blur of the bar's
-        // field is a move to a sibling the bar must not fight back — and while a sheet or the
-        // switcher owns the screen (their doors put the keys away through `keybar.dismiss`).
-        holdKeys={!search.on && !settingsOpen && sw === 'closed'}
-        ref={keybar}
-        // The pan's per-frame writes happen on the UI thread against these (perf: the JS thread
-        // stalls 40-300ms under load and a runOnJS pan hitched with it). A STABLE object: the
-        // bar memoizes its gesture on it, and an inline literal re-serialized the worklets and
-        // re-attached the recognizer on every render — mid-gesture (user: "hitching even worse").
-        panSV={panBridge}
-        pills={pillsProp}
-      />
-      </Animated.View>
+        <Animated.View
+          // It used to ride inside the zoom box, which gated it; out here it is the grid's own
+          // bottom bar that it covers, and the fade alone does not stop a hit (see `chromeLive`).
+          pointerEvents={chromeLive ? 'auto' : 'none'}
+          style={[{ position: 'absolute', left: 0, right: 0 }, keyboardBarStyle, barFadeStyle]}
+        >
+          <KeyBar
+            theme={theme}
+            decckm={modes.decckm}
+            bracketedPaste={modes.bracketedPaste}
+            textMode={textMode}
+            sendBytes={kb.sendBytes}
+            open={open}
+            onOpenChange={setOpen}
+            onHeight={kb.onHeight}
+            onRowHeight={kb.onRowHeight}
+            sending={sending}
+            // §4.5: tabs are reachable only with tmux present AND the config applied AND a client
+            // attached. False no longer removes the button — it greys it, and the tap explains itself
+            // (`tabsHint`, user 2026-08-12).
+            showTabs={showTabs}
+            onTabsTap={kb.onTabsTap}
+            // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
+            // hop through; without it the axis is silence, like the tabs button (§7).
+            onBarSwipe={showTabs ? kb.onBarSwipe : undefined}
+            // At rest the bar keeps the keyboard against a terminal tap (the field re-aims, see
+            // KeyBar's `onBlur`). Suppressed while the search field is up — there a blur of the bar's
+            // field is a move to a sibling the bar must not fight back — and while a sheet or the
+            // switcher owns the screen (their doors put the keys away through `keybar.dismiss`).
+            holdKeys={!search.on && !settingsOpen && sw === 'closed'}
+            ref={keybar}
+            // The pan's per-frame writes happen on the UI thread against these (perf: the JS thread
+            // stalls 40-300ms under load and a runOnJS pan hitched with it). A STABLE object: the
+            // bar memoizes its gesture on it, and an inline literal re-serialized the worklets and
+            // re-attached the recognizer on every render — mid-gesture (user: "hitching even worse").
+            panSV={panBridge}
+            pills={pillsProp}
+          />
+        </Animated.View>
 
-      {/* The popover layer: outside-tap scrim over everything (bar included, as in the
+        {/* The popover layer: outside-tap scrim over everything (bar included, as in the
           prototype), popovers anchored `popBase` up. That base carries the keyboard itself:
           Yoga positions an absolute child off the *border* box, not the padding box (see
           `positionAbsoluteChild` — border and margin are subtracted, padding is not), so this
           layer's bottom edge is the screen's, not the stage's padded one. Without the pad in
           the anchor the popover opened `barHeight` up from the screen bottom — behind the
           keyboard, invisible (user, 2026-08-10). */}
-      {open !== 'none' && (
-        <View style={StyleSheet.absoluteFill}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen('none')} />
-          <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, keyboardPopoverStyle]}>
-          {open === 'arrows' ? (
-            <ArrowsPopover
-              theme={theme}
-              decckm={modes.decckm}
-              bottom={popBase}
-              sendBytes={send}
-            />
-          ) : open === 'tabsHint' ? (
-            <TabsHintPopover
-              theme={theme}
-              bottom={popBase}
-              text={tabsHint(tmux.present, usesTmux(settings), pollSession(settings) !== null)}
-            />
-          ) : open === 'clipboard' ? (
-            <ClipboardPopover
-              theme={theme}
-              bottom={popBase}
-              bracketedPaste={modes.bracketedPaste}
-              sendBytes={send}
-              onClose={() => setOpen('none')}
-            />
-          ) : (
-            <BarMenu
-              theme={theme}
-              bottom={popBase}
-              textMode={textMode}
-              onTextMode={onTextModeTap}
-              onUpload={startUpload}
-              onDownload={startDownload}
-              onOpenSettings={openSettings}
-            />
-          )}
-          </Animated.View>
-        </View>
-      )}
+        {open !== 'none' && (
+          <View style={StyleSheet.absoluteFill}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen('none')} />
+            <Animated.View
+              pointerEvents="box-none"
+              style={[StyleSheet.absoluteFill, keyboardPopoverStyle]}
+            >
+              {open === 'arrows' ? (
+                <ArrowsPopover
+                  theme={theme}
+                  decckm={modes.decckm}
+                  bottom={popBase}
+                  sendBytes={send}
+                />
+              ) : open === 'tabsHint' ? (
+                <TabsHintPopover
+                  theme={theme}
+                  bottom={popBase}
+                  text={tabsHint(tmux.present, usesTmux(settings), pollSession(settings) !== null)}
+                />
+              ) : open === 'clipboard' ? (
+                <ClipboardPopover
+                  theme={theme}
+                  bottom={popBase}
+                  bracketedPaste={modes.bracketedPaste}
+                  sendBytes={send}
+                  onClose={() => setOpen('none')}
+                />
+              ) : (
+                <BarMenu
+                  theme={theme}
+                  bottom={popBase}
+                  textMode={textMode}
+                  onTextMode={onTextModeTap}
+                  onUpload={startUpload}
+                  onDownload={startDownload}
+                  onOpenSettings={openSettings}
+                />
+              )}
+            </Animated.View>
+          </View>
+        )}
       </View>
 
       {downloadOpen && (
@@ -2441,9 +2552,7 @@ export default function SessionScreen() {
         />
       )}
 
-      {session.status !== 'connected' && (
-        <Status session={session} theme={theme} onSetup={leave} />
-      )}
+      {session.status !== 'connected' && <Status session={session} theme={theme} onSetup={leave} />}
     </View>
   );
 }
@@ -2512,7 +2621,8 @@ function PageContent({
         paddingLeft: insets.side + gridCenter,
         paddingRight: insets.side - gridCenter,
         paddingBottom: insets.bottom,
-      }}>
+      }}
+    >
       <Snapshot
         lines={snap.lines}
         theme={theme}
@@ -2553,7 +2663,8 @@ function NeighborPage({
         styles.page,
         { backgroundColor: theme.background, borderRadius: pageRadius(stageW) },
         radii,
-      ]}>
+      ]}
+    >
       <PageContent
         snap={snap}
         stageW={stageW}
@@ -2584,7 +2695,8 @@ function Status({
       onPress={onPress}
       // The same touch-down every other button in the app answers with — these three sat in a
       // fixed box and answered with nothing at all.
-      style={({ pressed }) => [styles.action, { backgroundColor: colour }, pressed && PRESSED]}>
+      style={({ pressed }) => [styles.action, { backgroundColor: colour }, pressed && PRESSED]}
+    >
       <Text style={[styles.actionLabel, { color: textColour }]}>{label}</Text>
     </Pressable>
   );
@@ -2670,7 +2782,13 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 11,
   },
-  searchInput: { flex: 1, fontFamily: SANS, includeFontPadding: false, fontSize: 13, paddingVertical: 0 },
+  searchInput: {
+    flex: 1,
+    fontFamily: SANS,
+    includeFontPadding: false,
+    fontSize: 13,
+    paddingVertical: 0,
+  },
   searchCount: { fontFamily: MONO, includeFontPadding: false, fontSize: 11 },
   /** One stepper key. The pair sits in a 2pt-gap group of its own (see the row's JSX) so it reads
    *  as one segmented control, which is how the prototype draws them. */
@@ -2712,7 +2830,13 @@ const styles = StyleSheet.create({
     lineHeight: leading(TEXT.label),
     textAlign: 'center',
   },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: SPACE.sm },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: SPACE.sm,
+  },
   /** A filled button, wearing the app's button corner rather than the field's — these three had
    *  drifted to 12, which is what a field is. */
   action: { paddingHorizontal: SPACE.wide, paddingVertical: SPACE.md, borderRadius: RADIUS.button },

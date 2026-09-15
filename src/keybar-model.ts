@@ -75,7 +75,12 @@ export function pasteBytes(text: string, bracketedPaste: boolean): string {
 export type NavKey = 'up' | 'down' | 'left' | 'right' | 'home' | 'end';
 
 const NAV_FINAL: Record<NavKey, string> = {
-  up: 'A', down: 'B', right: 'C', left: 'D', home: 'H', end: 'F',
+  up: 'A',
+  down: 'B',
+  right: 'C',
+  left: 'D',
+  home: 'H',
+  end: 'F',
 };
 
 /** The escape sequence a nav key sends, DECCKM-aware — `CSI x` normally, `SS3 x` when the app
@@ -105,7 +110,11 @@ export const DEL = '\x7f';
  * replacement extending past the caret. `caret` is the resulting UTF-16 field position. Keep
  * navigation separate from keys so it bypasses Ctrl and the line-length/dictation heuristics.
  */
-export function diffInput(prev: string, next: string, caret = prev.length): {
+export function diffInput(
+  prev: string,
+  next: string,
+  caret = prev.length,
+): {
   ahead: number;
   keys: string;
   caret: number;

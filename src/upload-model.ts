@@ -39,10 +39,7 @@ export function stripDataUri(data: string): string {
 /** `20260808T135802` — UTC to the second. Two captures in the same second overwrite, which §4.6
  *  accepts by name. */
 export function utcStamp(date: Date): string {
-  return date
-    .toISOString()
-    .replace(/[-:]/g, '')
-    .slice(0, 15);
+  return date.toISOString().replace(/[-:]/g, '').slice(0, 15);
 }
 
 /** The quick-attach (and camera-default) name: stamp plus the original's extension, if any. */

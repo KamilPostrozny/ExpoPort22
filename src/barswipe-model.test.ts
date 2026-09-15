@@ -96,4 +96,3 @@ test('pill morph: squeezed out by 0.7 of a window, growing from 30% in', () => {
 });
 
 /* --- neighbour page type size --- */
-

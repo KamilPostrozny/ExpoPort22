@@ -40,17 +40,50 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'ash', 'mksh
  *  mangled syntax. Curated, not exhaustive — the fallthrough is already OFF at the screen, this
  *  table is for saying so here, in the tested place. */
 const OFF = new Set([
- 'vim', 'nvim', 'vi', 'emacs', 'nano', 'micro',
- 'htop', 'btop', 'top', 'atop',
- 'fzf', 'fzy', 'kaku',
- 'less', 'more', 'man', 'tail',
- 'tig', 'lazygit', 'k9s', 'lazydocker',
- 'tmux', 'screen',
- 'ssh', 'scp', 'sftp', 'mosh', 'expect',
- 'git', 'make', 'cmake', 'gradle', 'mvn',
- 'npm', 'yarn', 'pnpm', 'bunx', 'npx',
- 'psql', 'mysql', 'sqlite3', 'redis-cli',
- 'code', 'lazy',
+  'vim',
+  'nvim',
+  'vi',
+  'emacs',
+  'nano',
+  'micro',
+  'htop',
+  'btop',
+  'top',
+  'atop',
+  'fzf',
+  'fzy',
+  'kaku',
+  'less',
+  'more',
+  'man',
+  'tail',
+  'tig',
+  'lazygit',
+  'k9s',
+  'lazydocker',
+  'tmux',
+  'screen',
+  'ssh',
+  'scp',
+  'sftp',
+  'mosh',
+  'expect',
+  'git',
+  'make',
+  'cmake',
+  'gradle',
+  'mvn',
+  'npm',
+  'yarn',
+  'pnpm',
+  'bunx',
+  'npx',
+  'psql',
+  'mysql',
+  'sqlite3',
+  'redis-cli',
+  'code',
+  'lazy',
 ]);
 
 /** The line is plain English: mail, chat, and an LLM prompt line. The last group (claude, pi,
@@ -59,8 +92,18 @@ const OFF = new Set([
  *  `node` (see the doc above). The path-segment half (`PROSE_SIGNATURES`) still covers the install
  *  shape that reports `node` and rides the interpreter branch instead. */
 const ON = new Set([
- 'mutt', 'neomutt', 'mail', 'alpine', 'pine', 'elm', 'weechat', 'irssi',
- 'claude', 'pi', 'codex', 'aider',
+  'mutt',
+  'neomutt',
+  'mail',
+  'alpine',
+  'pine',
+  'elm',
+  'weechat',
+  'irssi',
+  'claude',
+  'pi',
+  'codex',
+  'aider',
 ]);
 
 /** Basenames that mean "an interpreter — the basename is useless, look at what it is running".
@@ -69,11 +112,25 @@ const ON = new Set([
 /** Exported because the poll's `children` half is asked on the host only while the foreground is
  *  one of these (see `childrenCommand` in tmux-model) — the two halves must name the same set. */
 export const INTERPRETERS = new Set([
- 'node', 'nodejs', 'bun', 'deno',
- 'python', 'python2', 'python3',
- 'ruby', 'ruby3', 'jruby', 'irb', 'pry',
- 'php', 'perl', 'perl5',
- 'lua', 'luajit', 'tclsh', 'wish',
+  'node',
+  'nodejs',
+  'bun',
+  'deno',
+  'python',
+  'python2',
+  'python3',
+  'ruby',
+  'ruby3',
+  'jruby',
+  'irb',
+  'pry',
+  'php',
+  'perl',
+  'perl5',
+  'lua',
+  'luajit',
+  'tclsh',
+  'wish',
 ]);
 
 /** Path SEGMENTS that mark a prose app when it is the thing an interpreter is running. Segments,
@@ -83,10 +140,14 @@ export const INTERPRETERS = new Set([
  *  pairs are belt and braces for the two install shapes (a global install's `lib/…` path, a
  *  `.bin` shim whose only segment is the bare name). */
 const PROSE_SIGNATURES = new Set([
- 'claude', 'claude-code', '@anthropic-ai',
- 'pi', 'pi-coding-agent', '@earendil-works',
- 'codex',
- 'aider',
+  'claude',
+  'claude-code',
+  '@anthropic-ai',
+  'pi',
+  'pi-coding-agent',
+  '@earendil-works',
+  'codex',
+  'aider',
 ]);
 
 /** Does a child's argv name one of the known prose apps? The command line is split on `/` and
@@ -100,18 +161,16 @@ const PROSE_SIGNATURES = new Set([
  *  exactly `claude`, `pi`, … — rarer than the install shapes the set exists to catch, and one
  *  tap of the override heals it. */
 function argvNamesProseApp(argv: string): boolean {
- return argv
-  .split("/")
-  .some((segment) => PROSE_SIGNATURES.has(segment.split(/\s+/)[0] ?? ""));
+  return argv.split('/').some((segment) => PROSE_SIGNATURES.has(segment.split(/\s+/)[0] ?? ''));
 }
 
 /** The decision. `command` is the foreground job's basename (may be `''` — a pane tmux cannot
  *  name yet); `children` the direct children's argvs, empty when the foreground is not an
  *  interpreter (the poll does not ask for them then). */
 export function proseFor(command: string, children: string[]): ProseDecision {
- if (SHELLS.has(command)) return false;
- if (ON.has(command)) return true;
- if (OFF.has(command)) return false;
- if (INTERPRETERS.has(command)) return children.some(argvNamesProseApp);
- return null;
+  if (SHELLS.has(command)) return false;
+  if (ON.has(command)) return true;
+  if (OFF.has(command)) return false;
+  if (INTERPRETERS.has(command)) return children.some(argvNamesProseApp);
+  return null;
 }
