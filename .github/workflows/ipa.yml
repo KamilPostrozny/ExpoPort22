@@ -17,6 +17,7 @@ name: IPA
 # release IPA embeds its JS, so gating it would leave the release app silently running a stale
 # bundle. A slice is merged to main only after it has been tested on the phone as Port22-dev.
 on:
+  pull_request:
   push:
     branches: [main, dev]
     # Docs-only commits do not change the IPA, and a run is ~15 minutes of waiting.
@@ -40,8 +41,34 @@ permissions:
   contents: write
 
 jobs:
+  checks:
+    name: Build, test, and lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CI: '1'
+      HUSKY: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.1'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run lint
+      - run: bun run format:check
+      - run: bun run build
+
   gate:
-    # Always runs (~10 seconds on ubuntu-latest), and always says out loud WHY it decided what it
+    needs: [checks]
+    # Pull requests validate code but never package or publish an IPA.
+    if: github.event_name != 'pull_request'
+    # Runs after checks on shipping events (~10 seconds on ubuntu-latest), and says WHY it decided what it
     # did. main and force_build short-circuit to build=true; dev is where the work is — a JS-only
     # push to dev costs nothing and rides Metro. One gate for both branches, not two conditional
     # jobs: a package job that referenced the gate's outputs through a skipped gate was skipped
@@ -57,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # the diff is against this push's base, not the branch tip
+          fetch-depth: 0 # the diff is against this push's base, not the branch tip
       - uses: oven-sh/setup-bun@v2
       - id: gate
         run: |
@@ -132,7 +159,7 @@ jobs:
     # `JavaScriptCodable+Date.swift`, which every SDK 57 build compiles into an xcframework.
     runs-on: macos-26
     needs: [gate]
-    # The gate is the single decision point: it always runs and answers for both branches.
+    # After checks, the gate is the single native-build decision point for both shipping branches.
     if: needs.gate.outputs.build == 'true'
     env:
       BRANCH: ${{ github.ref_name }}

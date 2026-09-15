@@ -1,0 +1,73 @@
+{
+  "src/app/terminal.tsx": {
+    "react-hooks/immutability": {
+      "count": 11
+    },
+    "react-hooks/purity": {
+      "count": 2
+    },
+    "react-hooks/refs": {
+      "count": 11
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "src/download-sheet.tsx": {
+    "react-hooks/immutability": {
+      "count": 2
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/keybar.tsx": {
+    "react-hooks/immutability": {
+      "count": 2
+    },
+    "react-hooks/purity": {
+      "count": 1
+    },
+    "react-hooks/refs": {
+      "count": 3
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/settings-sheet.tsx": {
+    "react-hooks/immutability": {
+      "count": 3
+    },
+    "react-hooks/refs": {
+      "count": 1
+    }
+  },
+  "src/switcher.tsx": {
+    "react-hooks/immutability": {
+      "count": 2
+    },
+    "react-hooks/purity": {
+      "count": 2
+    },
+    "react-hooks/refs": {
+      "count": 34
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 3
+    }
+  },
+  "src/terminal.tsx": {
+    "react-hooks/immutability": {
+      "count": 1
+    }
+  },
+  "src/upload-sheet.tsx": {
+    "react-hooks/immutability": {
+      "count": 2
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  }
+}

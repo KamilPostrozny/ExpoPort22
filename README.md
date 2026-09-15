@@ -12,12 +12,16 @@ locally; iOS builds through GitHub Actions and is signed/installed locally.
 
 ```bash
 bun install --frozen-lockfile
-bun test
-bunx tsc --noEmit
+bun run build
+bun run typecheck
+bun run test
 bun run lint
+bun run format:check
 ```
 
-For an already installed compatible development client:
+`build` exports iOS/Android production JavaScript and assets to `dist/`; it does not create an
+APK/IPA. [AGENTS.md](AGENTS.md) documents formatting, hooks, the existing lint baseline, and focused
+tests. For an already installed compatible development client:
 
 ```bash
 bunx expo start --dev-client

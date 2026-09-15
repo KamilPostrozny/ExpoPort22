@@ -1,0 +1,22 @@
+# Dependencies, generated output, native projects and local agent state
+node_modules/
+.expo/
+android/
+ios/
+dist/
+web-build/
+modules/*/android/build/
+expo-env.d.ts
+src/themes-generated.ts
+bun.lock
+patches/
+.pi/
+.backpass/
+.backpassrc.json
+.claude/
+.vscode/
+
+# Keep historical evidence and prose out of the code-formatting sweep.
+docs/
+**/*.md
+agentlint-report.html

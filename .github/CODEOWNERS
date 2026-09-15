@@ -1,0 +1,10 @@
+# Repository owner; confirmed with the GitHub collaborators API.
+* @KamilPostrozny
+
+# Delivery, native bridge contracts, and security-sensitive SSH identity code.
+/.github/workflows/ @KamilPostrozny
+/scripts/ @KamilPostrozny
+/modules/ @KamilPostrozny
+/patches/ @KamilPostrozny
+/src/keys.ts @KamilPostrozny
+/src/host-keys.ts @KamilPostrozny
