@@ -1,56 +1,67 @@
-# Welcome to your Expo app 👋
+# Port22
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A personal iOS/Android SSH terminal for one host, with tmux window switching, terminal search,
+clipboard integration, and SFTP uploads/downloads. iOS is the visual and interaction reference;
+Android must match it.
 
-## Get started
+## Development
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Expo SDK 57, React Native, TypeScript, Expo Router, Bun. **Use a native development build, not
+Expo Go:** the app includes custom SSH, pasteboard, and WebView modules. Linux builds Android
+locally; iOS builds through GitHub Actions and is signed/installed locally.
 
 ```bash
-npm run reset-project
+bun install --frozen-lockfile
+bun test
+bunx tsc --noEmit
+bun run lint
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+For an already installed compatible development client:
 
-### Other setup steps
+```bash
+bunx expo start --dev-client
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Follow [the device workflow](docs/ship.md) for Metro ownership, initial builds, installation,
+reloading, screenshots, and logs. JS changes usually need only a reload; native changes require
+rebuilding the affected client. `bun run android` / `bun run ios` start Expo; they do not build the
+custom native modules. There is no `reset-project` command.
 
-## Learn more
+## Source map
 
-To learn more about developing your project with Expo, look at the following resources:
+| Path | Responsibility |
+|---|---|
+| `src/app/` | Router screens: setup, terminal orchestration, layout |
+| `src/terminal.tsx` | xterm.js DOM component, terminal protocols and touch input |
+| `src/keybar.tsx`, `src/hooks/use-terminal-keyboard.ts` | Native text input, keys, keyboard docking |
+| `src/session.ts`, `src/tmux.ts` | SSH lifecycle, tmux store and side-channel operations |
+| `src/*-model.ts`, `src/*.test.ts` | Pure logic and Bun regression tests |
+| `src/switcher.tsx` | Window cards and search UI |
+| `src/theme.ts`, `src/fonts.ts`, `src/style.ts` | Shared appearance; generated themes come from `scripts/gen-themes.ts` |
+| `src/upload*`, `src/download*`, `src/clipboard*` | Transfers and clipboard |
+| `modules/` | Native `expo-ssh`, `expo-pasteboard`, `expo-webguard` |
+| `assets/`, `public/` | Bundled app and DOM assets |
+| `scripts/`, `.github/workflows/ipa.yml` | Font/theme tooling and device delivery |
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+`app.json`, `package.json`, and `bun.lock` define the build. Generated `android/` and `ios/` are
+not the source of truth; do not make durable configuration changes only there.
 
-## Join the community
+## Documentation for small-context agents
 
-Join our community of developers creating universal apps.
+[AGENTS.md](AGENTS.md) is the mandatory brief; [CLAUDE.md](CLAUDE.md) imports it. Agent runners must
+be configured to load it once—model choice alone does not enable this. Skills are in
+`.agents/skills/*/SKILL.md`; their paths are also linked explicitly for runners without discovery.
+Avoid auto-loading the rest of the docs or external personal memory files.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+| Need | Read on demand |
+|---|---|
+| Current behaviour and constraints | [docs/current.md](docs/current.md) |
+| Active issue triage | [docs/issues.md](docs/issues.md) |
+| Feature-specific verification | [TESTS.md](TESTS.md) |
+| Device workflow | [docs/ship.md](docs/ship.md) |
+| Old implementation/evidence | [archive index](docs/archive/README.md), only for historical investigation |
+
+Keep current requirements, test procedures, and execution evidence separate. Update the relevant
+current document when behaviour changes. Put long investigations in the archive, with a link from
+the active issue. Do not append contradictory corrections beneath obsolete instructions.

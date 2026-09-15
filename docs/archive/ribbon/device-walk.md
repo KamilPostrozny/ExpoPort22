@@ -1,4 +1,8 @@
-# The ribbon on a real phone — the walk
+# The ribbon on a real phone — historical walk
+
+> **RETIRED — DO NOT EXECUTE.** The ribbon, old worktree, and most referenced test IDs are no
+> longer active. User-only screenshot assignments below are obsolete. Use the current
+> [device workflow](../../ship.md) and [test index](../../../TESTS.md).
 
 The order we run TESTS.md's T11.7–T11.22 in, on device, together. It is ordered so the host is set
 up once, the cheap and foundational things fail early, and the destructive / theme-changing cases
@@ -21,7 +25,8 @@ take it; I read it when you send it.
 **You**, on the host, before connecting:
 
 ```bash
-tmux kill-server                       # start from a known state
+# Unsafe global server-kill command removed. Do not replay this historical setup.
+# Current tests require a disposable target; never terminate the user's tmux server.
 tmux new -d -s port22                  # window 1
 tmux new-window -t port22              # window 2
 tmux new-window -t port22              # window 3

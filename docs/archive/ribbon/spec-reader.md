@@ -1,4 +1,8 @@
-# Reader — the ⋯ key becomes the recipe
+# Reader — the ⋯ key becomes the recipe (archived)
+
+> **RETIRED FEATURE — NOT A CURRENT SPEC.** The ribbon was removed on 2026-09-01.
+> This proposal and its appended corrections remain only as historical research. Do not implement
+> its platform divergences, code sketches, or dependency choices. See [current behaviour](../../current.md).
 
 > Full design spec for the ribbon redesign. Written by a spec agent against the
 > measured constraints of this repo, then adversarially verified. Read

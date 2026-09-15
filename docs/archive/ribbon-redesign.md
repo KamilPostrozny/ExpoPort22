@@ -1,4 +1,8 @@
-# The ribbon, redesigned — three approaches
+# The ribbon, redesigned — three approaches (archived)
+
+> **RETIRED FEATURE — NOT AN IMPLEMENTATION PLAN.** The ribbon was removed on 2026-09-01.
+> The recommendations, dependency survey, metrics, and shipped-state claims below are historical.
+> Do not build any of these alternatives. See [current behaviour](../current.md).
 
 Research and design study for §4.4's context ribbon. Commissioned because every version so far has
 been *"either not visible, or too intrusive and takes too much space, or is not readable enough if
