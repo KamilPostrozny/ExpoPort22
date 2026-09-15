@@ -1,9 +1,6 @@
 {
-  "platforms": ["apple", "android"],
+  "platforms": ["apple"],
   "apple": {
     "modules": ["ExpoHwKeysModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.hwkeys.ExpoHwKeysModule"]
   }
 }

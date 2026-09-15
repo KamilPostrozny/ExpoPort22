@@ -46,8 +46,10 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   bar-up-to-switcher interaction is retired; the tabs button opens the switcher.
 - Ctrl arms once or locks on double-tap; the fixed chord strip is C/Z/R/L/D. Esc, Tab, arrows,
   Home/End, and Enter send terminal input. Keys must not fire during a swipe.
-- Physical keyboard (Bluetooth/USB): the field consumes plain printables, Enter, Backspace and
-  Space; everything else a hardware key sends is intercepted by `modules/expo-hwkeys` and routed
+- Physical keyboard (Bluetooth/USB, Apple-only for now — the module's `android/` half is removed
+  until its interception is device-verified, and `requireNativeModule`'s throw is guarded so the
+  hook is a no-op elsewhere): the field consumes plain printables, Enter, Backspace and Space;
+  everything else a hardware key sends is intercepted by `modules/expo-hwkeys` and routed
   by `src/hwkeys-model.ts` to the bytes the bar sends (Esc, Tab, arrows, Home/End, PgUp/Dn,
   Delete, F-keys, Ctrl/Alt chords), or to an app action — Alt+1..9/0 selects the tmux window by
   number, Alt+T opens the switcher, Alt+N makes a window, Cmd/Win+V pastes. Without an attached

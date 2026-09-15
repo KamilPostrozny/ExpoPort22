@@ -42,8 +42,12 @@ export function useHwKeys(mode: HwKeysMode, ctx: HwRouteCtx, handlers: HwKeysHan
   });
 
   useEffect(() => {
-    void ExpoHwKeys.setMode(mode);
-    const sub = ExpoHwKeys.addListener('onKey', (raw) => {
+    // `null` off Apple (the native module is not built in there): no subscription, no mode call,
+    // and the hardware keys take the app's pre-feature path — the field's own pipeline.
+    if (ExpoHwKeys === null) return;
+    const hwKeys = ExpoHwKeys;
+    void hwKeys.setMode(mode);
+    const sub = hwKeys.addListener('onKey', (raw) => {
       const current = modeRef.current;
       if (current === 'off') return;
       if (current === 'switcher') {
@@ -74,7 +78,7 @@ export function useHwKeys(mode: HwKeysMode, ctx: HwRouteCtx, handlers: HwKeysHan
     });
     return () => {
       sub.remove();
-      void ExpoHwKeys.setMode('off');
+      void hwKeys.setMode('off');
     };
   }, [mode]);
 }

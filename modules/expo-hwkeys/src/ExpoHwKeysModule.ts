@@ -4,7 +4,7 @@ import { NativeModule, requireNativeModule } from 'expo';
  *  become. The module emits only the keys the 1×1 field does not meaningfully consume (its
  *  pass-through rule); plain printables, Enter, Backspace and Space never arrive here. */
 export type HwKeyEvent = {
-  platform: 'ios' | 'android';
+  platform: 'ios';
   /** iOS `UIKeyboardHidUsage` raw value, Android `KeyEvent.KEYCODE_*`. */
   keyCode: number;
   character: string;
@@ -28,4 +28,16 @@ declare class ExpoHwKeysModule extends NativeModule<ExpoHwKeysModuleEvents> {
   setMode(mode: 'off' | 'terminal' | 'switcher'): Promise<void>;
 }
 
-export default requireNativeModule<ExpoHwKeysModule>('ExpoHwKeys');
+/**
+ * `null` where the module is not built in — the native side is Apple-only for now, so Android
+ * resolves nothing and the app runs exactly as before the feature. `requireNativeModule` throws
+ * (not returns null) for a missing module, and an uncaught throw at import time takes the whole
+ * route down — measured on the pre-module iOS client, whose terminal route refused to render.
+ */
+let hwKeys: ExpoHwKeysModule | null = null;
+try {
+  hwKeys = requireNativeModule<ExpoHwKeysModule>('ExpoHwKeys');
+} catch {
+  hwKeys = null;
+}
+export default hwKeys;
