@@ -975,6 +975,10 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
      *  buffer-absolute span is still correct and gets put back (the onResize handler below).
      *  Nulled when the buffer genuinely changes (a window hop) or we clear on purpose. */
     let selSpan: { col: number; row: number; len: number; cols: number } | null = null;
+    // The auto-scroll's target row, buffer-absolute, tracked by hand: see autoStep for why the
+    // scroll and its selection must be driven by this counter instead of ydisp.
+    let autoTop: number | null = null;
+    let autoBottom: number | null = null;
     /** The press point of the long-press — the extension drag's slop is measured from here, so
      *  the finger's own tremor (a pixel or two, steady for a half-second or more) does not turn
      *  the long-press into a drag on its first tremor (trace 2026-09-12: the selection crawled
@@ -1078,6 +1082,8 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
       if (auto !== null) clearInterval(auto);
       auto = null;
       autoDir = null;
+      autoTop = null;
+      autoBottom = null;
     };
 
     /** One auto-scroll tick: a line toward the edge, then extend to the edge cell. The line is
@@ -1093,26 +1099,30 @@ export default function TerminalView({ theme, fontSize, holdSize, ref, ...handle
     const autoStep = () => {
       const h = cellHeight();
       if (h <= 0 || autoDir === null) return;
-      // The extend must read the viewport AFTER the line it spent has landed. xterm's scrollLines
-      // moves the model's viewportY synchronously but the visible scroll is an animated step on the
-      // render layer, and a 50ms interval is the same clock as that animation — reading ydisp() in
-      // the same tick as the spend samples the viewport one line behind, and the extend chases the
-      // previous line: the highlight TRACKS the scroll instead of extending it (user, 2026-09-12).
-      // A frame is the shortest delay at which the scroll has landed; the model and the render are
-      // in agreement again by then.
-      console.log(
-        '[terminal] auto',
-        autoDir,
-        scrollRoute(currentModes()),
-        `ydisp=${ydisp()}`,
-      );
-      spend(autoDir === 'up' ? h : -h, selPt.x, selPt.y);
-      requestAnimationFrame(() => {
-        if (auto === null) return;
-        const c = cellAt(selPt.x, selPt.y);
-        const row = ydisp() + (autoDir === 'up' ? 0 : term.rows - 1);
-        applySelection({ col: c === null ? 0 : c.col, row });
-      });
+      const dir = autoDir; // captured: stopAuto() below nulls the shared autoDir
+      const col = cellAt(selPt.x, selPt.y)?.col ?? 0;
+      let row = 0;
+      if (dir === 'up') {
+        // One older line per tick. Track the top row ourselves, buffer-absolute, instead of reading
+        // ydisp: xterm's scrollLines takes the viewport path and sets ydisp from the scroll event a
+        // frame LATER, so a same-tick read is stale (the highlight "stuck" mid-buffer, 2026-09-12)
+        // and a frame-later read (rAF) draws the scroll and the selection in two passes — the
+        // flicker. The counter advances by exactly the one line we just spent, and selecting it in
+        // the SAME tick as the spend lets xterm draw the scroll and the highlight in a single pass.
+        if (autoTop === null) autoTop = ydisp();
+        spend(h, selPt.x, selPt.y);
+        autoTop = Math.max(0, autoTop - 1);
+        row = autoTop;
+        if (row <= 0) stopAuto();
+      } else {
+        if (autoBottom === null) autoBottom = ydisp() + term.rows - 1;
+        spend(-h, selPt.x, selPt.y);
+        autoBottom += 1;
+        row = autoBottom;
+        if (row >= term.buffer.active.length - 1) stopAuto();
+      }
+      console.log('[terminal] auto', dir, scrollRoute(currentModes()), `row=${row}`);
+      applySelection({ col, row });
     };
 
     const setAuto = (dir: 'up' | 'down' | null) => {
