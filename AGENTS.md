@@ -1,6 +1,7 @@
 # Expo HAS CHANGED
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+Do this before the first code edit, not later in implementation.
 
 # One app, two platforms — iOS is the spec
 
@@ -28,13 +29,15 @@ no choice:
   the safe-area strip comes off it, Android reports a height that already stops at the gesture
   strip and nothing comes off).
 
-**"Android does that for us" is a claim with a shelf life — measure it.** This file used to name a
-third kind: an OS behaviour that would double up, "Android resizes its own window for the keyboard".
-It does under `adjustResize`, and this app is edge-to-edge, where it does not — measured on the
-emulator 2026-08-16, IME inset at y=1517 and the activity's frame still the whole 1080×2400. On the
-strength of that sentence the terminal skipped the keyboard entirely on Android: the key bar sat
-under Gboard and the shell was never told it had lost eighteen rows, and nobody saw it because the
-emulator's keyboard had never been raised in a test.
+**"Android does that for us" is a claim with a shelf life — measure it.**
+
+- This file used to name a third kind: an OS behaviour that would double up, "Android resizes its
+  own window for the keyboard".
+- It does under `adjustResize`, and this app is edge-to-edge, where it does not — measured on the
+  emulator 2026-08-16, IME inset at y=1517 and the activity's frame still the whole 1080×2400.
+- On the strength of that sentence the terminal skipped the keyboard entirely on Android: the key
+  bar sat under Gboard and the shell was never told it had lost eighteen rows, and nobody saw it
+  because the emulator's keyboard had never been raised in a test.
 
 A branch that exists to make something *look* different is not necessary — delete it and take the
 iOS value. When you do add a necessary branch, say in a comment which of the three it is and what
@@ -47,6 +50,10 @@ Where a platform genuinely cannot reach parity, that is a finding to raise, not 
 quietly ship.
 
 # Nothing is done until it has run on both
+
+**No exceptions for supposedly non-visual changes:** an Expo code edit — including a refactor or
+“pure log removal” — is not done or fixed until both device paths below have run. Typechecks and
+tests are additional checks, never substitutes.
 
 - **Every new implementation is tested on the Android emulator *and* on the real iPhone before it is
   reported as working.**
@@ -75,29 +82,11 @@ screenshot showed and what the logs showed. If one platform cannot be reached, e
 unverified; typechecks, tests, static inspection, or evidence from only the other platform do not
 substitute.
 
-# Look for the package before writing native code
+End every completion report with this checklist; never omit a row:
 
-Before writing native code of our own, or hand-copying data that a package already holds, look for
-the package first — in this order:
+- **Android:** screenshot — …; logs — …
+- **iPhone:** screenshot — …; logs — …
 
-1. **An Expo SDK module** (`expo install …`). Check the versioned docs above, not memory.
-2. **A maintained npm package** that already holds the data or the algorithm. Static data
-   especially: a hand-copied table is a typo nobody sees until it is on screen.
-3. **A maintained React Native library**, if it actually covers the requirement.
-4. Only then, native code of our own.
+If a path did not complete, write **Unverified** and the blocker in its row; do not replace the row
+with test or typecheck results.
 
-Rolling our own is the right answer when the check comes back empty, and then say so in the file:
-name what you looked at and why it did not fit. Two worked examples, both verified rather than
-assumed:
-
-- **SSH** (`modules/expo-ssh`) — the one maintained candidate,
-  `@dylankenneally/react-native-ssh-sftp`, exposes no host-key API at all, so the TOFU pin in §4.1
-  of PLAN.md cannot be built on it; it also has no PTY resize, and its SFTP takes file paths rather
-  than bytes. Citadel wrapped in our own Expo module is the answer — Citadel is the library, that
-  file is just its proven call sequence.
-- **Catppuccin** (`src/theme.ts`) — `@catppuccin/palette` ships the 26 colours and the light/dark
-  flag, so the hand-copied hex table went away. What stayed is what the package does not decide:
-  the ANSI mapping and the chrome roles.
-
-Read the candidate's actual API — its `.d.ts`, its source — before ruling it in or out. "No library
-does this" is a claim, and it needs the same evidence as any other.
