@@ -33,7 +33,8 @@ Sources: `src/settings.ts`, `src/keys.ts`, `src/host-keys.ts`, `src/session.ts`,
 ## Terminal, input, and keyboard
 
 Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `src/keybar.tsx`,
-`src/hooks/use-terminal-keyboard.ts`, `src/prose-model.ts`, `src/app/terminal.tsx`.
+`src/hooks/use-terminal-keyboard.ts`, `src/prose-model.ts`, `src/app/terminal.tsx`,
+`src/hwkeys-model.ts`, `src/hooks/use-hwkeys.ts`, `modules/expo-hwkeys/`.
 
 - xterm.js runs in an Expo DOM component. Native TextInput owns the keyboard; the WebView renders
   the terminal and handles terminal selection/scrolling. The PTY uses `xterm-256color`.
@@ -45,6 +46,14 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   bar-up-to-switcher interaction is retired; the tabs button opens the switcher.
 - Ctrl arms once or locks on double-tap; the fixed chord strip is C/Z/R/L/D. Esc, Tab, arrows,
   Home/End, and Enter send terminal input. Keys must not fire during a swipe.
+- Physical keyboard (Bluetooth/USB): the field consumes plain printables, Enter, Backspace and
+  Space; everything else a hardware key sends is intercepted by `modules/expo-hwkeys` and routed
+  by `src/hwkeys-model.ts` to the bytes the bar sends (Esc, Tab, arrows, Home/End, PgUp/Dn,
+  Delete, F-keys, Ctrl/Alt chords), or to an app action — Alt+1..9/0 selects the tmux window by
+  number, Alt+T opens the switcher, Alt+N makes a window, Cmd/Win+V pastes. Without an attached
+  tmux session the Alt keys fall through to terminal bytes. Interception is only armed while the
+  field holds focus; the open switcher keeps Escape (it closes) and the search field keeps the
+  rest. A repeated key never re-fires an app action.
 - Prose mode follows the foreground program; the menu provides an override scoped to that context.
   Shell/TUI input stays raw. Preserve dictation-space filtering and real leading spaces.
 - SSH writes are serialized in `src/session.ts`; do not bypass the queue and reorder input.

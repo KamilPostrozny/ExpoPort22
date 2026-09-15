@@ -1,6 +1,11 @@
 import ExpoModulesCore
 import UIKit
 
+/// Private UIKit: the per-key-down subevent of a `UIPhysicalKeyboardEvent`. Not in the public
+/// headers, so it is declared here for the signatures and the casts only — at runtime the ObjC
+/// runtime resolves the same class UIKit defines, so `as? UIKeyboardInput` succeeds.
+@objc class UIKeyboardInput: NSObject {}
+
 /**
  * The physical-keyboard seam.
  *
@@ -93,7 +98,9 @@ private final class KeyTap {
   static func intercept(input: UIKeyboardInput, modifiers: UIKeyModifierFlags, keyDown: Bool) -> Bool {
     guard mode != "off" else { return false }
     guard keyDown else { return false }
-    let code = Int(input.keyCode)
+    // The fields are private too — KVC keeps this stub free of any ABI assumption about their
+    // types. A missing key reads as a number of zero, which is not in any intercept set.
+    let code = Int((input.value(forKey: "keyCode") as? NSNumber)?.intValue ?? 0)
     let ctrl = modifiers.contains(.control)
     let alt = modifiers.contains(.alternate)
     let meta = modifiers.contains(.command)
@@ -109,9 +116,9 @@ private final class KeyTap {
   static func emit(_ input: UIKeyboardInput, modifiers: UIKeyModifierFlags) {
     module?.sendEvent("onKey", [
       "platform": "ios",
-      "keyCode": Int(input.keyCode),
-      "character": input.characters ?? "",
-      "baseCharacter": input.charactersIgnoringModifiers ?? "",
+      "keyCode": Int((input.value(forKey: "keyCode") as? NSNumber)?.intValue ?? 0),
+      "character": input.value(forKey: "characters") as? String ?? "",
+      "baseCharacter": input.value(forKey: "charactersIgnoringModifiers") as? String ?? "",
       "shiftKey": modifiers.contains(.shift),
       "ctrlKey": modifiers.contains(.control),
       "altKey": modifiers.contains(.alternate),

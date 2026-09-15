@@ -61,8 +61,6 @@ class ExpoHwKeysModule : Module() {
       add(KeyEvent.KEYCODE_LEFT_BRACKET)
       add(KeyEvent.KEYCODE_RIGHT_BRACKET)
       add(KeyEvent.KEYCODE_BACKSLASH)
-      add(KeyEvent.KEYCODE_CARET)
-      add(KeyEvent.KEYCODE_UNDERSCORE)
       add(KeyEvent.KEYCODE_ENTER)
       add(KeyEvent.KEYCODE_DPAD_UP)
       add(KeyEvent.KEYCODE_DPAD_DOWN)
@@ -92,13 +90,13 @@ class ExpoHwKeysModule : Module() {
       mapOf(
         "platform" to "android",
         "keyCode" to event.keyCode,
-        "character" to charOf(event.unicode),
+        "character" to charOf(event.unicodeChar),
         "baseCharacter" to charOf(event.getUnicodeChar(0)),
         "shiftKey" to event.isShiftPressed,
         "ctrlKey" to event.isCtrlPressed,
         "altKey" to event.isAltPressed,
         "metaKey" to event.isMetaPressed,
-        "repeat" to event.isRepeat,
+        "repeat" to (event.repeatCount > 0),
       ),
     )
   }
