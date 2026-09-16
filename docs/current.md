@@ -43,8 +43,9 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
 - Font size 8–32, default 13; portrait/landscape and keyboard changes must resize the remote PTY.
 - Pan routes to negotiated mouse-wheel events, alternate-screen arrows, or local scrollback.
   Respect DECCKM, finger cell coordinates, one-cell notch granularity, and momentum cancellation.
-- Long-press selects text without becoming a scroll. A terminal tap clears selection but does not
-  move the keyboard; only the bar's down and up swipes hide and raise it (the up-swipe also
+- Long-press selects text without becoming a scroll. A terminal tap clears selection and stays a
+  click — a mouse report to an app that negotiated one, an OSC 8 link under the finger — but does
+  not move the keyboard; only the bar's down and up swipes hide and raise it (the up-swipe also
   focuses the page for a hardware keyboard).
 - Bar down hides the keyboard; bar up raises it. Horizontal bar gestures switch windows. The old
   bar-up-to-switcher interaction is retired; the tabs button opens the switcher.

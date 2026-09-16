@@ -80,9 +80,10 @@ export type TerminalHandle = {
    *  hop: the incoming window rewrites every row, so a selection that survived would be the
    *  newcomer's text wearing the old highlight, and a Copy of it would be the wrong content. */
   clearSelection(): void;
-  /** Focus xterm's helper textarea so the page owns the keyboard — the terminal tap and the
-   *  bar's up-swipe. The OS keyboard is still the OS's; this only moves first responder into the
-   *  page, where xterm turns every key (printable, Esc/Tab/arrow/F-key, chord) into `onData`. */
+  /** Focus xterm's helper textarea so the page owns the keyboard — the bar's up-swipe's job, and
+   *  only that one: a terminal tap deliberately does not take it. The OS keyboard is still the
+   *  OS's; this only moves first responder into the page, where xterm turns every key (printable,
+   *  Esc/Tab/arrow/F-key, chord) into `onData`. */
   focus(): void;
   /** Blur it: the down-swipe and the screen's doors put the keyboard away through here. */
   blur(): void;
@@ -1169,6 +1170,43 @@ export default function TerminalView({
       return screen && term.rows > 0 ? screen.getBoundingClientRect().height / term.rows : 0;
     };
 
+    /** A tap is a click. The compatibility mouse pair WebKit fires after a touch is what used to
+     *  carry a tap into xterm — and `preventDefault` on the touchend, which is what stops that
+     *  pair from focusing the helper textarea and raising the keyboard, took the click with it. So
+     *  the pair is dispatched here instead, in WebKit's order: `mousemove` first, because that is
+     *  the hover xterm's link provider answers (a tap on an OSC 8 link opens it), then
+     *  `mousedown`/`mouseup`, which `bindMouse` reads to encode a report per the negotiated
+     *  protocol — SGR through `onData`, legacy DEFAULT through `onBinary`, exactly as it encodes
+     *  the synthesized wheels above. Nothing is reimplemented: the encoding stays xterm's, and an
+     *  app that never asked for the mouse simply gets no report out of the pair. Only `focus` is
+     *  neutralised for the dispatch, since xterm's `mousedown` handler takes the keyboard on its
+     *  way to the report; the bar's up-swipe stays the only door that raises it. */
+    const clickAt = (x: number, y: number) => {
+      const target = term.element?.querySelector('.xterm-screen') ?? term.element;
+      if (target === undefined) return;
+      const send = (type: 'mousemove' | 'mousedown' | 'mouseup', buttons: number) =>
+        target.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX: x,
+            clientY: y,
+            button: 0,
+            buttons,
+          }),
+        );
+      const focus = term.focus;
+      term.focus = () => {};
+      try {
+        send('mousemove', 0);
+        send('mousedown', 1);
+        send('mouseup', 0);
+      } finally {
+        term.focus = focus;
+      }
+    };
+
     /** Turns accumulated pixels into notches and routes them. `x`/`y` is where the finger is —
      *  where a wheel report has to land. */
     const spend = (dy: number, x: number, y: number) => {
@@ -1425,10 +1463,14 @@ export default function TerminalView({
       // A one-finger tap on a live selection clears it (T13's tap-to-clear, kept; the mechanism
       // is ours now — xterm's own path runs off a synthetic mouse pair that touch never sends).
       // It must NOT move the keyboard either: `preventDefault` suppresses the compatibility mouse
-      // pair WebKit fires after a tap, which is exactly what xterm's mousedown handler uses to
-      // focus its textarea and raise the keyboard. Raising/focusing is the bar's up-swipe job.
+      // pair WebKit fires after a tap, whose `mousedown` is what focuses xterm's textarea and
+      // raises the keyboard. Raising/focusing is the bar's up-swipe job. That pair was also the
+      // tap's click — the report an app that negotiated mouse reporting waits for, and the hover
+      // an OSC 8 link is opened by — so `clickAt` sends it on, with the focus left out.
       if (pan === 'pending' && fingers === 1) {
         ev.preventDefault();
+        const tap = ev.changedTouches[0];
+        if (tap !== undefined) clickAt(tap.clientX, tap.clientY);
         clearSelection();
       }
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
