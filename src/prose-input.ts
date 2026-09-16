@@ -67,3 +67,17 @@ export function proseKey(
 export function proseSelfKey(key: string): string {
   return key === 'Delete' ? '\x1b[3~' : DEL;
 }
+
+/**
+ * The most cells one polled caret move may become in arrows (see `caretArrows`).
+ *
+ * iOS parks the caret at a document edge when a hold-space drag engages and again when it ends — a
+ * jump of most of the line — and a park is not travel the user made. Bounding each poll keeps a
+ * park to a few cells while a real drag, sampled every 60ms, still arrives in steps of one or two.
+ */
+export const CARET_MOVE_MAX = 8;
+
+/** A caret move the poll saw, as the signed number of arrows to send for it. */
+export function caretArrows(moved: number): number {
+  return Math.max(-CARET_MOVE_MAX, Math.min(CARET_MOVE_MAX, moved));
+}

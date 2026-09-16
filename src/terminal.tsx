@@ -42,7 +42,7 @@ import {
 import { MONO_ADVANCE } from '@/switcher-model';
 import { DEL, caretKeys, diffInput } from '@/keybar-model';
 import { filterDictation } from '@/input-model';
-import { proseKey, proseSelfKey, proseText } from '@/prose-input';
+import { caretArrows, proseKey, proseSelfKey, proseText } from '@/prose-input';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
 // `MONO` from the leaf, `Theme` as a type only — both so that `@/theme`, and with it the palette
 // and the 27-theme graph, stays out of this webview's bundle. See `fonts.ts`.
@@ -653,19 +653,21 @@ export default function TerminalView({
      * handle, this side owns the field's change stream and sends what changed. Raw mode is untouched
      * — every branch here is gated on the mode.
      *
-     * What this does NOT restore: §4.2's hold-space trackpad. The old native field reported the
-     * caret's own moves; a webview textarea does not. Measured 2026-09-16 with the gesture
-     * instrumented: of the caret reports the page saw while a held spacebar was dragged, every one
-     * read `caret == value.length` — the selection never left the end of the field's marked text —
-     * and the drag itself arrived as an ordinary text change (a DEL and a re-insert, which the diff
-     * sent on to the PTY and which read on the phone as the cursor stepping left and back). There is
-     * no position to turn into arrows, and no listener can recover one the engine never reports. */
+     * The one thing the old native field could do and this page could not: §4.2's hold-space trackpad.
+     * Measured 2026-09-16: every caret report WebKit made while the spacebar was held read
+     * `caret == value.length` — the walk was never one of them — and the drag itself surfaced as an
+     * ordinary text change (a DEL and a re-insert, which the diff sent on, and which read on the
+     * phone as the cursor stepping left and back). Whether the caret moves at all without an
+     * announcement is what `prosePoll` samples for; if it does not, the walk cannot be forwarded. */
     const proseArea = term.textarea;
     /** The field as the diff last saw it, and where that edit left the caret — the pair `diffInput`
      *  is fed. Reset wherever the field is wiped out from under the page: xterm clears it on Return
      *  and on ^C, and its `_handleTextAreaBlur` on any blur. */
     let proseMirror = '';
     let proseCaret = 0;
+    /** The caret the last poll saw, and the poll itself (see `prosePoll`). */
+    let proseSaw = 0;
+    let prosePollId: ReturnType<typeof setInterval> | null = null;
     const proseSay = (line: string) => {
       // The DOM console reaches Metro only intermittently (the archive caught it stopping mid-walk,
       // T6.5), and these lines are all the mode has to say; they also go over the bridge, where the
@@ -676,7 +678,46 @@ export default function TerminalView({
     const proseReset = () => {
       proseMirror = '';
       proseCaret = 0;
+      proseSaw = 0;
     };
+    /**
+     * §4.2 hold-space: iOS's held spacebar is a trackpad that walks the caret through the field and
+     * changes no character, so the move is the only thing to forward — and WebKit does not report
+     * that walk as a selection change the way it reports an edit's caret (measured 2026-09-16: not
+     * one selection change arrived while the spacebar was held and dragged). So the caret is POLLED
+     * rather than listened for. 60ms is under a finger's notice and coarse enough that iOS's chatter
+     * on a character boundary — a caret bouncing between two neighbours — never lands in a sample;
+     * the old native field needed a 40ms settle for exactly that bounce.
+     *
+     * An edit's own caret move is not a walk: `proseInput` re-anchors `proseSaw` from the field
+     * after every edit it sends, so the poll's delta is only ever movement no edit produced. */
+    const prosePoll = () => {
+      if (!latest.current.prose || proseArea === undefined) return;
+      if (document.activeElement !== proseArea) return;
+      const start = proseArea.selectionStart;
+      const end = proseArea.selectionEnd;
+      if (start === null || end === null || start !== end) return; // a range is a selection
+      if (start === proseSaw) return;
+      // Against the caret the last EDIT left (or the last sample) — never against `proseCaret`, the
+      // diff's own anchor: the whole point is to catch the moves that no edit produced.
+      const moved = start - proseSaw;
+      proseSaw = start;
+      const arrows = caretArrows(moved);
+      proseSay(`caret ${arrows > 0 ? 'right' : 'left'} ${Math.abs(arrows)}`);
+      if (arrows !== 0) void latest.current.onData(caretKeys(arrows, currentModes().decckm));
+    };
+    /** Bound to the keyboard being up with prose in charge: no timer runs when it cannot fire. */
+    const proseWatch = (on: boolean) => {
+      if (on && prosePollId === null) {
+        proseSaw = proseArea?.selectionStart ?? 0;
+        prosePollId = setInterval(prosePoll, 60);
+      } else if (!on && prosePollId !== null) {
+        clearInterval(prosePollId);
+        prosePollId = null;
+      }
+    };
+    const proseFocusWatch = () => proseWatch(latest.current.prose);
+    const proseBlurWatch = () => proseWatch(false);
     /** The flip: the traits iOS reads, plus a fresh correction context — one mode's half-typed line
      *  must never become the other's. The auto path decides the mode before the keyboard rises, so
      *  the attach that follows reads the new traits; whether iOS ALSO re-reads them on a flip made
@@ -691,6 +732,7 @@ export default function TerminalView({
       proseArea.setAttribute('autocapitalize', on ? 'sentences' : 'off');
       proseArea.setAttribute('spellcheck', on ? 'true' : 'false');
       proseReset();
+      proseWatch(on);
       proseSay(`mode ${on ? 'on' : 'off'}`);
     };
     /** Which key goes where, and the reset for the two xterm clears the field on its way past. */
@@ -725,6 +767,8 @@ export default function TerminalView({
       const edit = diffInput(before, next, proseCaret);
       proseMirror = next;
       proseCaret = edit.caret;
+      // The poll's baseline follows the EDIT, so the caret move this edit made is not read as a walk.
+      proseSaw = proseArea.selectionStart ?? edit.caret;
       // A replacement that reaches past the caret moves the PTY's cursor with it.
       if (edit.ahead !== 0)
         void latest.current.onData(caretKeys(edit.ahead, currentModes().decckm));
@@ -752,10 +796,16 @@ export default function TerminalView({
     ];
     for (const type of PROSE_OWNED) host.current?.addEventListener(type, proseInput, true);
     proseArea?.addEventListener('blur', proseReset, true);
+    // The walk only exists while the field holds the keyboard: no focus, no poll.
+    proseArea?.addEventListener('focus', proseFocusWatch, true);
+    proseArea?.addEventListener('blur', proseBlurWatch, true);
     const proseTeardown = () => {
       proseApplyRef.current = null;
+      proseWatch(false);
       for (const type of PROSE_OWNED) host.current?.removeEventListener(type, proseInput, true);
       proseArea?.removeEventListener('blur', proseReset, true);
+      proseArea?.removeEventListener('focus', proseFocusWatch, true);
+      proseArea?.removeEventListener('blur', proseBlurWatch, true);
     };
     proseApplyRef.current = proseApply;
     proseApply(latest.current.prose);

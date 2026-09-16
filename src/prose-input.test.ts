@@ -4,7 +4,7 @@
 import { expect, test } from 'bun:test';
 
 import { DEL } from '@/keybar-model';
-import { proseKey, proseSelfKey, proseText } from '@/prose-input';
+import { CARET_MOVE_MAX, caretArrows, proseKey, proseSelfKey, proseText } from '@/prose-input';
 
 const plain = { ctrl: false, alt: false, meta: false };
 
@@ -56,4 +56,13 @@ test('iOS non-breaking spaces become the spacebar the PTY understands', () => {
   expect(proseText('a\u202fb')).toBe('a b');
   expect(proseText(' plain ')).toBe(' plain ');
   expect(proseText('a\u00a0b\u202fc')).toBe('a b c');
+});
+
+test('a parked caret costs a few arrows, a walked one costs what it walked', () => {
+  expect(caretArrows(1)).toBe(1);
+  expect(caretArrows(-3)).toBe(-3);
+  expect(caretArrows(0)).toBe(0);
+  // iOS parks the caret at a document edge on engage/end: a jump of the whole line, not travel.
+  expect(caretArrows(40)).toBe(CARET_MOVE_MAX);
+  expect(caretArrows(-40)).toBe(-CARET_MOVE_MAX);
 });
