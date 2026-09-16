@@ -86,20 +86,7 @@ export type TerminalHandle = {
   focus(): void;
   /** Blur it: the down-swipe and the screen's doors put the keyboard away through here. */
   blur(): void;
-  /** The tab grid is open: the page takes Escape and bare digits for it instead of the terminal
-   *  chords. The screen sets this at the grid's open and clear, and the search field a native
-   *  TextInput means the digits stay query text whenever that field is the one focused. */
-  setSwitcher(open: boolean): void;
 };
-
-/** A hardware chord that is an app action rather than terminal input — the same set the custom
- *  native module used to intercept, now decided in the page by xterm's own key handler. */
-export type AppKeyAction =
-  | { kind: 'window-select'; number: number }
-  | { kind: 'window-new' }
-  | { kind: 'switcher' }
-  | { kind: 'switcher-close' }
-  | { kind: 'paste' };
 
 export type TerminalProps = {
   theme: Theme;
@@ -149,10 +136,6 @@ export type TerminalProps = {
    *  on the next ~2s beat. Fired from the touch layer's `spend`, throttled, on the wheel route
    *  only — arrows and local scroll do not touch tmux copy mode. */
   onScroll?: () => void;
-  /** A hardware chord that is an app action rather than terminal input. xterm's key handler runs
-   *  every key through it first (see `attachCustomKeyEventHandler` in `boot`); only the app's
-   *  chords — Alt+1..9/0, Alt+T, Alt+N, Cmd+V — are taken, everything else is left to xterm. */
-  onAppKey: (action: AppKeyAction) => void;
   ref?: Ref<TerminalHandle>;
   dom?: DOMProps;
 };
@@ -373,8 +356,6 @@ export default function TerminalView({
    *  reinterprets the buffer and a stale selection would be the wrong content wearing the right
    *  highlight (see `clearSelection` on `TerminalHandle`). */
   const clearSelRef = useRef<() => void>(() => {});
-  /** The grid's key mode, set by the screen through `TerminalHandle.setSwitcher`. */
-  const switcherOpen = useRef(false);
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
   const latest = useRef({ theme, holdSize, ...handlers });
@@ -545,9 +526,6 @@ export default function TerminalView({
     blur: () => {
       terminal.current?.blur();
     },
-    setSwitcher: (open) => {
-      switcherOpen.current = open;
-    },
   };
   useDOMImperativeHandle(
     (ref ?? null) as Ref<DOMImperativeFactory>,
@@ -658,73 +636,6 @@ export default function TerminalView({
     // on the bar — full control, no WebKit gesture involved, and what native iOS terminals do.
 
     term.onData((data) => latest.current.onData(data));
-    // The app's hardware chords. When xterm's textarea has focus, xterm's own handler runs them
-    // (returning false stops xterm and the browser acting on the key too). When the page is first
-    // responder but the keyboard is down — the bar's dismiss blurs the textarea — xterm never sees
-    // a key, so a page-level keydown takes the same chords. Only one path can fire: the page
-    // listener defers while the textarea is the active element. Everything else is left to xterm,
-    // so Esc/Tab/arrows/F-keys/Ctrl and Alt chords keep its own encodings. No native code.
-    const appChord = (e: KeyboardEvent): boolean => {
-      const act = latest.current.onAppKey;
-      if (e.metaKey && !e.ctrlKey && !e.altKey && e.code === 'KeyV') {
-        e.preventDefault();
-        act({ kind: 'paste' });
-        return true;
-      }
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.repeat) {
-        const digit = /^Digit([0-9])$/.exec(e.code);
-        if (digit !== null) {
-          e.preventDefault();
-          act({ kind: 'window-select', number: digit[1] === '0' ? 10 : Number(digit[1]) });
-          return true;
-        }
-        if (e.code === 'KeyT') {
-          e.preventDefault();
-          act({ kind: 'switcher' });
-          return true;
-        }
-        if (e.code === 'KeyN') {
-          e.preventDefault();
-          act({ kind: 'window-new' });
-          return true;
-        }
-      }
-      return false;
-    };
-    // WebKit gives the page first responder only from a user gesture, so this path is live only
-    // after the terminal has been armed — the tap (`touchEnd`) or the bar up-swipe (`onRaise`).
-    // It is what keeps the chords working with the keyboard down, after a dismiss blurs the textarea.
-    const onDomKey = (e: KeyboardEvent) => {
-      if (e.type !== 'keydown') return;
-      if (document.activeElement === term.textarea) return; // xterm's handler owns this one
-      if (switcherOpen.current) {
-        // The grid: Escape closes it and a bare digit picks that tmux window. Repeats do not
-        // re-fire, and any modifier is left alone — nothing else in the grid is the page's.
-        if (!e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey) {
-          if (e.code === 'Escape') {
-            e.preventDefault();
-            latest.current.onAppKey({ kind: 'switcher-close' });
-            return;
-          }
-          const digit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code);
-          if (digit !== null) {
-            e.preventDefault();
-            latest.current.onAppKey({
-              kind: 'window-select',
-              number: digit[1] === '0' ? 10 : Number(digit[1]),
-            });
-            return;
-          }
-        }
-        return; // in the grid, nothing else the page sees is a terminal chord
-      }
-      appChord(e);
-    };
-    document.addEventListener('keydown', onDomKey, true);
-    term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== 'keydown') return true;
-      return !appChord(e);
-    });
     term.onBell(() => latest.current.onBell());
     // Instrumentation (the callout's Copy fired on nothing, 2026-09-12): the selection model died
     // between the long-press landing and the Copy tap, and xterm clears it from several internal
@@ -1021,7 +932,6 @@ export default function TerminalView({
       clearTimeout(settle);
       observer.disconnect();
       teardownTouch();
-      document.removeEventListener('keydown', onDomKey, true);
       hitMark.current = []; // the elements go with the terminal; the refs must not outlive it
       dropPendingFit();
       hostData.current = null;
@@ -1514,12 +1424,9 @@ export default function TerminalView({
       }
       // A one-finger tap on a live selection clears it (T13's tap-to-clear, kept; the mechanism
       // is ours now — xterm's own path runs off a synthetic mouse pair that touch never sends).
-      // The tap is also the keyboard's door now: focus inside the gesture so WebKit shows the
-      // software keyboard, and the page gets every hardware key from here on.
-      if (pan === 'pending' && fingers === 1) {
-        clearSelection();
-        term.focus();
-      }
+      // The tap does NOT move the keyboard: only the bar's up-swipe raises it (and focuses the
+      // page for a hardware keyboard), as before.
+      if (pan === 'pending' && fingers === 1) clearSelection();
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
       // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.
       if (pan === 'pending' && isTwoFingerTap(fingers, false, ev.timeStamp - downAt)) {
@@ -1569,6 +1476,9 @@ export default function TerminalView({
     if (!term) return;
     const { theme: current } = latest.current;
     document.body.style.background = current.background;
+    // The software keyboard's own appearance follows the page's `color-scheme`, so the keyboard
+    // matches the app's theme rather than the system's (the old native `keyboardAppearance`).
+    document.documentElement.style.colorScheme = current.isDark ? 'dark' : 'light';
     term.options.theme = xtermTheme(current);
     term.options.fontSize = fontSize;
     resizer.current?.();

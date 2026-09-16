@@ -32,5 +32,3 @@ up and down. On Android measure IME state while the keyboard is visible, not aft
 | T7A.6 | Open chords/arrows/clipboard with keyboard up/down | Correct anchoring, hit targets, no unexpected terminal displacement; arrows include Enter. |
 | T7A.7 | Exercise repeated presses/haptics | No crash; visible feedback still matches iOS. Emulator cannot certify physical haptic feel. |
 | T7.16 | Attach a hardware keyboard; press Esc, Tab, arrows, Home/End, PgUp/Dn, Delete and F-keys in vim/shell | Each reaches the PTY with xterm's own encoding (vim modes, completion, history); the software keyboard and the bar are unaffected. |
-| T7.17 | With tmux attached, press Alt+1..9, Alt+0, Alt+T, Alt+N, Cmd+V | Window-number select, switcher, new window and the bar's paste rules fire; the key does not also reach the PTY. Without tmux the Alt digits type terminal bytes. |
-| T7.18 | With the tab grid open (terminal armed first), press Escape, then reopen and press a window number | Escape closes the grid back to the terminal; the digit selects that window and lands on it. With the grid's search field focused, the same keys are query text instead. |

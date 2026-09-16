@@ -116,7 +116,6 @@ import {
   scrollBottom,
   searchWindow,
   selectWindow,
-  selectWindowByNumber,
   useTmux,
 } from '@/tmux';
 import { proseFor } from '@/prose-model';
@@ -480,51 +479,6 @@ export default function SessionScreen() {
       setModes(next);
     },
     onTwoFingerTap: async () => openSettings(),
-    // The hardware app chords, decided in the page by xterm's key handler (see `src/terminal.tsx`).
-    // The actions are the screen's: the same doors the tabs button, the ⋮ menu and the key bar's
-    // Paste use, so a hardware key and a finger land in the same place.
-    onAppKey: (action) => {
-      // The page reports only the chord; the tmux gate is here, where `showTabs` is live. Without
-      // a named tmux session the Alt chords keep their terminal meaning (ESC + the key), exactly
-      // as the old native routing did. With the grid open the same actions take the grid's path:
-      // Escape closes it and a bare digit is a card tap on that window number.
-      if (action.kind === 'switcher-close') {
-        if (swRef.current === 'open' || swRef.current === 'opening') closeTo(activePos());
-        return;
-      }
-      if (action.kind === 'paste') {
-        keybar.current?.paste();
-        return;
-      }
-      if (action.kind === 'window-select') {
-        const pos = visibleCards.findIndex((c) => c.win.index === action.number);
-        if ((swRef.current === 'open' || swRef.current === 'opening') && pos >= 0) {
-          selectCard(pos, visibleCards[pos].win);
-          return;
-        }
-        if (!showTabs) {
-          void send('\x1b' + (action.number === 10 ? '0' : String(action.number)));
-          return;
-        }
-        selectWindowByNumber(action.number).catch((error) =>
-          console.log('[keys] select-window', action.number, 'failed:', error),
-        );
-        return;
-      }
-      if (action.kind === 'window-new') {
-        if (!showTabs) {
-          void send('\x1bn');
-          return;
-        }
-        newWindow().catch((error) => console.log('[keys] new-window failed:', error));
-        return;
-      }
-      if (showTabs) {
-        openSwitcher();
-      } else {
-        void send('\x1bt');
-      }
-    },
   };
   /** One identity-stable object instead of nine one-per-key trampolines: same ref-indirection, one hook. */
   const tv = useMemo(
@@ -540,7 +494,6 @@ export default function SessionScreen() {
       onLink: async (...a: any[]) => termH.current.onLink?.(...a),
       onModes: async (...a: any[]) => termH.current.onModes?.(...a),
       onTwoFingerTap: async (...a: any[]) => termH.current.onTwoFingerTap?.(...a),
-      onAppKey: (...a: any[]) => termH.current.onAppKey?.(...a),
     }),
     [],
   );
@@ -563,8 +516,9 @@ export default function SessionScreen() {
         onLink={tv.onLink}
         onModes={tv.onModes}
         onTwoFingerTap={tv.onTwoFingerTap}
-        onAppKey={tv.onAppKey}
-        dom={{ scrollEnabled: false, style: styles.terminal }}
+        // The webview's own input accessory bar (the prev/next/Done strip) is not this app's
+        // chrome; the native TextInput it replaces never showed one.
+        dom={{ scrollEnabled: false, style: styles.terminal, hideKeyboardAccessoryView: true }}
       />
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the handlers are identity-stable
@@ -822,7 +776,6 @@ export default function SessionScreen() {
 
   const finishClose = () => {
     setSw('closed');
-    terminal.current?.setSwitcher(false);
     // The pad froze at the open (see the keyboardWillChangeFrame guard) and no keyboard event is
     // coming to re-report it, so thaw it to the last one that WAS announced. The thaw that MATTERS
     // for the bar's position already happened at the commit (`closeTo`/`springBack`) — this one is
@@ -866,8 +819,6 @@ export default function SessionScreen() {
 
   const commitOpen = () => {
     setSw('opening');
-    // The page takes Escape and bare digits while the grid is up; cleared in `finishClose`.
-    terminal.current?.setSwitcher(true);
     // Matched SPEED, not duration (user, 2026-09-01): a catch of the close partway home has less
     // distance left, and giving that remainder the button's full ZOOM_OUT made its settle crawl
     // next to the button's flight. Time scales with the travel left; the floor keeps a deep

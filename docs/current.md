@@ -37,28 +37,25 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
 
 - xterm.js runs in an Expo DOM component. The WebView owns the keyboard: xterm's helper
   textarea is first responder, so software and hardware keys alike become xterm `onData` (Esc,
-  Tab, arrows, F-keys, Ctrl/Alt chords, DECCKM-aware). A terminal tap focuses it; the bar's down
-  and up swipes and the screen's doors blur/focus it. The PTY uses `xterm-256color`.
+  Tab, arrows, F-keys, Ctrl/Alt chords, DECCKM-aware). The bar's up-swipe focuses it (and raises
+  the software keyboard); the bar's down-swipe and the screen's doors blur it. A terminal tap
+  deliberately does neither. The PTY uses `xterm-256color`.
 - Font size 8–32, default 13; portrait/landscape and keyboard changes must resize the remote PTY.
 - Pan routes to negotiated mouse-wheel events, alternate-screen arrows, or local scrollback.
   Respect DECCKM, finger cell coordinates, one-cell notch granularity, and momentum cancellation.
-- Long-press selects text without becoming a scroll. A terminal tap focuses the page and raises
-  the keyboard.
+- Long-press selects text without becoming a scroll. A terminal tap clears selection but does not
+  move the keyboard; only the bar's down and up swipes hide and raise it (the up-swipe also
+  focuses the page for a hardware keyboard).
 - Bar down hides the keyboard; bar up raises it. Horizontal bar gestures switch windows. The old
   bar-up-to-switcher interaction is retired; the tabs button opens the switcher.
 - Ctrl arms once or locks on double-tap; the fixed chord strip is C/Z/R/L/D. Esc, Tab, arrows,
   Home/End, and Enter send terminal input. Keys must not fire during a swipe.
-- Hardware app chords are decided in the page (xterm's `attachCustomKeyEventHandler`, plus a
-  page-level keydown fallback so they work with the software keyboard up or down): Alt+1..9/0
-  selects the tmux window by number, Alt+T opens the switcher, Alt+N makes a window, Cmd/Win+V
-  pastes through the bar's rules. The tmux gate is applied screen-side; without an attached
-  session the Alt keys fall through to `ESC` + the key. With the tab grid open the page takes the
-  grid's keys instead: Escape closes it and a bare digit selects that tmux window (the grid's
-  search field is a native TextInput, so while it holds focus the digits are just query text).
-  WebKit grants the page first responder only from a user gesture, so hardware keys reach nothing
-  until the terminal is armed by a tap or the bar's up-swipe; after that one gesture they work for
-  the rest of the session, keyboard up or down. This is the accepted cost of owning the keyboard
-  in the page rather than natively.
+- No app-level hardware-key control: the page intercepts no key, so a hardware keyboard feeds
+  xterm exactly as the software one does (Alt/AltGr chords included) and tmux owns window
+  management. The software keyboard follows the app theme (the page's `color-scheme`) and its
+  webview accessory bar is hidden. WebKit grants the page first responder only from a user
+  gesture, so the bar's up-swipe is what arms a hardware keyboard; a terminal tap deliberately
+  does not focus the page.
 - Prose mode follows the foreground program; the menu provides an override scoped to that context.
   Shell/TUI input stays raw. The old native-field dictation filter went with the field: xterm
   forwards exactly what the keyboard produced. That is an accepted regression of moving keyboard
