@@ -40,7 +40,7 @@ import {
   type ModeSignal,
 } from '@/scroll-model';
 import { MONO_ADVANCE } from '@/switcher-model';
-import { CARET_SETTLE_MS, CARET_STEP_MAX, DEL, caretKeys, diffInput } from '@/keybar-model';
+import { DEL, caretKeys, diffInput } from '@/keybar-model';
 import { filterDictation } from '@/input-model';
 import { proseKey, proseSelfKey, proseText } from '@/prose-input';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
@@ -542,12 +542,9 @@ export default function TerminalView({
       clearSelRef.current();
     },
     focus: () => {
-      console.log('[kb] page focus', document.activeElement?.tagName ?? 'none');
+      console.log('[kb] page focus called');
       terminal.current?.focus();
-      setTimeout(
-        () => console.log('[kb] after focus', document.activeElement?.tagName ?? 'none'),
-        300,
-      );
+      console.log('[kb] activeElement', document.activeElement?.tagName ?? 'none');
     },
     blur: () => {
       terminal.current?.blur();
@@ -658,18 +655,20 @@ export default function TerminalView({
      * So, in prose mode only: the traits go on, xterm steps aside for the keys the browser should
      * handle, this side owns the field's change stream and sends what changed. Raw mode is untouched
      * — every branch here is gated on the mode.
-     */
+     *
+     * What this does NOT restore: §4.2's hold-space trackpad. The old native field reported the
+     * caret's own moves; a webview textarea does not. Measured 2026-09-16 with the gesture
+     * instrumented: of the caret reports the page saw while a held spacebar was dragged, every one
+     * read `caret == value.length` — the selection never left the end of the field's marked text —
+     * and the drag itself arrived as an ordinary text change (a DEL and a re-insert, which the diff
+     * sent on to the PTY and which read on the phone as the cursor stepping left and back). There is
+     * no position to turn into arrows, and no listener can recover one the engine never reports. */
     const proseArea = term.textarea;
     /** The field as the diff last saw it, and where that edit left the caret — the pair `diffInput`
      *  is fed. Reset wherever the field is wiped out from under the page: xterm clears it on Return
      *  and on ^C, and its `_handleTextAreaBlur` on any blur. */
     let proseMirror = '';
     let proseCaret = 0;
-    /** Where the field's caret wants to stand, and the settle it is waiting on — iOS's hold-space
-     *  trackpad walks that caret without changing a character, so a selection change is all it
-     *  produces (see `proseSelection`). */
-    let proseWanted = 0;
-    let proseSettle: ReturnType<typeof setTimeout> | null = null;
     const proseSay = (line: string) => {
       // The DOM console reaches Metro only intermittently (the archive caught it stopping mid-walk,
       // T6.5), and these lines are all the mode has to say; they also go over the bridge, where the
@@ -680,7 +679,6 @@ export default function TerminalView({
     const proseReset = () => {
       proseMirror = '';
       proseCaret = 0;
-      proseWanted = 0;
     };
     /** The flip: the traits iOS reads, plus a fresh correction context — one mode's half-typed line
      *  must never become the other's. The auto path decides the mode before the keyboard rises, so
@@ -729,7 +727,7 @@ export default function TerminalView({
       if (next === before) return;
       const edit = diffInput(before, next, proseCaret);
       proseMirror = next;
-      proseCaret = proseWanted = edit.caret;
+      proseCaret = edit.caret;
       // A replacement that reaches past the caret moves the PTY's cursor with it.
       if (edit.ahead !== 0)
         void latest.current.onData(caretKeys(edit.ahead, currentModes().decckm));
@@ -746,46 +744,6 @@ export default function TerminalView({
       }
       void latest.current.onData(bytes);
     };
-    /**
-     * §4.2 hold-space: iOS's held spacebar is a trackpad that walks the caret through the FIELD and
-     * changes no character, so a selection change is the only event it produces. The settled move
-     * becomes arrows the PTY understands. An edit's own caret move was already levelled out in
-     * `proseInput`, so it arrives here as a delta of zero.
-     *
-     * 40ms of stillness before believing a position: hovering on a character boundary makes iOS
-     * chatter the caret between two neighbours, and following that sent a real arrow each way — the
-     * cursor visibly shook rather than moved. A jump larger than a couple of cells is iOS PARKING
-     * the caret at a document edge as the drag begins or ends, not travel; it re-anchors instead.
-     *
-     * The field's caret and the PTY's cursor can end up out of step (a bar arrow moves one and not
-     * the other, and the walk stops at the field's edge). The eye closes that loop — the terminal's
-     * cursor is what the person is watching, and an invisible caret can offer no better anchor.
-     */
-    const proseSelection = () => {
-      if (!latest.current.prose || proseArea === undefined) return;
-      if (document.activeElement !== proseArea) return;
-      const start = proseArea.selectionStart;
-      const end = proseArea.selectionEnd;
-      if (start === null || end === null || start !== end) return; // a range is a selection
-      // TRACKPAD PROBE (temporary): what iOS reports, against what the field holds.
-      proseSay(
-        `caret ${start} anchor=${proseCaret} len=${proseArea.value.length} ` +
-          `val=${JSON.stringify(proseArea.value.slice(0, 24))}`,
-      );
-      proseWanted = start;
-      if (proseSettle !== null) clearTimeout(proseSettle);
-      proseSettle = setTimeout(() => {
-        proseSettle = null;
-        const delta = proseWanted - proseCaret;
-        proseCaret = proseWanted;
-        if (delta === 0 || Math.abs(delta) > CARET_STEP_MAX) {
-          proseSay(`trackpad skip delta=${delta}`);
-          return;
-        }
-        proseSay(`trackpad ${delta > 0 ? 'right' : 'left'} ${Math.abs(delta)}`);
-        void latest.current.onData(caretKeys(delta, currentModes().decckm));
-      }, CARET_SETTLE_MS);
-    };
     // The change stream has to be taken ABOVE the textarea (see `proseInput`); the blur reset only
     // needs to hear the field itself.
     const PROSE_OWNED = [
@@ -797,13 +755,10 @@ export default function TerminalView({
     ];
     for (const type of PROSE_OWNED) host.current?.addEventListener(type, proseInput, true);
     proseArea?.addEventListener('blur', proseReset, true);
-    document.addEventListener('selectionchange', proseSelection);
     const proseTeardown = () => {
       proseApplyRef.current = null;
-      if (proseSettle !== null) clearTimeout(proseSettle);
       for (const type of PROSE_OWNED) host.current?.removeEventListener(type, proseInput, true);
       proseArea?.removeEventListener('blur', proseReset, true);
-      document.removeEventListener('selectionchange', proseSelection);
     };
     proseApplyRef.current = proseApply;
     proseApply(latest.current.prose);
