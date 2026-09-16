@@ -51,11 +51,14 @@ private final class KeyTap {
   static func install() {
     guard !installed else { return }
     installed = true
-    // `handleKeyUIEvent(_:)` is private UIKit (declared below only for the selector — the real
-    // implementation is the one UIApplication already carries, the way React Native's dev-build
-    // `RCTKeyCommands` swizzles the same point):
+    // `handleKeyUIEvent:` is private UIKit — resolve the selector by name, the way React Native's
+    // dev-build `RCTKeyCommands` swizzles the same point. It must not be declared as a method of
+    // this extension: a Swift extension compiles to an ObjC category, and a category method with
+    // the same selector *replaces* the private implementation the moment the binary loads, before
+    // the swizzle ever runs.
+    let originalSelector = NSSelectorFromString("handleKeyUIEvent:")
     guard
-      let original = class_getInstanceMethod(UIApplication.self, #selector(UIApplication.handleKeyUIEvent(_:))),
+      let original = class_getInstanceMethod(UIApplication.self, originalSelector),
       let swizzled = class_getInstanceMethod(UIApplication.self, #selector(UIApplication.hwKeysHandleKeyUIEvent(_:)))
     else { return }
     method_exchangeImplementations(original, swizzled)
@@ -129,23 +132,29 @@ private final class KeyTap {
 }
 
 private extension UIApplication {
-  /** Private UIKit: declared for the `#selector` above and nothing else. */
-  @objc func handleKeyUIEvent(_ event: UIEvent) {}
-
   @objc func hwKeysHandleKeyUIEvent(_ event: UIEvent) {
-    // `UIKeyboardEvent` is the public base of the private `UIPhysicalKeyboardEvent`, so the cast
-    // is a normal one — no name lookup. Touch events are not keyboard events, so this is the
-    // only kind that reaches the loop.
-    if let keyboard = event as? UIKeyboardEvent {
-      // Key up/down per event: the private flag React Native reads for exactly this. If it ever
-      // disappears the answer is "pass everything through" (a no-op), never a doubled key.
-      let keyDown = (keyboard.value(forKey: "_isKeyDown") as? Bool) ?? false
-      let modifiers = keyboard.allKeys
-      for subevent in keyboard.subevents ?? [] {
-        if KeyTap.intercept(subevent: subevent, modifiers: modifiers, keyDown: keyDown) {
-          KeyTap.emit(subevent: subevent, modifiers: modifiers)
-          return // consumed: the field never sees it
-        }
+    // The concrete keyboard classes are private UIKit — `UIPhysicalKeyboardEvent` and its
+    // `subevents` of `UIKeyboardInput` — and their `allKeys`/`subevents` surface is not in the
+    // public SDK headers, so nothing here may name the types. `handleKeyUIEvent:` only ever sees
+    // keyboard events; if the class name says otherwise, pass through untouched rather than risk
+    // a KVC throw on a non-keyboard event.
+    guard NSStringFromClass(type(of: event)).contains("Keyboard") else {
+      hwKeysHandleKeyUIEvent(event) // the original, after the swap
+      return
+    }
+    // Key up/down per event: the private flag React Native reads for exactly this. A missing key
+    // reads as zero — "pass everything through" (a no-op), never a doubled key.
+    let keyDown = (event.value(forKey: "_isKeyDown") as? NSNumber)?.boolValue ?? false
+    let modifierValue = event.value(forKey: "allKeys") as? NSValue
+    let modifiers = modifierValue.map { UIKeyModifierFlags(rawValue: $0.uintValue) } ?? []
+    guard let subevents = event.value(forKey: "subevents") as? [UIEvent] else {
+      hwKeysHandleKeyUIEvent(event) // the original, after the swap
+      return
+    }
+    for subevent in subevents {
+      if KeyTap.intercept(subevent: subevent, modifiers: modifiers, keyDown: keyDown) {
+        KeyTap.emit(subevent: subevent, modifiers: modifiers)
+        return // consumed: the field never sees it
       }
     }
     hwKeysHandleKeyUIEvent(event) // the original, after the swap
