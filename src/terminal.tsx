@@ -113,6 +113,11 @@ export type TerminalProps = {
    *  left the bar's own row; this carries it into the page so the helper textarea's traits can be
    *  flipped and the walk can see what iOS does with them. See the probe block in `boot`. */
   prose: boolean;
+  /** PROBE (temporary, 2026-09-16): one line per prose event, on the reliable channel. The DOM
+   *  console reaches Metro only intermittently (the archive caught it stopping mid-walk), and the
+   *  walk's whole answer is in these lines, so they go over the bridge to native `console.log` as
+   *  well — where `LOG` lines land in Metro without the DOM forwarding in the path. */
+  onProseProbe: (line: string) => Promise<void>;
   /** The terminal exists and knows its size. Fires again on every reload of the webview — iOS reaps
    *  a backgrounded one — which is the moment the session has to be painted back in. */
   onBoot: () => Promise<void>;
@@ -653,11 +658,24 @@ export default function TerminalView({
       'background:rgba(0,0,0,.6)';
     document.body.appendChild(proseLamp);
     const proseRecent: string[] = [];
+    /** Counted per event kind, and drawn above the recent lines: a screenshot then says how MANY
+     *  events there were, not just which one was last. */
+    const proseCounts = new Map<string, number>();
+    const proseDraw = () => {
+      const summary =
+        [...proseCounts].map(([kind, n]) => `${kind}=${n}`).join(' ') || 'no events yet';
+      proseLamp.textContent = `${summary}\n${proseRecent.join('\n')}`;
+    };
     const proseSay = (line: string) => {
       console.log(`[prose] ${line}`);
+      void latest.current.onProseProbe(line);
+      const kind = line.slice(0, line.indexOf(' '));
+      const inputType = /inputType=(\S+)/.exec(line)?.[1];
+      const key = inputType === undefined ? kind : `${kind}:${inputType}`;
+      proseCounts.set(key, (proseCounts.get(key) ?? 0) + 1);
       proseRecent.push(line);
-      if (proseRecent.length > 5) proseRecent.shift();
-      proseLamp.textContent = proseRecent.join('\n');
+      if (proseRecent.length > 4) proseRecent.shift();
+      proseDraw();
     };
     /** The helper textarea, or a line saying why there is nothing to flip. */
     const proseArea = term.textarea;

@@ -479,6 +479,9 @@ export default function SessionScreen() {
       setModes(next);
     },
     onTwoFingerTap: async () => openSettings(),
+    // PROBE (temporary, 2026-09-16): the page's prose-event lines, echoed here so they reach Metro
+    // as an ordinary `LOG` line even when the DOM console forwarding drops out.
+    onProseProbe: async (line: string) => console.log('[prose]', line),
   };
   /** One identity-stable object instead of nine one-per-key trampolines: same ref-indirection, one hook. */
   const tv = useMemo(
@@ -494,6 +497,7 @@ export default function SessionScreen() {
       onLink: async (...a: any[]) => termH.current.onLink?.(...a),
       onModes: async (...a: any[]) => termH.current.onModes?.(...a),
       onTwoFingerTap: async (...a: any[]) => termH.current.onTwoFingerTap?.(...a),
+      onProseProbe: async (...a: any[]) => termH.current.onProseProbe?.(...a),
     }),
     [],
   );
@@ -519,6 +523,7 @@ export default function SessionScreen() {
         onLink={tv.onLink}
         onModes={tv.onModes}
         onTwoFingerTap={tv.onTwoFingerTap}
+        onProseProbe={tv.onProseProbe}
         // The webview's own input accessory bar (the prev/next/Done strip) is not this app's
         // chrome; the native TextInput it replaces never showed one.
         dom={{ scrollEnabled: false, style: styles.terminal, hideKeyboardAccessoryView: true }}
