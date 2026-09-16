@@ -636,9 +636,8 @@ export default function TerminalView({
     /*
      * Prose mode's input path (T7.14/T7.15), restored 2026-09-16. It lived in the key bar's native
      * field until 232033f moved the keyboard into this page and dropped it, leaving the mode a value
-     * that reached nothing (docs/current.md recorded that as an accepted regression; the device walk
-     * that day is why it was not — the measurements this block is built on are in its report, and
-     * the case is T7.14 in docs/tests/keybar.md).
+     * that reached nothing. docs/current.md had recorded that loss as accepted; the walk on
+     * 2026-09-16 measured that it was not, and the numbers it turned up are the ones below.
      *
      * xterm's helper textarea is the only field here, and it is what iOS reads its traits and its
      * caret context from. Measured on the phone, 2026-09-16: with the traits flipped but xterm still
