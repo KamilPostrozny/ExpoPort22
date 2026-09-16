@@ -62,7 +62,13 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   Shell/TUI input stays raw. In prose mode the page flips the WebView helper textarea's
   autocorrect/capitalisation/spellcheck traits and owns that field's input: xterm steps aside for
   printable keys and for backspace/delete, and each change to the field reaches the PTY as
-  `diffInput`'s keys, so iOS's whole-word rewrites and the dictation space filter survive. The
+  `diffInput`'s keys, so iOS's whole-word rewrites and the dictation space filter survive. A flip
+  made while the keyboard is already up (a tab switch — its poll answer lands ~400ms after the
+  switch) drops the keyboard instead of refocusing: the platform re-reads the traits only when the
+  input session ends and restarts, a synchronous blur+focus coalesces and re-reads only some of
+  them (measured 2026-09-16), and no programmatic re-focus can re-raise the keyboard (WebKit grants
+  the page first responder only from a user gesture); the bar's up-swipe raises it again on the new
+  mode. The
   hold-space path samples the focused field's caret at 60ms and sends character-counted arrows,
   sharing the resulting position with the next input diff. Prose pins the transparent field inside
   the viewport rather than letting xterm move it with every remote cursor redraw. It hides the text
