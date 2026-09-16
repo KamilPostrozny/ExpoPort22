@@ -93,20 +93,14 @@ private final class KeyTap {
     return set
   }()
 
-  /// A per-key-down subevent of the physical event. Typed as the public `UIEvent` on purpose:
-  /// the concrete class is private UIKit, and a Swift declaration of it would be a *sibling*
-  /// class in the ObjC runtime (different class object, same superclass), so an `as?` cast to a
-  /// stub would always fail. Name checks and KVC touch it without declaring it.
-  static func intercept(subevent: UIEvent, modifiers: UIKeyModifierFlags, keyDown: Bool) -> Bool {
+  /// One intercepted key, described by the public `UIKey`: its HID usage code and the modifiers
+  /// held with it. The mode decides what is taken; everything else goes on to the field.
+  static func intercept(key: UIKey) -> Bool {
     guard mode != "off" else { return false }
-    guard keyDown else { return false }
-    guard NSStringFromClass(type(of: subevent)) == "UIKeyboardInput" else { return false }
-    // The fields are private too — KVC keeps this free of any ABI assumption about their types.
-    // A missing key reads as a number of zero, which is not in any intercept set.
-    let code = Int((subevent.value(forKey: "keyCode") as? NSNumber)?.intValue ?? 0)
-    let ctrl = modifiers.contains(.control)
-    let alt = modifiers.contains(.alternate)
-    let meta = modifiers.contains(.command)
+    let code = Int(key.keyCode.rawValue)
+    let ctrl = key.modifierFlags.contains(.control)
+    let alt = key.modifierFlags.contains(.alternate)
+    let meta = key.modifierFlags.contains(.command)
     if mode == "switcher" {
       // Only Escape: it closes the switcher, and the search field keeps every other key.
       return code == 0x29 && !ctrl && !alt && !meta
@@ -116,16 +110,16 @@ private final class KeyTap {
     return plain.contains(code) || fKeys.contains(code)
   }
 
-  static func emit(subevent: UIEvent, modifiers: UIKeyModifierFlags) {
+  static func emit(key: UIKey) {
     module?.sendEvent("onKey", [
       "platform": "ios",
-      "keyCode": Int((subevent.value(forKey: "keyCode") as? NSNumber)?.intValue ?? 0),
-      "character": subevent.value(forKey: "characters") as? String ?? "",
-      "baseCharacter": subevent.value(forKey: "charactersIgnoringModifiers") as? String ?? "",
-      "shiftKey": modifiers.contains(.shift),
-      "ctrlKey": modifiers.contains(.control),
-      "altKey": modifiers.contains(.alternate),
-      "metaKey": modifiers.contains(.command),
+      "keyCode": Int(key.keyCode.rawValue),
+      "character": key.characters,
+      "baseCharacter": key.charactersIgnoringModifiers,
+      "shiftKey": key.modifierFlags.contains(.shift),
+      "ctrlKey": key.modifierFlags.contains(.control),
+      "altKey": key.modifierFlags.contains(.alternate),
+      "metaKey": key.modifierFlags.contains(.command),
       "repeat": false,
     ])
   }
@@ -133,27 +127,32 @@ private final class KeyTap {
 
 private extension UIApplication {
   @objc func hwKeysHandleKeyUIEvent(_ event: UIEvent) {
-    // The concrete keyboard classes are private UIKit — `UIPhysicalKeyboardEvent` and its
-    // `subevents` of `UIKeyboardInput` — and their `allKeys`/`subevents` surface is not in the
-    // public SDK headers, so nothing here may name the types. `handleKeyUIEvent:` only ever sees
-    // keyboard events; if the class name says otherwise, pass through untouched rather than risk
-    // a KVC throw on a non-keyboard event.
-    guard NSStringFromClass(type(of: event)).contains("Keyboard") else {
+    // `UIPhysicalKeyboardEvent` is private UIKit, but it derives from the public `UIPressesEvent`
+    // (WebKit's UIKit SPI declares `UIPhysicalKeyboardEvent : UIPressesEvent`), so the event can be
+    // read as presses and each press exposes a public `UIKey` — the key itself needs no private
+    // class, selector or field named. `handleKeyUIEvent:` only ever sees keyboard events; anything
+    // else passes through untouched.
+    guard NSStringFromClass(type(of: event)).contains("Keyboard"),
+          let presses = event as? UIPressesEvent else {
       hwKeysHandleKeyUIEvent(event) // the original, after the swap
       return
     }
-    // Key up/down per event: the private flag React Native reads for exactly this. A missing key
-    // reads as zero — "pass everything through" (a no-op), never a doubled key.
-    let keyDown = (event.value(forKey: "_isKeyDown") as? NSNumber)?.boolValue ?? false
-    let modifierValue = event.value(forKey: "allKeys") as? NSValue
-    let modifiers = UIKeyModifierFlags(rawValue: UInt(truncatingIfNeeded: modifierValue?.integerValue ?? 0))
-    guard let subevents = event.value(forKey: "subevents") as? [UIEvent] else {
+    // Key up/down per event: the private flag React Native reads at this same swizzle point
+    // (`RCTKeyCommands.m`). The `responds(to:)` check keeps KVC from raising if an OS renames it;
+    // when the flag is absent nothing is intercepted — a pass-through, never a doubled key.
+    let keyDownSelector = NSSelectorFromString("_isKeyDown")
+    var keyDown = false
+    if event.responds(to: keyDownSelector) {
+      keyDown = (event.value(forKey: "_isKeyDown") as? NSNumber)?.boolValue ?? false
+    }
+    guard keyDown else {
       hwKeysHandleKeyUIEvent(event) // the original, after the swap
       return
     }
-    for subevent in subevents {
-      if KeyTap.intercept(subevent: subevent, modifiers: modifiers, keyDown: keyDown) {
-        KeyTap.emit(subevent: subevent, modifiers: modifiers)
+    for press in presses.allPresses {
+      guard let key = press.key else { continue }
+      if KeyTap.intercept(key: key) {
+        KeyTap.emit(key: key)
         return // consumed: the field never sees it
       }
     }
