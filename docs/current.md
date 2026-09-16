@@ -52,10 +52,13 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   page-level keydown fallback so they work with the software keyboard up or down): Alt+1..9/0
   selects the tmux window by number, Alt+T opens the switcher, Alt+N makes a window, Cmd/Win+V
   pastes through the bar's rules. The tmux gate is applied screen-side; without an attached
-  session the Alt keys fall through to `ESC` + the key. WebKit grants the page first responder
-  only from a user gesture, so hardware keys reach nothing until the terminal is armed by a tap
-  or the bar's up-swipe; after that one gesture they work for the rest of the session, keyboard
-  up or down. This is the accepted cost of owning the keyboard in the page rather than natively.
+  session the Alt keys fall through to `ESC` + the key. With the tab grid open the page takes the
+  grid's keys instead: Escape closes it and a bare digit selects that tmux window (the grid's
+  search field is a native TextInput, so while it holds focus the digits are just query text).
+  WebKit grants the page first responder only from a user gesture, so hardware keys reach nothing
+  until the terminal is armed by a tap or the bar's up-swipe; after that one gesture they work for
+  the rest of the session, keyboard up or down. This is the accepted cost of owning the keyboard
+  in the page rather than natively.
 - Prose mode follows the foreground program; the menu provides an override scoped to that context.
   Shell/TUI input stays raw. The old native-field dictation filter went with the field: xterm
   forwards exactly what the keyboard produced. That is an accepted regression of moving keyboard

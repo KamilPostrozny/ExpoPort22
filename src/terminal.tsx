@@ -86,6 +86,10 @@ export type TerminalHandle = {
   focus(): void;
   /** Blur it: the down-swipe and the screen's doors put the keyboard away through here. */
   blur(): void;
+  /** The tab grid is open: the page takes Escape and bare digits for it instead of the terminal
+   *  chords. The screen sets this at the grid's open and clear, and the search field a native
+   *  TextInput means the digits stay query text whenever that field is the one focused. */
+  setSwitcher(open: boolean): void;
 };
 
 /** A hardware chord that is an app action rather than terminal input — the same set the custom
@@ -94,6 +98,7 @@ export type AppKeyAction =
   | { kind: 'window-select'; number: number }
   | { kind: 'window-new' }
   | { kind: 'switcher' }
+  | { kind: 'switcher-close' }
   | { kind: 'paste' };
 
 export type TerminalProps = {
@@ -368,6 +373,8 @@ export default function TerminalView({
    *  reinterprets the buffer and a stale selection would be the wrong content wearing the right
    *  highlight (see `clearSelection` on `TerminalHandle`). */
   const clearSelRef = useRef<() => void>(() => {});
+  /** The grid's key mode, set by the screen through `TerminalHandle.setSwitcher`. */
+  const switcherOpen = useRef(false);
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
   const latest = useRef({ theme, holdSize, ...handlers });
@@ -538,6 +545,9 @@ export default function TerminalView({
     blur: () => {
       terminal.current?.blur();
     },
+    setSwitcher: (open) => {
+      switcherOpen.current = open;
+    },
   };
   useDOMImperativeHandle(
     (ref ?? null) as Ref<DOMImperativeFactory>,
@@ -687,6 +697,27 @@ export default function TerminalView({
     const onDomKey = (e: KeyboardEvent) => {
       if (e.type !== 'keydown') return;
       if (document.activeElement === term.textarea) return; // xterm's handler owns this one
+      if (switcherOpen.current) {
+        // The grid: Escape closes it and a bare digit picks that tmux window. Repeats do not
+        // re-fire, and any modifier is left alone — nothing else in the grid is the page's.
+        if (!e.repeat && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          if (e.code === 'Escape') {
+            e.preventDefault();
+            latest.current.onAppKey({ kind: 'switcher-close' });
+            return;
+          }
+          const digit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code);
+          if (digit !== null) {
+            e.preventDefault();
+            latest.current.onAppKey({
+              kind: 'window-select',
+              number: digit[1] === '0' ? 10 : Number(digit[1]),
+            });
+            return;
+          }
+        }
+        return; // in the grid, nothing else the page sees is a terminal chord
+      }
       appChord(e);
     };
     document.addEventListener('keydown', onDomKey, true);
