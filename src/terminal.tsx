@@ -762,13 +762,22 @@ export default function TerminalView({
       const start = proseArea.selectionStart;
       const end = proseArea.selectionEnd;
       if (start === null || end === null || start !== end) return; // a range is a selection
+      // TRACKPAD PROBE (temporary): what iOS reports, against what the field holds.
+      proseSay(
+        `caret ${start} anchor=${proseCaret} len=${proseArea.value.length} ` +
+          `val=${JSON.stringify(proseArea.value.slice(0, 24))}`,
+      );
       proseWanted = start;
       if (proseSettle !== null) clearTimeout(proseSettle);
       proseSettle = setTimeout(() => {
         proseSettle = null;
         const delta = proseWanted - proseCaret;
         proseCaret = proseWanted;
-        if (delta === 0 || Math.abs(delta) > CARET_STEP_MAX) return;
+        if (delta === 0 || Math.abs(delta) > CARET_STEP_MAX) {
+          proseSay(`trackpad skip delta=${delta}`);
+          return;
+        }
+        proseSay(`trackpad ${delta > 0 ? 'right' : 'left'} ${Math.abs(delta)}`);
         void latest.current.onData(caretKeys(delta, currentModes().decckm));
       }, CARET_SETTLE_MS);
     };
