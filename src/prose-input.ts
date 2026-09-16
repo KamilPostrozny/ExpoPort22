@@ -69,20 +69,22 @@ export function proseSelfKey(key: string): string {
 }
 
 /**
- * What a flushed walk becomes, as the signed number of arrows to send.
- *
- * `moves` counts the samples that carried movement since the last flush, `pending` is what they add
- * up to. A LONE jump — one sample, nothing moving before or after it — is iOS parking the caret at a
- * document edge as a drag engages or ends, not travel: the old native field's first run sent those
- * faithfully and "the line's cursor shot to column 0 on every grab". It then dropped every jump over
- * two cells, which also ate fast travel (the settled delta of a real drag). Polling can tell the two
- * apart where an event stream could not: travel arrives as a run of samples, a park as exactly one.
- * The chatter iOS makes when a finger hovers on a character boundary is neither, and a settled net
- * of zero already sends nothing.
+ * iOS parks the caret at a document edge when a hold-space drag engages and again when it ends: one
+ * jump of most of the line, with stillness either side. Sending those faithfully is what made the
+ * old native field's first run "shoot to column 0 on every grab"; its answer was to drop every jump
+ * over two cells, which also ate fast travel. Polling can be finer: a big jump that LANDS ON an edge
+ * is the park shape, so it is held for exactly one sample — 60ms — and the sample after it decides.
  */
 export const CARET_PARK_MIN = 3;
 
-/** A flushed walk, in arrows. Zero for a park; otherwise everything the walk accumulated. */
-export function walkArrows(pending: number, moves: number): number {
-  return moves === 1 && Math.abs(pending) >= CARET_PARK_MIN ? 0 : pending;
+/** What to do with a polled caret move: send it as travel, or hold it to see whether it is a park. */
+export function walkStep(moved: number, caret: number, length: number): 'send' | 'hold' {
+  const atEdge = caret === 0 || caret === length;
+  return atEdge && Math.abs(moved) >= CARET_PARK_MIN ? 'hold' : 'send';
+}
+
+/** A held jump, once the next sample has landed: `travel` if the caret kept going the same way,
+ *  `park` if it stopped or turned back — iOS pinning it, which the PTY must not see as arrows. */
+export function heldStep(held: number, next: number): 'park' | 'travel' {
+  return next !== 0 && held > 0 === next > 0 ? 'travel' : 'park';
 }

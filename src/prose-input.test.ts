@@ -4,7 +4,14 @@
 import { expect, test } from 'bun:test';
 
 import { DEL } from '@/keybar-model';
-import { CARET_PARK_MIN, proseKey, proseSelfKey, proseText, walkArrows } from '@/prose-input';
+import {
+  CARET_PARK_MIN,
+  heldStep,
+  proseKey,
+  proseSelfKey,
+  proseText,
+  walkStep,
+} from '@/prose-input';
 
 const plain = { ctrl: false, alt: false, meta: false };
 
@@ -58,22 +65,25 @@ test('iOS non-breaking spaces become the spacebar the PTY understands', () => {
   expect(proseText('a\u00a0b\u202fc')).toBe('a b c');
 });
 
-test('a run of samples is travel, however far it went', () => {
-  // The walk sampled 13→12→13→12→0: four samples of movement, twelve cells of it real.
-  expect(walkArrows(-12, 4)).toBe(-12);
-  expect(walkArrows(9, 3)).toBe(9);
+test('a small step is travel, wherever the caret is', () => {
+  expect(walkStep(-1, 12, 13)).toBe('send');
+  expect(walkStep(2, 0, 13)).toBe('send'); // stepping off the edge is still travel
 });
 
-test('a lone jump is a park, not travel', () => {
-  // iOS parks the caret at a document edge when a drag engages or ends: one big sample, stillness
-  // either side. Sending it shot the cursor to column 0 on every grab in the old native field.
-  expect(walkArrows(-12, 1)).toBe(0);
-  expect(walkArrows(20, 1)).toBe(0);
-  // Below the threshold a lone sample is a real single step.
-  expect(walkArrows(-2, 1)).toBe(-2);
-  expect(walkArrows(CARET_PARK_MIN - 1, 1)).toBe(CARET_PARK_MIN - 1);
+test('a big jump that lands on an edge is held, not sent', () => {
+  // The park shape: 12 -> 0 in one sample, or 0 -> 13.
+  expect(walkStep(-12, 0, 13)).toBe('hold');
+  expect(walkStep(13, 13, 13)).toBe('hold');
+  // A big jump into the middle of the line is travel — nothing parks there.
+  expect(walkStep(9, 9, 13)).toBe('send');
 });
 
-test('chatter that nets to nothing sends nothing', () => {
-  expect(walkArrows(0, 5)).toBe(0);
+test('the sample after a held jump says which it was', () => {
+  // Kept going the same way: travel, and the held cells were real.
+  expect(heldStep(-12, -2)).toBe('travel');
+  expect(heldStep(12, 1)).toBe('travel');
+  // Stopped dead or turned back: iOS put the caret there, the user did not.
+  expect(heldStep(-12, 0)).toBe('park');
+  expect(heldStep(12, -3)).toBe('park');
+  expect(heldStep(12, 0)).toBe('park');
 });
