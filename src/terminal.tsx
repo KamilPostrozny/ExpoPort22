@@ -1178,12 +1178,17 @@ export default function TerminalView({
      *  `mousedown`/`mouseup`, which `bindMouse` reads to encode a report per the negotiated
      *  protocol — SGR through `onData`, legacy DEFAULT through `onBinary`, exactly as it encodes
      *  the synthesized wheels above. Nothing is reimplemented: the encoding stays xterm's, and an
-     *  app that never asked for the mouse simply gets no report out of the pair. Only `focus` is
-     *  neutralised for the dispatch, since xterm's `mousedown` handler takes the keyboard on its
-     *  way to the report; the bar's up-swipe stays the only door that raises it. */
+     *  app that never asked for the mouse simply gets no report out of the pair. Focus is the one
+     *  thing held back, because xterm's `mousedown` handler takes the keyboard on its way to the
+     *  report; the bar's up-swipe stays the only door that raises it. It is held back on
+     *  `term.textarea`, not on the public `term.focus` facade: that facade only delegates to
+     *  `_core.focus()`, which is the method the handler actually calls, so patching the facade
+     *  left the keyboard coming up on the phone (2026-09-16). The textarea is what the core
+     *  focuses either way. */
     const clickAt = (x: number, y: number) => {
       const target = term.element?.querySelector('.xterm-screen') ?? term.element;
-      if (target === undefined) return;
+      const textarea = term.textarea;
+      if (target === undefined || textarea === undefined) return;
       const send = (type: 'mousemove' | 'mousedown' | 'mouseup', buttons: number) =>
         target.dispatchEvent(
           new MouseEvent(type, {
@@ -1196,14 +1201,14 @@ export default function TerminalView({
             buttons,
           }),
         );
-      const focus = term.focus;
-      term.focus = () => {};
+      const focus = textarea.focus;
+      textarea.focus = () => {};
       try {
         send('mousemove', 0);
         send('mousedown', 1);
         send('mouseup', 0);
       } finally {
-        term.focus = focus;
+        textarea.focus = focus;
       }
     };
 
