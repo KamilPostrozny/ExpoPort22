@@ -659,7 +659,7 @@ export default function TerminalView({
      * ordinary text change (a DEL and a re-insert, which the diff sent on, and which read on the
      * phone as the cursor stepping left and back). Whether the caret moves at all without an
      * announcement is what `prosePoll` samples for; if it does not, the walk cannot be forwarded. */
-    const PROSE_BUILD = 'poll2';
+    const PROSE_BUILD = 'walk1';
     const proseArea = term.textarea;
     /** The field as the diff last saw it, and where that edit left the caret — the pair `diffInput`
      *  is fed. Reset wherever the field is wiped out from under the page: xterm clears it on Return
