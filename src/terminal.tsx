@@ -148,9 +148,6 @@ export type TerminalProps = {
    *  every key through it first (see `attachCustomKeyEventHandler` in `boot`); only the app's
    *  chords — Alt+1..9/0, Alt+T, Alt+N, Cmd+V — are taken, everything else is left to xterm. */
   onAppKey: (action: AppKeyAction) => void;
-  /** Whether tmux is attached: the Alt+ window chords only exist when a session can act on them.
-   *  `false` leaves Alt+1..9 as the terminal's own `ESC 1` bytes, exactly as before. */
-  tmuxKeys: boolean;
   ref?: Ref<TerminalHandle>;
   dom?: DOMProps;
 };
@@ -651,37 +648,48 @@ export default function TerminalView({
     // on the bar — full control, no WebKit gesture involved, and what native iOS terminals do.
 
     term.onData((data) => latest.current.onData(data));
-    // Every key xterm would handle comes through here first. The app's hardware chords are taken
-    // (returning false stops xterm and the browser from acting on them too); everything else is
-    // left alone, so Esc/Tab/arrows/F-keys/Ctrl and Alt chords keep xterm's own encodings. No
-    // native code in the path. `latest.current` keeps the handler on this render's props.
-    term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== 'keydown') return true;
+    // The app's hardware chords. When xterm's textarea has focus, xterm's own handler runs them
+    // (returning false stops xterm and the browser acting on the key too). When the page is first
+    // responder but the keyboard is down — the bar's dismiss blurs the textarea — xterm never sees
+    // a key, so a page-level keydown takes the same chords. Only one path can fire: the page
+    // listener defers while the textarea is the active element. Everything else is left to xterm,
+    // so Esc/Tab/arrows/F-keys/Ctrl and Alt chords keep its own encodings. No native code.
+    const appChord = (e: KeyboardEvent): boolean => {
       const act = latest.current.onAppKey;
       if (e.metaKey && !e.ctrlKey && !e.altKey && e.code === 'KeyV') {
         e.preventDefault();
         act({ kind: 'paste' });
-        return false;
+        return true;
       }
-      if (latest.current.tmuxKeys && e.altKey && !e.ctrlKey && !e.metaKey && !e.repeat) {
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.repeat) {
         const digit = /^Digit([0-9])$/.exec(e.code);
         if (digit !== null) {
           e.preventDefault();
           act({ kind: 'window-select', number: digit[1] === '0' ? 10 : Number(digit[1]) });
-          return false;
+          return true;
         }
         if (e.code === 'KeyT') {
           e.preventDefault();
           act({ kind: 'switcher' });
-          return false;
+          return true;
         }
         if (e.code === 'KeyN') {
           e.preventDefault();
           act({ kind: 'window-new' });
-          return false;
+          return true;
         }
       }
-      return true;
+      return false;
+    };
+    const onDomKey = (e: KeyboardEvent) => {
+      if (e.type !== 'keydown') return;
+      if (document.activeElement === term.textarea) return; // xterm's handler owns this one
+      appChord(e);
+    };
+    document.addEventListener('keydown', onDomKey, true);
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+      return !appChord(e);
     });
     term.onBell(() => latest.current.onBell());
     // Instrumentation (the callout's Copy fired on nothing, 2026-09-12): the selection model died
@@ -979,6 +987,7 @@ export default function TerminalView({
       clearTimeout(settle);
       observer.disconnect();
       teardownTouch();
+      document.removeEventListener('keydown', onDomKey, true);
       hitMark.current = []; // the elements go with the terminal; the refs must not outlive it
       dropPendingFit();
       hostData.current = null;

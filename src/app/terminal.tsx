@@ -484,21 +484,36 @@ export default function SessionScreen() {
     // The actions are the screen's: the same doors the tabs button, the ⋮ menu and the key bar's
     // Paste use, so a hardware key and a finger land in the same place.
     onAppKey: (action) => {
+      // The page reports only the chord; the tmux gate is here, where `showTabs` is live. Without
+      // a named tmux session the Alt chords keep their terminal meaning (ESC + the key), exactly
+      // as the old native routing did.
       if (action.kind === 'paste') {
         keybar.current?.paste();
         return;
       }
       if (action.kind === 'window-select') {
+        if (!showTabs) {
+          void send('\x1b' + (action.number === 10 ? '0' : String(action.number)));
+          return;
+        }
         selectWindowByNumber(action.number).catch((error) =>
           console.log('[keys] select-window', action.number, 'failed:', error),
         );
         return;
       }
       if (action.kind === 'window-new') {
+        if (!showTabs) {
+          void send('\x1bn');
+          return;
+        }
         newWindow().catch((error) => console.log('[keys] new-window failed:', error));
         return;
       }
-      openSwitcher();
+      if (showTabs) {
+        openSwitcher();
+      } else {
+        void send('\x1bt');
+      }
     },
   };
   /** One identity-stable object instead of nine one-per-key trampolines: same ref-indirection, one hook. */
@@ -539,12 +554,11 @@ export default function SessionScreen() {
         onModes={tv.onModes}
         onTwoFingerTap={tv.onTwoFingerTap}
         onAppKey={tv.onAppKey}
-        tmuxKeys={showTabs}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the handlers are identity-stable
-    [theme, fontSize, termHold, showTabs],
+    [theme, fontSize, termHold],
   );
 
   /** The cards as of this render, for the deferred neighbour refresh — a `setTimeout` closure

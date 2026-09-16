@@ -48,6 +48,11 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   bar-up-to-switcher interaction is retired; the tabs button opens the switcher.
 - Ctrl arms once or locks on double-tap; the fixed chord strip is C/Z/R/L/D. Esc, Tab, arrows,
   Home/End, and Enter send terminal input. Keys must not fire during a swipe.
+- Hardware app chords are decided in the page (xterm's `attachCustomKeyEventHandler`, plus a
+  page-level keydown fallback so they work with the software keyboard up or down): Alt+1..9/0
+  selects the tmux window by number, Alt+T opens the switcher, Alt+N makes a window, Cmd/Win+V
+  pastes through the bar's rules. The tmux gate is applied screen-side; without an attached
+  session the Alt keys fall through to `ESC` + the key.
 - Prose mode follows the foreground program; the menu provides an override scoped to that context.
   Shell/TUI input stays raw. The old native-field dictation filter went with the field: xterm
   forwards exactly what the keyboard produced. That is an accepted regression of moving keyboard
