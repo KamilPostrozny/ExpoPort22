@@ -5,17 +5,13 @@
  * and pill, 35pt keys at 18pt radius, 24pt side margins, 48pt chord caps with 8.5pt captions,
  * arrows popover at 22pt corners, menu at 26pt.
  *
- * The native `TextInput`s here own the keyboard (T4's device-proven decision): ONE FIELD PER PROSE
- * MODE, and the keyboard attaches to whichever matches `textMode` — because iOS reads a field's
- * brain (autocorrect, capitalization) only when the keyboard ATTACHES to it, and never re-reads
- * it off the attached field (see the fields' comment). The webview never takes focus, typing
- * reaches the PTY through `sendBytes`. Touching the terminal blurs the input natively, but the
- * blur is undone (see the fields' `onBlur`) — a terminal tap is a click the pane gets, never a way
- * to put the keyboard away. The bar itself is its door: a swipe down sends the keys away, a
- * swipe up asks for them back.
+ * The terminal's webview owns the keyboard; this bar is only UI that sends bytes straight through
+ * `sendBytes`. The bar is the keyboard's door: a swipe down — or a door the screen opens — asks
+ * the screen to put it away (`onDismiss`), and a swipe up asks the screen to focus the webview
+ * back (`onRaise`).
  *
- * Every decision (Ctrl machine, control bytes, nav sequences, input diff, swipe classification)
- * lives in `src/keybar-model.ts`, tested; this file renders and executes.
+ * Every decision (Ctrl machine, control bytes, nav sequences, swipe classification) lives in
+ * `src/keybar-model.ts`, tested; this file renders and executes.
  *
  * Geometry lives in `src/style.ts` as `BAR`.
  */
@@ -33,16 +29,11 @@ import {
   type Ref,
 } from 'react';
 import {
-  Keyboard,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
-  type NativeSyntheticEvent,
   type StyleProp,
-  type TextInputSelectionChangeEventData,
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
@@ -67,7 +58,6 @@ import {
   type Slot,
 } from '@/clipboard';
 import { provenance } from '@/clipboard-model';
-import { filterDictation, trackLine } from '@/input-model';
 import {
   CHORD_STRIP,
   afterChord,
@@ -76,11 +66,7 @@ import {
   barRaises,
   rowJoins,
   controlByte,
-  CARET_SETTLE_MS,
-  CARET_STEP_MAX,
-  caretKeys,
   ctrlTap,
-  diffInput,
   navKey,
   pasteBytes,
   type CtrlMode,
@@ -100,7 +86,6 @@ import {
 import { MONO, rgba, SANS, SANS_SEMIBOLD, type Theme } from '@/theme';
 import { pasteFile } from '@/upload';
 import { QUICK_DIR } from '@/upload-model';
-import WebGuard from '../modules/expo-webguard/src/ExpoWebGuardModule';
 
 export type BarPopover = 'none' | 'menu' | 'arrows' | 'clipboard' | 'tabsHint';
 
@@ -114,8 +99,7 @@ export type KeyBarProps = {
   bracketedPaste: boolean;
   /** Prose mode — the keyboard's autocorrect and sentence capitalization: ON where the line is
    *  plain English (a claude code prompt, a mail draft), OFF at a bare prompt or a keystroke TUI,
-   *  where a correction is a mangled command. Screen-owned; this TextInput is the only field it
-   *  rides.
+   *  where a correction is a mangled command. Screen-owned; the terminal's webview applies it.
    *
    *  Since T7.15 it is also AUTO while a named tmux session is on screen: the poll carries the
    *  pane's foreground program (see `proseFor`), and the screen decides the default from it. The
@@ -125,11 +109,7 @@ export type KeyBarProps = {
    *  state, so that is what the override is for. vim's insert is deliberately NOT prose — an
    *  autocorrect landing in insert mode rewrites the code.
    *
-   *  The flip is a FOCUS MOVE between the bar's two fields, one born per value: a live change of
-   *  `autoCorrect` on the field the keyboard is attached to is not re-read until the keyboard
-   *  closes and opens again (device, 2026-09-08: autocorrect stayed off through the toggle,
-   *  healed by a manual close/open). Moving first responder to the other field re-configures the
-   *  keyboard in place, no drop. */
+   *  Kept here as the value the ⋯ menu's row mirrors; the bar no longer applies it to a field. */
   textMode: boolean;
   /** Everything a key emits, on its way to the PTY. */
   sendBytes: (bytes: string) => void;
@@ -160,16 +140,10 @@ export type KeyBarProps = {
   sending?: boolean;
   /** T10: tabs circle tap opens the switcher. */
   onTabsTap?: () => void;
-  /** The bar keeps the keyboard against a blur nobody asked for — the terminal's own touch
-   *  (iOS resigns these fields for any touch another native view accepts). While the SEARCH
-   *  field is up, a blur of these fields is a focus move to a sibling the bar must not fight
-   *  back, so the screen keeps this false then; at rest the search is the only other
-   *  focus-taker in the window. */
-  holdKeys?: boolean;
-  /** The field's answer to "who holds focus" — the screen's hardware-key mode keys on it
-   *  (`src/hooks/use-hwkeys.ts`): the keys are intercepted only while this field is the one the
-   *  keyboard would feed. */
-  onFieldFocus?: (focused: boolean) => void;
+  /** The up-swipe asks for the keyboard: the screen focuses the terminal's webview. */
+  onRaise?: () => void;
+  /** A down-swipe or a door (settings, switcher) puts it away. */
+  onDismiss?: () => void;
   /** T11: the page-slide window hop's transitions — 'start' once when the pan leaves the slop,
    *  'end' on release with the relative travel. The per-frame x rides `panSV.swipeX`, written by
    *  the worklet. The screen owns the model: rubber band, thresholds, commit
@@ -346,216 +320,30 @@ function Key({
   );
 }
 
-/**
- * §4.2 held-delete: iOS gates the delete key's auto-repeat on the first responder's `hasText`, and
- * the field empties as soon as the diff has eaten what was typed — long before the *line* is empty —
- * so the repeat died after a character or two. RN's `RCTUITextField` is not ours to subclass, so
- * the field is kept permanently non-empty instead: it holds a pad nobody ever sees
- * (1×1, `opacity: 0`), each pad character a repeat eats diffs into one more DEL, and the pad is
- * topped back up before it runs out. Spaces, because iOS's delete accelerates to whole words once
- * it has been held a while, and a pad of spaces is one word per character — a pad of letters would
- * come off in one 500-DEL bite.
- */
-const PAD = ' '.repeat(512);
-
 /** What the screen may do to the keyboard from out there — the doors (settings, the switcher)
- *  put the keys away through `dismiss`, never `Keyboard.dismiss()` directly, so the blur
- *  arrives expected (see `expectingBlur`) and the field does not re-aim it back up. */
+ *  put it away through `dismiss` (which forwards to the `onDismiss` prop), and the screen's Cmd+V
+ *  action pastes through `paste` (the bar's own clipboard rules, the same as the Paste key). */
 export type KeyBarHandle = {
   dismiss: () => void;
-  /** PTY bytes in through the bar's tracked seam — the hardware keys' door (`src/hooks/use-hwkeys.ts`)
-   *  — so line-length and the dictation filter see them exactly as the bar's own keys. */
-  emitDirect: (bytes: string) => void;
-  /** Paste by the bar's own rules — its clipboard slots first, the phone pasteboard, the file
-   *  upload as the last door (the ⋯ key's `onPaste`). */
   paste: () => void;
 };
 
 function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
   const { theme, open, onOpenChange } = props;
-  /** The keyboard's owners — one field per prose mode, each BORN with its own brain. iOS reads a
-   *  field's autocorrect/capitalization when the keyboard attaches to it, and NOT when the
-   *  attached field's props change afterwards (device, 2026-09-08: a live flip of `autoCorrect` on
-   *  the focused field left the old brain in place — typing fine, no corrections — until the
-   *  keyboard was closed and re-opened). UIKit's own signal for "the brain changed" is a change
-   *  of text-input context: move first responder to a field born with the other value and the
-   *  keyboard re-configures in place, never dropping (the two fields share one absolute slot, so
-   *  there is no slide either). That is why this is two fields rather than one mutable prop. */
-  const inputOff = useRef<TextInput>(null);
-  const inputOn = useRef<TextInput>(null);
-  /** Which field is first responder right now — `null` when the keyboard is down. Decides whether
-   *  a prose flip is a focus move (keyboard up) or a silent re-aim (keyboard down: the next raise
-   *  lands on the right field and presents with the new brain from the first frame). */
-  const focusedIn = useRef<'off' | 'on' | null>(null);
-  /** Keep the bar's field the first responder: the terminal's webview cannot steal it from under
-   *  the keys (see `expo-webguard`). Fed from every place `focusedIn` changes, so the flag is up
-   *  by the time the first tap after a raise can land, and down before a swipe's hide settles.
-   *  No-op on Android, where the focused field survives outside touches. */
-  const syncHold = () => {
-    WebGuard.setHold(focusedIn.current !== null);
-  };
-  /** What the (uncontrolled) TextInput last held — the other half of `diffInput`. */
-  const typed = useRef(PAD);
-  /** The field's text, set *only* to top the pad back up (see `PAD`); `undefined` the rest of the
-   *  time, which leaves the field uncontrolled so ordinary typing never round-trips through
-   *  React — the flip back is the effect below. */
-  const [padWrite, setPadWrite] = useState<string | undefined>(undefined);
-  /** Intentional blurs, owed to `onBlur`. iOS resigns the field for any touch another native
-   *  view accepts — so a terminal tap arrives as a blur nobody asked for, and it is the only
-   *  blur the bar undoes (see the fields' `onBlur`). Every path that puts the keyboard away on
-   *  purpose — the down-swipe, the prose flip's focus move, the screen's doors through `dismiss`
-   *  — spends one of these first, so their blur arrives expected and the keys stay down where
-   *  they were sent. */
-  const expectingBlur = useRef(0);
-  /** Which field the prose flip that OWES the next blur is moving focus to — spent by that
-   *  blur's re-aim, which cannot read `props.textMode` (see the flip's effect). */
-  const flipTarget = useRef<'on' | 'off' | null>(null);
-  /** Where the PTY's cursor stands, in field coordinates — everything up to here has been sent. */
-  const caret = useRef(PAD.length);
-  /** Where the field's caret stands right now, which during a drag runs ahead of `caret`. */
-  const wanted = useRef(PAD.length);
-  /** The pending settle (see `CARET_SETTLE_MS`), if the caret is mid-bounce. */
-  const settle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    // The one render this cascades is the point: RN writes a `value` from its own layout effect
-    // (TextInput.js:223, the only text write Fabric honours — `text` is not in the component's
-    // `updateProps`), and letting go on the very next render is what keeps the field uncontrolled
-    // for every keystroke that is not a top-up.
-    if (padWrite !== undefined) {
-      // The write puts the caret back at the end of the pad, and RN suppresses the selection event
-      // for its own writes (`_comingFromJS`), so the anchor is re-set here rather than learnt —
-      // and here rather than in `repad`, which runs a render too early to be true yet.
-      caret.current = wanted.current = PAD.length;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
-      setPadWrite(undefined);
-    }
-  }, [padWrite]);
-  const repad = useCallback(() => {
-    typed.current = PAD; // ref first: a change event fired by the write diffs against it to nothing
-    setPadWrite(PAD);
-  }, []);
   const [ctrl, setCtrl] = useState<CtrlMode>('off');
   const lastCtrlTap = useRef(0);
   /** The pill's measured width — the name-pill pitch (prototype: item + gap exactly fill it). */
   const [pillW, setPillW] = useState(0);
 
-  // Prose mode flips the keyboard's own brain, so its context has to start clean in BOTH
-  // directions: a shell line already in the pad must not become the correction context for a
-  // sentence, and half a sentence must not ride into a command. `repad` is the reset. Mount is
-  // skipped — the mode starts off and the pad starts topped, so nothing owes a reset yet.
-  //
-  // The flip itself is the focus move (see `inputOff`/`inputOn`): with the keyboard up it moves
-  // first responder to the field born with the new value — the keyboard stays, the brain follows.
-  // With the keyboard down it is a silent re-aim; the bar still never RAISES it here.
-  const textModeWas = useRef(false);
-  useEffect(() => {
-    if (props.textMode === textModeWas.current) return;
-    textModeWas.current = props.textMode;
-    repad();
-    if (focusedIn.current !== null) {
-      // The blur of the field LEFT is owed; the re-aim must land where THIS flip is moving TO.
-      // It cannot read `props.textMode`: the blur event fires before the flip's render,
-      // where the prop is still the old value, and an off-by-one render is the whole point
-      // of the focus move.
-      flipTarget.current = props.textMode ? 'on' : 'off';
-      expectingBlur.current += 1;
-      (props.textMode ? inputOn : inputOff).current?.focus();
-    }
-  }, [props.textMode, repad]);
-
-  /** T12's dictation filter needs to know whether the line is empty, so everything the bar itself
-   *  sends passes through this tracked seam. (The arrows popover bypasses it — escape sequences
-   *  carry no line-length information anyway; see input-model's ceiling note.) */
-  const lineLen = useRef(0);
-  const track = (bytes: string) => {
-    lineLen.current = trackLine(lineLen.current, bytes);
-    props.sendBytes(bytes);
-  };
-
   /**
-   * The per-key seam: every typed key passes through here one at a time — chords apply, then the
-   * bytes go out. T12's dictation filter sits one level up in `onChangeText`, where the whole
-   * insert chunk is still visible — spacebar vs dictation is a chunk-size question, invisible per
-   * key. Held-delete comes through the same diff, off the pad the field carries (see `PAD`).
+   * The per-key seam: the bar's own Esc and Tab go through here, so an armed Ctrl is applied
+   * uniformly and then the bytes go out. The field-driven diff and T12's dictation filter are
+   * gone with the field — the terminal's webview owns the keyboard now.
    */
   const emitKey = (key: string) => {
     const applied = applyCtrl(ctrl, key);
     if (applied.mode !== ctrl) setCtrl(applied.mode);
-    track(applied.out);
-  };
-
-  const onChangeText = (next: string) => {
-    // Finish any trackpad move before applying an edit at its new position. Otherwise typing
-    // inside the 40ms settle window edits at the old PTY cursor and cancels the queued move.
-    if (settle.current) {
-      clearTimeout(settle.current);
-      settle.current = undefined;
-      const move = caretKeys(wanted.current - caret.current, props.decckm);
-      if (move) props.sendBytes(move);
-      caret.current = wanted.current;
-    }
-    const edit = diffInput(typed.current, next, caret.current);
-    if (edit.ahead) props.sendBytes(caretKeys(edit.ahead, props.decckm));
-    // §4.2: drop iOS dictation's prepended space at an empty line; a real spacebar (a single-char
-    // insert) always passes. Decided on the whole diff, before it is split into keys.
-    const bytes = filterDictation(lineLen.current, edit.keys);
-    // RN sends text before selection (RCTTextInputComponentView.mm:54). Anchor at the actual
-    // replacement end so its following selection event is not mistaken for a trackpad move.
-    caret.current = wanted.current = edit.caret;
-    typed.current = next;
-    for (const key of bytes) emitKey(key); // string iteration = one code point per key
-    // Top the pad up before a held delete runs it dry, and trim the typed tail before iOS starts
-    // caring about the length — nothing reads the field back, so both are the same write.
-    // In prose mode the tail may run long — a prompt in the making, not a stray paste — and a
-    // repad mid-sentence would reset the keyboard's correction context, so the top-up bar moves
-    // with the mode.
-    const tailLimit = props.textMode ? PAD.length + 3000 : PAD.length + 500;
-    if (next.length < PAD.length / 2 || next.length > tailLimit) repad();
-  };
-
-  /**
-   * §4.2 hold-space: the held spacebar is iOS's trackpad, and it walks the caret without changing
-   * a character of text — so this is the only event that reports it. The delta against the anchor
-   * becomes arrows (`caretKeys`); an edit's own caret move was already levelled out in
-   * `onChangeText`, so it reads as zero here. Sent past `track`, like the arrows popover: an
-   * escape sequence carries no line-length information, and counting its bytes as typed would
-   * poison the dictation heuristic.
-   *
-   * Rightward travel stops at the end of the field, which is the end of the line — the shell will
-   * not go further either. Leftward it runs to the pad, far past any line; drag past column 0 and
-   * the PTY's cursor simply stops while the field's keeps going, so the two are out of step until
-   * the drag comes back. The eye closes that loop — the terminal's cursor is what the person is
-   * watching — and a hidden field can offer no better anchor.
-   */
-  const onSelectionChange = (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
-    const { start, end } = e.nativeEvent.selection;
-    // A range is a selection, not a caret: the system's, and nothing for the PTY to follow.
-    // Autocorrect may temporarily select the word being replaced. The PTY did NOT move to the
-    // range start, so changing its anchor here would make the replacement delete the wrong text.
-    if (start !== end) return;
-    const step = start - wanted.current;
-    wanted.current = start;
-    if (Math.abs(step) > CARET_STEP_MAX) {
-      // A park, not travel — iOS pinning the caret to a document edge as the drag begins and ends.
-      // Re-anchor on it and send nothing. Answering it by writing the caret back to the middle of
-      // the pad was tried and is worse than useless: `setSelection` does not stick while the
-      // floating cursor is live, iOS restored its own position at once, and every real
-      // one-character step then arrived as a fresh 200-character jump against an anchor that no
-      // longer matched the field (device log, T12).
-      caret.current = start;
-      if (settle.current) clearTimeout(settle.current);
-      settle.current = undefined;
-      return;
-    }
-    if (step === 0 || settle.current) return;
-    settle.current = setTimeout(() => {
-      settle.current = undefined;
-      const delta = wanted.current - caret.current;
-      caret.current = wanted.current;
-      const keys = caretKeys(delta, props.decckm);
-      if (!keys) return; // the bounce cancelled itself, which is the point
-      props.sendBytes(keys);
-    }, CARET_SETTLE_MS);
+    props.sendBytes(applied.out);
   };
 
   /**
@@ -588,7 +376,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
   }, [ctrl]);
 
   const sendChord = (letter: string) => {
-    track(controlByte(letter)!);
+    props.sendBytes(controlByte(letter)!);
     setCtrl(afterChord(ctrl));
   };
 
@@ -611,7 +399,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
     const text = await topSlotText();
     // Typed, never executed: no trailing newline of ours, and the bracketed-paste markers so the
     // newlines *inside* a multi-line yank are content rather than Return presses.
-    if (text) return track(pasteBytes(text, props.bracketedPaste));
+    if (text) return props.sendBytes(pasteBytes(text, props.bracketedPaste));
     // Nothing to type does not mean nothing to paste: a copied photo or file is on the pasteboard
     // as bytes, not text, and used to make the key look dead (user, 2026-09-01). It goes the file
     // way — uploaded to /tmp/port22 and its path typed. Still silent when there is neither.
@@ -665,144 +453,25 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
     [],
   );
   const dismissKeys = useCallback(() => {
-    // Only when a field actually holds it: a dismiss with the keyboard down blurs nothing, and
-    // an owed blur that never arrives would swallow the next terminal tap's re-aim. When the
-    // field is not focused the keys may be mid-re-aim (an unasked blur owed, the hide not
-    // settled) — a door or a swipe then means the user wants them DOWN, so the re-aim is spent
-    // on the dismiss rather than re-raising the keys over the sheet that just opened.
-    intentionalAt.current = Date.now();
-    if (focusedIn.current !== null) expectingBlur.current += 1;
-    else rearm.current = null;
-    Keyboard.dismiss();
+    cbRef.current.onDismiss?.();
   }, []);
-  // The screen's doors (settings, the switcher) put the keys away through here rather than
-  // `Keyboard.dismiss()` directly: the blur they cause must arrive expected, or the field would
-  // re-aim itself and raise the keyboard over the sheet that just opened.
-  // The hardware keys (`src/hooks/use-hwkeys.ts`) arrive out of React's sight, so the handle
-  // routes them through the bar's own seams: `track`, so the bytes take the same tracked seam as
-  // a typed key, and `onPaste`, so the paste takes the same clipboard rules as the ⋯ key's tap.
+  // The screen's doors (settings, the switcher) put the keys away through here rather than calling
+  // the webview's blur directly, so there is one door to the keyboard's exit. The handle also
+  // carries the screen's Cmd+V paste, which uses the bar's own clipboard rules (see `onPaste`).
   useImperativeHandle(
     ref,
     () => ({
       dismiss: dismissKeys,
-      emitDirect: (bytes: string) => track(bytes),
       paste: () => {
         void onPaste();
       },
     }),
-    [dismissKeys, track, onPaste],
+    [dismissKeys, onPaste],
   );
-  // The raise lands on the field matching the CURRENT prose mode, so the keyboard presents with
-  // the right brain from the first frame — the same focus the text-mode flip moves to below.
+  /** The up-swipe asks the screen to focus the terminal's webview. */
   const raiseKeys = useCallback(() => {
-    const p = cbRef.current;
-    console.log('[keys] raise');
-    (p.textMode ? inputOn : inputOff).current?.focus();
+    cbRef.current.onRaise?.();
   }, []);
-  /** The re-aim owed by the unasked blur — WHICH field to hand back, and whether it has been
-   *  spent. See `blurField` for why it cannot happen in the blur's own tick. */
-  const rearm = useRef<'off' | 'on' | null>(null);
-  /** When a DELIBERATE `Keyboard.dismiss()` last ran (a swipe, a door). The hide's re-aim must
-   *  not fight it. It is a timestamp, not the `expectingBlur` counter, because that counter is
-   *  owed by blurs that on this app never arrive (the prose flip's focus move, measured below),
-   *  and a stuck credit would swallow every hide after it — including the tap's. (Measured,
-   *  iPhone, 2026-09-14: the tap that also flipped the prose mode stuck the flag and the
-   *  re-aim stopped landing; a dismiss is the only intentional hide, and it stamps.) */
-  const intentionalAt = useRef(0);
-  /** Whether the keyboard is on screen right now, per its own show/hide events — the re-aim must
-   *  not land while the keys are up (it would be a no-op at best) and must land once the hide is
-   *  DONE: UIKit refuses a become that rides the hide's own animation, and that refusal is exactly
-   *  what made the first re-aim (a one-tick setTimeout in the blur) leave the keys down on device.
-   *  (Measured, iPhone, 2026-09-14: tap still dismissed with the one-tick re-aim in place.) */
-  const kbShown = useRef(false);
-  const maybeRearm = () => {
-    if (rearm.current !== null && !kbShown.current) {
-      const to = rearm.current;
-      rearm.current = null;
-      console.log('[keys] re-aimed the unasked blur →', to);
-      (to === 'off' ? inputOff : inputOn).current?.focus();
-    }
-  };
-  useEffect(() => {
-    if (Platform.OS !== 'ios') return;
-    const onShow = () => {
-      kbShown.current = true;
-      console.log('[keys] kb show');
-    };
-    const onHide = () => {
-      kbShown.current = false;
-      // THE measured failure (iPhone, 2026-09-14, traced in the [keys] log: raise → focus →
-      // show → hide, with NO blur and NO `Keyboard.dismiss` anywhere in the tree): a terminal
-      // touch can take the responder away while React still believes the field is focused, and
-      // the keyboard goes with it. A blur-based re-aim never saw it, because the blur does not
-      // come. So the hide is its own trigger: the keys left, no one owed the leaving, and the
-      // field is still focused in RN's eyes — hand the field back.
-      if (
-        rearm.current === null &&
-        Date.now() - intentionalAt.current > 600 &&
-        focusedIn.current !== null &&
-        cbRef.current.holdKeys
-      ) {
-        const to = focusedIn.current;
-        focusedIn.current = null;
-        repad();
-        syncHold();
-        console.log('[keys] kb hide stole the responder, field still', to, '→ re-aim');
-        rearm.current = to;
-      }
-      console.log('[keys] kb hide, owed re-aim:', rearm.current);
-      maybeRearm();
-    };
-    const showSub = Keyboard.addListener('keyboardDidShow', onShow);
-    const hideSub = Keyboard.addListener('keyboardDidHide', onHide);
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-  /** The blur nobody asked for is the terminal's touch. iOS resigns these fields for any touch
-   *  another native view accepts — without the re-aim that touch is the keyboard's only exit
-   *  while it is up, and the tap-to-dismiss it is not supposed to have any more (user,
-   *  2026-09-14: it should be gone; the iOS build holds its responder, so a tap is a click the
-   *  pane gets, keys still up). Android's focused EditText survives outside touches and never
-   *  blurs, so it needs no re-aim: same answer, the platforms' own arithmetic. The re-aim is OWED
-   *  by this blur and SPENT by the hide that the resign starts (see `maybeRearm`), with a timeout
-   *  behind it for the hide that never fires. */
-  /** Every focus change of the bar's fields, the one place it is written: the field state for
-   *  the bar's own re-aim, and the screen's hardware-key mode behind it. */
-  const reportFocus = (to: 'on' | 'off' | null) => {
-    focusedIn.current = to;
-    cbRef.current.onFieldFocus?.(to !== null);
-  };
-
-  const blurField = (field: { current: TextInput | null }) => () => {
-    console.log('[keys] blur', field === inputOff ? 'off' : 'on', {
-      owed: expectingBlur.current,
-      flip: flipTarget.current,
-      hold: props.holdKeys,
-      os: Platform.OS,
-    });
-    reportFocus(null);
-    repad();
-    syncHold();
-    if (expectingBlur.current > 0) {
-      expectingBlur.current -= 1; // owed to the flip or a door: the keys stay down
-      if (flipTarget.current !== null) {
-        const to = flipTarget.current;
-        flipTarget.current = null;
-        // One tick: the resign and a become in the same pass race, and the become loses.
-        setTimeout(() => (to === 'on' ? inputOn : inputOff).current?.focus(), 0);
-      }
-      return;
-    }
-    if (Platform.OS !== 'ios' || !props.holdKeys) return;
-    rearm.current = field === inputOff ? 'off' : 'on';
-    console.log('[keys] unasked blur → keys re-aim when the hide settles');
-    // The belt: some hides never fire their event, and a tap must not leave the keys down.
-    setTimeout(maybeRearm, 300);
-  };
-  const blurOff = () => blurField(inputOff);
-  const blurOn = () => blurField(inputOn);
   const panSV = props.panSV;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- every capture is identity-stable
   const pan = useMemo(
@@ -976,10 +645,10 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
                     <Key onPress={onCtrlTap} style={[styles.key, ctrlStyle]}>
                       <Text style={keyLabel}>Ctrl</Text>
                     </Key>
-                    <Key onPress={() => track('\x1b')} style={styles.key}>
+                    <Key onPress={() => emitKey('\x1b')} style={styles.key}>
                       <Text style={keyLabel}>Esc</Text>
                     </Key>
-                    <Key onPress={() => track('\x09')} style={styles.key}>
+                    <Key onPress={() => emitKey('\x09')} style={styles.key}>
                       <Text style={keyLabel}>Tab</Text>
                     </Key>
                     <Key
@@ -1057,70 +726,6 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
           </Key>
         </View>
       </GestureDetector>
-
-      {/* The keyboard's owners (see `inputOff`/`inputOn`). Invisible but real: the focused one
-          takes every keystroke into `onChangeText`, and the diff against what it held last is
-          what goes to the PTY. `onFocus`/`onBlur` feed `focusedIn` so a prose flip knows whether
-          it is a focus move or a silent re-aim; blur repads, as before. */}
-      <TextInput
-        ref={inputOff}
-        style={styles.input}
-        onChangeText={onChangeText}
-        onSelectionChange={onSelectionChange}
-        onSubmitEditing={() => emitKey('\r')}
-        // The pad (see `PAD`) seeds the field and is written back over it; nothing else sets the
-        // text, so every repeat of a held delete arrives as an `onChangeText` the diff turns into
-        // a DEL. There is no empty-field case left for an `onKeyPress` to cover.
-        defaultValue={PAD}
-        value={padWrite}
-        submitBehavior="submit" // Return sends without blurring
-        onFocus={() => {
-          reportFocus('off');
-          syncHold();
-          console.log('[keys] focus off');
-        }}
-        onBlur={blurOff}
-        // Prose mode (see `KeyBarProps.textMode`): this field is the OFF brain — no corrections,
-        // no capitalization. Its twin below is the ON brain; the flip moves focus between them
-        // rather than mutating these. `spellCheck` stays off in both — the squiggle is noise on a
-        // 1×1 field nobody can see.
-        autoCorrect={false}
-        autoCapitalize="none"
-        spellCheck={false}
-        autoComplete="off"
-        caretHidden
-        contextMenuHidden
-        multiline={false}
-        // Category (1), iOS-only API: `ascii-capable` is an iOS `keyboardType` value with no
-        // Android equivalent; Android takes its default layout. Nothing visual crosses this branch.
-        keyboardType={Platform.OS === 'ios' ? 'ascii-capable' : 'default'}
-        keyboardAppearance={theme.isDark ? 'dark' : 'light'} // iOS-only prop, ignored elsewhere
-      />
-      <TextInput
-        ref={inputOn}
-        style={styles.input}
-        onChangeText={onChangeText}
-        onSelectionChange={onSelectionChange}
-        onSubmitEditing={() => emitKey('\r')}
-        defaultValue={PAD}
-        value={padWrite}
-        submitBehavior="submit" // Return sends without blurring
-        onFocus={() => {
-          reportFocus('on');
-          syncHold();
-          console.log('[keys] focus on');
-        }}
-        onBlur={blurOn}
-        autoCorrect
-        autoCapitalize="sentences"
-        spellCheck={false}
-        autoComplete="off"
-        caretHidden
-        contextMenuHidden
-        multiline={false}
-        keyboardType={Platform.OS === 'ios' ? 'ascii-capable' : 'default'}
-        keyboardAppearance={theme.isDark ? 'dark' : 'light'} // iOS-only prop, ignored elsewhere
-      />
     </View>
   );
 }
@@ -1128,7 +733,7 @@ function KeyBarInner(props: KeyBarProps, ref: Ref<KeyBarHandle>) {
 /**
  * The bar re-rendered on every render of the terminal screen — which is every phase of every
  * gesture, every keyboard step, every ~2s tmux poll — and it is not a small tree: three `Plate`s,
- * the chord strip, the keys with their glyphs, the TextInput, and one `NamePill` per
+ * the chord strip, the keys with their glyphs, and one `NamePill` per
  * window (two `useAnimatedStyle` hooks each), all deliberately mounted at rest so a swipe never
  * pays to build them. None of that changes unless a prop does, so: memo.
  *
@@ -1265,7 +870,7 @@ export function ArrowsPopover({
           </View>
           {/* Not an `arrow()`: Return is a plain CR, not a CSI/SS3 sequence, so it has no `NavKey`
               and DECCKM has nothing to say about it (user asked for it here, 2026-09-01). Same
-              byte the field's own Return sends. */}
+              byte a Return key sends. */}
           <Key onPress={() => sendBytes('\r')} style={styles.enterKey}>
             <Text style={[styles.homeEndGlyph, { color: theme.foreground }]}>Enter</Text>
           </Key>
@@ -1674,33 +1279,5 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     fontSize: TEXT.note,
     borderTopWidth: StyleSheet.hairlineWidth,
-  },
-
-  /* the invisible keyboard owner */
-  /**
-   * Invisible, but no longer 1×1: iOS's hold-space trackpad walks the caret by hit-testing the
-   * field's own text layout, and a field one point wide has nowhere to walk — the caret never
-   * moved and no selection event ever fired. Full width gives the drag real characters to cross
-   * (the field scrolls its content, as any single-line field does, so the pad past the edge is
-   * still reachable). It lies over the keys but cannot take their touches: RN's own hit test
-   * drops any view under `alpha < 0.01` (RCTViewComponentView.mm:746), and `pointerEvents:
-   * 'none'` is deliberately *not* used — that sets `userInteractionEnabled = NO`, which is what
-   * a UITextField consults before agreeing to become first responder.
-   *
-   * MONO at 13 is the calibration: the drag moves one terminal column per column of finger
-   * travel only if the field's characters are about as wide as the terminal's, and 13 is the
-   * default font size. Set larger in Settings and the cursor runs a little ahead of the finger —
-   * the eye closes that loop; threading the live size down here would be a prop for a feel.
-   */
-  input: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    height: 24,
-    opacity: 0,
-    fontFamily: MONO,
-    includeFontPadding: false,
-    fontSize: 13,
   },
 });

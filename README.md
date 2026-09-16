@@ -38,13 +38,13 @@ custom native modules. There is no `reset-project` command.
 |---|---|
 | `src/app/` | Router screens: setup, terminal orchestration, layout |
 | `src/terminal.tsx` | xterm.js DOM component, terminal protocols and touch input |
-| `src/keybar.tsx`, `src/hooks/use-terminal-keyboard.ts` | Native text input, keys, keyboard docking |
+| `src/keybar.tsx`, `src/hooks/use-terminal-keyboard.ts` | Keys, chords, paste, keyboard docking |
 | `src/session.ts`, `src/tmux.ts` | SSH lifecycle, tmux store and side-channel operations |
 | `src/*-model.ts`, `src/*.test.ts` | Pure logic and Bun regression tests |
 | `src/switcher.tsx` | Window cards and search UI |
 | `src/theme.ts`, `src/fonts.ts`, `src/style.ts` | Shared appearance; generated themes come from `scripts/gen-themes.ts` |
 | `src/upload*`, `src/download*`, `src/clipboard*` | Transfers and clipboard |
-| `modules/` | Native `expo-ssh`, `expo-pasteboard`, `expo-webguard` |
+| `modules/` | Native `expo-ssh`, `expo-pasteboard` |
 | `assets/`, `public/` | Bundled app and DOM assets |
 | `scripts/`, `.github/workflows/ipa.yml` | Font/theme tooling and device delivery |
 
@@ -54,9 +54,8 @@ not the source of truth; do not make durable configuration changes only there.
 ## Documentation for small-context agents
 
 [AGENTS.md](AGENTS.md) is the mandatory brief; [CLAUDE.md](CLAUDE.md) imports it. Agent runners must
-be configured to load it once—model choice alone does not enable this. Skills are in
-`.agents/skills/*/SKILL.md`; their paths are also linked explicitly for runners without discovery.
-Avoid auto-loading the rest of the docs or external personal memory files.
+be configured to load it once—model choice alone does not enable this. Avoid auto-loading the rest
+of the docs or external personal memory files.
 
 | Need | Read on demand |
 |---|---|

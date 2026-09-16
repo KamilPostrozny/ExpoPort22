@@ -20,8 +20,8 @@ up and down. On Android measure IME state while the keyboard is visible, not aft
 | T7.10 | Begin swipes over individual keys | No key press leaks to the host. |
 | T7.11 | Press each key while host echo is delayed | Dim/shrink and supported haptic start on touch, not roundtrip. |
 | T7.12 | Two-finger tap terminal, then two-finger pan | Tap opens Settings; pan scrolls. |
-| T7.13 | Select with keyboard up; clear; type and swipe | Native input remains functional; selection does not strand the pan/focus responder. |
-| T7.14 | Toggle prose override; type text, dictation, and shell syntax | Prose enables intended corrections/caps; raw mode preserves syntax. Mode switches do not dismiss or steal the keyboard. |
+| T7.13 | Select with keyboard up; clear; type and swipe | The page's keyboard input remains functional; selection does not strand the pan/focus responder. |
+| T7.14 | Toggle prose override; type text, dictation, and shell syntax | The override still follows and is scoped to the foreground program. The native autocorrect/caps brain went with the field, so both modes type what the keyboard produces; mode switches do not dismiss or steal the keyboard. |
 | T7.15 | Change foreground program between shell, TUI, prose app and interpreter-hosted agent | Automatic mode follows actual program; override is scoped to that context. Unknown programs default raw; no stale async answer changes another window. |
 | T7A.1 | Compare bar and popovers to iPhone | Opaque plates on both, no Android glass/material variation. |
 | T7A.2 | Compare margins, radii, dimensions and keyboard-hidden position | Matches iOS at equivalent logical size. |
@@ -31,3 +31,5 @@ up and down. On Android measure IME state while the keyboard is visible, not aft
 | T7A.5 | Repeat T7.9 after selection, popovers, and Settings | Keyboard gestures keep working; no relaunch needed to recover. |
 | T7A.6 | Open chords/arrows/clipboard with keyboard up/down | Correct anchoring, hit targets, no unexpected terminal displacement; arrows include Enter. |
 | T7A.7 | Exercise repeated presses/haptics | No crash; visible feedback still matches iOS. Emulator cannot certify physical haptic feel. |
+| T7.16 | Attach a hardware keyboard; press Esc, Tab, arrows, Home/End, PgUp/Dn, Delete and F-keys in vim/shell | Each reaches the PTY with xterm's own encoding (vim modes, completion, history); the software keyboard and the bar are unaffected. |
+| T7.17 | With tmux attached, press Alt+1..9, Alt+0, Alt+T, Alt+N, Cmd+V | Window-number select, switcher, new window and the bar's paste rules fire; the key does not also reach the PTY. Without tmux the Alt digits type terminal bytes. |

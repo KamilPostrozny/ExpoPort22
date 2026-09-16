@@ -23,7 +23,7 @@
   },
   "src/keybar.tsx": {
     "react-hooks/immutability": {
-      "count": 2
+      "count": 1
     },
     "react-hooks/purity": {
       "count": 1

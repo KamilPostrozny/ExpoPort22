@@ -39,7 +39,6 @@ import {
 import { pushYank } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
 import { useTerminalKeyboard } from '@/hooks/use-terminal-keyboard';
-import { useHwKeys, type HwKeysMode } from '@/hooks/use-hwkeys';
 import KeyBar, {
   ArrowsPopover,
   BAR_PAD_TOP,
@@ -134,9 +133,10 @@ import UploadSheet from '@/upload-sheet';
  * three states §4.9 asks for. The terminal itself stays mounted through all of them, so a reconnect
  * comes back to the same scrollback in a webview that is already booted.
  *
- * Below the terminal sits T7's key bar, and inside the bar the native `TextInput` that owns the
- * keyboard (T4's decision — the webview never takes focus). Native keyboard progress docks the
- * bar; `keyboardPad` gives the terminal the final destination in one layout/resize.
+ * Below the terminal sits T7's key bar, but the keyboard belongs to the terminal's own webview:
+ * xterm's helper textarea is the first responder, so every key goes to the page and the bar only
+ * sends bytes and asks the screen to raise or dismiss. Native keyboard progress docks the bar;
+ * `keyboardPad` gives the terminal the final destination in one layout/resize.
  */
 export default function SessionScreen() {
   const theme = useTheme();
@@ -148,9 +148,9 @@ export default function SessionScreen() {
   const sending = useUploadBusy();
   const terminal = useRef<TerminalHandle>(null);
   /** The key bar's handle: the screen's doors put the keyboard away through it (see
-   *  `KeyBarHandle.dismiss`) rather than `Keyboard.dismiss()` directly — the blur that dismiss
-   *  causes must arrive EXPECTED, or the field re-aims itself and raises the keyboard over the
-   *  sheet that just opened. */
+   *  `KeyBarHandle.dismiss`) rather than `Keyboard.dismiss()` directly — the keyboard is the
+   *  webview's now, and `dismiss` blurs the page's textarea so the sheet opens over a keyboard
+   *  that is actually gone. */
   const keybar = useRef<KeyBarHandle>(null);
   const detach = useRef<(() => void) | null>(null);
   const [open, setOpen] = useState<BarPopover>('none');
@@ -362,9 +362,6 @@ export default function SessionScreen() {
    */
   type SwPhase = 'closed' | 'opening' | 'open' | 'closing' | 'birth';
   const [sw, setSw] = useState<SwPhase>('closed');
-  /** The bar's field is who holds focus — the bar reports it (`onFieldFocus`). The hardware
-   *  keys' mode keys on it: they are intercepted only while the terminal is the one listening. */
-  const [fieldFocused, setFieldFocused] = useState(false);
   /** The phase read from a handler that runs after the render it was written in (same reason as
    *  `searchRef`) — the settings doors both need to know which screen is in front. */
   const swRef = useRef(sw);
@@ -483,6 +480,26 @@ export default function SessionScreen() {
       setModes(next);
     },
     onTwoFingerTap: async () => openSettings(),
+    // The hardware app chords, decided in the page by xterm's key handler (see `src/terminal.tsx`).
+    // The actions are the screen's: the same doors the tabs button, the ⋮ menu and the key bar's
+    // Paste use, so a hardware key and a finger land in the same place.
+    onAppKey: (action) => {
+      if (action.kind === 'paste') {
+        keybar.current?.paste();
+        return;
+      }
+      if (action.kind === 'window-select') {
+        selectWindowByNumber(action.number).catch((error) =>
+          console.log('[keys] select-window', action.number, 'failed:', error),
+        );
+        return;
+      }
+      if (action.kind === 'window-new') {
+        newWindow().catch((error) => console.log('[keys] new-window failed:', error));
+        return;
+      }
+      openSwitcher();
+    },
   };
   /** One identity-stable object instead of nine one-per-key trampolines: same ref-indirection, one hook. */
   const tv = useMemo(
@@ -498,6 +515,7 @@ export default function SessionScreen() {
       onLink: async (...a: any[]) => termH.current.onLink?.(...a),
       onModes: async (...a: any[]) => termH.current.onModes?.(...a),
       onTwoFingerTap: async (...a: any[]) => termH.current.onTwoFingerTap?.(...a),
+      onAppKey: (...a: any[]) => termH.current.onAppKey?.(...a),
     }),
     [],
   );
@@ -520,11 +538,13 @@ export default function SessionScreen() {
         onLink={tv.onLink}
         onModes={tv.onModes}
         onTwoFingerTap={tv.onTwoFingerTap}
+        onAppKey={tv.onAppKey}
+        tmuxKeys={showTabs}
         dom={{ scrollEnabled: false, style: styles.terminal }}
       />
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the handlers are identity-stable
-    [theme, fontSize, termHold],
+    [theme, fontSize, termHold, showTabs],
   );
 
   /** The cards as of this render, for the deferred neighbour refresh — a `setTimeout` closure
@@ -995,37 +1015,6 @@ export default function SessionScreen() {
   };
   /** Is a `closeTo` waiting out its two frames? Cleared by the flight itself and by a grab. */
   const closeArmed = useRef(false);
-
-  /**
-   * The physical keyboard (`modules/expo-hwkeys` + `src/hwkeys-model.ts`): the 1×1 field only
-   * consumes plain printables, Return, Backspace and Space — a hardware Esc, Tab, arrows, F-keys
-   * and chords either wander focus or are dropped, so the module intercepts those and hands them
-   * here. The mode is the app's own answer to "who is listening": the field's focus, and the
-   * switcher — open, it keeps only Escape (it closes) while the search field keeps the rest.
-   * Without tabs (`showTabs`) the window keys fall through to plain Alt bytes, tmux decides.
-   */
-  void fieldFocused; // TEMP diagnostic: force terminal mode regardless of focus
-  const hwKeysMode: HwKeysMode = sw === 'closed' ? 'terminal' : 'switcher';
-  useHwKeys(
-    hwKeysMode,
-    { decckm: modes.decckm, tmux: showTabs },
-    {
-      onBytes: (bytes) => keybar.current?.emitDirect(bytes),
-      onWindowSelect: (number) => {
-        selectWindowByNumber(number).catch((error) =>
-          console.log('[hwkeys] select-window', number, 'failed:', error),
-        );
-      },
-      onWindowNew: () => {
-        newWindow().catch((error) => console.log('[hwkeys] new-window failed:', error));
-      },
-      onSwitcher: openSwitcher,
-      onPaste: () => keybar.current?.paste(),
-      onEscape: () => {
-        if (swRef.current === 'open' || swRef.current === 'opening') closeTo(activePos());
-      },
-    },
-  );
 
   /**
    * Leaving the grid for the active window — Done, and Android's back press. Unlike a card tap,
@@ -1671,6 +1660,9 @@ export default function SessionScreen() {
     onRowHeight: setRowHeight,
     onTabsTap: openSwitcher,
     onBarSwipe,
+    // The webview owns the keyboard; the bar only asks it up or down (see `KeyBarProps`).
+    onRaise: () => terminal.current?.focus(),
+    onDismiss: () => terminal.current?.blur(),
   };
   /** One identity-stable object instead of five one-per-key trampolines. */
   const kb = useMemo(
@@ -1680,6 +1672,8 @@ export default function SessionScreen() {
       onRowHeight: (...a: any[]) => kbH.current.onRowHeight(...a),
       onTabsTap: (...a: any[]) => kbH.current.onTabsTap(...a),
       onBarSwipe: (...a: any[]) => kbH.current.onBarSwipe(...a),
+      onRaise: (...a: any[]) => kbH.current.onRaise(...a),
+      onDismiss: (...a: any[]) => kbH.current.onDismiss(...a),
     }),
     [],
   );
@@ -2491,12 +2485,10 @@ export default function SessionScreen() {
             // T11: the page-slide window hop rides the horizontal bar pan — where there is tmux to
             // hop through; without it the axis is silence, like the tabs button (§7).
             onBarSwipe={showTabs ? kb.onBarSwipe : undefined}
-            // At rest the bar keeps the keyboard against a terminal tap (the field re-aims, see
-            // KeyBar's `onBlur`). Suppressed while the search field is up — there a blur of the bar's
-            // field is a move to a sibling the bar must not fight back — and while a sheet or the
-            // switcher owns the screen (their doors put the keys away through `keybar.dismiss`).
-            holdKeys={!search.on && !settingsOpen && sw === 'closed'}
-            onFieldFocus={setFieldFocused}
+            // The bar's own doors: the up-swipe raises the page's keyboard, the down-swipe and the
+            // screen's doors put it away. Focus is the webview's (`TerminalHandle.focus`/`blur`).
+            onRaise={kb.onRaise}
+            onDismiss={kb.onDismiss}
             ref={keybar}
             // The pan's per-frame writes happen on the UI thread against these (perf: the JS thread
             // stalls 40-300ms under load and a runOnJS pan hitched with it). A STABLE object: the

@@ -80,7 +80,21 @@ export type TerminalHandle = {
    *  hop: the incoming window rewrites every row, so a selection that survived would be the
    *  newcomer's text wearing the old highlight, and a Copy of it would be the wrong content. */
   clearSelection(): void;
+  /** Focus xterm's helper textarea so the page owns the keyboard — the terminal tap and the
+   *  bar's up-swipe. The OS keyboard is still the OS's; this only moves first responder into the
+   *  page, where xterm turns every key (printable, Esc/Tab/arrow/F-key, chord) into `onData`. */
+  focus(): void;
+  /** Blur it: the down-swipe and the screen's doors put the keyboard away through here. */
+  blur(): void;
 };
+
+/** A hardware chord that is an app action rather than terminal input — the same set the custom
+ *  native module used to intercept, now decided in the page by xterm's own key handler. */
+export type AppKeyAction =
+  | { kind: 'window-select'; number: number }
+  | { kind: 'window-new' }
+  | { kind: 'switcher' }
+  | { kind: 'paste' };
 
 export type TerminalProps = {
   theme: Theme;
@@ -130,6 +144,13 @@ export type TerminalProps = {
    *  on the next ~2s beat. Fired from the touch layer's `spend`, throttled, on the wheel route
    *  only — arrows and local scroll do not touch tmux copy mode. */
   onScroll?: () => void;
+  /** A hardware chord that is an app action rather than terminal input. xterm's key handler runs
+   *  every key through it first (see `attachCustomKeyEventHandler` in `boot`); only the app's
+   *  chords — Alt+1..9/0, Alt+T, Alt+N, Cmd+V — are taken, everything else is left to xterm. */
+  onAppKey: (action: AppKeyAction) => void;
+  /** Whether tmux is attached: the Alt+ window chords only exist when a session can act on them.
+   *  `false` leaves Alt+1..9 as the terminal's own `ESC 1` bytes, exactly as before. */
+  tmuxKeys: boolean;
   ref?: Ref<TerminalHandle>;
   dom?: DOMProps;
 };
@@ -514,6 +535,12 @@ export default function TerminalView({
     clearSelection: () => {
       clearSelRef.current();
     },
+    focus: () => {
+      terminal.current?.focus();
+    },
+    blur: () => {
+      terminal.current?.blur();
+    },
   };
   useDOMImperativeHandle(
     (ref ?? null) as Ref<DOMImperativeFactory>,
@@ -600,11 +627,11 @@ export default function TerminalView({
     terminal.current = term;
     fit.current = fitAddon;
 
-    // T7: the keyboard is native now (T4's decision), so the webview must never take focus. The
-    // helper textarea xterm keeps for real keyboards is disabled outright — xterm's own mousedown
-    // focus call then no-ops and focus stays on the body, which is also exactly the state T4
-    // measured long-press selection to need.
-    if (term.textarea) term.textarea.disabled = true;
+    // The page owns the keyboard. xterm's helper textarea is left enabled so it can take first
+    // responder and feed every key through `onData` — the software keyboard and a hardware
+    // keyboard alike (xterm already owns Esc/Tab/arrows/F-keys/chords and DECCKM, which is the
+    // whole reason the custom native interception went away). The touch layer focuses it on a tap
+    // (see `touchEnd`); `TerminalHandle.focus`/`blur` are the native doors.
 
     // iOS synthesises a mouse pair when a touch gesture ends. xterm answers those by focusing its
     // textarea and clearing the document selection — which is the selection the finger just made,
@@ -624,6 +651,38 @@ export default function TerminalView({
     // on the bar — full control, no WebKit gesture involved, and what native iOS terminals do.
 
     term.onData((data) => latest.current.onData(data));
+    // Every key xterm would handle comes through here first. The app's hardware chords are taken
+    // (returning false stops xterm and the browser from acting on them too); everything else is
+    // left alone, so Esc/Tab/arrows/F-keys/Ctrl and Alt chords keep xterm's own encodings. No
+    // native code in the path. `latest.current` keeps the handler on this render's props.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+      const act = latest.current.onAppKey;
+      if (e.metaKey && !e.ctrlKey && !e.altKey && e.code === 'KeyV') {
+        e.preventDefault();
+        act({ kind: 'paste' });
+        return false;
+      }
+      if (latest.current.tmuxKeys && e.altKey && !e.ctrlKey && !e.metaKey && !e.repeat) {
+        const digit = /^Digit([0-9])$/.exec(e.code);
+        if (digit !== null) {
+          e.preventDefault();
+          act({ kind: 'window-select', number: digit[1] === '0' ? 10 : Number(digit[1]) });
+          return false;
+        }
+        if (e.code === 'KeyT') {
+          e.preventDefault();
+          act({ kind: 'switcher' });
+          return false;
+        }
+        if (e.code === 'KeyN') {
+          e.preventDefault();
+          act({ kind: 'window-new' });
+          return false;
+        }
+      }
+      return true;
+    });
     term.onBell(() => latest.current.onBell());
     // Instrumentation (the callout's Copy fired on nothing, 2026-09-12): the selection model died
     // between the long-press landing and the Copy tap, and xterm clears it from several internal
@@ -1412,7 +1471,12 @@ export default function TerminalView({
       }
       // A one-finger tap on a live selection clears it (T13's tap-to-clear, kept; the mechanism
       // is ours now — xterm's own path runs off a synthetic mouse pair that touch never sends).
-      if (pan === 'pending' && fingers === 1) clearSelection();
+      // The tap is also the keyboard's door now: focus inside the gesture so WebKit shows the
+      // software keyboard, and the page gets every hardware key from here on.
+      if (pan === 'pending' && fingers === 1) {
+        clearSelection();
+        term.focus();
+      }
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
       // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.
       if (pan === 'pending' && isTwoFingerTap(fingers, false, ev.timeStamp - downAt)) {
