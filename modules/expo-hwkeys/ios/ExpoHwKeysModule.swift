@@ -146,7 +146,7 @@ private extension UIApplication {
     // reads as zero — "pass everything through" (a no-op), never a doubled key.
     let keyDown = (event.value(forKey: "_isKeyDown") as? NSNumber)?.boolValue ?? false
     let modifierValue = event.value(forKey: "allKeys") as? NSValue
-    let modifiers = modifierValue.map { UIKeyModifierFlags(rawValue: $0.uintValue) } ?? []
+    let modifiers = UIKeyModifierFlags(rawValue: UInt(truncatingIfNeeded: modifierValue?.integerValue ?? 0))
     guard let subevents = event.value(forKey: "subevents") as? [UIEvent] else {
       hwKeysHandleKeyUIEvent(event) // the original, after the swap
       return
