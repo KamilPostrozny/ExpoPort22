@@ -774,20 +774,12 @@ export default function TerminalView({
           `focus len=${proseArea.value.length} caret=${proseArea.selectionStart} anchor=${prose.caret}`,
         );
       }
-      keyMoves++;
       proseWatch(latest.current.prose);
     };
     const proseBlurWatch = () => {
       proseWatch(false);
-      keyMoves++;
       proseSay(`blur len=${proseArea?.value.length ?? -1} mirror=${proseMirror.length}`);
     };
-    /** Every focus and blur event the field has seen, whoever caused it — the landing of the
-     *  deferred refocus below compares against this, so a keyboard move of the USER's (the bar's
-     *  doors blur and focus it too) in the gap vetoes a landing that would re-raise a keyboard
-     *  the user just put away. */
-    let keyMoves = 0;
-    let refocusTimer: ReturnType<typeof setTimeout> | null = null;
     /** iOS re-reads the field's traits on a focus and re-raises the keyboard from a programmatic
      *  one (the bar's up-swipe is exactly that). Chrome-for-Android refuses to raise the IME from
      *  JS at all (issues.md I17), so the same move there drops the keyboard and leaves it dead:
@@ -800,12 +792,8 @@ export default function TerminalView({
      *  select-window — does not re-read them: the platform reads the traits at focus, not on the
      *  attribute change (reported 2026-09-16: prose never engaged after a tab switch until the
      *  keyboard was closed and re-opened). That one case carries the focus move the rest of the
-     *  path avoids: blur drops the keyboard, focus brings it back on the new mode (the old native
-     *  field needed exactly this, T7.14). Synchronous does NOT work — measured 2026-09-16: the
-     *  blur and focus events both logged with no resize between them, i.e. iOS kept the keyboard
-     *  up, moved the activeElement, and re-read nothing. The re-read needs the keyboard to
-     *  actually leave, so the focus lands AFTER the hide is underway. */
-    const REFOCUS_LAND_MS = 200;
+     *  path avoids: blur drops the keyboard, focus brings it back on the new mode — the user's
+     *  workaround minus the two swipes (the old native field needed exactly this, T7.14). */
     const proseApply = (on: boolean) => {
       if (proseArea === undefined) return;
       proseArea.dataset.prose = String(on);
@@ -820,18 +808,7 @@ export default function TerminalView({
       if (refocusReraises && document.activeElement === proseArea) {
         proseSay(`refocus ${on ? 'on' : 'off'}`);
         proseArea.blur();
-        keyMoves++; // our own blur, so the comparison below counts moves since it
-        const baseline = keyMoves;
-        if (refocusTimer !== null) clearTimeout(refocusTimer);
-        refocusTimer = setTimeout(() => {
-          refocusTimer = null;
-          if (keyMoves !== baseline) {
-            proseSay('refocus skipped, the keyboard moved on its own');
-            return;
-          }
-          proseSay('refocus land');
-          proseArea.focus();
-        }, REFOCUS_LAND_MS);
+        proseArea.focus();
       }
       proseSay(`mode ${on ? 'on' : 'off'} ${PROSE_BUILD}`);
     };
@@ -917,8 +894,6 @@ export default function TerminalView({
     proseArea?.addEventListener('blur', proseBlurWatch, true);
     const proseTeardown = () => {
       proseApplyRef.current = null;
-      if (refocusTimer !== null) clearTimeout(refocusTimer);
-      refocusTimer = null;
       proseWatch(false);
       for (const type of PROSE_OWNED) host.current?.removeEventListener(type, proseInput, true);
       proseArea?.removeEventListener('focus', proseFocusWatch, true);
