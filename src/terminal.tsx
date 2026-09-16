@@ -542,9 +542,7 @@ export default function TerminalView({
       clearSelRef.current();
     },
     focus: () => {
-      console.log('[kb] page focus called');
       terminal.current?.focus();
-      console.log('[kb] activeElement', document.activeElement?.tagName ?? 'none');
     },
     blur: () => {
       terminal.current?.blur();

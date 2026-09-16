@@ -33,7 +33,8 @@ Sources: `src/settings.ts`, `src/keys.ts`, `src/host-keys.ts`, `src/session.ts`,
 ## Terminal, input, and keyboard
 
 Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `src/keybar.tsx`,
-`src/hooks/use-terminal-keyboard.ts`, `src/prose-model.ts`, `src/app/terminal.tsx`.
+`src/hooks/use-terminal-keyboard.ts`, `src/prose-model.ts`, `src/prose-input.ts`,
+`src/app/terminal.tsx`.
 
 - xterm.js runs in an Expo DOM component. The WebView owns the keyboard: xterm's helper
   textarea is first responder, so software and hardware keys alike become xterm `onData` (Esc,
@@ -58,9 +59,13 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   gesture, so the bar's up-swipe is what arms a hardware keyboard; a terminal tap deliberately
   does not focus the page.
 - Prose mode follows the foreground program; the menu provides an override scoped to that context.
-  Shell/TUI input stays raw. The old native-field dictation filter went with the field: xterm
-  forwards exactly what the keyboard produced. That is an accepted regression of moving keyboard
-  ownership into the page, not a parity claim.
+  Shell/TUI input stays raw. In prose mode the page flips the WebView helper textarea's
+  autocorrect/capitalisation/spellcheck traits and owns that field's input: xterm steps aside for
+  printable keys and for backspace/delete, and each change to the field reaches the PTY as
+  `diffInput`'s keys, so iOS's whole-word rewrites and the dictation space filter survive. The
+  hold-space trackpad is the one part that did not come back — a WebView textarea never reports the
+  caret leaving the end of the field, so there is no move to turn into arrows (measured
+  2026-09-16; `src/prose-input.ts`, `src/terminal.tsx`).
 - SSH writes are serialized in `src/session.ts`; do not bypass the queue and reorder input.
 
 ## Clipboard and transfers
