@@ -681,6 +681,9 @@ export default function TerminalView({
       }
       return false;
     };
+    // WebKit gives the page first responder only from a user gesture, so this path is live only
+    // after the terminal has been armed — the tap (`touchEnd`) or the bar up-swipe (`onRaise`).
+    // It is what keeps the chords working with the keyboard down, after a dismiss blurs the textarea.
     const onDomKey = (e: KeyboardEvent) => {
       if (e.type !== 'keydown') return;
       if (document.activeElement === term.textarea) return; // xterm's handler owns this one
