@@ -68,23 +68,74 @@ export function proseSelfKey(key: string): string {
   return key === 'Delete' ? '\x1b[3~' : DEL;
 }
 
+/** A collapsed DOM caret uses UTF-16 offsets; terminal arrows count characters, like the diff. */
+const clamp = (at: number, length: number) => Math.max(0, Math.min(at, length));
+
+/** The walk's memory between samples. */
+export type ProseState = {
+  /** Where this side believes the field's caret is — the anchor an edit also uses. */
+  caret: number;
+  /** The caret the current gesture started from, or -1 between gestures. */
+  burst: number;
+  /** The last accepted step, signed, so a reversal can be told from travel. */
+  last: number;
+};
+
+/** A fresh walk: no gesture, no travel, caret at the start of the line. */
+export function proseStart(): ProseState {
+  return { caret: 0, burst: -1, last: 0 };
+}
+
+/** What one caret sample means for the walk. */
+export type ProseWalk =
+  /** The caret did not move (or a range is up, which is a selection, not a walk). */
+  | { action: 'none'; state: ProseState }
+  /** The finger moved the caret: send this many arrows. */
+  | { action: 'send'; arrows: number; state: ProseState }
+  /** iOS restored the caret to where the gesture began: drop it, and the burst ends with it. */
+  | { action: 'park'; state: ProseState };
+
 /**
- * iOS parks the caret at a document edge when a hold-space drag engages and again when it ends: one
- * jump of most of the line, with stillness either side. Sending those faithfully is what made the
- * old native field's first run "shoot to column 0 on every grab"; its answer was to drop every jump
- * over two cells, which also ate fast travel. Polling can be finer: a big jump that LANDS ON an edge
- * is the park shape, so it is held for exactly one sample — 60ms — and the sample after it decides.
+ * A restoring jump has to be at least this long to be one. A reversing drag of one or two cells is a
+ * finger turning round, not iOS pinning the caret back.
  */
 export const CARET_PARK_MIN = 3;
 
-/** What to do with a polled caret move: send it as travel, or hold it to see whether it is a park. */
-export function walkStep(moved: number, caret: number, length: number): 'send' | 'hold' {
-  const atEdge = caret === 0 || caret === length;
-  return atEdge && Math.abs(moved) >= CARET_PARK_MIN ? 'hold' : 'send';
-}
-
-/** A held jump, once the next sample has landed: `travel` if the caret kept going the same way,
- *  `park` if it stopped or turned back — iOS pinning it, which the PTY must not see as arrows. */
-export function heldStep(held: number, next: number): 'park' | 'travel' {
-  return next !== 0 && held > 0 === next > 0 ? 'travel' : 'park';
+/**
+ * The walk's decision, pure so a test can drive the whole drag shape. `to` is the caret the sample
+ * just read.
+ *
+ * The park is the whole reason this is not one subtraction. When the spacebar trackpad ends, iOS
+ * puts the field's caret back where the gesture began, and that restore arrives as ordinary caret
+ * movement. Measured on the phone, 2026-09-16: a finger dragged to column 0 of a 13-character field
+ * and the release arrived as `+13`, straight to the end — which the PTY drew as the cursor jumping to
+ * the end of the line. Three things together identify it, and each is needed:
+ *
+ *   - it LANDS ON the burst's origin — the caret after the last edit, which is where the gesture
+ *     began. The first sample of a burst cannot qualify: the caret has just left that position.
+ *   - it REVERSES the travel. A finger dragging back to the end of the line arrives in small steps
+ *     the same way round, and must not be mistaken for the restore — that is why this file does not
+ *     settle for the landing alone, which would drop the last step of every drag back to the end.
+ *   - it is LONG. A one-cell turn-round is a finger, not iOS.
+ *
+ * Dropping one ends the burst, so the very next sample opens a new one: a flick that is caught by
+ * mistake costs a single 60ms sample and corrects itself.
+ */
+export function proseWalk(text: string, state: ProseState, to: number): ProseWalk {
+  const from = clamp(state.caret, text.length);
+  const at = clamp(to, text.length);
+  if (from === at) return { action: 'none', state };
+  const step = at - from;
+  const origin = state.burst < 0 ? from : state.burst;
+  // Arrows are characters, not UTF-16 units: one arrow steps a whole emoji, as the PTY expects.
+  const arrows = [...text.slice(Math.min(from, at), Math.max(from, at))].length;
+  const reverses = state.last !== 0 && Math.sign(step) !== Math.sign(state.last);
+  if (at === origin && reverses && arrows >= CARET_PARK_MIN) {
+    return { action: 'park', state: { caret: state.caret, burst: -1, last: 0 } };
+  }
+  return {
+    action: 'send',
+    arrows: Math.sign(step) * arrows,
+    state: { caret: at, burst: origin, last: step },
+  };
 }

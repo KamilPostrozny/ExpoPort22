@@ -63,9 +63,18 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   autocorrect/capitalisation/spellcheck traits and owns that field's input: xterm steps aside for
   printable keys and for backspace/delete, and each change to the field reaches the PTY as
   `diffInput`'s keys, so iOS's whole-word rewrites and the dictation space filter survive. The
-  hold-space trackpad is the one part that did not come back — a WebView textarea never reports the
-  caret leaving the end of the field, so there is no move to turn into arrows (measured
-  2026-09-16; `src/prose-input.ts`, `src/terminal.tsx`).
+  hold-space path samples the focused field's caret at 60ms and sends character-counted arrows,
+  sharing the resulting position with the next input diff. Prose pins the transparent field inside
+  the viewport rather than letting xterm move it with every remote cursor redraw. It hides the text
+  paint rather than using `opacity: 0`, which [WebKit suppresses selection gestures for](https://bugs.webkit.org/show_bug.cgi?id=191442).
+  When the trackpad ends, iOS restores the field's caret to where the gesture began; that restore is
+  a long reversing jump back to the burst's origin, so it is recognised and dropped, and the field is
+  put back where the last accepted sample left it so typing after a drag lands at the cursor. The
+  walk traverses the field's own text, so the pending line has to survive the keyboard going down:
+  xterm empties the field on blur, the page keeps the line, and the next focus puts it and its caret
+  back — an empty field cannot be walked at all, and a mirror that has drifted from the field makes
+  the diff over-delete. `[prose]` lines on the console carry the mode, the walk, the parks and each
+  change's DEL count (`src/prose-input.ts`, `src/terminal.tsx`).
 - SSH writes are serialized in `src/session.ts`; do not bypass the queue and reorder input.
 
 ## Clipboard and transfers
