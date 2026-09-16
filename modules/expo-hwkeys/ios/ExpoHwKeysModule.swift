@@ -226,7 +226,7 @@ private extension UIApplication {
     if let number = KeyTap.value(event, "_keyCode") as? NSNumber {
       let code = number.intValue
       let rawModifiers = (KeyTap.value(event, "_modifierFlags") as? NSNumber)?.intValue ?? 0
-      let modifiers = UIKeyModifierFlags(rawValue: UInt(max(0, rawModifiers)))
+      let modifiers = UIKeyModifierFlags(rawValue: max(0, rawModifiers))
       let characters = KeyTap.value(event, "_modifiedInput") as? String ?? ""
       let base = KeyTap.value(event, "_unmodifiedInput") as? String ?? ""
       if KeyTap.intercept(code: code, modifiers: modifiers, keyDown: down) {
