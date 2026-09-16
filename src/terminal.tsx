@@ -683,7 +683,7 @@ export default function TerminalView({
      * Hold-space reads the same field's caret, but its geometry must stay independent of the
      * remote terminal cursor (see data-prose CSS). The input diff and walk share ONE caret anchor:
      * otherwise typing after a drag rewrites the suffix from the previous edit's stale position. */
-    const PROSE_BUILD = 'park-aware';
+    const PROSE_BUILD = 'refocus';
     const proseArea = term.textarea;
     /** The field as the diff last saw it, and where that edit left the caret — the pair `diffInput`
      *  is fed. Cleared where the field is wiped out from under the page on a LINE BOUNDARY: xterm
@@ -780,12 +780,20 @@ export default function TerminalView({
       proseWatch(false);
       proseSay(`blur len=${proseArea?.value.length ?? -1} mirror=${proseMirror.length}`);
     };
-    /** The flip: the traits iOS reads, plus a fresh correction context — one mode's half-typed line
-     *  must never become the other's. The auto path decides the mode before the keyboard rises, so
-     *  the attach that follows reads the new traits; whether iOS ALSO re-reads them on a flip made
-     *  while the keyboard is already up is not established here (the old native field needed a focus
-     *  move for exactly that, T7.14, and it is the one thing this flip does not do — a focus move
-     *  would drop the keyboard). */
+    /** iOS re-reads the field's traits on a focus and re-raises the keyboard from a programmatic
+     *  one (the bar's up-swipe is exactly that). Chrome-for-Android refuses to raise the IME from
+     *  JS at all (issues.md I17), so the same move there drops the keyboard and leaves it dead:
+     *  refocus only where it can come back. */
+    const refocusReraises = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    /** The flip: the traits the platform reads, plus a fresh correction context — one mode's
+     *  half-typed line must never become the other's. The auto path usually decides the mode
+     *  before the keyboard rises, so the attach that follows reads the new traits. A flip made
+     *  while the keyboard is ALREADY up — a tab switch, whose poll nudge answers ~400ms after
+     *  select-window — does not re-read them: the platform reads the traits at focus, not on the
+     *  attribute change (reported 2026-09-16: prose never engaged after a tab switch until the
+     *  keyboard was closed and re-opened). That one case carries the focus move the rest of the
+     *  path avoids: blur drops the keyboard, focus brings it back on the new mode — the user's
+     *  workaround minus the two swipes (the old native field needed exactly this, T7.14). */
     const proseApply = (on: boolean) => {
       if (proseArea === undefined) return;
       proseArea.dataset.prose = String(on);
@@ -797,6 +805,11 @@ export default function TerminalView({
       proseArea.value = '';
       proseReset();
       proseWatch(on && document.activeElement === proseArea);
+      if (refocusReraises && document.activeElement === proseArea) {
+        proseSay(`refocus ${on ? 'on' : 'off'}`);
+        proseArea.blur();
+        proseArea.focus();
+      }
       proseSay(`mode ${on ? 'on' : 'off'} ${PROSE_BUILD}`);
     };
     /** Which key goes where, and the reset for the two xterm clears the field on its way past. */
