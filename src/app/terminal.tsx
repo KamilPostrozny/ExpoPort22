@@ -479,6 +479,9 @@ export default function SessionScreen() {
       setModes(next);
     },
     onTwoFingerTap: async () => openSettings(),
+    // One line about the mode, from the page: the DOM console reaches Metro only intermittently, so
+    // the page echoes its prose lines here and they log as ordinary `LOG` lines.
+    onProseLog: async (line: string) => console.log('[prose]', line),
   };
   /** One identity-stable object instead of nine one-per-key trampolines: same ref-indirection, one hook. */
   const tv = useMemo(
@@ -494,6 +497,7 @@ export default function SessionScreen() {
       onLink: async (...a: any[]) => termH.current.onLink?.(...a),
       onModes: async (...a: any[]) => termH.current.onModes?.(...a),
       onTwoFingerTap: async (...a: any[]) => termH.current.onTwoFingerTap?.(...a),
+      onProseLog: async (...a: any[]) => termH.current.onProseLog?.(...a),
     }),
     [],
   );
@@ -505,6 +509,9 @@ export default function SessionScreen() {
         theme={theme}
         fontSize={fontSize}
         holdSize={termHold}
+        // The mode the screen decided (auto-decision or ⋯ override). The page needs it: prose mode
+        // is the helper textarea's traits plus an input path that sends what the field changed.
+        prose={textMode}
         onData={tv.onData}
         onScroll={tv.onScroll}
         onResize={tv.onResize}
@@ -516,13 +523,14 @@ export default function SessionScreen() {
         onLink={tv.onLink}
         onModes={tv.onModes}
         onTwoFingerTap={tv.onTwoFingerTap}
+        onProseLog={tv.onProseLog}
         // The webview's own input accessory bar (the prev/next/Done strip) is not this app's
         // chrome; the native TextInput it replaces never showed one.
         dom={{ scrollEnabled: false, style: styles.terminal, hideKeyboardAccessoryView: true }}
       />
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the handlers are identity-stable
-    [theme, fontSize, termHold],
+    [theme, fontSize, termHold, textMode],
   );
 
   /** The cards as of this render, for the deferred neighbour refresh — a `setTimeout` closure

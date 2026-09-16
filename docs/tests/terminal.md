@@ -18,6 +18,7 @@ as well as the phone; confirm foreground program and terminal modes before inter
 | T6.8 | Drag by measured cell-height increments | One notch per cell, not five-line jumps. |
 | T6.9 | Enter/leave vim and repeat pans | Mode changes take effect; no stale alternate-screen/mouse routing. |
 | T6.10 | Scroll git log's pager, including no-alternate-screen mode | Pager moves rather than tmux's unrelated history. Scroll back to the live bottom; input is not trapped in copy mode. |
+| T6.11 | Tap a control in a mouse-enabled TUI (htop), then tap an OSC 8 link in a plain shell | The click lands on the tapped cell and the link opens; the software keyboard stays down either way. |
 
 Inspect glyphs, bold pitch, font loading, cursor position, ANSI colours, and box drawing during the
 walk. Keyboard/rotation changes must update host PTY size, not only scale the image. When preserving

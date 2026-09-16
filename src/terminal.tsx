@@ -40,6 +40,9 @@ import {
   type ModeSignal,
 } from '@/scroll-model';
 import { MONO_ADVANCE } from '@/switcher-model';
+import { DEL, caretKeys, diffInput } from '@/keybar-model';
+import { filterDictation } from '@/input-model';
+import { proseKey, proseSelfKey, proseStart, proseText, proseWalk } from '@/prose-input';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
 // `MONO` from the leaf, `Theme` as a type only — both so that `@/theme`, and with it the palette
 // and the 27-theme graph, stays out of this webview's bundle. See `fonts.ts`.
@@ -80,9 +83,10 @@ export type TerminalHandle = {
    *  hop: the incoming window rewrites every row, so a selection that survived would be the
    *  newcomer's text wearing the old highlight, and a Copy of it would be the wrong content. */
   clearSelection(): void;
-  /** Focus xterm's helper textarea so the page owns the keyboard — the terminal tap and the
-   *  bar's up-swipe. The OS keyboard is still the OS's; this only moves first responder into the
-   *  page, where xterm turns every key (printable, Esc/Tab/arrow/F-key, chord) into `onData`. */
+  /** Focus xterm's helper textarea so the page owns the keyboard — the bar's up-swipe's job, and
+   *  only that one: a terminal tap deliberately does not take it. The OS keyboard is still the
+   *  OS's; this only moves first responder into the page, where xterm turns every key (printable,
+   *  Esc/Tab/arrow/F-key, chord) into `onData`. */
   focus(): void;
   /** Blur it: the down-swipe and the screen's doors put the keyboard away through here. */
   blur(): void;
@@ -107,6 +111,15 @@ export type TerminalProps = {
    *  every snapshot taken behind it rewrite themselves mid-flight. The terminal is not being
    *  looked at while this is true; it is being flown into a card. */
   holdSize: boolean;
+  /** Prose mode as the screen decided it — `textMode` on `src/app/terminal.tsx`, from the
+   *  auto-decision or the ⋯ override. The page flips the helper textarea's traits from it and, while
+   *  it is on, owns the field's input (see the prose block in `boot`); off, xterm keeps the
+   *  keyboard exactly as it had it. */
+  prose: boolean;
+  /** One line about the mode, on the reliable channel. The DOM console reaches Metro only
+   *  intermittently (the archive caught it stopping mid-walk, T6.5), and the mode's flips are what a
+   *  device walk reads; this echoes them to a native `console.log` instead. */
+  onProseLog: (line: string) => Promise<void>;
   /** The terminal exists and knows its size. Fires again on every reload of the webview — iOS reaps
    *  a backgrounded one — which is the moment the session has to be painted back in. */
   onBoot: () => Promise<void>;
@@ -294,6 +307,33 @@ const CSS = `
   }
   /* Except the parts that are not text: the hidden textarea and the measuring elements. */
   .xterm .xterm-helpers { -webkit-user-select: none; user-select: none; }
+  /* Prose retains a whole line, unlike xterm's transient IME helper. Keep its input geometry
+     independent of remote cursor redraws: moving a one-cell field under an active keyboard
+     trackpad feeds terminal movement back into WebKit's caret hit testing. The fixed, contained
+     field also keeps caret reveal inside the input instead of scrolling the terminal page.
+     Important overrides xterm's inline geometry on every render; raw IME placement is untouched. */
+  .xterm .xterm-helper-textarea[data-prose='true'] {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    box-sizing: border-box;
+    font: 16px/1.2 '${MONO}';
+    line-height: 1.2 !important;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    contain: strict;
+    /* WebKit disables selection gestures for opacity:0 editable elements (bug 191442).
+       Hide the paint, not the element, so the keyboard trackpad can still move its caret. */
+    opacity: 1;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    caret-color: transparent;
+    background: transparent;
+    -webkit-user-select: text;
+    user-select: text;
+  }
   /* The webview must not rubber-band: a pan is a scroll for the session, never for the page. */
   .xterm-viewport { overscroll-behavior: none; }
   /* And it must not draw a scrollbar. Not '::-webkit-scrollbar': xterm 6 does not use the browser's
@@ -337,6 +377,7 @@ export default function TerminalView({
   theme,
   fontSize,
   holdSize,
+  prose,
   ref,
   ...handlers
 }: TerminalProps) {
@@ -358,10 +399,17 @@ export default function TerminalView({
   const clearSelRef = useRef<() => void>(() => {});
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
-  const latest = useRef({ theme, holdSize, ...handlers });
+  const latest = useRef({ theme, holdSize, prose, ...handlers });
   useEffect(() => {
-    latest.current = { theme, holdSize, ...handlers };
+    latest.current = { theme, holdSize, prose, ...handlers };
   });
+  /** PROBE (temporary, 2026-09-16): the page's prose flip, installed by `boot` once xterm has
+   *  opened the helper textarea this needs. Null before then, which is also why the initial value
+   *  is applied by `boot` itself rather than by this effect's first run. */
+  const proseApplyRef = useRef<((on: boolean) => void) | null>(null);
+  useEffect(() => {
+    proseApplyRef.current?.(prose);
+  }, [prose]);
 
   // Coming out of a hold, the size is measured and reported exactly once — the layout it settles
   // in is the only one the host ever hears about.
@@ -611,6 +659,235 @@ export default function TerminalView({
     term.open(host.current!);
     terminal.current = term;
     fit.current = fitAddon;
+
+    /*
+     * Prose mode's input path (T7.14/T7.15), restored 2026-09-16. It lived in the key bar's native
+     * field until 232033f moved the keyboard into this page and dropped it, leaving the mode a value
+     * that reached nothing. docs/current.md had recorded that loss as accepted; the walk on
+     * 2026-09-16 measured that it was not, and the numbers it turned up are the ones below.
+     *
+     * xterm's helper textarea is the only field here, and it is what iOS reads its traits and its
+     * caret context from. Measured on the phone, 2026-09-16: with the traits flipped but xterm still
+     * answering every key, the field held only the capitals-and-spaces skeleton xterm does not
+     * `preventDefault` — 265 logged values, not one lowercase letter — the keyboard corrected THAT
+     * skeleton, and every correction was an `insertReplacementText`, which xterm drops (it forwards
+     * `inputType === "insertText"` and nothing else). With the field holding a real line, iOS rewrote
+     * whole words (`wieh` → `wish`, `bow` → `now`), each rewrite arrived as a value change with the
+     * caret already moved, and sending `diffInput`'s DELs plus the new text put it on the PTY: the
+     * line read `Does it work now properly? It seems so`.
+     *
+     * So, in prose mode only: the traits go on, xterm steps aside for the keys the browser should
+     * handle, this side owns the field's change stream and sends what changed. Raw mode is untouched
+     * — every branch here is gated on the mode.
+     *
+     * Hold-space reads the same field's caret, but its geometry must stay independent of the
+     * remote terminal cursor (see data-prose CSS). The input diff and walk share ONE caret anchor:
+     * otherwise typing after a drag rewrites the suffix from the previous edit's stale position. */
+    const PROSE_BUILD = 'park-aware';
+    const proseArea = term.textarea;
+    /** The field as the diff last saw it, and where that edit left the caret — the pair `diffInput`
+     *  is fed. Cleared where the field is wiped out from under the page on a LINE BOUNDARY: xterm
+     *  clears the field on Return and on ^C, and those are the two ends of a line. A blur is not
+     *  one: xterm's `_handleTextAreaBlur` empties the field whenever the keyboard goes down, and
+     *  the pending line has to survive that (see `proseFocusWatch`). */
+    let proseMirror = '';
+    let prose = proseStart();
+    let prosePollId: ReturnType<typeof setInterval> | null = null;
+    /** When the last walk sample was seen, so a log line carries the gap that separates one
+     *  gesture's burst of samples from the next gesture. */
+    let proseAt = 0;
+    const proseSay = (line: string) => {
+      // The DOM console reaches Metro only intermittently (the archive caught it stopping mid-walk,
+      // T6.5), and these lines are all the mode has to say; they also go over the bridge, where the
+      // native side logs them like any other.
+      console.log(`[prose] ${line}`);
+      void latest.current.onProseLog(line);
+    };
+    /** The line ended: the field and the diff start over. Not called for a blur — the pending line
+     *  outlives the keyboard. */
+    const proseReset = () => {
+      proseMirror = '';
+      prose = proseStart();
+    };
+    /** WebKit can omit selectionchange during hold-space, so sample while focused. A sample only
+     * owns navigation when the text is unchanged; input owns an edit's caret movement. Flush this
+     * same reader on beforeinput so an edit between timer ticks uses the moved caret, not the
+     * previous poll's position. Nothing here moves the field while a finger is dragging, and no
+     * echo-driven geometry is written — the field's own CSS keeps it in place. The one selection
+     * write is the one that takes the field back off iOS's end-of-trackpad restore. */
+    const prosePoll = () => {
+      if (!latest.current.prose || proseArea === undefined) return;
+      if (document.activeElement !== proseArea || proseArea.value !== proseMirror) return;
+      const start = proseArea.selectionStart;
+      const end = proseArea.selectionEnd;
+      if (start === null || end === null || start !== end) return; // a range is a selection
+      if (performance.now() < proseGrace) {
+        // The field has only just taken the keyboard (or had the line put back into it), and WebKit
+        // is still placing the caret. That settle is not a finger, so it re-anchors instead of
+        // walking — otherwise merely raising the keyboard would step the PTY's cursor.
+        prose = { caret: start, burst: -1, last: 0 };
+        return;
+      }
+      const walk = proseWalk(proseMirror, prose, start);
+      prose = walk.state;
+      if (walk.action === 'none') return;
+      if (walk.action === 'park') {
+        // iOS putting the field's caret back as the trackpad ends. The field went with the restore
+        // and the PTY's cursor did not, so the field is put back where the last accepted sample left
+        // it — otherwise the typing that follows a drag lands at the end of the line.
+        proseSay(`park caret=${start}`);
+        proseArea.setSelectionRange(prose.caret, prose.caret);
+        return;
+      }
+      proseSay(
+        `walk ${walk.arrows} caret=${start} len=${proseMirror.length} dt=${Math.round(performance.now() - proseAt)}`,
+      );
+      proseAt = performance.now();
+      void latest.current.onData(caretKeys(walk.arrows, currentModes().decckm));
+    };
+    /** How long after the field takes the keyboard its reported caret is treated as WebKit settling
+     *  rather than as movement. Far below the time it takes to raise a keyboard and start a drag. */
+    const PROSE_SETTLE_MS = 150;
+    let proseGrace = 0;
+    /** Bound to the keyboard being up with prose in charge: no timer runs when it cannot fire. */
+    const proseWatch = (on: boolean) => {
+      if (on && prosePollId === null) {
+        proseGrace = performance.now() + PROSE_SETTLE_MS;
+        prosePollId = setInterval(prosePoll, 60);
+        proseSay('watch on');
+      } else if (!on && prosePollId !== null) {
+        clearInterval(prosePollId);
+        prosePollId = null;
+        proseSay('watch off');
+      }
+    };
+    const proseFocusWatch = () => {
+      // xterm empties the field whenever the keyboard goes down, and an EMPTY field cannot be walked
+      // at all: the trackpad moves a caret through text, so with no text to its right a drag right
+      // does nothing (measured 2026-09-16 — cursor at column 0, keyboard down and up again, dragging
+      // right dead). The line is still pending at the PTY, so it goes back into the field with the
+      // caret it left off at, and the walk has something to traverse again.
+      if (latest.current.prose && proseArea !== undefined) {
+        if (proseArea.value !== proseMirror) proseArea.value = proseMirror;
+        proseArea.setSelectionRange(prose.caret, prose.caret);
+        proseSay(
+          `focus len=${proseArea.value.length} caret=${proseArea.selectionStart} anchor=${prose.caret}`,
+        );
+      }
+      proseWatch(latest.current.prose);
+    };
+    const proseBlurWatch = () => {
+      proseWatch(false);
+      proseSay(`blur len=${proseArea?.value.length ?? -1} mirror=${proseMirror.length}`);
+    };
+    /** The flip: the traits iOS reads, plus a fresh correction context — one mode's half-typed line
+     *  must never become the other's. The auto path decides the mode before the keyboard rises, so
+     *  the attach that follows reads the new traits; whether iOS ALSO re-reads them on a flip made
+     *  while the keyboard is already up is not established here (the old native field needed a focus
+     *  move for exactly that, T7.14, and it is the one thing this flip does not do — a focus move
+     *  would drop the keyboard). */
+    const proseApply = (on: boolean) => {
+      if (proseArea === undefined) return;
+      proseArea.dataset.prose = String(on);
+      proseArea.setAttribute('autocorrect', on ? 'on' : 'off');
+      // `sentences`, not `on`: the attribute spells its on-value out, and this is the value the
+      // pre-232033f native field's `autoCapitalize={textMode ? 'sentences' : 'none'}` gave it.
+      proseArea.setAttribute('autocapitalize', on ? 'sentences' : 'off');
+      proseArea.setAttribute('spellcheck', on ? 'true' : 'false');
+      proseArea.value = '';
+      proseReset();
+      proseWatch(on && document.activeElement === proseArea);
+      proseSay(`mode ${on ? 'on' : 'off'} ${PROSE_BUILD}`);
+    };
+    /** Which key goes where, and the reset for the two xterm clears the field on its way past. */
+    term.attachCustomKeyEventHandler((e) => {
+      if (!latest.current.prose || proseArea === undefined) return true;
+      if (e.key === 'Enter' || (e.ctrlKey && (e.key === 'c' || e.key === 'C'))) proseReset();
+      const action = proseKey(
+        e.key,
+        { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey },
+        proseArea.value,
+        proseArea.selectionStart,
+      );
+      if (action === 'browser') return false;
+      if (action === 'self') {
+        // The field is already at that edge, so the browser would fire no `input` at all — and a
+        // held backspace would die the moment the line emptied. The byte is sent here instead.
+        void latest.current.onData(proseSelfKey(e.key));
+        return false;
+      }
+      return true; // xterm's: escapes, navigation, F-keys, Return, every chord
+    });
+    /** The page's own input path, registered on the container ABOVE the textarea: capture runs
+     *  outermost-first, so stopping the event here keeps xterm's own listener from sending the same
+     *  characters a second time — and from dropping the replacements it never understood. */
+    const proseInput = (e: Event) => {
+      if (!latest.current.prose || proseArea === undefined) return;
+      e.stopPropagation();
+      if (e.type === 'beforeinput') prosePoll();
+      if (e.type !== 'input') return; // the `input` carries the result; the rest is bookkeeping
+      const before = proseMirror;
+      const next = proseArea.value;
+      // One line per change, carrying the DEL count the diff worked out: that number is what shows a
+      // mirror that has drifted from the field — a stale anchor counts the deleted characters out
+      // again (measured 2026-09-16: one Backspace arriving as two DELs).
+      if (next === before) {
+        // A key that changed nothing, i.e. a delete at an edge the `self` routing has already sent.
+        proseSay(
+          `in ${(e as InputEvent).inputType} len=${next.length} caret=${proseArea.selectionStart} del=0`,
+        );
+        return;
+      }
+      const edit = diffInput(before, next, prose.caret);
+      proseSay(
+        `in ${(e as InputEvent).inputType} len=${next.length} caret=${proseArea.selectionStart} del=${edit.keys.split(DEL).length - 1}`,
+      );
+      proseMirror = next;
+      // An edit re-anchors the caret and ends any walk in flight (see `proseWalk`).
+      prose = { caret: edit.caret, burst: -1, last: 0 };
+      // This is also the walk's anchor: the edit's own movement must not become another arrow.
+      // A replacement that reaches past the caret moves the PTY's cursor with it.
+      if (edit.ahead !== 0)
+        void latest.current.onData(caretKeys(edit.ahead, currentModes().decckm));
+      // §4.2's dictation filter: iOS prepends a space to dictated text so it joins the previous
+      // word — right in prose, wrong at a bare prompt, where ` ls` is not `ls`. The field IS the line
+      // here, so its length is the honest answer to "is the line empty", and a better one than the
+      // old tracker could give: that one had a pad in front of the caret and never saw the bar's own
+      // bytes. `proseText` maps the non-breaking space iOS puts where the spacebar was.
+      const bytes = filterDictation(before.length, proseText(edit.keys));
+      if (bytes === '') return;
+      // A rewrite — iOS changing a word it has already sent — is the one event worth a line.
+      if (bytes.includes(DEL) && bytes.replaceAll(DEL, '') !== '') {
+        proseSay(`rewrite ${JSON.stringify(bytes)}`);
+      }
+      void latest.current.onData(bytes);
+    };
+    // The change stream has to be taken ABOVE the textarea (see `proseInput`); the blur listener only
+    // has to stop the poll. It deliberately does NOT reset the line: xterm empties the field on blur,
+    // and the pending line is put back on the next focus (see `proseFocusWatch`). Binding
+    // `proseReset` here instead wiped the mirror the moment the keyboard went down, so the field came
+    // back empty — the walk had no text to traverse and the diff ran against a line the PTY did not
+    // have (measured 2026-09-16: `blur len=14 mirror=0`).
+    const PROSE_OWNED = [
+      'beforeinput',
+      'input',
+      'compositionstart',
+      'compositionupdate',
+      'compositionend',
+    ];
+    for (const type of PROSE_OWNED) host.current?.addEventListener(type, proseInput, true);
+    // The walk only exists while the field holds the keyboard: no focus, no poll.
+    proseArea?.addEventListener('focus', proseFocusWatch, true);
+    proseArea?.addEventListener('blur', proseBlurWatch, true);
+    const proseTeardown = () => {
+      proseApplyRef.current = null;
+      proseWatch(false);
+      for (const type of PROSE_OWNED) host.current?.removeEventListener(type, proseInput, true);
+      proseArea?.removeEventListener('focus', proseFocusWatch, true);
+      proseArea?.removeEventListener('blur', proseBlurWatch, true);
+    };
+    proseApplyRef.current = proseApply;
+    proseApply(latest.current.prose);
 
     // The page owns the keyboard. xterm's helper textarea is left enabled so it can take first
     // responder and feed every key through `onData` — the software keyboard and a hardware
@@ -931,6 +1208,7 @@ export default function TerminalView({
     return () => {
       clearTimeout(settle);
       observer.disconnect();
+      proseTeardown();
       teardownTouch();
       hitMark.current = []; // the elements go with the terminal; the refs must not outlive it
       dropPendingFit();
@@ -1167,6 +1445,48 @@ export default function TerminalView({
     const cellHeight = () => {
       const screen = term.element?.querySelector('.xterm-screen');
       return screen && term.rows > 0 ? screen.getBoundingClientRect().height / term.rows : 0;
+    };
+
+    /** A tap is a click. The compatibility mouse pair WebKit fires after a touch is what used to
+     *  carry a tap into xterm — and `preventDefault` on the touchend, which is what stops that
+     *  pair from focusing the helper textarea and raising the keyboard, took the click with it. So
+     *  the pair is dispatched here instead, in WebKit's order: `mousemove` first, because that is
+     *  the hover xterm's link provider answers (a tap on an OSC 8 link opens it), then
+     *  `mousedown`/`mouseup`, which `bindMouse` reads to encode a report per the negotiated
+     *  protocol — SGR through `onData`, legacy DEFAULT through `onBinary`, exactly as it encodes
+     *  the synthesized wheels above. Nothing is reimplemented: the encoding stays xterm's, and an
+     *  app that never asked for the mouse simply gets no report out of the pair. Focus is the one
+     *  thing held back, because xterm's `mousedown` handler takes the keyboard on its way to the
+     *  report; the bar's up-swipe stays the only door that raises it. It is held back on
+     *  `term.textarea`, not on the public `term.focus` facade: that facade only delegates to
+     *  `_core.focus()`, which is the method the handler actually calls, so patching the facade
+     *  left the keyboard coming up on the phone (2026-09-16). The textarea is what the core
+     *  focuses either way. */
+    const clickAt = (x: number, y: number) => {
+      const target = term.element?.querySelector('.xterm-screen') ?? term.element;
+      const textarea = term.textarea;
+      if (target === undefined || textarea === undefined) return;
+      const send = (type: 'mousemove' | 'mousedown' | 'mouseup', buttons: number) =>
+        target.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX: x,
+            clientY: y,
+            button: 0,
+            buttons,
+          }),
+        );
+      const focus = textarea.focus;
+      textarea.focus = () => {};
+      try {
+        send('mousemove', 0);
+        send('mousedown', 1);
+        send('mouseup', 0);
+      } finally {
+        textarea.focus = focus;
+      }
     };
 
     /** Turns accumulated pixels into notches and routes them. `x`/`y` is where the finger is —
@@ -1425,10 +1745,14 @@ export default function TerminalView({
       // A one-finger tap on a live selection clears it (T13's tap-to-clear, kept; the mechanism
       // is ours now — xterm's own path runs off a synthetic mouse pair that touch never sends).
       // It must NOT move the keyboard either: `preventDefault` suppresses the compatibility mouse
-      // pair WebKit fires after a tap, which is exactly what xterm's mousedown handler uses to
-      // focus its textarea and raise the keyboard. Raising/focusing is the bar's up-swipe job.
+      // pair WebKit fires after a tap, whose `mousedown` is what focuses xterm's textarea and
+      // raises the keyboard. Raising/focusing is the bar's up-swipe job. That pair was also the
+      // tap's click — the report an app that negotiated mouse reporting waits for, and the hover
+      // an OSC 8 link is opened by — so `clickAt` sends it on, with the focus left out.
       if (pan === 'pending' && fingers === 1) {
         ev.preventDefault();
+        const tap = ev.changedTouches[0];
+        if (tap !== undefined) clickAt(tap.clientX, tap.clientY);
         clearSelection();
       }
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
