@@ -9,13 +9,13 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { Appearance, AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { hydratePins } from '@/clipboard';
 import { useTheme } from '@/hooks/use-theme';
-import { hydrateSettings } from '@/settings';
+import { hydrateSettings, useSettings } from '@/settings';
 import { MONO, MONO_BOLD, SANS, SANS_BOLD, SANS_MEDIUM, SANS_SEMIBOLD } from '@/theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -51,6 +51,16 @@ export default function RootLayout() {
 
 function Root() {
   const theme = useTheme();
+  const settings = useSettings();
+
+  // The app's interface style drives the software keyboard and the system affordances. A chosen
+  // flavour pins it, so a dark app gets a dark keyboard on a light phone; `follow system` hands
+  // it back to iOS (`unspecified`) so the system's own changes keep through.
+  useEffect(() => {
+    Appearance.setColorScheme(
+      settings.followSystem ? 'unspecified' : theme.isDark ? 'dark' : 'light',
+    );
+  }, [settings.followSystem, theme.isDark]);
 
   // Which app is in front decides what a screenshot from the laptop will actually contain, and the
   // person switching apps is holding the same phone — so the app says it itself.
