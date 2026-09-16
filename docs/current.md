@@ -81,6 +81,20 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   back — an empty field cannot be walked at all, and a mirror that has drifted from the field makes
   the diff over-delete. `[prose]` lines on the console carry the mode, the walk, the parks and each
   change's DEL count (`src/prose-input.ts`, `src/terminal.tsx`).
+- Raw mode's held software keys (2026-09-18): a HELD Backspace/Delete delivers one keydown — the
+  repeats never arrive (measured report: one character per held press) — so the page owns the hold:
+  one byte per keydown and an app-side repeat loop from 300ms at ~25/s until the keyup, a blur,
+  a mode flip, another key, or the 6s runaway cap (`src/raw-hold-model.ts`, the intercept in
+  `src/terminal.tsx`'s custom key handler; `\[raw\]` console lines). Prose mode's backspace path is
+  the browser's field editing and is untouched. Both platforms; Android IME repeats, where sent,
+  land on top of the loop. Hold-space in raw mode reuses the prose walk one level down (iOS only —
+  Android's keyboards have no spacebar trackpad, a reported parity gap): while the field is focused
+  it holds a mirror of the PTY's current logical line at the cursor column (wrap-climbed, refreshed
+  at 60ms while no gesture is in flight, never mid-gesture and never under an IME composition), and
+  the same 60ms sampler plus `proseWalk` translates the trackpad's caret into character-counted
+  arrows via `caretKeys` — arrows only, so a stale mirror costs a stray arrow, never a deletion.
+  Movement is bounded by the line (T7.14's measured WebView limit is the walk's reach). Cases T7.17/
+  T7.18 in `docs/tests/keybar.md`.
 - SSH writes are serialized in `src/session.ts`; do not bypass the queue and reorder input.
 
 ## Clipboard and transfers

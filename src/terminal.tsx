@@ -43,6 +43,18 @@ import { MONO_ADVANCE } from '@/switcher-model';
 import { DEL, caretKeys, diffInput } from '@/keybar-model';
 import { filterDictation } from '@/input-model';
 import { proseKey, proseSelfKey, proseStart, proseText, proseWalk } from '@/prose-input';
+import {
+  RAW_HOLD_DELAY_MS,
+  RAW_HOLD_REPEAT_MS,
+  rawHoldBeat,
+  rawHoldByte,
+  rawHoldInit,
+  rawHoldPress,
+  rawHoldReady,
+  rawHoldRelease,
+  type RawHoldKey,
+  type RawHoldState,
+} from '@/raw-hold-model';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
 // `MONO` from the leaf, `Theme` as a type only — both so that `@/theme`, and with it the palette
 // and the 27-theme graph, stays out of this webview's bundle. See `fonts.ts`.
@@ -312,7 +324,11 @@ const CSS = `
      trackpad feeds terminal movement back into WebKit's caret hit testing. The fixed, contained
      field also keeps caret reveal inside the input instead of scrolling the terminal page.
      Important overrides xterm's inline geometry on every render; raw IME placement is untouched. */
-  .xterm .xterm-helper-textarea[data-prose='true'] {
+  /* data-rawwalk pins the SAME geometry for the raw-mode hold-space walk (iOS): the trackpad
+     needs a field that does not move under it, for the exact reason prose has this rule. The
+     raw walk holds the line in the field, so the paint-hiding applies there too. */
+  .xterm .xterm-helper-textarea[data-prose='true'],
+  .xterm .xterm-helper-textarea[data-rawwalk='true'] {
     position: fixed !important;
     left: 0 !important;
     top: 0 !important;
@@ -775,16 +791,21 @@ export default function TerminalView({
         );
       }
       proseWatch(latest.current.prose);
+      // The raw walk lives on the same focus: the mirror is only worth holding while the field
+      // can take the keyboard (and the trackpad), never in prose mode.
+      rawWatch(!latest.current.prose);
     };
     const proseBlurWatch = () => {
       proseWatch(false);
+      rawHoldStop('blur'); // a keyup for a held key will never come after the field lost it
+      rawWatch(false);
       proseSay(`blur len=${proseArea?.value.length ?? -1} mirror=${proseMirror.length}`);
     };
     /** iOS re-reads the field's traits on a focus and re-raises the keyboard from a programmatic
      *  one (the bar's up-swipe is exactly that). Chrome-for-Android refuses to raise the IME from
      *  JS at all (issues.md I17), so the same move there drops the keyboard and leaves it dead:
-     *  refocus only where it can come back. */
-    const refocusReraises = /iPhone|iPad|iPod/.test(navigator.userAgent);
+     *  refocus only where it can come back. (`isIOS`, the same probe, is declared with the raw
+     *  hold paths below and shared with the walk.) */
     /** The flip: the traits the platform reads, plus a fresh correction context — one mode's
      *  half-typed line must never become the other's. The auto path usually decides the mode
      *  before the keyboard rises, so the attach that follows reads the new traits. A flip made
@@ -809,7 +830,11 @@ export default function TerminalView({
       proseArea.value = '';
       proseReset();
       proseWatch(on && document.activeElement === proseArea);
-      if (refocusReraises && document.activeElement === proseArea) {
+      // The flip ends whatever the other mode was holding: a raw hold-delete loop and the walk
+      // (the mirror is prose's line to own from here on).
+      rawHoldStop('mode');
+      rawWatch(!on && document.activeElement === proseArea);
+      if (isIOS && document.activeElement === proseArea) {
         proseSay(`keys down on flip ${on ? 'on' : 'off'}`);
         proseArea.blur();
       }
@@ -817,22 +842,48 @@ export default function TerminalView({
     };
     /** Which key goes where, and the reset for the two xterm clears the field on its way past. */
     term.attachCustomKeyEventHandler((e) => {
-      if (!latest.current.prose || proseArea === undefined) return true;
-      if (e.key === 'Enter' || (e.ctrlKey && (e.key === 'c' || e.key === 'C'))) proseReset();
-      const action = proseKey(
-        e.key,
-        { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey },
-        proseArea.value,
-        proseArea.selectionStart,
-      );
-      if (action === 'browser') return false;
-      if (action === 'self') {
-        // The field is already at that edge, so the browser would fire no `input` at all — and a
-        // held backspace would die the moment the line emptied. The byte is sent here instead.
-        void latest.current.onData(proseSelfKey(e.key));
-        return false;
+      if (proseArea === undefined) return true;
+      if (latest.current.prose) {
+        if (e.key === 'Enter' || (e.ctrlKey && (e.key === 'c' || e.key === 'C'))) proseReset();
+        const action = proseKey(
+          e.key,
+          { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey },
+          proseArea.value,
+          proseArea.selectionStart,
+        );
+        if (action === 'browser') return false;
+        if (action === 'self') {
+          // The field is already at that edge, so the browser would fire no `input` at all — and a
+          // held backspace would die the moment the line emptied. The byte is sent here instead.
+          void latest.current.onData(proseSelfKey(e.key));
+          return false;
+        }
+        return true; // xterm's: escapes, navigation, F-keys, Return, every chord
       }
-      return true; // xterm's: escapes, navigation, F-keys, Return, every chord
+      // Raw mode: the hold paths own exactly the two keys the platform under-delivers, and let
+      // everything else — chords included, Ctrl-Backspace among them — reach xterm unchanged.
+      if (e.type === 'keydown') {
+        if (
+          (e.key === 'Backspace' || e.key === 'Delete') &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          !e.metaKey
+        ) {
+          // preventDefault keeps the browser from editing the walk's mirror field as a side
+          // effect — unlike prose, where the browser's edit IS the input path.
+          e.preventDefault();
+          rawHoldDown(e.key);
+          return false; // ours: xterm's single answer is what dies the hold (measured)
+        }
+        if (e.key === ' ' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          // A space landing with the walk armed re-anchors the mirror right before the finger can
+          // start dragging; the echo lands a beat later and the next poll takes it from there.
+          if (isIOS && raw.burst < 0) rawSyncMirror(true);
+          return true; // xterm sends the space
+        }
+        if (rawHold.key !== null) rawHoldStop('other key'); // a letter ends a held delete
+      }
+      return true;
     });
     /** The page's own input path, registered on the container ABOVE the textarea: capture runs
      *  outermost-first, so stopping the event here keeps xterm's own listener from sending the same
@@ -884,6 +935,181 @@ export default function TerminalView({
     // `proseReset` here instead wiped the mirror the moment the keyboard went down, so the field came
     // back empty — the walk had no text to traverse and the diff ran against a line the PTY did not
     // have (measured 2026-09-16: `blur len=14 mirror=0`).
+    /*
+     * Raw mode's hold paths (2026-09-18). Two held software keys do not do what they do in a
+     * text field, because in raw mode the bytes are the keystrokes and the keystrokes are what
+     * the platform decides to send:
+     *
+     *   - Backspace/Delete: measured, a HELD press delivers ONE keydown — the repeats never
+     *     arrive (one character dies per held press, device report). The page therefore owns the
+     *     hold: one byte per keydown, and an app-side repeat loop from the hold delay until the
+     *     keyup (or a blur, a mode flip, another key, or the cap — see `raw-hold-model.ts`).
+     *     Both platforms: Android's repeats, where the IME sends them, simply land on top.
+     *
+     *   - Space: iOS turns a held spacebar into the keyboard's TRACKPAD, which moves the caret
+     *     of the focused field — the page never sees a held space, only the caret moving (the
+     *     prose mode's walk, T7.14). In raw mode the field is xterm's and holds no text, so the
+     *     trackpad drags through nothing. The fix mirrors the prose walk one level down: while
+     *     the field is focused, it holds a mirror of the PTY's current LINE at the PTY's cursor
+     *     column; the same 60ms sampler reads the caret and sends character-counted arrows via
+     *     the SAME `proseWalk` — so the burst, the reversal and the park (iOS restoring the
+     *     caret to the gesture's origin as the trackpad ends) are all the measured prose rules,
+     *     not a second implementation. Movement is bounded by the line: a WebView textarea never
+     *     reports the caret leaving the field (T7.14), which is exactly the reach the walk wants.
+     *
+     *     iOS only: the trackpad is an iOS keyboard affordance, Android has no equivalent — a
+     *     genuine parity gap, reported rather than silently diverged (AGENTS.md).
+     *
+     * What the mirror must never do: touch the field MID-GESTURE (a value or selection write
+     *     under the trackpad feeds terminal movement back into WebKit's caret hit testing — the
+     *     same reason prose pins the field's CSS), or fight xterm's composition (an IME owns the
+     *     field's value, and overwriting it mid-compose would eat the user's text). Both are
+     *     guarded where the writes happen (`rawSyncMirror`), and the walk's bytes are arrows
+     *     ONLY — the raw walk never diffs text, so a stale mirror can cost a stray arrow and
+     *     never a deletion (the prose over-delete hazard is structurally out).
+     */
+    let rawHold: RawHoldState = rawHoldInit();
+    let rawHoldTimer: ReturnType<typeof setTimeout> | null = null;
+    let rawHoldLoopId: ReturnType<typeof setInterval> | null = null;
+    const rawSay = (line: string) => {
+      console.log(`[raw] ${line}`);
+      void latest.current.onProseLog(`[raw] ${line}`);
+    };
+    const rawHoldStop = (why: string) => {
+      if (rawHold.key === null && rawHoldTimer === null && rawHoldLoopId === null) return;
+      rawHold = rawHoldRelease(rawHold);
+      if (rawHoldTimer !== null) clearTimeout(rawHoldTimer);
+      if (rawHoldLoopId !== null) clearInterval(rawHoldLoopId);
+      rawHoldTimer = null;
+      rawHoldLoopId = null;
+      rawSay(`hold stop ${why}`);
+    };
+    const rawHoldDown = (key: RawHoldKey) => {
+      const press = rawHoldPress(rawHold, key, performance.now());
+      rawHold = press.state;
+      void latest.current.onData(rawHoldByte(key));
+      if (!press.arm) return;
+      if (rawHoldTimer !== null) clearTimeout(rawHoldTimer); // the new hold owns the delay now
+      rawHoldTimer = setTimeout(() => {
+        rawHoldTimer = null;
+        if (!rawHoldReady(rawHold, key, performance.now())) return;
+        rawHold = { ...rawHold, looping: true };
+        rawHoldLoopId = setInterval(() => {
+          const beat = rawHoldBeat(rawHold, performance.now());
+          if (beat.stop) {
+            rawSay(`hold cap ${key}`);
+            rawHoldStop('cap');
+            return;
+          }
+          if (beat.send) void latest.current.onData(rawHoldByte(key));
+        }, RAW_HOLD_REPEAT_MS);
+        rawSay(`hold on ${key}`);
+      }, RAW_HOLD_DELAY_MS);
+    };
+    const rawKeyUpWatch = (e: KeyboardEvent) => {
+      if (rawHold.key !== null && e.key === rawHold.key) rawHoldStop('keyup');
+    };
+    /** An IME owns the field's value while composing: the mirror must not touch it, and a sample
+     *  read mid-compose would walk through composition text that is not the PTY's line. */
+    let rawComposing = 0;
+    const rawCompositionStart = () => {
+      rawComposing += 1;
+    };
+    const rawCompositionEnd = () => {
+      rawComposing = Math.max(0, rawComposing - 1);
+      rawSyncMirror(false);
+    };
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    let rawMirror = '';
+    let raw = proseStart();
+    let rawAt = 0;
+    let rawGrace = 0;
+    let rawPollId: ReturnType<typeof setInterval> | null = null;
+    /** The PTY's current logical line and the cursor's offset INSIDE it — the wrap climb is the
+     *  part a first cut gets wrong: on a wrapped row `cursorX` is the column of the physical row,
+     *  not the offset of the logical line the field holds. */
+    const rawReadLine = (): { line: string; col: number } => {
+      const buf = term.buffer.active;
+      let start = buf.cursorY;
+      let row = buf.getLine(start);
+      while (start > 0 && row !== undefined && row.isWrapped) {
+        start -= 1;
+        row = buf.getLine(start);
+      }
+      const line = row?.translateToString(true) ?? '';
+      return { line, col: Math.min((buf.cursorY - start) * term.cols + buf.cursorX, line.length) };
+    };
+    /** One second without a walk sample is a finished gesture, gesture or not: the park is the
+     *  measured end of a trackpad drag, but if one ever is missed the walk must still come back,
+     *  and a drag that pauses a whole second has no business holding the field hostage. */
+    const RAW_STALE_MS = 1000;
+    const rawSyncMirror = (log: boolean, force = false) => {
+      if (!isIOS || latest.current.prose || proseArea === undefined) return;
+      if (!force && raw.burst >= 0) return; // mid-gesture: the field holds the gesture's line
+      const { line, col } = rawReadLine();
+      if (line === rawMirror && col === raw.caret) return;
+      rawMirror = line;
+      raw = { caret: col, burst: -1, last: 0 };
+      if (proseArea.value !== line) proseArea.value = line;
+      proseArea.setSelectionRange(col, col);
+      rawGrace = performance.now() + PROSE_SETTLE_MS; // a caret the page just placed is not a finger
+      if (log) rawSay(`mirror len=${line.length} caret=${col}`);
+    };
+    const rawPoll = () => {
+      if (!isIOS || latest.current.prose || proseArea === undefined) return;
+      if (document.activeElement !== proseArea || rawComposing > 0) return;
+      // The field is xterm's to type into, so TYPING does not change its value — the mirror is
+      // stale the moment the PTY's line or cursor is, and only the buffer says so. Refresh while
+      // no gesture is in flight; mid-gesture the field holds the gesture's line and owns it.
+      const live = rawReadLine();
+      const stale = performance.now() - rawAt > RAW_STALE_MS; // the burst is over, missed park or not
+      if ((raw.burst < 0 || stale) && (live.line !== rawMirror || live.col !== raw.caret)) {
+        rawSyncMirror(false, stale);
+        return;
+      }
+      if (proseArea.value !== rawMirror) {
+        // xterm emptied the field (a blur, a Return) or left composition residue in it: put the
+        // line back, never mid-gesture, and let the next tick walk from the fresh anchor.
+        if (raw.burst < 0 || stale) rawSyncMirror(false, stale);
+        return;
+      }
+      const start = proseArea.selectionStart;
+      const end = proseArea.selectionEnd;
+      if (start === null || end === null || start !== end) return; // a range is a selection
+      if (performance.now() < rawGrace) {
+        raw = { caret: start, burst: -1, last: 0 };
+        return;
+      }
+      const walk = proseWalk(rawMirror, raw, start);
+      raw = walk.state;
+      if (walk.action === 'none') return;
+      if (walk.action === 'park') {
+        rawSay(`park caret=${start}`);
+        proseArea.setSelectionRange(raw.caret, raw.caret);
+        rawSyncMirror(true); // the gesture is over: back on the live line, before the next drag
+        return;
+      }
+      rawSay(
+        `walk ${walk.arrows} caret=${start} len=${rawMirror.length} dt=${Math.round(performance.now() - rawAt)}`,
+      );
+      rawAt = performance.now();
+      void latest.current.onData(caretKeys(walk.arrows, currentModes().decckm));
+    };
+    const rawWatch = (on: boolean) => {
+      if (on && rawPollId === null && isIOS && proseArea !== undefined) {
+        proseArea.dataset.rawwalk = 'true';
+        rawSyncMirror(false);
+        rawPollId = setInterval(rawPoll, 60);
+        rawSay('walk watch on');
+      } else if (!on && rawPollId !== null) {
+        clearInterval(rawPollId);
+        rawPollId = null;
+        if (proseArea !== undefined) delete proseArea.dataset.rawwalk;
+        rawMirror = '';
+        raw = proseStart();
+        rawSay('walk watch off');
+      }
+    };
     const PROSE_OWNED = [
       'beforeinput',
       'input',
@@ -895,12 +1121,22 @@ export default function TerminalView({
     // The walk only exists while the field holds the keyboard: no focus, no poll.
     proseArea?.addEventListener('focus', proseFocusWatch, true);
     proseArea?.addEventListener('blur', proseBlurWatch, true);
+    // The raw hold's release is the keyup; the composition counter guards the mirror against an
+    // IME that owns the field's value. Both observe only — xterm keeps its own handlers.
+    proseArea?.addEventListener('keyup', rawKeyUpWatch, true);
+    host.current?.addEventListener('compositionstart', rawCompositionStart, true);
+    host.current?.addEventListener('compositionend', rawCompositionEnd, true);
     const proseTeardown = () => {
       proseApplyRef.current = null;
       proseWatch(false);
+      rawHoldStop('teardown');
+      rawWatch(false);
       for (const type of PROSE_OWNED) host.current?.removeEventListener(type, proseInput, true);
       proseArea?.removeEventListener('focus', proseFocusWatch, true);
       proseArea?.removeEventListener('blur', proseBlurWatch, true);
+      proseArea?.removeEventListener('keyup', rawKeyUpWatch, true);
+      host.current?.removeEventListener('compositionstart', rawCompositionStart, true);
+      host.current?.removeEventListener('compositionend', rawCompositionEnd, true);
     };
     proseApplyRef.current = proseApply;
     proseApply(latest.current.prose);
