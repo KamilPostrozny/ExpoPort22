@@ -1647,7 +1647,10 @@ export default function SessionScreen() {
     onTabsTap: openSwitcher,
     onBarSwipe,
     // The webview owns the keyboard; the bar only asks it up or down (see `KeyBarProps`).
-    onRaise: () => terminal.current?.focus(),
+    onRaise: () => {
+      console.log('[kb] raise asked');
+      terminal.current?.focus();
+    },
     onDismiss: () => terminal.current?.blur(),
   };
   /** One identity-stable object instead of five one-per-key trampolines. */
