@@ -40,6 +40,7 @@ import {
   type ModeSignal,
 } from '@/scroll-model';
 import { MONO_ADVANCE } from '@/switcher-model';
+import { diffInput } from '@/keybar-model';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
 // `MONO` from the leaf, `Theme` as a type only — both so that `@/theme`, and with it the palette
 // and the 27-theme graph, stays out of this webview's bundle. See `fonts.ts`.
@@ -679,6 +680,11 @@ export default function TerminalView({
     };
     /** The helper textarea, or a line saying why there is nothing to flip. */
     const proseArea = term.textarea;
+    /** PROBE part 2's mirror of the field: `proseMirror` is what the diff last saw, `proseCaret`
+     *  where that edit left the caret — the pair `diffInput` is fed. Reset wherever the field is
+     *  wiped out from under the page (xterm clears it on CR and on blur). */
+    let proseMirror = '';
+    let proseCaret = 0;
     /** A value for a log line: short enough to sit in the lamp, honest about `null` vs `""`. */
     const proseText = (value: string | null | undefined) =>
       value === null || value === undefined
@@ -713,6 +719,12 @@ export default function TerminalView({
         e.type === 'focusin' ||
         e.type === 'focusout'
       ) {
+        // PROBE part 2: xterm's `_handleTextAreaBlur` empties the field, so the mirror has to go
+        // with it — a stale mirror would read the wipe as a deletion of the whole line.
+        if (e.type === 'blur') {
+          proseMirror = '';
+          proseCaret = 0;
+        }
         proseSay(`${e.type} ${proseState()}`);
         return;
       }
@@ -751,10 +763,61 @@ export default function TerminalView({
     const proseTeardown = () => {
       proseApplyRef.current = null;
       for (const type of PROSE_EVENTS) proseArea?.removeEventListener(type, proseEvent, true);
+      for (const type of PROSE_OWNED) host.current?.removeEventListener(type, proseInput, true);
       proseLamp.remove();
     };
     proseApplyRef.current = proseApply;
     proseApply(latest.current.prose);
+
+    /*
+     * PROBE part 2 (2026-09-16, same walk). Part 1 said why the mode never did anything: across
+     * 265 logged field values, not one contained a lowercase letter. The field only ever held the
+     * capitals-and-spaces skeleton, because xterm's keypress path `preventDefault`s the insertion
+     * of everything it can name a key for; the keyboard corrected THAT skeleton (its four
+     * corrections were all `insertReplacementText` — smart punctuation), and xterm forwards only
+     * `inputType === "insertText"`, so not one of them reached the PTY.
+     *
+     * So this half hands the field the line: xterm steps aside for printable keys (and for
+     * backspace/delete), the page owns every change, and each one reaches the PTY as the diff the
+     * old native field used — inserts, replacements and deletes alike. It answers the one question
+     * left before the real port: does iOS autocorrect WORDS once the field holds a real line?
+     */
+    term.attachCustomKeyEventHandler((e) => {
+      if (!latest.current.prose) return true;
+      if (e.key === 'Enter') {
+        proseMirror = '';
+        proseCaret = 0;
+        return true; // xterm's, and it clears the field itself
+      }
+      // The browser's: each produces text or a delete in the field, and the diff is the sender.
+      if (e.key === 'Backspace' || e.key === 'Delete') return false;
+      return !(e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey);
+    });
+    /** The page's own input path, registered on the container ABOVE the textarea: capture runs
+     *  outermost-first, so stopping the event here keeps xterm's own listener from sending the
+     *  same characters a second time. */
+    const proseInput = (e: Event) => {
+      if (!latest.current.prose) return;
+      e.stopPropagation();
+      if (e.type !== 'input') return; // the `input` carries the result; the rest is bookkeeping
+      const next = proseArea?.value ?? '';
+      if (next === proseMirror) return;
+      const edit = diffInput(proseMirror, next, proseCaret);
+      proseMirror = next;
+      proseCaret = edit.caret;
+      if (edit.keys !== '') {
+        proseSay(`send ${proseText(edit.keys)} ${proseState()}`);
+        void latest.current.onData(edit.keys);
+      }
+    };
+    const PROSE_OWNED = [
+      'beforeinput',
+      'input',
+      'compositionstart',
+      'compositionupdate',
+      'compositionend',
+    ];
+    for (const type of PROSE_OWNED) host.current?.addEventListener(type, proseInput, true);
 
     // The page owns the keyboard. xterm's helper textarea is left enabled so it can take first
     // responder and feed every key through `onData` — the software keyboard and a hardware
