@@ -19,6 +19,8 @@ export type HwKeyEvent = {
 export type ExpoHwKeysModuleEvents = {
   /** A key the field would have dropped or wandered — one per key-down, repeats included. */
   onKey: (event: HwKeyEvent) => void;
+  /** TEMP diagnostic: the raw shape of every keyboard event the native swizzle sees. */
+  onKeyDebug: (info: Record<string, unknown>) => void;
 };
 
 declare class ExpoHwKeysModule extends NativeModule<ExpoHwKeysModuleEvents> {
@@ -40,4 +42,5 @@ try {
 } catch {
   hwKeys = null;
 }
+console.log('[hwkeys] native module:', hwKeys ? 'present' : 'missing');
 export default hwKeys;

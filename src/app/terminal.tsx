@@ -1004,8 +1004,8 @@ export default function SessionScreen() {
    * switcher — open, it keeps only Escape (it closes) while the search field keeps the rest.
    * Without tabs (`showTabs`) the window keys fall through to plain Alt bytes, tmux decides.
    */
-  const hwKeysMode: HwKeysMode =
-    !fieldFocused && sw === 'closed' ? 'off' : sw !== 'closed' ? 'switcher' : 'terminal';
+  void fieldFocused; // TEMP diagnostic: force terminal mode regardless of focus
+  const hwKeysMode: HwKeysMode = sw === 'closed' ? 'terminal' : 'switcher';
   useHwKeys(
     hwKeysMode,
     { decckm: modes.decckm, tmux: showTabs },

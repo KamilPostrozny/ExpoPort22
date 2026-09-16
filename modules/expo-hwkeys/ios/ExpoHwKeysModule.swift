@@ -21,6 +21,10 @@ import UIKit
  * The mode is JS-driven on purpose — the same reason the web guard's hold flag lives in JS: only
  * the app knows when the terminal's field is focused and the switcher is closed, and that is the
  * only moment intercepting is right.
+ *
+ * TEMPORARY DIAGNOSTIC: every keyboard event that reaches `handleKeyUIEvent:` (and every
+ * `.presses` event that reaches `sendEvent:`) is also handed to JS as `onKeyDebug`, carrying
+ * the private fields it actually has. Remove once the on-device shape is known.
  */
 public class ExpoHwKeysModule: Module {
   public func definition() -> ModuleDefinition {
@@ -31,11 +35,12 @@ public class ExpoHwKeysModule: Module {
       KeyTap.install()
     }
 
-    Events("onKey")
+    Events("onKey", "onKeyDebug")
 
     AsyncFunction("setMode") { (mode: String) in
       DispatchQueue.main.async {
         KeyTap.mode = mode
+        KeyTap.debug("mode", ["mode": mode, "install": KeyTap.installStatus])
       }
     }
   }
@@ -46,7 +51,15 @@ public class ExpoHwKeysModule: Module {
 private final class KeyTap {
   static weak var module: ExpoHwKeysModule?
   static var mode: String = "off"
+  static var installStatus: String = "not-run"
   private static var installed = false
+
+  /// Diagnostic only: the raw shape of one keyboard event, back to JS.
+  static func debug(_ name: String, _ info: [String: Any?]) {
+    var body = info
+    body["debug"] = name
+    module?.sendEvent("onKeyDebug", body)
+  }
 
   static func install() {
     guard !installed else { return }
@@ -56,12 +69,21 @@ private final class KeyTap {
     // this extension: a Swift extension compiles to an ObjC category, and a category method with
     // the same selector *replaces* the private implementation the moment the binary loads, before
     // the swizzle ever runs.
-    let originalSelector = NSSelectorFromString("handleKeyUIEvent:")
-    guard
-      let original = class_getInstanceMethod(UIApplication.self, originalSelector),
-      let swizzled = class_getInstanceMethod(UIApplication.self, #selector(UIApplication.hwKeysHandleKeyUIEvent(_:)))
-    else { return }
-    method_exchangeImplementations(original, swizzled)
+    let keySelector = NSSelectorFromString("handleKeyUIEvent:")
+    let sendSelector = NSSelectorFromString("sendEvent:")
+    let originalKey = class_getInstanceMethod(UIApplication.self, keySelector)
+    let swizzledKey = class_getInstanceMethod(UIApplication.self, #selector(UIApplication.hwKeysHandleKeyUIEvent(_:)))
+    let originalSend = class_getInstanceMethod(UIApplication.self, sendSelector)
+    let swizzledSend = class_getInstanceMethod(UIApplication.self, #selector(UIApplication.hwKeysSendEvent(_:)))
+
+    if let originalKey, let swizzledKey {
+      method_exchangeImplementations(originalKey, swizzledKey)
+    }
+    if let originalSend, let swizzledSend {
+      method_exchangeImplementations(originalSend, swizzledSend)
+    }
+    installStatus = "handleKey=\(originalKey != nil)/\(swizzledKey != nil) send=\(originalSend != nil)/\(swizzledSend != nil)"
+    debug("install", ["status": installStatus])
   }
 
   /// The keys a mode intercepts, by HID usage (the values `UIKeyboardHidUsage` copies 1:1).
@@ -93,14 +115,13 @@ private final class KeyTap {
     return set
   }()
 
-  /// One intercepted key, described by the public `UIKey`: its HID usage code and the modifiers
-  /// held with it. The mode decides what is taken; everything else goes on to the field.
-  static func intercept(key: UIKey) -> Bool {
+  /// The mode decides what is taken; everything else goes on to the field.
+  static func intercept(code: Int, modifiers: UIKeyModifierFlags, keyDown: Bool) -> Bool {
     guard mode != "off" else { return false }
-    let code = Int(key.keyCode.rawValue)
-    let ctrl = key.modifierFlags.contains(.control)
-    let alt = key.modifierFlags.contains(.alternate)
-    let meta = key.modifierFlags.contains(.command)
+    guard keyDown else { return false }
+    let ctrl = modifiers.contains(.control)
+    let alt = modifiers.contains(.alternate)
+    let meta = modifiers.contains(.command)
     if mode == "switcher" {
       // Only Escape: it closes the switcher, and the search field keeps every other key.
       return code == 0x29 && !ctrl && !alt && !meta
@@ -110,52 +131,116 @@ private final class KeyTap {
     return plain.contains(code) || fKeys.contains(code)
   }
 
-  static func emit(key: UIKey) {
+  static func emit(code: Int, modifiers: UIKeyModifierFlags, characters: String, baseCharacter: String) {
     module?.sendEvent("onKey", [
       "platform": "ios",
-      "keyCode": Int(key.keyCode.rawValue),
-      "character": key.characters,
-      "baseCharacter": key.charactersIgnoringModifiers,
-      "shiftKey": key.modifierFlags.contains(.shift),
-      "ctrlKey": key.modifierFlags.contains(.control),
-      "altKey": key.modifierFlags.contains(.alternate),
-      "metaKey": key.modifierFlags.contains(.command),
+      "keyCode": code,
+      "character": characters,
+      "baseCharacter": baseCharacter,
+      "shiftKey": modifiers.contains(.shift),
+      "ctrlKey": modifiers.contains(.control),
+      "altKey": modifiers.contains(.alternate),
+      "metaKey": modifiers.contains(.command),
       "repeat": false,
     ])
+  }
+
+  /// KVC only where the selector exists — `value(forKey:)` raises for a key the object lacks.
+  static func value(_ object: NSObject, _ key: String) -> Any? {
+    let selector = NSSelectorFromString(key)
+    guard object.responds(to: selector) else { return nil }
+    return object.value(forKey: key)
+  }
+
+  static func isKeyDown(_ event: UIEvent) -> Bool {
+    if let number = value(event, "_isKeyDown") as? NSNumber {
+      return number.boolValue
+    }
+    if let presses = event as? UIPressesEvent {
+      for press in presses.allPresses {
+        switch press.phase {
+        case .began, .changed: return true
+        case .ended, .cancelled, .stationary: return false
+        @unknown default: break
+        }
+      }
+    }
+    return true
+  }
+
+  static func phaseName(_ phase: UIPress.Phase) -> String {
+    switch phase {
+    case .began: return "began"
+    case .changed: return "changed"
+    case .stationary: return "stationary"
+    case .ended: return "ended"
+    case .cancelled: return "cancelled"
+    @unknown default: return "unknown"
+    }
+  }
+
+  static func describe(_ event: UIEvent) -> [String: Any?] {
+    var info: [String: Any?] = [
+      "class": NSStringFromClass(type(of: event)),
+      "type": event.type.rawValue,
+      "presses": (event as? UIPressesEvent)?.allPresses.count ?? -1,
+    ]
+    for key in ["_isKeyDown", "_keyCode", "_modifierFlags", "_gsModifierFlags", "_modifiedInput", "_unmodifiedInput", "_inputFlags"] {
+      info[key] = value(event, key) ?? "absent"
+    }
+    if let presses = event as? UIPressesEvent {
+      var keys: [[String: Any?]] = []
+      for press in presses.allPresses {
+        var entry: [String: Any?] = ["phase": phaseName(press.phase)]
+        if let key = press.key {
+          entry["code"] = Int(key.keyCode.rawValue)
+          entry["chars"] = key.characters
+          entry["base"] = key.charactersIgnoringModifiers
+          entry["mods"] = Int(key.modifierFlags.rawValue)
+        } else {
+          entry["key"] = "nil"
+        }
+        keys.append(entry)
+      }
+      info["keys"] = keys
+    }
+    return info
   }
 }
 
 private extension UIApplication {
   @objc func hwKeysHandleKeyUIEvent(_ event: UIEvent) {
-    // `UIPhysicalKeyboardEvent` is private UIKit, but it derives from the public `UIPressesEvent`
-    // (WebKit's UIKit SPI declares `UIPhysicalKeyboardEvent : UIPressesEvent`), so the event can be
-    // read as presses and each press exposes a public `UIKey` — the key itself needs no private
-    // class, selector or field named. `handleKeyUIEvent:` only ever sees keyboard events; anything
-    // else passes through untouched.
-    guard NSStringFromClass(type(of: event)).contains("Keyboard"),
-          let presses = event as? UIPressesEvent else {
-      hwKeysHandleKeyUIEvent(event) // the original, after the swap
-      return
+    KeyTap.debug("handleKey", KeyTap.describe(event))
+    let down = KeyTap.isKeyDown(event)
+    if let presses = event as? UIPressesEvent {
+      for press in presses.allPresses {
+        guard let key = press.key else { continue }
+        let code = Int(key.keyCode.rawValue)
+        if KeyTap.intercept(code: code, modifiers: key.modifierFlags, keyDown: down) {
+          KeyTap.emit(code: code, modifiers: key.modifierFlags, characters: key.characters, baseCharacter: key.charactersIgnoringModifiers)
+          return // consumed: the field never sees it
+        }
+      }
     }
-    // Key up/down per event: the private flag React Native reads at this same swizzle point
-    // (`RCTKeyCommands.m`). The `responds(to:)` check keeps KVC from raising if an OS renames it;
-    // when the flag is absent nothing is intercepted — a pass-through, never a doubled key.
-    let keyDownSelector = NSSelectorFromString("_isKeyDown")
-    var keyDown = false
-    if event.responds(to: keyDownSelector) {
-      keyDown = (event.value(forKey: "_isKeyDown") as? NSNumber)?.boolValue ?? false
-    }
-    guard keyDown else {
-      hwKeysHandleKeyUIEvent(event) // the original, after the swap
-      return
-    }
-    for press in presses.allPresses {
-      guard let key = press.key else { continue }
-      if KeyTap.intercept(key: key) {
-        KeyTap.emit(key: key)
-        return // consumed: the field never sees it
+    // Fallback: the private surface React Native and WebKit read, in case `allPresses` is empty.
+    if let number = KeyTap.value(event, "_keyCode") as? NSNumber {
+      let code = number.intValue
+      let rawModifiers = (KeyTap.value(event, "_modifierFlags") as? NSNumber)?.intValue ?? 0
+      let modifiers = UIKeyModifierFlags(rawValue: UInt(max(0, rawModifiers)))
+      let characters = KeyTap.value(event, "_modifiedInput") as? String ?? ""
+      let base = KeyTap.value(event, "_unmodifiedInput") as? String ?? ""
+      if KeyTap.intercept(code: code, modifiers: modifiers, keyDown: down) {
+        KeyTap.emit(code: code, modifiers: modifiers, characters: characters, baseCharacter: base)
+        return
       }
     }
     hwKeysHandleKeyUIEvent(event) // the original, after the swap
+  }
+
+  @objc func hwKeysSendEvent(_ event: UIEvent) {
+    if event.type == .presses || NSStringFromClass(type(of: event)).contains("Keyboard") {
+      KeyTap.debug("sendEvent", KeyTap.describe(event))
+    }
+    hwKeysSendEvent(event) // the original, after the swap
   }
 }
