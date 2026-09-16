@@ -689,6 +689,7 @@ export default function TerminalView({
         ? 'no textarea'
         : `focused=${document.activeElement === proseArea} len=${proseArea.value.length} ` +
           `sel=${proseArea.selectionStart}/${proseArea.selectionEnd} ` +
+          `val=${proseText(proseArea.value)} ` +
           `traits=${proseArea.getAttribute('autocorrect')}/${proseArea.getAttribute(
             'autocapitalize',
           )}/${proseArea.getAttribute('spellcheck')}`;
