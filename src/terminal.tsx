@@ -683,7 +683,7 @@ export default function TerminalView({
      * Hold-space reads the same field's caret, but its geometry must stay independent of the
      * remote terminal cursor (see data-prose CSS). The input diff and walk share ONE caret anchor:
      * otherwise typing after a drag rewrites the suffix from the previous edit's stale position. */
-    const PROSE_BUILD = 'refocus';
+    const PROSE_BUILD = 'drop';
     const proseArea = term.textarea;
     /** The field as the diff last saw it, and where that edit left the caret — the pair `diffInput`
      *  is fed. Cleared where the field is wiped out from under the page on a LINE BOUNDARY: xterm
@@ -789,11 +789,15 @@ export default function TerminalView({
      *  half-typed line must never become the other's. The auto path usually decides the mode
      *  before the keyboard rises, so the attach that follows reads the new traits. A flip made
      *  while the keyboard is ALREADY up — a tab switch, whose poll nudge answers ~400ms after
-     *  select-window — does not re-read them: the platform reads the traits at focus, not on the
-     *  attribute change (reported 2026-09-16: prose never engaged after a tab switch until the
-     *  keyboard was closed and re-opened). That one case carries the focus move the rest of the
-     *  path avoids: blur drops the keyboard, focus brings it back on the new mode — the user's
-     *  workaround minus the two swipes (the old native field needed exactly this, T7.14). */
+     *  select-window — does not re-read them: the platform reads the traits when the input
+     *  session ends and starts, not on the attribute change (reported 2026-09-16: prose never
+     *  engaged after a tab switch until the keyboard was closed and re-opened). Measured the same
+     *  day, both shortcuts fail: a synchronous blur+focus coalesces (the session stays up,
+     *  re-reads only some traits — autocorrect dropped but the predictive bar stayed and the
+     *  on-direction never armed), and a deferred page focus cannot re-raise at all, because
+     *  WebKit grants the page first responder only from a user gesture (current.md). So the flip
+     *  drops the keyboard — ending the session so the re-read is complete — and the bar's
+     *  up-swipe, the door the user already has, raises it again on the new mode. */
     const proseApply = (on: boolean) => {
       if (proseArea === undefined) return;
       proseArea.dataset.prose = String(on);
@@ -806,9 +810,8 @@ export default function TerminalView({
       proseReset();
       proseWatch(on && document.activeElement === proseArea);
       if (refocusReraises && document.activeElement === proseArea) {
-        proseSay(`refocus ${on ? 'on' : 'off'}`);
+        proseSay(`keys down on flip ${on ? 'on' : 'off'}`);
         proseArea.blur();
-        proseArea.focus();
       }
       proseSay(`mode ${on ? 'on' : 'off'} ${PROSE_BUILD}`);
     };
