@@ -42,7 +42,7 @@ import {
 import { MONO_ADVANCE } from '@/switcher-model';
 import { DEL, caretKeys, diffInput } from '@/keybar-model';
 import { filterDictation } from '@/input-model';
-import { caretArrows, proseKey, proseSelfKey, proseText } from '@/prose-input';
+import { proseKey, proseSelfKey, proseText, walkArrows } from '@/prose-input';
 import { isHttpLink, parseOsc52 } from '@/terminal-protocol';
 // `MONO` from the leaf, `Theme` as a type only — both so that `@/theme`, and with it the palette
 // and the 27-theme graph, stays out of this webview's bundle. See `fonts.ts`.
@@ -666,8 +666,12 @@ export default function TerminalView({
      *  and on ^C, and its `_handleTextAreaBlur` on any blur. */
     let proseMirror = '';
     let proseCaret = 0;
-    /** The caret the last poll saw, and the poll itself (see `prosePoll`). */
+    /** The caret the last poll saw, the walk it is accumulating (cells, movement samples, still
+     *  samples), and the poll itself — see `prosePoll`. */
     let proseSaw = 0;
+    let prosePending = 0;
+    let proseMoves = 0;
+    let proseStill = 0;
     let prosePollId: ReturnType<typeof setInterval> | null = null;
     const proseSay = (line: string) => {
       // The DOM console reaches Metro only intermittently (the archive caught it stopping mid-walk,
@@ -680,6 +684,7 @@ export default function TerminalView({
       proseMirror = '';
       proseCaret = 0;
       proseSaw = 0;
+      proseWalkReset();
     };
     /**
      * §4.2 hold-space: iOS's held spacebar is a trackpad that walks the caret through the field and
@@ -690,6 +695,12 @@ export default function TerminalView({
      * on a character boundary — a caret bouncing between two neighbours — never lands in a sample;
      * the old native field needed a 40ms settle for exactly that bounce.
      *
+     * Movement is accumulated and flushed when the caret has been still for two samples, which is
+     * also what absorbs iOS's chatter on a character boundary: a caret bouncing between two
+     * neighbours settles to a net of zero and sends nothing. `walkArrows` drops the one thing that
+     * looks like movement and is not — a lone big jump, which is iOS parking the caret at a document
+     * edge as the drag engages or ends; a real drag arrives as a run of samples.
+     *
      * An edit's own caret move is not a walk: `proseInput` re-anchors `proseSaw` from the field
      * after every edit it sends, so the poll's delta is only ever movement no edit produced. */
     const prosePoll = () => {
@@ -698,15 +709,28 @@ export default function TerminalView({
       const start = proseArea.selectionStart;
       const end = proseArea.selectionEnd;
       if (start === null || end === null || start !== end) return; // a range is a selection
-      if (start === proseSaw) return;
-      proseSay(`poll ${proseSaw}->${start} len=${proseArea.value.length}`);
+      if (start === proseSaw) {
+        proseStill += 1;
+        if (proseStill !== 2 || prosePending === 0) return;
+        const arrows = walkArrows(prosePending, proseMoves);
+        proseSay(`walk ${arrows} (pending ${prosePending} over ${proseMoves})`);
+        prosePending = 0;
+        proseMoves = 0;
+        if (arrows !== 0) void latest.current.onData(caretKeys(arrows, currentModes().decckm));
+        return;
+      }
       // Against the caret the last EDIT left (or the last sample) — never against `proseCaret`, the
       // diff's own anchor: the whole point is to catch the moves that no edit produced.
-      const moved = start - proseSaw;
+      proseStill = 0;
+      prosePending += start - proseSaw;
       proseSaw = start;
-      const arrows = caretArrows(moved);
-      proseSay(`caret ${arrows > 0 ? 'right' : 'left'} ${Math.abs(arrows)}`);
-      if (arrows !== 0) void latest.current.onData(caretKeys(arrows, currentModes().decckm));
+      proseMoves += 1;
+    };
+    /** A fresh baseline: an edit, a focus or a mode flip starts the walk over. */
+    const proseWalkReset = () => {
+      prosePending = 0;
+      proseMoves = 0;
+      proseStill = 0;
     };
     /** Bound to the keyboard being up with prose in charge: no timer runs when it cannot fire. */
     const proseWatch = (on: boolean) => {
@@ -774,6 +798,7 @@ export default function TerminalView({
       proseCaret = edit.caret;
       // The poll's baseline follows the EDIT, so the caret move this edit made is not read as a walk.
       proseSaw = proseArea.selectionStart ?? edit.caret;
+      proseWalkReset();
       // A replacement that reaches past the caret moves the PTY's cursor with it.
       if (edit.ahead !== 0)
         void latest.current.onData(caretKeys(edit.ahead, currentModes().decckm));

@@ -4,7 +4,7 @@
 import { expect, test } from 'bun:test';
 
 import { DEL } from '@/keybar-model';
-import { CARET_MOVE_MAX, caretArrows, proseKey, proseSelfKey, proseText } from '@/prose-input';
+import { CARET_PARK_MIN, proseKey, proseSelfKey, proseText, walkArrows } from '@/prose-input';
 
 const plain = { ctrl: false, alt: false, meta: false };
 
@@ -58,11 +58,22 @@ test('iOS non-breaking spaces become the spacebar the PTY understands', () => {
   expect(proseText('a\u00a0b\u202fc')).toBe('a b c');
 });
 
-test('a parked caret costs a few arrows, a walked one costs what it walked', () => {
-  expect(caretArrows(1)).toBe(1);
-  expect(caretArrows(-3)).toBe(-3);
-  expect(caretArrows(0)).toBe(0);
-  // iOS parks the caret at a document edge on engage/end: a jump of the whole line, not travel.
-  expect(caretArrows(40)).toBe(CARET_MOVE_MAX);
-  expect(caretArrows(-40)).toBe(-CARET_MOVE_MAX);
+test('a run of samples is travel, however far it went', () => {
+  // The walk sampled 13→12→13→12→0: four samples of movement, twelve cells of it real.
+  expect(walkArrows(-12, 4)).toBe(-12);
+  expect(walkArrows(9, 3)).toBe(9);
+});
+
+test('a lone jump is a park, not travel', () => {
+  // iOS parks the caret at a document edge when a drag engages or ends: one big sample, stillness
+  // either side. Sending it shot the cursor to column 0 on every grab in the old native field.
+  expect(walkArrows(-12, 1)).toBe(0);
+  expect(walkArrows(20, 1)).toBe(0);
+  // Below the threshold a lone sample is a real single step.
+  expect(walkArrows(-2, 1)).toBe(-2);
+  expect(walkArrows(CARET_PARK_MIN - 1, 1)).toBe(CARET_PARK_MIN - 1);
+});
+
+test('chatter that nets to nothing sends nothing', () => {
+  expect(walkArrows(0, 5)).toBe(0);
 });

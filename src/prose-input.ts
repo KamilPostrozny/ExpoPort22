@@ -69,15 +69,20 @@ export function proseSelfKey(key: string): string {
 }
 
 /**
- * The most cells one polled caret move may become in arrows (see `caretArrows`).
+ * What a flushed walk becomes, as the signed number of arrows to send.
  *
- * iOS parks the caret at a document edge when a hold-space drag engages and again when it ends — a
- * jump of most of the line — and a park is not travel the user made. Bounding each poll keeps a
- * park to a few cells while a real drag, sampled every 60ms, still arrives in steps of one or two.
+ * `moves` counts the samples that carried movement since the last flush, `pending` is what they add
+ * up to. A LONE jump — one sample, nothing moving before or after it — is iOS parking the caret at a
+ * document edge as a drag engages or ends, not travel: the old native field's first run sent those
+ * faithfully and "the line's cursor shot to column 0 on every grab". It then dropped every jump over
+ * two cells, which also ate fast travel (the settled delta of a real drag). Polling can tell the two
+ * apart where an event stream could not: travel arrives as a run of samples, a park as exactly one.
+ * The chatter iOS makes when a finger hovers on a character boundary is neither, and a settled net
+ * of zero already sends nothing.
  */
-export const CARET_MOVE_MAX = 8;
+export const CARET_PARK_MIN = 3;
 
-/** A caret move the poll saw, as the signed number of arrows to send for it. */
-export function caretArrows(moved: number): number {
-  return Math.max(-CARET_MOVE_MAX, Math.min(CARET_MOVE_MAX, moved));
+/** A flushed walk, in arrows. Zero for a park; otherwise everything the walk accumulated. */
+export function walkArrows(pending: number, moves: number): number {
+  return moves === 1 && Math.abs(pending) >= CARET_PARK_MIN ? 0 : pending;
 }
