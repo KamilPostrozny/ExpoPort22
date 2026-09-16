@@ -1424,9 +1424,13 @@ export default function TerminalView({
       }
       // A one-finger tap on a live selection clears it (T13's tap-to-clear, kept; the mechanism
       // is ours now — xterm's own path runs off a synthetic mouse pair that touch never sends).
-      // The tap does NOT move the keyboard: only the bar's up-swipe raises it (and focuses the
-      // page for a hardware keyboard), as before.
-      if (pan === 'pending' && fingers === 1) clearSelection();
+      // It must NOT move the keyboard either: `preventDefault` suppresses the compatibility mouse
+      // pair WebKit fires after a tap, which is exactly what xterm's mousedown handler uses to
+      // focus its textarea and raise the keyboard. Raising/focusing is the bar's up-swipe job.
+      if (pan === 'pending' && fingers === 1) {
+        ev.preventDefault();
+        clearSelection();
+      }
       // Two fingers that never became a pan and lifted quickly: §4.8's Settings door. Routed out
       // over the bridge — only this layer can tell the tap from the two-finger scroll it owns.
       if (pan === 'pending' && isTwoFingerTap(fingers, false, ev.timeStamp - downAt)) {
@@ -1448,7 +1452,7 @@ export default function TerminalView({
     // preventDefault is a console warning, not a cancel.
     el.addEventListener('touchstart', touchStart, { passive: false });
     el.addEventListener('touchmove', touchMove, { passive: false });
-    el.addEventListener('touchend', touchEnd);
+    el.addEventListener('touchend', touchEnd, { passive: false });
     el.addEventListener('touchcancel', touchCancel);
     return () => {
       stopCoast();
