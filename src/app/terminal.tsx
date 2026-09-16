@@ -505,6 +505,9 @@ export default function SessionScreen() {
         theme={theme}
         fontSize={fontSize}
         holdSize={termHold}
+        // PROBE (temporary, 2026-09-16): the mode has always been reported here and nowhere
+        // else — the page needs it to test the helper textarea's traits on device.
+        prose={textMode}
         onData={tv.onData}
         onScroll={tv.onScroll}
         onResize={tv.onResize}
@@ -522,7 +525,7 @@ export default function SessionScreen() {
       />
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the handlers are identity-stable
-    [theme, fontSize, termHold],
+    [theme, fontSize, termHold, textMode],
   );
 
   /** The cards as of this render, for the deferred neighbour refresh — a `setTimeout` closure

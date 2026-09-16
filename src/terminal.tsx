@@ -108,6 +108,11 @@ export type TerminalProps = {
    *  every snapshot taken behind it rewrite themselves mid-flight. The terminal is not being
    *  looked at while this is true; it is being flown into a card. */
   holdSize: boolean;
+  /** PROBE (temporary, 2026-09-16): prose mode as the screen decided it — `textMode` on
+   *  `src/app/terminal.tsx`, from the auto-decision or the ⋯ override. Until now the mode never
+   *  left the bar's own row; this carries it into the page so the helper textarea's traits can be
+   *  flipped and the walk can see what iOS does with them. See the probe block in `boot`. */
+  prose: boolean;
   /** The terminal exists and knows its size. Fires again on every reload of the webview — iOS reaps
    *  a backgrounded one — which is the moment the session has to be painted back in. */
   onBoot: () => Promise<void>;
@@ -338,6 +343,7 @@ export default function TerminalView({
   theme,
   fontSize,
   holdSize,
+  prose,
   ref,
   ...handlers
 }: TerminalProps) {
@@ -359,10 +365,17 @@ export default function TerminalView({
   const clearSelRef = useRef<() => void>(() => {});
   // Native re-marshals every prop on every render, so the terminal reads them through this ref
   // instead of being torn down and rebuilt each time a callback's identity changes.
-  const latest = useRef({ theme, holdSize, ...handlers });
+  const latest = useRef({ theme, holdSize, prose, ...handlers });
   useEffect(() => {
-    latest.current = { theme, holdSize, ...handlers };
+    latest.current = { theme, holdSize, prose, ...handlers };
   });
+  /** PROBE (temporary, 2026-09-16): the page's prose flip, installed by `boot` once xterm has
+   *  opened the helper textarea this needs. Null before then, which is also why the initial value
+   *  is applied by `boot` itself rather than by this effect's first run. */
+  const proseApplyRef = useRef<((on: boolean) => void) | null>(null);
+  useEffect(() => {
+    proseApplyRef.current?.(prose);
+  }, [prose]);
 
   // Coming out of a hold, the size is measured and reported exactly once — the layout it settles
   // in is the only one the host ever hears about.
@@ -612,6 +625,117 @@ export default function TerminalView({
     term.open(host.current!);
     terminal.current = term;
     fit.current = fitAddon;
+
+    /*
+     * PROBE (temporary, 2026-09-16). T7.14/T7.15 report the mode honestly, but the mode has never
+     * reached this page: xterm opens its helper textarea with `autocorrect="off"
+     * autocapitalize="off" spellcheck="false"` and never touches them again, and its keydown route
+     * `preventDefault`s every printable key, so the textarea's value stays empty (xterm sends the
+     * key itself and inserts nothing). An empty document is the thing to suspect: iOS reads the
+     * text around the caret to autocorrect and to capitalise a sentence, and neither the traits nor
+     * the value have ever been set from the mode.
+     *
+     * So this flips the three traits on the live textarea and reports every event WebKit delivers
+     * anyway, WITHOUT touching the input path — the walk has to answer whether the traits alone buy
+     * anything in this state before a diff-forwarding input path is written on a guess. What the
+     * walk settles: does the keyboard change at all on a live flip (the ⋯ row, keyboard up); does
+     * it change on a real attach (bar down, bar up) that a live flip did not; does a correction
+     * ever arrive as an `insertReplacementText` input event; does the value ever hold a character.
+     *
+     * The last lines are drawn in the page as well as logged, because the DOM console has been seen
+     * to stop reaching Metro mid-walk (docs/archive/device-verification.md, T6.5) and a screenshot
+     * survives that. Delete this block, the lamp and the `prose` prop when the walk has its answer.
+     */
+    const proseLamp = document.createElement('div');
+    proseLamp.style.cssText =
+      'position:fixed;left:0;top:0;z-index:9999;pointer-events:none;max-width:100%;' +
+      'font:9px/1.3 monospace;white-space:pre-wrap;padding:2px 4px;color:#fff;' +
+      'background:rgba(0,0,0,.6)';
+    document.body.appendChild(proseLamp);
+    const proseRecent: string[] = [];
+    const proseSay = (line: string) => {
+      console.log(`[prose] ${line}`);
+      proseRecent.push(line);
+      if (proseRecent.length > 5) proseRecent.shift();
+      proseLamp.textContent = proseRecent.join('\n');
+    };
+    /** The helper textarea, or a line saying why there is nothing to flip. */
+    const proseArea = term.textarea;
+    /** A value for a log line: short enough to sit in the lamp, honest about `null` vs `""`. */
+    const proseText = (value: string | null | undefined) =>
+      value === null || value === undefined
+        ? 'null'
+        : JSON.stringify(value.length > 40 ? `${value.slice(0, 40)}…` : value);
+    const proseState = () =>
+      proseArea === undefined
+        ? 'no textarea'
+        : `focused=${document.activeElement === proseArea} len=${proseArea.value.length} ` +
+          `sel=${proseArea.selectionStart}/${proseArea.selectionEnd} ` +
+          `traits=${proseArea.getAttribute('autocorrect')}/${proseArea.getAttribute(
+            'autocapitalize',
+          )}/${proseArea.getAttribute('spellcheck')}`;
+    const proseApply = (on: boolean) => {
+      if (proseArea === undefined) {
+        proseSay(`mode ${on ? 'on' : 'off'} but xterm opened no textarea`);
+        return;
+      }
+      proseArea.setAttribute('autocorrect', on ? 'on' : 'off');
+      // `sentences`, not `on`: the attribute's on-value is spelled out, and it is the same value
+      // the pre-232033f native field's `autoCapitalize={textMode ? 'sentences' : 'none'}` meant.
+      proseArea.setAttribute('autocapitalize', on ? 'sentences' : 'off');
+      proseArea.setAttribute('spellcheck', on ? 'true' : 'false');
+      proseSay(`mode ${on ? 'on' : 'off'} ${proseState()}`);
+    };
+    /** One line per delivered event; `beforeinput` and `input` are where a correction would show. */
+    const proseEvent = (e: Event) => {
+      if (
+        e.type === 'focus' ||
+        e.type === 'blur' ||
+        e.type === 'focusin' ||
+        e.type === 'focusout'
+      ) {
+        proseSay(`${e.type} ${proseState()}`);
+        return;
+      }
+      const input = e as InputEvent;
+      let ranges = '-';
+      try {
+        ranges = String(input.getTargetRanges?.().length ?? '-');
+      } catch {
+        ranges = 'err';
+      }
+      proseSay(
+        `${e.type} inputType=${input.inputType ?? '-'} data=${proseText(input.data)} ` +
+          `composed=${String(input.composed ?? '-')} ranges=${ranges} ${proseState()}`,
+      );
+    };
+    const PROSE_EVENTS = [
+      'beforeinput',
+      'input',
+      'focus',
+      'blur',
+      'focusin',
+      'focusout',
+      'compositionstart',
+      'compositionupdate',
+      'compositionend',
+    ];
+    proseArea?.addEventListener('beforeinput', proseEvent, true);
+    proseArea?.addEventListener('input', proseEvent, true);
+    proseArea?.addEventListener('focus', proseEvent, true);
+    proseArea?.addEventListener('blur', proseEvent, true);
+    proseArea?.addEventListener('focusin', proseEvent, true);
+    proseArea?.addEventListener('focusout', proseEvent, true);
+    proseArea?.addEventListener('compositionstart', proseEvent, true);
+    proseArea?.addEventListener('compositionupdate', proseEvent, true);
+    proseArea?.addEventListener('compositionend', proseEvent, true);
+    const proseTeardown = () => {
+      proseApplyRef.current = null;
+      for (const type of PROSE_EVENTS) proseArea?.removeEventListener(type, proseEvent, true);
+      proseLamp.remove();
+    };
+    proseApplyRef.current = proseApply;
+    proseApply(latest.current.prose);
 
     // The page owns the keyboard. xterm's helper textarea is left enabled so it can take first
     // responder and feed every key through `onData` — the software keyboard and a hardware
@@ -932,6 +1056,7 @@ export default function TerminalView({
     return () => {
       clearTimeout(settle);
       observer.disconnect();
+      proseTeardown();
       teardownTouch();
       hitMark.current = []; // the elements go with the terminal; the refs must not outlive it
       dropPendingFit();
