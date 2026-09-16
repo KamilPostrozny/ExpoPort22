@@ -659,6 +659,7 @@ export default function TerminalView({
      * ordinary text change (a DEL and a re-insert, which the diff sent on, and which read on the
      * phone as the cursor stepping left and back). Whether the caret moves at all without an
      * announcement is what `prosePoll` samples for; if it does not, the walk cannot be forwarded. */
+    const PROSE_BUILD = 'poll2';
     const proseArea = term.textarea;
     /** The field as the diff last saw it, and where that edit left the caret — the pair `diffInput`
      *  is fed. Reset wherever the field is wiped out from under the page: xterm clears it on Return
@@ -698,6 +699,7 @@ export default function TerminalView({
       const end = proseArea.selectionEnd;
       if (start === null || end === null || start !== end) return; // a range is a selection
       if (start === proseSaw) return;
+      proseSay(`poll ${proseSaw}->${start} len=${proseArea.value.length}`);
       // Against the caret the last EDIT left (or the last sample) — never against `proseCaret`, the
       // diff's own anchor: the whole point is to catch the moves that no edit produced.
       const moved = start - proseSaw;
@@ -733,7 +735,7 @@ export default function TerminalView({
       proseArea.setAttribute('spellcheck', on ? 'true' : 'false');
       proseReset();
       proseWatch(on);
-      proseSay(`mode ${on ? 'on' : 'off'}`);
+      proseSay(`mode ${on ? 'on' : 'off'} ${PROSE_BUILD}`);
     };
     /** Which key goes where, and the reset for the two xterm clears the field on its way past. */
     term.attachCustomKeyEventHandler((e) => {
@@ -763,6 +765,9 @@ export default function TerminalView({
       if (e.type !== 'input') return; // the `input` carries the result; the rest is bookkeeping
       const before = proseMirror;
       const next = proseArea.value;
+      proseSay(
+        `in ${(e as InputEvent).inputType} len=${next.length} caret=${proseArea.selectionStart}`,
+      );
       if (next === before) return;
       const edit = diffInput(before, next, proseCaret);
       proseMirror = next;
