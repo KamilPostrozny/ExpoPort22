@@ -62,7 +62,13 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   Shell/TUI input stays raw. In prose mode the page flips the WebView helper textarea's
   autocorrect/capitalisation/spellcheck traits and owns that field's input: xterm steps aside for
   printable keys and for backspace/delete, and each change to the field reaches the PTY as
-  `diffInput`'s keys, so iOS's whole-word rewrites and the dictation space filter survive. The
+  `diffInput`'s keys, so iOS's whole-word rewrites and the dictation space filter survive. A flip
+  made while the keyboard is already up (a tab switch — its poll answer lands ~400ms after the
+  switch) drops the keyboard instead of refocusing: the platform re-reads the traits only when the
+  input session ends and restarts, a synchronous blur+focus coalesces and re-reads only some of
+  them (measured 2026-09-16), and no programmatic re-focus can re-raise the keyboard (WebKit grants
+  the page first responder only from a user gesture); the bar's up-swipe raises it again on the new
+  mode. The
   hold-space path samples the focused field's caret at 60ms and sends character-counted arrows,
   sharing the resulting position with the next input diff. Prose pins the transparent field inside
   the viewport rather than letting xterm move it with every remote cursor redraw. It hides the text
@@ -75,6 +81,20 @@ Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `
   back — an empty field cannot be walked at all, and a mirror that has drifted from the field makes
   the diff over-delete. `[prose]` lines on the console carry the mode, the walk, the parks and each
   change's DEL count (`src/prose-input.ts`, `src/terminal.tsx`).
+- Raw mode's held software keys (2026-09-18): a HELD Backspace/Delete delivers one keydown — the
+  repeats never arrive (measured report: one character per held press) — so the page owns the hold:
+  one byte per keydown and an app-side repeat loop from 300ms at ~25/s until the keyup, a blur,
+  a mode flip, another key, or the 6s runaway cap (`src/raw-hold-model.ts`, the intercept in
+  `src/terminal.tsx`'s custom key handler; `\[raw\]` console lines). Prose mode's backspace path is
+  the browser's field editing and is untouched. Both platforms; Android IME repeats, where sent,
+  land on top of the loop. Hold-space in raw mode reuses the prose walk one level down (iOS only —
+  Android's keyboards have no spacebar trackpad, a reported parity gap): while the field is focused
+  it holds a mirror of the PTY's current logical line at the cursor column (wrap-climbed, refreshed
+  at 60ms while no gesture is in flight, never mid-gesture and never under an IME composition), and
+  the same 60ms sampler plus `proseWalk` translates the trackpad's caret into character-counted
+  arrows via `caretKeys` — arrows only, so a stale mirror costs a stray arrow, never a deletion.
+  Movement is bounded by the line (T7.14's measured WebView limit is the walk's reach). Cases T7.17/
+  T7.18 in `docs/tests/keybar.md`.
 - SSH writes are serialized in `src/session.ts`; do not bypass the queue and reorder input.
 
 ## Clipboard and transfers
