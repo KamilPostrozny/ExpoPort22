@@ -44,7 +44,7 @@ custom native modules. There is no `reset-project` command.
 | `src/switcher.tsx` | Window cards and search UI |
 | `src/theme.ts`, `src/fonts.ts`, `src/style.ts` | Shared appearance; generated themes come from `scripts/gen-themes.ts` |
 | `src/upload*`, `src/download*`, `src/clipboard*` | Transfers and clipboard |
-| `modules/` | Native `expo-ssh`, `expo-pasteboard` |
+| `modules/` | Native `expo-ssh`, `expo-pasteboard`, `expo-soft-keyboard` (Android IME raise) |
 | `assets/`, `public/` | Bundled app and DOM assets |
 | `scripts/`, `.github/workflows/ipa.yml` | Font/theme tooling and device delivery |
 

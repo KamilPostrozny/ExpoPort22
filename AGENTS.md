@@ -124,6 +124,7 @@ src/
 modules/
   expo-ssh/        Native SSH/SFTP bridge and TypeScript contract
   expo-pasteboard/ Native clipboard bridge
+  expo-soft-keyboard/ Android-only IME raise for the terminal webview
 assets/
   fonts/        Bundled native fonts
   images/       App icons and splash images

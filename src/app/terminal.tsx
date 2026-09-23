@@ -27,6 +27,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import SoftKeyboard from '../../modules/expo-soft-keyboard/src/ExpoSoftKeyboardModule';
+
 import {
   PAGE_GAP,
   ROW_REACH,
@@ -1647,7 +1649,13 @@ export default function SessionScreen() {
     onTabsTap: openSwitcher,
     onBarSwipe,
     // The webview owns the keyboard; the bar only asks it up or down (see `KeyBarProps`).
-    onRaise: () => terminal.current?.focus(),
+    // Chrome-for-Android will not show the IME for a focus the page did not get from its own
+    // gesture (issues.md I17); the Android-only module shows it natively once that focus lands.
+    // It is `null` on iOS, where the page's focus raises the keyboard by itself.
+    onRaise: () => {
+      terminal.current?.focus();
+      void SoftKeyboard?.show();
+    },
     onDismiss: () => terminal.current?.blur(),
   };
   /** One identity-stable object instead of five one-per-key trampolines. */

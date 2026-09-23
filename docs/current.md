@@ -34,12 +34,16 @@ Sources: `src/settings.ts`, `src/keys.ts`, `src/host-keys.ts`, `src/session.ts`,
 
 Sources: `src/terminal.tsx`, `src/terminal-protocol.ts`, `src/input-model.ts`, `src/keybar.tsx`,
 `src/hooks/use-terminal-keyboard.ts`, `src/prose-model.ts`, `src/prose-input.ts`,
-`src/app/terminal.tsx`.
+`src/app/terminal.tsx`, `modules/expo-soft-keyboard/` (Android only).
 
 - xterm.js runs in an Expo DOM component. The WebView owns the keyboard: xterm's helper
   textarea is first responder, so software and hardware keys alike become xterm `onData` (Esc,
   Tab, arrows, F-keys, Ctrl/Alt chords, DECCKM-aware). The bar's up-swipe focuses it (and raises
-  the software keyboard); the bar's down-swipe and the screen's doors blur it. A terminal tap
+  the software keyboard); the bar's down-swipe and the screen's doors blur it. WebKit raises the
+  iPhone keyboard from that focus; Chrome-for-Android does not (a native gesture is not page user
+  activation), so on Android the up-swipe also calls `expo-soft-keyboard`'s `show()`, which waits
+  for the WebView to report an editable focus and then calls `InputMethodManager.showSoftInput`
+  (log tag `ExpoSoftKeyboard`). The module is `null` on iOS. A terminal tap
   deliberately does neither. The PTY uses `xterm-256color`.
 - Font size 8–32, default 13; portrait/landscape and keyboard changes must resize the remote PTY.
 - Pan routes to negotiated mouse-wheel events, alternate-screen arrows, or local scrollback.
