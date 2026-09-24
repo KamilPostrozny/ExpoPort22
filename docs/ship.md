@@ -133,9 +133,26 @@ Linux has no Xcode. `.github/workflows/ipa.yml` is the build authority:
 | `dev` | Port22-dev / `com.kamilpostrozny.port22.dev` | `dev` |
 | `main` | Port22 / `com.kamilpostrozny.port22` | `prod` |
 
-`dev` gates native builds; JS-only pushes can skip the build job. `main` builds embedded releases.
-Docs-only paths are ignored. Check the workflow and changed dependencies rather than assuming a
-missing IPA means CI is broken. When a push/build is required, identify its exact commit and run ID:
+Both branches are gated; the `Needs a native build?` job logs its reason and answers one mode:
+
+| Mode | When | Job |
+|---|---|---|
+| `full` | `force_build=true`; a native change on `dev`; on `main`, anything but an exact fingerprint match | `package` (`macos-26`, ~15 min) |
+| `reembed` | `main` only: HEAD's `@expo/fingerprint` iOS hash equals the `fingerprint.json` published with `prod`, and no workflow changed since `prod`'s native base | `reembed` (`ubuntu-latest`, ~2 min) |
+| `none` | `dev` only: JS-only push; the dev client loads it from Metro | — |
+
+`reembed` runs `scripts/reembed-js.sh`: it reruns Xcode's "Bundle React Native code and images"
+script on Linux (Linux `hermesc`) and swaps `main.jsbundle`, `www.bundle/` and `assets/` into the
+current `prod` IPA. Everything else in the IPA is the base's bytes. So a `prod` IPA may be a
+re-embed on an earlier native build: its release notes name both (`native-sha:` for the native
+base, `js-sha:` for the JS). Debug a native crash against `native-sha`. A re-embed that cannot run
+safely (the Hermes bytecode version changed) fails and asks for `force_build`.
+
+Native changes still need `macos-26`/Xcode: xtool builds only SwiftPM packages, while this app is a
+CocoaPods Xcode workspace whose `Assets.car` and splash storyboard come from Apple's `actool` and
+`ibtool`, which have no Linux equivalent. Docs-only paths are ignored. Check the workflow and
+changed dependencies rather than assuming a missing IPA means CI is broken. When a push/build is
+required, identify its exact commit and run ID:
 
 ```bash
 gh run list --workflow=IPA --branch dev
@@ -151,6 +168,11 @@ env USBMUXD_SOCKET_ADDRESS=UNIX:$HOME/.local/share/port22/nm.sock xtool devices
 scripts/install-variant.sh dev
 # For a verified release build, use: scripts/install-variant.sh release
 ```
+
+For a JS-only change, `scripts/install-variant.sh release --local-js` puts the working tree's JS on
+the phone as the release app with no CI: it downloads `prod`, refuses unless the working tree's
+native fingerprint equals `prod`'s `fingerprint.json`, runs `scripts/reembed-js.sh` locally and
+installs the result. It is a local, uncommitted build; `bun install --frozen-lockfile` first.
 
 Prerequisites: authenticated `gh`, `xtool` signing/pairing, `netmuxd` user service, reachable paired
 phone. Do not install if the device list is empty. The script allocates the PTY required by xtool.

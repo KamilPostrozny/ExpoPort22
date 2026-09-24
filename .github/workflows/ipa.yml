@@ -12,10 +12,21 @@ name: IPA
 #   main → Release, JS embedded        → `prod` prerelease → Port22 (release)
 #   dev  → Debug dev client (Metro)    → `dev`  prerelease → Port22-dev
 #
-# `dev` is the working branch and is GATED: a push that only touches JS changes no IPA, so no
-# build — the dev client on the phone picks the JS up from Metro. `main` is never gated: the
-# release IPA embeds its JS, so gating it would leave the release app silently running a stale
-# bundle. A slice is merged to main only after it has been tested on the phone as Port22-dev.
+# Both are GATED, and the gate answers one of three modes:
+#
+#   full    → `package` on macos-26: prebuild + xcodebuild, the only native-build authority.
+#   reembed → main only, `reembed` on ubuntu-latest (~2 min instead of ~15): the release IPA
+#             embeds its JS, so a JS-only push still needs a new IPA — but only its JS half.
+#             scripts/reembed-js.sh rebuilds `main.jsbundle`/`www.bundle`/`assets` exactly as
+#             Xcode's bundle phase does and swaps them into the current `prod` IPA.
+#   none    → dev only: a JS-only push changes no IPA; the dev client picks it up from Metro.
+#
+# main's decision is `@expo/fingerprint`'s iOS hash of HEAD against the `fingerprint.json` that
+# `prod` was built with: reembed ONLY on an exact match, full on anything else (a different hash,
+# a missing asset, a download error, a workflow change since the native base). Linux cannot do
+# the full build — xtool builds only SwiftPM packages, and actool/ibtool have no Linux producer
+# (docs/ship.md §5). A slice is merged to main only after it has been tested on the phone as
+# Port22-dev.
 on:
   pull_request:
   push:
@@ -68,33 +79,79 @@ jobs:
     needs: [checks]
     # Pull requests validate code but never package or publish an IPA.
     if: github.event_name != 'pull_request'
-    # Runs after checks on shipping events (~10 seconds on ubuntu-latest), and says WHY it decided what it
-    # did. main and force_build short-circuit to build=true; dev is where the work is — a JS-only
-    # push to dev costs nothing and rides Metro. One gate for both branches, not two conditional
-    # jobs: a package job that referenced the gate's outputs through a skipped gate was skipped
-    # itself on main (2026-09-13), which is why main never gets to "skip the gate" — the gate just
-    # answers true for it.
+    # Runs after checks on shipping events (~10-30 seconds on ubuntu-latest), and says WHY it
+    # decided what it did. force_build short-circuits to full. One gate for both branches, not
+    # conditional jobs: a package job that referenced the gate's outputs through a skipped gate
+    # was skipped itself on main (2026-09-13), so the gate always runs and answers a mode.
     name: Needs a native build?
     runs-on: ubuntu-latest
     outputs:
-      build: ${{ steps.gate.outputs.build }}
+      mode: ${{ steps.gate.outputs.mode }}
+      # reembed only: the native base's fingerprint hash and commit, so the job can check that
+      # `prod` has not moved since, and name the base in its release notes.
+      base_fingerprint: ${{ steps.gate.outputs.base_fingerprint }}
+      native_sha: ${{ steps.gate.outputs.native_sha }}
     env:
       BRANCH: ${{ github.ref_name }}
       FORCE: ${{ inputs.force_build }}
+      GH_TOKEN: ${{ github.token }}
+      HUSKY: '0'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the diff is against this push's base, not the branch tip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.1'
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
       - id: gate
         run: |
           set -euo pipefail
           if [ "$FORCE" = "true" ]; then
             echo "force_build — building anyway"
-            build=true
+            mode=full
           elif [ "$BRANCH" = "main" ]; then
-            echo "main is never gated: the release IPA embeds its JS, so a JS-only push still needs a rebuild"
-            build=true
+          # Fail safe: every branch below that is not a confirmed exact match leaves this at full.
+          mode=full
+          base="$RUNNER_TEMP/prod"
+          mkdir -p "$base"
+          if ! gh release download prod -p fingerprint.json -D "$base"; then
+            echo "prod has no fingerprint.json (or the download failed) — full build"
+          elif ! native_sha=$(gh release view prod --json body -q .body \
+                   | sed -n 's/^native-sha: \([0-9a-f]\{40\}\)$/\1/p' | head -n1) \
+               || [ -z "$native_sha" ]; then
+            echo "prod's notes name no native-sha — full build"
+          elif ! git cat-file -e "$native_sha^{commit}" 2>/dev/null; then
+            echo "native base $native_sha is not in this history — full build"
+          elif ! git diff --quiet "$native_sha" HEAD -- .github/workflows/; then
+            # The fingerprint cannot see how the package job builds (Xcode pin, flags).
+            echo "workflows changed since native base $native_sha — full build"
+          else
+            bun install --frozen-lockfile
+            # Same command, same inputs as the package job: a clean checkout, before prebuild.
+            bunx @expo/fingerprint fingerprint:generate --platform ios > "$RUNNER_TEMP/head.json"
+            base_fingerprint=$(node -p 'require(process.argv[1]).hash' "$base/fingerprint.json")
+            head_fingerprint=$(node -p 'require(process.argv[1]).hash' "$RUNNER_TEMP/head.json")
+            echo "native fingerprint: prod $base_fingerprint (built from $native_sha), HEAD $head_fingerprint"
+            if [ -n "$base_fingerprint" ] && [ "$base_fingerprint" = "$head_fingerprint" ]; then
+              echo "native half unchanged since $native_sha — re-embed this push's JS into prod"
+              mode=reembed
+              echo "base_fingerprint=$base_fingerprint" >> "$GITHUB_OUTPUT"
+              echo "native_sha=$native_sha" >> "$GITHUB_OUTPUT"
+            else
+              echo "native change — full build. Sources that differ:"
+              node -e '
+                const [a, b] = process.argv.slice(1).map((p) => require(p).sources);
+                const key = (s) => s.filePath ?? s.id ?? JSON.stringify(s.contents ?? "");
+                const m = (l) => new Map(l.map((s) => [key(s), s.hash]));
+                const [ma, mb] = [m(a), m(b)];
+                for (const k of new Set([...ma.keys(), ...mb.keys()]))
+                  if (ma.get(k) !== mb.get(k)) console.log("  " + k);
+              ' "$base/fingerprint.json" "$RUNNER_TEMP/head.json" || true
+            fi
+          fi
           else
           # The push's own diff: a plain commit against its parent, a merge against the merge
           # base so the merged side's changes count too.
@@ -148,10 +205,14 @@ jobs:
               build=true
             fi
           fi
-          [ "$build" = true ] || echo "no native change — no build (JS-only rides Metro)"
+          if [ "$build" = true ]; then mode=full; else
+            echo "no native change — no build (JS-only rides Metro)"
+            mode=none
+          fi
           fi
 
-          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
   package:
     # macos-26, not macos-15, for Xcode 26.6 alone: it is the image EAS uses for SDK 57, and
@@ -160,7 +221,7 @@ jobs:
     runs-on: macos-26
     needs: [gate]
     # After checks, the gate is the single native-build decision point for both shipping branches.
-    if: needs.gate.outputs.build == 'true'
+    if: needs.gate.outputs.mode == 'full'
     env:
       BRANCH: ${{ github.ref_name }}
     steps:
@@ -188,6 +249,13 @@ jobs:
             j.expo.ios.bundleIdentifier = "com.kamilpostrozny.port22.dev";
             fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
           '
+
+      # What the IPA's native half is built from, published beside it for the gate's next
+      # comparison. Here, not after the build: after "Apply the dev variant" (its app.json is part
+      # of the hash) but before prebuild, which writes ios/ and rewrites package.json's scripts —
+      # both hashed, and absent from the gate's clean checkout.
+      - name: Record the native fingerprint
+        run: bunx @expo/fingerprint fingerprint:generate --platform ios > "$RUNNER_TEMP/fingerprint.json"
 
       # `ios/` is generated, never committed — the app.json plugins are the source of truth for it.
       # This is also the step that resolves Citadel: `pod install` writes the Swift package
@@ -243,7 +311,8 @@ jobs:
 
       # Two rolling tags, not one: each is the latest build of its branch, and neither may ever
       # replace the other — `prod` is the release the phone runs, `dev` the client it develops
-      # against.
+      # against. `native-sha:` is machine-read by the gate: a later re-embed keeps this build's
+      # native half, so it must name this commit separately from its own JS commit.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -258,17 +327,57 @@ jobs:
             title="dev — latest dev branch"
             notes="Unsigned **Debug** dev-client build of ${GITHUB_SHA} from dev: \`Port22-dev\`, bundle \`com.kamilpostrozny.port22.dev\`. Rolling: every native-changing push to dev replaces it. Install with \`scripts/install-variant.sh dev\`; needs \`bunx expo start --dev-client\` running."
           fi
-          gh release delete "$tag" --yes --cleanup-tag || true
-          # The delete and the create race: deleting the tag is not instant on GitHub's side, and
-          # creating one over it came back HTTP 500 (2026-08-13). Retry rather than throw away a
-          # build that succeeded — the artifact above is the backstop if even this gives up.
-          for attempt in 1 2 3; do
-            if gh release create "$tag" Port22.ipa --prerelease --target "${GITHUB_SHA}" \
-                 --title "$title" --notes "$notes"; then
-              exit 0
-            fi
-            echo "release create failed (attempt $attempt) — waiting"
-            sleep 15
-          done
-          echo "could not publish; the IPA is on this run as an artifact"
-          exit 1
+          notes+=$'\n\n'"native-sha: ${GITHUB_SHA}"$'\n'"js-sha: ${GITHUB_SHA}"
+          scripts/publish-release.sh "$tag" "$title" "$notes" Port22.ipa "$RUNNER_TEMP/fingerprint.json"
+
+  reembed:
+    # main's JS-only push: the native half of `prod` is still right (the gate matched its
+    # fingerprint exactly), so rebuild only the JS on Linux and swap it in — ~2 minutes instead of
+    # a ~15-minute macos-26 build. scripts/reembed-js.sh holds the rebuild, the Hermes bytecode
+    # guard and the Release assertions; local installs use the same script.
+    runs-on: ubuntu-latest
+    needs: [gate]
+    if: needs.gate.outputs.mode == 'reembed'
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HUSKY: '0'
+      BASE_FINGERPRINT: ${{ needs.gate.outputs.base_fingerprint }}
+      NATIVE_SHA: ${{ needs.gate.outputs.native_sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.1'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: bun install --frozen-lockfile
+
+      - name: Download the native base
+        run: |
+          set -euo pipefail
+          gh release download prod -p Port22.ipa -p fingerprint.json -D base
+          # The gate compared against this asset; refuse if `prod` moved in between.
+          got=$(node -p 'require("./base/fingerprint.json").hash')
+          if [ "$got" != "$BASE_FINGERPRINT" ]; then
+            echo "prod changed since the gate ($BASE_FINGERPRINT → $got) — re-run the workflow"
+            exit 1
+          fi
+
+      - name: Re-embed this commit's JS
+        run: scripts/reembed-js.sh base/Port22.ipa Port22.ipa
+
+      - name: Keep the IPA whatever the release API does
+        uses: actions/upload-artifact@v4
+        with:
+          name: Port22-release-ipa
+          path: Port22.ipa
+          retention-days: 7
+
+      # The base's fingerprint.json goes back unchanged: it still describes the native half.
+      - name: Publish
+        run: |
+          set -euo pipefail
+          notes="Unsigned **Release** IPA from main: the JS of ${GITHUB_SHA} (\`main.jsbundle\` + \`www.bundle\` + \`assets\`, re-embedded on Linux by \`scripts/reembed-js.sh\`) on the native build of ${NATIVE_SHA}, whose native fingerprint it matches. \`__DEV__\` is false, Metro is not involved. Install with \`scripts/install-variant.sh release\` and just launch it — do NOT start a bundler for it. Use \`dev\` to develop."
+          notes+=$'\n\n'"native-sha: ${NATIVE_SHA}"$'\n'"js-sha: ${GITHUB_SHA}"
+          scripts/publish-release.sh prod "release — latest main" "$notes" Port22.ipa base/fingerprint.json
