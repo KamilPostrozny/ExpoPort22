@@ -1,0 +1,37 @@
+name: WatchProbe
+
+# Unsigned iOS IPA embedding a watchOS app, for the xtool sideload feasibility probe.
+on:
+  push:
+    branches: [watch-probe]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s /Applications/Xcode_26.6.app
+      - run: xcodebuild -showsdks
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build unsigned
+        run: |
+          set -euo pipefail
+          # -destination, not -sdk: -sdk iphoneos would also force it onto the watch target.
+          xcodebuild -project WatchProbe.xcodeproj -scheme WatchProbe -configuration Debug \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          app=build/Build/Products/Debug-iphoneos/WatchProbe.app
+          find "$app" -maxdepth 3 -name '*.app' -print
+          test -d "$app/Watch/WatchProbeWatch.app" || { echo "watch app not embedded"; exit 1; }
+          mkdir -p Payload && cp -R "$app" Payload/ && zip -qry WatchProbe.ipa Payload
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete watch-probe --yes --cleanup-tag || true
+          gh release create watch-probe WatchProbe.ipa --prerelease --target "$GITHUB_SHA" \
+            --title "WatchProbe (throwaway)" --notes "Unsigned watch sideload probe from $GITHUB_SHA."
